@@ -6,7 +6,7 @@
    * with the model it used, when it was last touched and what it cost — and the line under it says the
    * open one is saved. Click the title's pencil to rename it in place.
    */
-  import { ChevronDown, Check, Pencil } from 'lucide-svelte';
+  import { ChevronDown, Check, Pencil, Trash2 } from 'lucide-svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import InlineEdit from '$lib/components/shared/ui/InlineEdit.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
@@ -69,6 +69,7 @@
     </Dropdown>
     {#if store.active}
       <IconButton tooltip="Rename" size={22} onclick={startRename}><Pencil size={12} /></IconButton>
+      <IconButton tooltip="Delete conversation" size={22} onclick={() => store.askRemove(store.active!.id)}><Trash2 size={12} /></IconButton>
     {/if}
   {/if}
 </div>

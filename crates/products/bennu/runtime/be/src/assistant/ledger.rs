@@ -11,7 +11,9 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use bennu_assistant::prelude::Spent;
+use std::sync::LazyLock;
+
+use bennu_assistant::prelude::{InFlight, Spent};
 use serde::{Deserialize, Serialize};
 
 /// Where each window began, in epoch milliseconds, as the user's calendar has it.
@@ -20,6 +22,13 @@ pub struct Periods {
     pub day: u64,
     pub week: u64,
     pub month: u64,
+}
+
+/// What the runs now in progress have spent so far, process-wide: the ledger only learns of a run when it ends.
+static IN_FLIGHT: LazyLock<InFlight> = LazyLock::new(InFlight::default);
+
+pub(super) fn in_flight() -> &'static InFlight {
+    &IN_FLIGHT
 }
 
 #[derive(Debug, Serialize, Deserialize)]

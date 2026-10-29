@@ -21,7 +21,7 @@
    */
   import { tick } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
-  import { Trash2, Plus, X, CircleDot } from 'lucide-svelte';
+  import { Trash2, Plus, X, CircleDot, Sparkles } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -232,6 +232,18 @@
                   <button class="bm-where" type="button" onclick={() => open(bp)}>
                     {whereOf(bp)}<span class="bm-line">:{bp.line}</span>
                   </button>
+                  {#if bp.by_assistant}
+                    <span use:tooltip={'Set by the assistant. You can disable or remove it like any other.'}>
+                      <Badge variant="tone" tone="accent" size="sm" label="Imber">
+                        {#snippet icon()}<Sparkles size={10} />{/snippet}
+                      </Badge>
+                    </span>
+                  {/if}
+                  {#if bp.log_message}
+                    <span use:tooltip={`Prints "${bp.log_message}" instead of stopping`}>
+                      <Badge variant="tone" tone="info" size="sm" label="logpoint" />
+                    </span>
+                  {/if}
                   <!-- What it has actually done this session. Only once it has done something:
                        a `0×` on every row would be forty rows of noise before a launch. -->
                   {#if hits > 0}

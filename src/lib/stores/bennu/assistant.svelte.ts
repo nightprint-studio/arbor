@@ -12,21 +12,30 @@
  * disagree with the one that saves it.
  */
 
-import { totalTokens } from '$lib/components/bennu/assistant/assistant-format';
+import { formatTokens, totalTokens } from '$lib/components/bennu/assistant/assistant-format';
 import type {
   AccessAnswer, AccessScope, AssistantEffort, AssistantMessage, AssistantMode, AssistantModel, Conversation,
   EditProposal, MessageBlock, ProposalStatus,
 } from '$lib/components/bennu/assistant/assistant-types';
 import {
-  cancelAssistantRun, decideProposal, deleteConversation, listConversations, loadConversation, onAssistantEvent,
-  compactConversation, getInstructions, getSpend, listModels, renameConversation, replyToAssistant, sendAssistantMessage, type AssistantEvent, type RequestPreview, type SpendMeter, type SpendStatus,
+  cancelAssistantRun, retryAssistantRunNow, revokeAssistantGrant, decideProposal, remakeProposal as remakeProposalIpc, undoProposal as undoProposalIpc, canUndoProposal, type DecideResult, type RemakeResult, type UndoResult, deleteConversation, listConversations, loadConversation, onAssistantEvent,
+  compactConversation, getInstructions, getSpend, listModels, listSkills, type SkillListing, type SkillInfo, renameConversation, replyToAssistant, sendAssistantMessage, type AssistantEvent, type SendParams, type RequestPreview, type LastRequest, type SpendMeter, type SpendStatus,
 } from '$lib/ipc/bennu/assistant';
 import { bennuConfigStore } from './config.svelte';
 import type { BennuAssistantLimits } from '$lib/ipc/bennu/config';
+import { nextMode, parseMode } from '$lib/components/bennu/assistant/assistant-mode';
 import { periodStarts } from '$lib/components/bennu/assistant/assistant-periods';
+import { pendingDiagrams, verdictAnswer } from '$lib/components/bennu/assistant/assistant-diagram';
+import { validateMermaid } from '$lib/utils/mermaid';
+import { redoRequest, withDecision, withRemade, withUndo } from '$lib/components/bennu/assistant/assistant-proposal';
 import type { Activity } from '$lib/components/bennu/assistant/assistant-activity';
+import type { RetryStatus } from '$lib/components/bennu/assistant/assistant-retry';
 import { projectStore } from './project.svelte';
+import { bennuWorktreeStore } from './assistant-worktree.svelte';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+import { contextChange, modelChange, type CostChange } from '$lib/components/bennu/assistant/assistant-cost-change';
+import { DEFAULT_DECISION_LEVEL, MAX_DECISION_NOTES, parseDecisionLevel, type DecisionLevel } from '$lib/components/bennu/assistant/assistant-decision';
+import { nextSubagentsWord, parseSubagentsWord, subagentsEffective, type SubagentsWord } from '$lib/components/bennu/assistant/assistant-agents';
 
 /** What the window gives the store from the editor: the text selected in it. */
 export interface AssistantEditorApi {
@@ -80,10 +89,30 @@ function createAssistantStore() {
   let draft = $state('');
   let composerFocus = $state(0);
   let chatOnly = $state(false);
+  /** Where the next conversation's builds compile; fixed once it starts. Not remembered across restarts. */
+  let buildIsolation = $state<'shared' | 'separate'>('shared');
   let useInstructions = $state(true);
   let planEnabled = $state(true);
   let maxProjects = $state(6);
   let familiesOff = $state<string[]>([]);
+  let bevyWrite = $state(false);
+  let debugMutate = $state(false);
+  let decisionLevel = $state<DecisionLevel>(DEFAULT_DECISION_LEVEL);
+  let decisionNotes = $state('');
+  let confirmCostChanges = $state(true);
+  let subagentsEnabled = $state(false);
+  let debugIdleMinutes = $state(30);
+  let autoContinueOnStop = $state(false);
+  let longCache = $state(true);
+  let lastRequest = $state<LastRequest | null>(null);
+  let sideModel = $state('');
+  let wrapPastedCode = $state(true);
+  // Skills: opt-in, by `<scope>/<name>` id — see the skills manager. The listing is what is on disk now.
+  let skillsOn = $state<string[]>([]);
+  let skillListing = $state<SkillListing | null>(null);
+  let skillsLoading = $state(false);
+  let skillsOpen = $state(false);
+  let deleteAsked = $state<string | null>(null);
   let gitEnabled = $state(false);
   let hideAuthors = $state(true);
   let instructions = $state<{ name: string; bytes: number; truncated: boolean }[]>([]);
@@ -100,6 +129,8 @@ function createAssistantStore() {
   let previewError = $state<string | null>(null);
   let previewLoading = $state(false);
 
+  let decisionOpen = $state(false);
+  let costPending = $state<{ change: CostChange; to: string; apply: () => void } | null>(null);
   let compactOpen = $state(false);
   let compacting = $state(false);
 
@@ -107,6 +138,8 @@ function createAssistantStore() {
   let selection = $state('');
 
   let activity = $state<Activity | null>(null);
+  /** Set while the run waits to send a failed request again: the one status line, no toast per attempt. */
+  let retrying = $state<RetryStatus | null>(null);
   let runStartedAt = $state<number | null>(null);
   let runId = $state<string | null>(null);
   let runConversationId = $state<string | null>(null);
@@ -119,6 +152,12 @@ function createAssistantStore() {
   const active = $derived(conversations.find((c) => c.id === activeId) ?? null);
   const used = $derived(active ? totalTokens(active.context) : 0);
   const running = $derived(runId !== null);
+  /** The open conversation ended on a failed request that can be sent again as it stands. */
+  const canRetry = $derived.by(() => {
+    if (running || !active) return false;
+    const last = active.messages.at(-1);
+    return !!last && last.role === 'assistant' && last.blocks.some((b) => b.type === 'notice' && b.canRetry === true);
+  });
   const reviewing = $derived.by<EditProposal | null>(() => {
     if (!review) return null;
     const conv = conversations.find((c) => c.id === review!.conversationId);
@@ -146,7 +185,7 @@ function createAssistantStore() {
     if (!c) return;
     modelId = models.some((m) => m.id === c.model) ? c.model : modelId;
     effort = (['low', 'medium', 'high', 'xhigh', 'max'] as const).find((e) => e === c.effort) ?? effort;
-    mode = c.mode === 'auto' ? 'auto' : 'manual';
+    mode = parseMode(c.mode);
     scope = (['file', 'project', 'workspace', 'disk'] as const).find((s) => s === c.scope) ?? 'project';
     maxContext = Math.min(c.max_context, model.contextMax);
     allowEdits = c.allow_edits;
@@ -159,7 +198,19 @@ function createAssistantStore() {
     planEnabled = c.plan_enabled ?? true;
     maxProjects = c.max_projects ?? 6;
     familiesOff = c.tool_families_off ?? [];
+    bevyWrite = c.bevy_write_enabled ?? false;
+    debugMutate = c.debug_mutate_enabled ?? false;
+    skillsOn = c.skills_on ?? [];
     hideAuthors = c.hide_authors ?? true;
+    decisionLevel = parseDecisionLevel(c.decision_level);
+    decisionNotes = c.decision_notes ?? '';
+    confirmCostChanges = c.confirm_cost_changes ?? true;
+    subagentsEnabled = c.subagents_enabled ?? false;
+    debugIdleMinutes = c.debug_idle_minutes ?? 30;
+    autoContinueOnStop = c.auto_continue_on_stop ?? false;
+    longCache = c.long_cache ?? true;
+    sideModel = c.side_model ?? '';
+    wrapPastedCode = c.wrap_pasted_code ?? true;
   }
 
   function persist() {
@@ -167,7 +218,10 @@ function createAssistantStore() {
       assistant: {
         model: modelId, effort, mode, scope, max_context: maxContext,
         allow_edits: allowEdits, allow_temp: allowTemp, extra_folders: extraFolders, limits,
-        chat_only: chatOnly, use_instructions: useInstructions, git_enabled: gitEnabled, hide_authors: hideAuthors, plan_enabled: planEnabled, max_projects: maxProjects, tool_families_off: familiesOff,
+        chat_only: chatOnly, use_instructions: useInstructions, git_enabled: gitEnabled, hide_authors: hideAuthors, plan_enabled: planEnabled, max_projects: maxProjects, tool_families_off: familiesOff, bevy_write_enabled: bevyWrite, debug_mutate_enabled: debugMutate, skills_on: skillsOn,
+        decision_level: decisionLevel, decision_notes: decisionNotes, confirm_cost_changes: confirmCostChanges,
+        subagents_enabled: subagentsEnabled, debug_idle_minutes: debugIdleMinutes, auto_continue_on_stop: autoContinueOnStop, wrap_pasted_code: wrapPastedCode,
+        long_cache: longCache, side_model: sideModel,
       },
     });
   }
@@ -176,6 +230,24 @@ function createAssistantStore() {
 
   function update(id: string, change: (c: Conversation) => Conversation) {
     conversations = conversations.map((c) => (c.id === id ? change(c) : c));
+  }
+
+  function findProposal(conversationId: string, proposalId: string): EditProposal | null {
+    const conv = conversations.find((c) => c.id === conversationId);
+    for (const m of conv?.messages ?? []) {
+      for (const b of m.blocks) if (b.type === 'proposal' && b.proposal.id === proposalId) return b.proposal;
+    }
+    return null;
+  }
+
+  function changeProposal(conversationId: string, proposalId: string, change: (p: EditProposal) => EditProposal) {
+    update(conversationId, (c) => ({
+      ...c,
+      messages: c.messages.map((m) => ({
+        ...m,
+        blocks: m.blocks.map((b) => (b.type === 'proposal' && b.proposal.id === proposalId ? { ...b, proposal: change(b.proposal) } : b)),
+      })),
+    }));
   }
 
   /** Replace the message with this id, or append it — the run sends the whole message each time. */
@@ -187,20 +259,87 @@ function createAssistantStore() {
     });
   }
 
+  /** Prompts of diagrams already taken up, so a message pushed again does not parse its diagram twice. */
+  const diagramsTaken = new Set<string>();
+
+  /** Tell the run whether the diagrams it just drew can be drawn: only Mermaid can say. Asynchronous, so a
+   *  first diagram (which loads the library) never holds the event stream. No toast on a refusal — the run
+   *  hands the reason back to the model, which fixes the source. */
+  function checkDiagrams(message: AssistantMessage) {
+    for (const d of pendingDiagrams(message, diagramsTaken)) {
+      diagramsTaken.add(d.promptId);
+      void validateMermaid(d.source)
+        .then((verdict) => replyToAssistant(d.promptId, verdictAnswer(verdict)))
+        .catch(() => {})
+        .finally(() => diagramsTaken.delete(d.promptId));
+    }
+  }
+
+  /** The parameters of a send: the settings as they stand now. A retry sends the conversation again, so it never previews. */
+  function buildParams(conv: Conversation, ctx: NonNullable<ReturnType<typeof context>>, text: string, retry: boolean): SendParams {
+    return {
+      conversation_id: conv.id,
+      text,
+      retry,
+      root: ctx.root,
+      file: ctx.file,
+      selection: ctx.selection,
+      model: modelId,
+      effort: effectiveEffort,
+      mode,
+      scope,
+      allow_edits: allowEdits,
+      allow_temp: allowTemp,
+      extra_folders: extraFolders,
+      workspace_roots: projectStore.workspaceRoots,
+      max_projects: maxProjects,
+      max_context: maxContext,
+      periods: periodStarts(),
+      chat: chatOnly,
+      build_isolation: buildIsolation,
+      worktree: chatOnly ? null : bennuWorktreeStore.forSend(conv),
+      instructions: useInstructions,
+      git: gitEnabled,
+      hide_authors: hideAuthors,
+      plan: planEnabled,
+      families_off: familiesOff,
+      bevy_write: bevyWrite,
+      debug_mutate: debugMutate,
+      skills_on: skillsOn,
+      decision_level: decisionLevel,
+      decision_notes: decisionNotes,
+      debug_idle_minutes: debugIdleMinutes,
+      chat_decision_level: conv.decisionLevel ?? '',
+      chat_decision_notes: conv.decisionNotes ?? '',
+      subagents_enabled: subagentsEnabled,
+      chat_subagents: conv.subagents ?? '',
+      dry_run: dryRun && !retry,
+    };
+  }
+
   function onEvent(e: AssistantEvent) {
     if (e.kind === 'open_ui') {
-      if (!uiOpener?.(e.target, e.query)) toastStore.show(`The assistant tried to open "${e.target}", which this version cannot show.`, 'warning');
+      if (!uiOpener?.(e.target, e.query)) toastStore.show(`Imber tried to open "${e.target}", which this version cannot show.`, 'warning');
     } else if (e.kind === 'status') {
       if (runId === e.run_id) activity = { phase: e.phase, tool: e.tool ?? undefined, iteration: e.iteration };
+    } else if (e.kind === 'retry') {
+      if (runId === e.run_id) {
+        retrying = { attempt: e.attempt, max: e.max, until: e.until, kind: e.error_kind, message: e.message, detail: e.detail };
+      }
+    } else if (e.kind === 'retry_end') {
+      if (runId === e.run_id) retrying = null;
     } else if (e.kind === 'message') {
       putMessage(e.conversation_id, e.message as AssistantMessage);
+      checkDiagrams(e.message as AssistantMessage);
     } else if (e.kind === 'done') {
       update(e.conversation_id, (c) => ({
         ...c, cost: e.cost, context: e.context, title: e.title || c.title, updatedAt: e.updated_at,
       }));
       spend = e.spend ?? spend;
+      if (e.request) lastRequest = e.request;
       if (runId === e.run_id) {
         activity = null;
+        retrying = null;
         runStartedAt = null;
         runId = null;
         runConversationId = null;
@@ -288,6 +427,8 @@ function createAssistantStore() {
     get composerFocus() { return composerFocus; },
     focusComposer() { composerFocus += 1; },
     get chatOnly() { return chatOnly; },
+    get buildIsolation() { return buildIsolation; },
+    setBuildIsolation(v: 'shared' | 'separate') { buildIsolation = v; },
     /** Switch between agent conversations and chats. The open conversation belongs to one of them, so
      *  changing mode goes back to the home screen of the other. */
     setChatOnly(on: boolean) {
@@ -297,13 +438,92 @@ function createAssistantStore() {
       if (active && !!active.chat !== on) activeId = null;
     },
     get familiesOff() { return familiesOff; },
+    get bevyWrite() { return bevyWrite; },
+    setBevyWrite(on: boolean) { bevyWrite = on; persist(); },
+    get debugMutate() { return debugMutate; },
+    setDebugMutate(on: boolean) { debugMutate = on; persist(); },
     familyOn(id: string) { return !familiesOff.includes(id); },
     setFamily(id: string, on: boolean) {
       familiesOff = on ? familiesOff.filter((f) => f !== id) : [...familiesOff.filter((f) => f !== id), id];
       persist();
     },
+    // ── Skills ──
+    get skillsOn() { return skillsOn; },
+    skillOn(id: string) { return skillsOn.includes(id); },
+    /** Switch skills on or off together; ids no longer on disk stay as they are, so a skill that is
+     *  temporarily missing (a branch without it) keeps the user's choice. */
+    setSkills(ids: string[], on: boolean) {
+      const rest = skillsOn.filter((i) => !ids.includes(i));
+      skillsOn = on ? [...rest, ...ids] : rest;
+      persist();
+    },
+    setSkill(id: string, on: boolean) { this.setSkills([id], on); },
+    get skillListing() { return skillListing; },
+    get skillsLoading() { return skillsLoading; },
+    /** The skills the model is offered: enabled, and not hidden by a project skill of the same name. */
+    get enabledSkills(): SkillInfo[] {
+      return (skillListing?.skills ?? []).filter((s) => !s.shadowed && skillsOn.includes(s.id));
+    },
+    /** How many of the skills on disk are enabled, for "3 of 12 enabled". */
+    get skillCounts(): { on: number; total: number } {
+      const all = skillListing?.skills ?? [];
+      return { on: all.filter((s) => skillsOn.includes(s.id)).length, total: all.length };
+    },
+    /** Look on disk again. The projects searched are the ones the run would work across. */
+    async refreshSkills() {
+      const root = projectStore.project?.root;
+      const wide = scope === 'workspace' || scope === 'disk';
+      const open = wide ? projectStore.workspaceRoots : [];
+      const roots = [...new Set([...(root ? [root] : []), ...open])].slice(0, wide ? maxProjects : 1);
+      skillsLoading = true;
+      try { skillListing = await listSkills(roots); }
+      catch (e) { toastStore.show(`Could not look for skills: ${e}`, 'error'); }
+      finally { skillsLoading = false; }
+    },
+    get skillsOpen() { return skillsOpen; },
+    openSkills() { skillsOpen = true; void this.refreshSkills(); },
+    closeSkills() { skillsOpen = false; },
+
     get maxProjects() { return maxProjects; },
     setMaxProjects(n: number) { maxProjects = Math.min(20, Math.max(1, Math.round(n))); persist(); },
+    get decisionOpen() { return decisionOpen; },
+    openDecision() { decisionOpen = true; },
+    closeDecision() { decisionOpen = false; },
+    get decisionLevel() { return decisionLevel; },
+    setDecisionLevel(v: DecisionLevel) { decisionLevel = v; persist(); },
+    get decisionNotes() { return decisionNotes; },
+    setDecisionNotes(v: string) { decisionNotes = v.slice(0, MAX_DECISION_NOTES); persist(); },
+    /** The open conversation's own level ('' inherits the setting) and notes; applied from its next message. */
+    get chatDecisionLevel() { return active?.decisionLevel ?? ''; },
+    get chatDecisionNotes() { return active?.decisionNotes ?? ''; },
+    setChatDecisionLevel(v: string) { if (activeId) update(activeId, (c) => ({ ...c, decisionLevel: v })); },
+    setChatDecisionNotes(v: string) { if (activeId) update(activeId, (c) => ({ ...c, decisionNotes: v.slice(0, MAX_DECISION_NOTES) })); },
+    /** The open conversation's own switch for starting a run when its debugged program stops ('' follows the setting). */
+    get chatAutoContinue() { return active?.autoContinue ?? ''; },
+    setChatAutoContinue(v: string) { if (activeId) update(activeId, (c) => ({ ...c, autoContinue: v })); },
+    /** Whether a conversation may start a run by itself on a stop: its own switch, else the setting. */
+    autoContinueFor(id: string): boolean | undefined { const own = conversations.find((c) => c.id === id)?.autoContinue; return own === 'on' ? true : own === 'off' ? false : undefined; },
+    get confirmCostChanges() { return confirmCostChanges; },
+    setConfirmCostChanges(on: boolean) { confirmCostChanges = on; persist(); },
+    get subagentsEnabled() { return subagentsEnabled; },
+    setSubagentsEnabled(on: boolean) { subagentsEnabled = on; persist(); },
+    /** This conversation's own sub-agents switch (`''` follows the setting); kept with the conversation on its next send. */
+    get chatSubagents() { return parseSubagentsWord(active?.subagents); },
+    setChatSubagents(v: SubagentsWord) { if (activeId) update(activeId, (c) => ({ ...c, subagents: v })); },
+    cycleChatSubagents() { this.setChatSubagents(nextSubagentsWord(active?.subagents)); },
+    /** Whether the open conversation is offered sub-agents right now. */
+    get subagentsEffective() { return subagentsEffective(subagentsEnabled, active?.subagents); },
+    get debugIdleMinutes() { return debugIdleMinutes; },
+    setDebugIdleMinutes(n: number) { debugIdleMinutes = Math.min(240, Math.max(5, Math.round(n))); persist(); },
+    get autoContinueOnStop() { return autoContinueOnStop; },
+    setAutoContinueOnStop(on: boolean) { autoContinueOnStop = on; persist(); },
+    get lastRequest() { return lastRequest; },
+    get longCache() { return longCache; },
+    setLongCache(on: boolean) { longCache = on; persist(); },
+    get sideModel() { return sideModel; },
+    setSideModel(id: string) { sideModel = id; persist(); },
+    get wrapPastedCode() { return wrapPastedCode; },
+    setWrapPastedCode(on: boolean) { wrapPastedCode = on; persist(); },
     get planEnabled() { return planEnabled; },
     setPlanEnabled(on: boolean) { planEnabled = on; persist(); },
     get gitEnabled() { return gitEnabled; },
@@ -339,6 +559,9 @@ function createAssistantStore() {
     get running() { return running; },
     /** What the run in progress is doing right now. */
     get activity() { return activity; },
+    /** The run is waiting to send a failed request again, or null. */
+    get retrying() { return retrying; },
+    get canRetry() { return canRetry; },
     get runStartedAt() { return runStartedAt; },
     get used() { return used; },
     get dryRun() { return dryRun; },
@@ -357,6 +580,8 @@ function createAssistantStore() {
     setAllowEdits(on: boolean) { allowEdits = on; persist(); },
     setAllowTemp(on: boolean) { allowTemp = on; persist(); },
     setMode(next: AssistantMode) { mode = next; persist(); },
+    /** Manual → Accept edits → Autonomous → Manual, for a key that steps through them. */
+    cycleMode() { mode = nextMode(mode); persist(); },
     setDryRun(on: boolean) { dryRun = on; },
     addFolder(path: string) {
       const clean = path.trim();
@@ -366,7 +591,22 @@ function createAssistantStore() {
 
     /** Changing model keeps the window if the new model can hold it, and shrinks it to the model's own
      *  largest size when it cannot. */
+    /** A model or context change waiting for the user's yes, with what it would cost. */
+    get costPending() { return costPending; },
+    confirmCost() { const p = costPending; costPending = null; p?.apply(); },
+    cancelCost() { costPending = null; },
+
     setModel(id: string) {
+      const next = models.find((m) => m.id === id);
+      if (!next || id === modelId) return;
+      const change = confirmCostChanges && active
+        ? modelChange({ used, inputPricePerM: next.inputPrice, eurPerUsd: limits.eur_per_usd, })
+        : null;
+      if (change) { costPending = { change, to: next.name, apply: () => this.applyModel(id) }; return; }
+      this.applyModel(id);
+    },
+
+    applyModel(id: string) {
       const next = models.find((m) => m.id === id);
       if (!next) return;
       modelId = id;
@@ -377,7 +617,13 @@ function createAssistantStore() {
     },
 
     setMaxContext(tokens: number) {
-      if (tokens <= model.contextMax) { maxContext = tokens; persist(); }
+      if (tokens > model.contextMax || tokens === maxContext) return;
+      const change = confirmCostChanges && active
+        ? contextChange({ used, inputPricePerM: model.inputPrice, eurPerUsd: limits.eur_per_usd, newSize: tokens })
+        : null;
+      const apply = () => { maxContext = tokens; persist(); };
+      if (change) { costPending = { change, to: formatTokens(tokens), apply }; return; }
+      apply();
     },
 
     openReview(conversationId: string, proposalId: string) { review = { conversationId, proposalId }; },
@@ -422,6 +668,14 @@ function createAssistantStore() {
       this.newChat();
     },
 
+    /** Fetch a conversation again: the backend changed it behind the panel's back (an isolated copy was applied or discarded). */
+    async reload(id: string) {
+      const next = new Set(loaded);
+      next.delete(id);
+      loaded = next;
+      await fetchConversation(id);
+    },
+
     /** Back to the home screen of the current mode. */
     goHome() { activeId = null; },
 
@@ -440,7 +694,13 @@ function createAssistantStore() {
       await renameConversation(id, clean).catch(() => {});
     },
 
+    /** The conversation waiting for a yes before it is deleted: every route to deleting one goes through here. */
+    get deleteAsked() { return deleteAsked ? conversations.find((c) => c.id === deleteAsked) ?? null : null; },
+    askRemove(id: string) { deleteAsked = id; },
+    cancelRemove() { deleteAsked = null; },
+
     async remove(id: string) {
+      deleteAsked = null;
       conversations = conversations.filter((c) => c.id !== id);
       if (activeId === id) {
         // Back to the home screen: which conversation to open next is not for the panel to guess.
@@ -453,56 +713,35 @@ function createAssistantStore() {
      * Send `text` in the open conversation — or, with the dry run on, build the request and show it.
      * Returns whether the draft was consumed (a dry run keeps it, so it can be sent for real next).
      */
-    async send(text: string): Promise<boolean> {
+    async send(text: string, opts: { retry?: boolean } = {}): Promise<boolean> {
+      const retry = opts.retry === true;
       const ctx = context();
       if (!ctx) {
-        toastStore.show('Open a project first — the assistant works inside one.', 'warning');
+        toastStore.show('Open a project first — Imber works inside one.', 'warning');
         return false;
       }
       if (running) return false;
       if (!active) this.newChat();
       const conv = conversations.find((c) => c.id === activeId)!;
 
-      const params = {
-        conversation_id: conv.id,
-        text,
-        root: ctx.root,
-        file: ctx.file,
-        selection: ctx.selection,
-        model: modelId,
-        effort: effectiveEffort,
-        auto: mode === 'auto',
-        scope,
-        allow_edits: allowEdits,
-        allow_temp: allowTemp,
-        extra_folders: extraFolders,
-        workspace_roots: projectStore.workspaceRoots,
-        max_projects: maxProjects,
-        max_context: maxContext,
-        periods: periodStarts(),
-        chat: chatOnly,
-        instructions: useInstructions,
-        git: gitEnabled,
-        hide_authors: hideAuthors,
-        plan: planEnabled,
-        families_off: familiesOff,
-        dry_run: dryRun,
-      };
+      const params = buildParams(conv, ctx, text, retry);
 
-      if (dryRun) {
+      if (dryRun && !retry) {
         await this.showPreview(text);
         return false;
       }
 
-      // The user's message appears at once; the run's reply streams in behind it.
+      // The user's message appears at once; the run's reply streams in behind it. A retry has none: it picks up
+      // the conversation where the failed request left it.
       const now = Date.now();
-      putMessage(conv.id, { id: `u${now}`, role: 'user', at: now, blocks: [{ type: 'text', text }] });
+      if (!retry) putMessage(conv.id, { id: `u${now}`, role: 'user', at: now, blocks: [{ type: 'text', text }] });
       try {
         const result = await sendAssistantMessage(params);
         if ('run_id' in result) {
           runId = result.run_id;
           runStartedAt = Date.now();
           activity = { phase: 'thinking', iteration: 1 };
+          retrying = null;
           runConversationId = result.conversation_id;
         }
         return true;
@@ -525,11 +764,11 @@ function createAssistantStore() {
           conversation_id: active?.id ?? null,
           text: text.trim() || '(the next message)',
           root: ctx.root, file: ctx.file, selection: ctx.selection,
-          model: modelId, effort: effectiveEffort, auto: mode === 'auto', scope,
+          model: modelId, effort: effectiveEffort, mode, scope,
           allow_edits: allowEdits, allow_temp: allowTemp, extra_folders: extraFolders,
           workspace_roots: projectStore.workspaceRoots,
           max_projects: maxProjects,
-          max_context: maxContext, periods: periodStarts(), chat: chatOnly, instructions: useInstructions, git: gitEnabled, hide_authors: hideAuthors, plan: planEnabled, families_off: familiesOff, dry_run: true,
+          max_context: maxContext, periods: periodStarts(), chat: chatOnly, instructions: useInstructions, git: gitEnabled, hide_authors: hideAuthors, plan: planEnabled, families_off: familiesOff, bevy_write: bevyWrite, debug_mutate: debugMutate, skills_on: skillsOn, subagents_enabled: subagentsEnabled, chat_subagents: active?.subagents ?? '', dry_run: true,
         });
         if ('preview' in result) preview = result.preview;
       } catch (e) {
@@ -567,21 +806,84 @@ function createAssistantStore() {
       if (runId) await cancelAssistantRun(runId).catch(() => {});
     },
 
+    /** Skip the wait while the run is retrying: send the request again now. */
+    async retryNow() {
+      if (runId && retrying) await retryAssistantRunNow(runId).catch(() => {});
+    },
+
+    /** Send the failed request again, as the conversation stands: no new message from the user. */
+    async retry(): Promise<boolean> {
+      if (!canRetry) return false;
+      return this.send('', { retry: true });
+    },
+
+    /** Take back a file the agent opened for itself. The run answers by pushing the thread with the grant revoked. */
+    async revokeGrant(grantId: string) {
+      if (!runId) return;
+      const done = await revokeAssistantGrant(runId, grantId).catch(() => false);
+      if (!done) toastStore.show('That access has already ended.', 'info');
+    },
+
     /** Apply or reject an edit proposal. */
-    async resolveProposal(conversationId: string, proposalId: string, status: Exclude<ProposalStatus, 'pending'>) {
+    async resolveProposal(conversationId: string, proposalId: string, status: Extract<ProposalStatus, 'applied' | 'rejected'>) {
+      let result: DecideResult;
       try {
-        await decideProposal(conversationId, proposalId, status === 'applied');
+        result = await decideProposal(conversationId, proposalId, status === 'applied');
+      } catch (e) {
+        // The proposal is still held by the backend (nothing was written, or what was is put back).
+        toastStore.show(String(e), 'error');
+        return;
+      }
+      changeProposal(conversationId, proposalId, (p) => withDecision(p, result));
+      if (result.status === 'outdated') {
+        toastStore.show('The file changed since this was proposed — nothing was written. Re-apply it on the current file, or ask Imber to redo it.', 'warning');
+      }
+    },
+
+    /** Whether an applied proposal can still be undone from here (see the backend: it is kept in memory for a while). */
+    async canUndo(proposalId: string): Promise<boolean> {
+      return canUndoProposal(proposalId).catch(() => false);
+    },
+
+    /** Put back the files an applied proposal wrote, exactly as they were. All of them or none. */
+    async undoProposal(conversationId: string, proposalId: string) {
+      let result: UndoResult;
+      try {
+        result = await undoProposalIpc(conversationId, proposalId);
       } catch (e) {
         toastStore.show(String(e), 'error');
         return;
       }
-      update(conversationId, (c) => ({
-        ...c,
-        messages: c.messages.map((m) => ({
-          ...m,
-          blocks: m.blocks.map((b) => (b.type === 'proposal' && b.proposal.id === proposalId ? { ...b, proposal: { ...b.proposal, status } } : b)),
-        })),
-      }));
+      changeProposal(conversationId, proposalId, (p) => withUndo(p, result));
+      if (result.status === 'undone') toastStore.show(`Put back ${result.files.length} file${result.files.length === 1 ? '' : 's'} as they were.`, 'info');
+      else toastStore.show(`Not undone — changed since it was applied: ${result.stale.join(', ')}. Nothing was touched; Local History has the earlier text.`, 'warning');
+    },
+
+    /** Make an outdated proposal again on the files as they are now, to approve it from there. */
+    async remakeProposal(conversationId: string, proposalId: string) {
+      let result: RemakeResult;
+      try {
+        result = await remakeProposalIpc(conversationId, proposalId);
+      } catch (e) {
+        toastStore.show(`It no longer applies cleanly — ${e}`, 'warning');
+        return;
+      }
+      changeProposal(conversationId, proposalId, (p) => withRemade(p, result));
+      if (result.status === 'rejected') toastStore.show('Everything proposed is already in the files — nothing left to apply.', 'info');
+      else if (result.already_there.length) toastStore.show(`Already in place, left out: ${result.already_there.join(', ')}.`, 'info');
+    },
+
+    /** Drop an outdated proposal and ask the assistant, in the conversation, to propose it again. */
+    async askToRedo(conversationId: string, proposalId: string) {
+      if (running) {
+        toastStore.show('Wait for Imber to finish, or stop it first.', 'warning');
+        return;
+      }
+      const p = findProposal(conversationId, proposalId);
+      if (!p) return;
+      const request = redoRequest(p);
+      await this.resolveProposal(conversationId, proposalId, 'rejected');
+      if (activeId === conversationId) await this.send(request);
     },
 
     /** Submit the answers to a set of questions the assistant asked. */

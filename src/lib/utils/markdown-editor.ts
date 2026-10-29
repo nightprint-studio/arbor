@@ -57,6 +57,7 @@ import {
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { isMac } from '$lib/utils/platform';
+import { renderMermaid } from '$lib/utils/mermaid';
 import {
   history,
   defaultKeymap,
@@ -2225,76 +2226,7 @@ function selectionTouches(state: EditorState, from: number, to: number): boolean
 // a split point, so the bundle it produces is fetched from disk the first time a fence appears
 // and never in a session that has none.
 
-/** The library, initialised once. `null` until something asks for it. */
-let mermaidLoad: Promise<typeof import('mermaid').default> | null = null;
-/** The theme the library was initialised for — the value of one CSS variable is enough of a
- *  fingerprint, and it is what changes when a theme is switched. */
-let mermaidTheme = '';
-/** Rendered SVG by source, so scrolling a document past a diagram does not re-lay it out. */
-const mermaidCache = new Map<string, string>();
-let mermaidSeq = 0;
-
-/** The Arbor colours mermaid should draw with, read from the live theme. */
-function mermaidThemeVariables(): Record<string, string> {
-  const css = getComputedStyle(document.documentElement);
-  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
-  const accent = v('--accent', '#3d7fff');
-  const bg = v('--bg-base', '#1e1f22');
-  const text = v('--text-primary', '#dfe1e5');
-  return {
-    background: bg,
-    primaryColor: v('--bg-elevated', '#2b2d31'),
-    primaryTextColor: text,
-    primaryBorderColor: accent,
-    secondaryColor: v('--bg-overlay', '#33353a'),
-    tertiaryColor: v('--bg-hover', '#3a3d42'),
-    lineColor: v('--text-muted', '#7a7d85'),
-    textColor: text,
-    mainBkg: v('--bg-elevated', '#2b2d31'),
-    nodeBorder: accent,
-    clusterBkg: v('--bg-overlay', '#33353a'),
-    clusterBorder: v('--border', '#404348'),
-    titleColor: text,
-    edgeLabelBackground: bg,
-    fontFamily: v('--font-ui-sans', 'system-ui, sans-serif'),
-  };
-}
-
-async function mermaidLib() {
-  const theme = getComputedStyle(document.documentElement).getPropertyValue('--bg-base').trim();
-  if (mermaidLoad && theme !== mermaidTheme) {
-    // The theme moved under us: re-initialise and drop the pictures drawn in the old colours.
-    mermaidLoad = null;
-    mermaidCache.clear();
-  }
-  if (!mermaidLoad) {
-    mermaidTheme = theme;
-    mermaidLoad = import('mermaid').then((m) => {
-      m.default.initialize({
-        startOnLoad: false,
-        // `strict` sanitises the HTML a diagram's labels may contain. A markdown file is
-        // something you are given as often as something you wrote.
-        securityLevel: 'strict',
-        theme: 'base',
-        themeVariables: mermaidThemeVariables(),
-      });
-      return m.default;
-    });
-  }
-  return mermaidLoad;
-}
-
-/** The SVG for one diagram, or a thrown error carrying mermaid's own message — which names the
- *  line it could not parse, and is the only useful thing to show for a diagram that is wrong. */
-async function renderMermaid(code: string): Promise<string> {
-  const hit = mermaidCache.get(code);
-  if (hit) return hit;
-  const mermaid = await mermaidLib();
-  mermaidSeq += 1;
-  const { svg } = await mermaid.render(`arbor-mmd-${mermaidSeq}`, code);
-  mermaidCache.set(code, svg);
-  return svg;
-}
+// The loader, the theme and the cache live in `utils/mermaid.ts`: the assistant draws diagrams too.
 
 class MermaidWidget extends WidgetType {
   constructor(private readonly code: string) {

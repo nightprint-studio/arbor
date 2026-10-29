@@ -19,6 +19,10 @@ export interface Activity {
 const TOOL_WORDS: [RegExp, string][] = [
   [/^ask_user$/, 'Waiting for your answer'],
   [/^update_plan$/, 'Updating the plan'],
+  [/^load_skill$/, 'Loading a skill'],
+  [/^brp_(mutate|insert|remove|spawn|despawn|set_resource)$/, 'Changing the running game'],
+  [/^brp_/, 'Looking into the running game'],
+  [/^(screenshot_page|page_diagnostics)$/, 'Looking at the page'],
   [/^(edit_file|create_file)$/, 'Editing'],
   [/^delete_file$/, 'Deleting'],
   [/^(rename_symbol|add_parameter)$/, 'Planning a refactoring'],

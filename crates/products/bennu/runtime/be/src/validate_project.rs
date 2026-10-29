@@ -3,7 +3,7 @@
 //! diagnostic cache → fold):
 //!
 //! - [`bennu_validate_project`] — the explicit action (the split-button alternative to
-//!   `mvn compile`): it takes the shared [`BuildGuard`](crate::build::BuildGuard) (so a validation
+//!   `mvn compile`): it takes the shared [`BuildGuard`](crate::build_queue::BuildGuard) (so a validation
 //!   and a Maven build can't run at once), streams `arbor://bennu/validate-*` progress events for
 //!   the Build tool window, and returns full timing statistics + the diagnostics grouped by file.
 //! - [`bennu_project_diagnostics`] — the SILENT on-save refresh: no build guard, no events, no
@@ -21,7 +21,7 @@ use bennu_proto::prelude::{FileDiagnostics, ProjectValidationResult};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::build::{BuildGuard, BUSY_MSG};
+use crate::build_queue::{BuildGuard, Kind as QueueKind};
 use crate::index_service::IndexService;
 use crate::progress_gate::ProgressGate;
 
@@ -56,13 +56,13 @@ fn bennu_cancel_validation(_ctx: &BennuState, _args: ValidateProjectArgs) -> Res
 }
 
 /// Validate every `.java` file in the project and return timing stats + diagnostics. A concurrent
-/// build/validation is refused (`Err`) via the shared [`BuildGuard`].
+/// build/validation waits for its turn in the build queue.
 #[arbor_rpc::handler]
 fn bennu_validate_project(
     ctx: &BennuState,
     args: ValidateProjectArgs,
 ) -> Result<ProjectValidationResult, String> {
-    let _guard = BuildGuard::acquire(&args.root).ok_or_else(|| BUSY_MSG.to_string())?;
+    let _guard = BuildGuard::acquire(ctx.event_sink(), &args.root, QueueKind::Check, "validate project")?;
     let sink = ctx.event_sink();
     let encoding = crate::index_service::encoding_plan(&args.root);
     let svc = IndexService::global();

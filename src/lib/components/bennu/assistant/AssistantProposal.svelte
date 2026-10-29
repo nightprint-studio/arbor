@@ -3,14 +3,17 @@
    * Changes the assistant wants to make, laid out to be read before anything is written.
    *
    * What the card offers follows the mode. **Manual**: nothing happens until you say so — reject,
-   * review the diff, or apply. **Auto**: the edits go in as they are proposed and the card is a
-   * record, with the diff one click away and an undo. Once decided it stays in the conversation as
+   * review the diff, or apply. **Accept edits** and **Autonomous**: the edits go in as they are proposed
+   * and the card is a record, with the diff one click away (and an Undo that puts the files back, while the backend still remembers the apply). Once decided it stays in the conversation as
    * what was decided.
    */
-  import { FilePenLine, Check, X, Zap, Undo2, GitCompareArrows } from 'lucide-svelte';
+  import { FilePenLine, Check, X, Zap, GitCompareArrows, TriangleAlert, Layers, Undo2 } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
+  import AssistantOutdatedActions from './AssistantOutdatedActions.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
+  import { modeAppliesEdits } from './assistant-mode';
   import type { AssistantMode, EditProposal } from './assistant-types';
 
   let {
@@ -27,24 +30,49 @@
     return i < 0 ? { dir: '', name: path } : { dir: path.slice(0, i + 1), name: path.slice(i + 1) };
   }
 
+  // The backend remembers what an apply replaced for a while; once it forgot, Local History is the way back.
+  let undoable = $state(false);
+  let undoAsked = $state(false);
+  $effect(() => {
+    if (proposal.status !== 'applied') { undoable = false; return; }
+    void bennuAssistantStore.canUndo(proposal.id).then((ok) => { undoable = ok; });
+  });
+
+  function confirmUndo() {
+    undoAsked = false;
+    void bennuAssistantStore.undoProposal(conversationId, proposal.id);
+  }
+
   const decide = (status: 'applied' | 'rejected') =>
     bennuAssistantStore.resolveProposal(conversationId, proposal.id, status);
   const review = () => bennuAssistantStore.openReview(conversationId, proposal.id);
 </script>
 
-<div class="card" class:applied={proposal.status === 'applied'} class:rejected={proposal.status === 'rejected'}>
+<div
+  class="card"
+  class:applied={proposal.status === 'applied'}
+  class:rejected={proposal.status === 'rejected'}
+  class:outdated={proposal.status === 'outdated'}
+>
   <div class="head">
     <FilePenLine size={13} />
     <span class="title">Proposed changes</span>
     <span class="count">{proposal.files.length} file{proposal.files.length === 1 ? '' : 's'}</span>
+    {#if proposal.status === 'outdated'}<Badge variant="tone" tone="warning" size="sm">Outdated</Badge>{/if}
     <span class="delta"><b class="add">+{added}</b> <b class="del">−{removed}</b></span>
   </div>
 
   <ul class="files">
     {#each proposal.files as f (f.path)}
       {@const p = split(f.path)}
-      <li class="file">
+      <li class="file" class:stale={f.stale}>
         <span class="path"><span class="dir">{p.dir}</span><span class="name">{p.name}</span></span>
+        {#if f.stale}
+          <Badge variant="tone" tone="warning" size="sm"><TriangleAlert size={10} /> The file changed since this was proposed</Badge>
+        {:else if f.shared && proposal.status === 'pending'}
+          <!-- Applying either proposal makes the other outdated. -->
+          <Badge variant="tone" tone="info" size="sm"><Layers size={10} /> Also in another proposal</Badge>
+        {/if}
         <span class="delta"><span class="add">+{f.added}</span> <span class="del">−{f.removed}</span></span>
       </li>
     {/each}
@@ -55,12 +83,23 @@
       <Badge variant="tone" tone="success" size="sm"><Check size={10} /> Applied</Badge>
       <span class="grow"></span>
       <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review</Button>
-      <Button variant="ghost" size="sm" onclick={() => decide('rejected')}><Undo2 size={12} /> Undo</Button>
+      {#if undoable}
+        <Button variant="ghost" size="sm" onclick={() => (undoAsked = true)}><Undo2 size={12} /> Undo</Button>
+      {:else}
+        <!-- Forgotten after a restart: Local History still keeps every write. -->
+        <span class="hint" title="The files were written. To take it back, restore them from Local History.">Undo: Local History</span>
+      {/if}
+    {:else if proposal.status === 'undone'}
+      <Badge variant="tone" tone="neutral" size="sm"><Undo2 size={10} /> Undone</Badge>
+      <span class="grow"></span>
+      <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review</Button>
     {:else if proposal.status === 'rejected'}
       <Badge variant="tone" tone="error" size="sm"><X size={10} /> Rejected</Badge>
       <span class="grow"></span>
       <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review</Button>
-    {:else if mode === 'auto'}
+    {:else if proposal.status === 'outdated'}
+      <AssistantOutdatedActions {proposal} {conversationId} onReview={review} />
+    {:else if modeAppliesEdits(mode)}
       <Badge variant="tone" tone="info" size="sm"><Zap size={10} /> Applies automatically</Badge>
       <span class="grow"></span>
       <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review</Button>
@@ -73,6 +112,18 @@
   </div>
 </div>
 
+{#if undoAsked}
+  <ConfirmModal
+    title="Undo these changes?"
+    message={`Put back the ${proposal.files.length} file${proposal.files.length === 1 ? '' : 's'} this proposal wrote, exactly as they were.`}
+    detail="All of them or none: if any file changed since it was applied, nothing is touched. The undo is recorded in Local History."
+    variant="warning"
+    confirmLabel="Undo"
+    onConfirm={confirmUndo}
+    onCancel={() => (undoAsked = false)}
+  />
+{/if}
+
 <style>
   .card {
     display: flex; flex-direction: column;
@@ -82,12 +133,17 @@
     overflow: hidden;
     transition: border-color var(--transition-fast), opacity var(--transition-fast);
   }
+  .hint { font-size: var(--font-size-xs); color: var(--text-muted); }
   .card.applied  { border-color: color-mix(in srgb, var(--success) 35%, var(--border-subtle)); }
   /* A refusal is a decision worth seeing: the card keeps its content readable and takes the red. */
   .card.rejected { border-color: color-mix(in srgb, var(--error) 45%, var(--border-subtle)); }
   .card.rejected .head { background: color-mix(in srgb, var(--error) 8%, transparent); }
   .card.rejected .name { color: var(--text-muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--error) 60%, transparent); }
   .card.rejected .foot { background: color-mix(in srgb, var(--error) 6%, transparent); }
+  /* Outdated is not a verdict, it is a request for one: the warning colour, nothing struck through. */
+  .card.outdated { border-color: color-mix(in srgb, var(--warning) 45%, var(--border-subtle)); }
+  .card.outdated .head { background: color-mix(in srgb, var(--warning) 8%, transparent); }
+  .file.stale .name { color: var(--warning); }
 
   .head {
     display: flex; align-items: center; gap: 7px;

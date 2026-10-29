@@ -16,7 +16,7 @@ import { listen } from '@tauri-apps/api/event';
  */
 /** The backend product labels the router dispatches to. */
 export type Program =
-  | 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto' | 'bennu' | 'picus' | 'garrulus';
+  | 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto' | 'bennu' | 'picus' | 'garrulus' | 'voice';
 
 export function rpc<R>(program: Program, method: string, params: Record<string, unknown> = {}): Promise<R> {
   return invoke<R>('rpc', { program, method, params });
@@ -86,7 +86,7 @@ export const garrulus = <R>(method: string, params: Record<string, unknown> = {}
 
 /** Whether a borrowable product is installed. A file check in the shell — nothing is spawned — so
  *  it is the gate for UI that should only exist when the product does (Bennu's Picus tool window). */
-export function isProductInstalled(program: 'corvus' | 'picus'): Promise<boolean> {
+export function isProductInstalled(program: 'corvus' | 'picus' | 'voice'): Promise<boolean> {
   return invoke<boolean>('is_product_installed', { program });
 }
 
@@ -99,9 +99,9 @@ const ensured = new Set<Program>();
  * backend on open; a borrower has no window to do that, and `rpc` alone fails on a backend
  * that isn't up. Idempotent, and the shell runs the spawn off the UI thread.
  *
- * Only `corvus` and `picus` are borrowable.
+ * Only `corvus`, `picus` and `voice` are borrowable.
  */
-export async function ensureBackend(program: 'corvus' | 'picus'): Promise<void> {
+export async function ensureBackend(program: 'corvus' | 'picus' | 'voice'): Promise<void> {
   if (ensured.has(program)) return;
   // The shell records this window as a borrower, so the owner's window closing leaves the backend
   // running. A backend that died and came back is a new one with no borrowers: forget that it was

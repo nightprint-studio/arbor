@@ -27,6 +27,9 @@
   import BennuFormsPanel from './BennuFormsPanel.svelte';
   import BennuCatalogPanel from './BennuCatalogPanel.svelte';
   import BennuDtoLabPanel from './dtolab/BennuDtoLabPanel.svelte';
+  import BennuBrpPanel from './brp/BennuBrpPanel.svelte';
+  import BennuProfilerPanel from './profiler/BennuProfilerPanel.svelte';
+  import BennuLivePanel from './live/BennuLivePanel.svelte';
   import { isFrameworkCatalog } from './framework-catalogs';
   import PluginLogsPanel from '$lib/components/plugins/PluginLogsPanel.svelte';
   import PluginPanelSurface from '$lib/components/plugins/PluginPanelSurface.svelte';
@@ -86,6 +89,20 @@
   {#if active === 'dtolab'}
     <div class="dock-section">
       <BennuDtoLabPanel />
+    </div>
+  {/if}
+  <!-- Mounted only while shown: the recordings, the flame graph and a recording in flight live in the
+       profiler store, so closing the panel loses nothing but a scroll position. -->
+  {#if active === 'profiler'}
+    <div class="dock-section">
+      <BennuProfilerPanel />
+    </div>
+  {/if}
+  <!-- Mounted only while shown: the processes live in the backend, so closing the panel stops the
+       refreshing and nothing else — a started service keeps running. -->
+  {#if active === 'live'}
+    <div class="dock-section">
+      <BennuLivePanel />
     </div>
   {/if}
   {#if catalog}

@@ -84,7 +84,7 @@
   );
   // `@` is a wider glyph than a capital letter — set slightly smaller so it sits inside the
   // ring instead of touching it.
-  const fontSize = $derived(mark.letter === '@' ? 8 : 9);
+  const fontSize = $derived(mark.letter === '@' ? 8.5 : 9.5);
 </script>
 
 <svg
@@ -98,19 +98,22 @@
   <circle
     cx="8"
     cy="8"
-    r="6.4"
+    r="6.6"
     fill="none"
     stroke="var(--jki-color, {mark.color})"
-    stroke-width="1.4"
+    stroke-width="1"
   />
+  <!-- Centred on the baseline, not with `dominant-baseline: central`: that keyword centres the em box, which
+       sits a touch high for a capital. A capital's middle is about 0.36em above the baseline (`@` hangs lower,
+       so its middle is closer to it). -->
   <text
     x="8"
     y="8"
+    dy={mark.letter === '@' ? '0.3em' : '0.36em'}
     fill="var(--jki-color, {mark.color})"
     font-size={fontSize}
     font-weight="600"
     text-anchor="middle"
-    dominant-baseline="central"
   >{mark.letter}</text>
 </svg>
 

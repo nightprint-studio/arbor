@@ -1,0 +1,19 @@
+[package]
+name         = "bennu-ron"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "RON diagnostics for Bennu — LEAF crate. Bracket and syntax errors with byte offsets, and a span-preserving walk of a document checked against a Rust type's schema (unknown / missing fields, unknown variants, scalar type mismatches). The parser, the schema loader and the schema-hint detection are arbor-studio-ron's; this crate adds the positions they do not carry. No Tauri, no IPC."
+
+[dependencies]
+# The tag-preserving RON parser (the verdict on "is this RON"), the syn-based `.rs` schema loader
+# (serde rename / alias / default / flatten already resolved) and the schema-hint detection
+# (`// ron-studio: schema=…, root=…`, or a sidecar). Depending on it rather than re-reading a
+# crate's types here is the point: Studio and the editor then agree on what a type looks like.
+# Its own dependencies are the foundation (`arbor-fs`) and its sibling studio crates only, so
+# nothing here can close a cycle.
+arbor-studio-ron   = { path = "../../../../wasm/studio/ron" }
+# The schema DTOs (`Schema`, `TypeDef`, `ResolvedType`) the loader returns and the validator walks.
+arbor-studio-types = { path = "../../../../wasm/studio/types" }

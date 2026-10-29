@@ -7,9 +7,11 @@
    * apply all; once decided (or in auto mode, where it already went in) the window is a read-only
    * record. ↑ / ↓ move between files, Ctrl+Enter applies, Esc closes.
    *
-   * A design for now: the diffs are examples, and applying only changes the card in the conversation.
+   * Deciding goes through the store, which asks the backend to apply (all of it or none) or to reject.
    */
-  import { FilePenLine, FileCode2, Check, X } from 'lucide-svelte';
+  import { FilePenLine, FileCode2, Check, X, TriangleAlert } from 'lucide-svelte';
+  import AssistantOutdatedActions from './AssistantOutdatedActions.svelte';
+  import { staleSummary } from './assistant-proposal';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -19,6 +21,7 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
+  import { modeAppliesEdits } from './assistant-mode';
 
   const store = bennuAssistantStore;
   const proposal = $derived(store.reviewing);
@@ -30,6 +33,7 @@
   const added = $derived(proposal?.files.reduce((n, f) => n + f.added, 0) ?? 0);
   const removed = $derived(proposal?.files.reduce((n, f) => n + f.removed, 0) ?? 0);
   const decidable = $derived(proposal?.status === 'pending' && store.mode === 'manual');
+  const outdated = $derived(proposal?.status === 'outdated');
 
   // A different proposal starts on its first file.
   $effect(() => {
@@ -39,15 +43,21 @@
 
   function close() { store.closeReview(); }
 
-  function decide(status: 'applied' | 'rejected') {
+  async function decide(status: 'applied' | 'rejected') {
     if (!store.review) return;
-    store.resolveProposal(store.review.conversationId, store.review.proposalId, status);
-    close();
+    await store.resolveProposal(store.review.conversationId, store.review.proposalId, status);
+    // An outdated answer keeps the proposal: stay, so the way forward is right here.
+    if (store.reviewing?.status !== 'outdated') close();
+  }
+
+  function remake() {
+    if (store.review) store.remakeProposal(store.review.conversationId, store.review.proposalId);
   }
 
   function onKeydown(e: KeyboardEvent) {
     if (!proposal) return;
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && decidable) { e.preventDefault(); decide('applied'); }
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && proposal.status === 'outdated') { e.preventDefault(); remake(); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); picked = Math.min(picked + 1, proposal.files.length - 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); picked = Math.max(picked - 1, 0); }
   }
@@ -68,6 +78,7 @@
         <span class="delta"><b class="add">+{added}</b> <b class="del">−{removed}</b></span>
         {#if proposal.status === 'applied'}<Badge variant="tone" tone="success" size="sm"><Check size={10} /> Applied</Badge>{/if}
         {#if proposal.status === 'rejected'}<Badge variant="tone" tone="error" size="sm"><X size={10} /> Rejected</Badge>{/if}
+        {#if outdated}<Badge variant="tone" tone="warning" size="sm"><TriangleAlert size={10} /> Outdated</Badge>{/if}
       </ModalHeader>
     {/snippet}
 
@@ -80,7 +91,10 @@
             {#snippet icon()}<FileCode2 size={13} />{/snippet}
             <span class="name">{p.name}</span>
             {#snippet subtitle()}<span class="dir">{p.dir || './'}</span>{/snippet}
-            {#snippet badges()}<span class="delta"><span class="add">+{f.added}</span> <span class="del">−{f.removed}</span></span>{/snippet}
+            {#snippet badges()}
+              {#if f.stale}<span class="stale-mark" title="The file changed since this was proposed"><TriangleAlert size={11} /></span>{/if}
+              <span class="delta"><span class="add">+{f.added}</span> <span class="del">−{f.removed}</span></span>
+            {/snippet}
           </SidebarItem>
         {/each}
       </nav>
@@ -104,7 +118,8 @@
         <span class="note">
           {#if proposal.status === 'applied'}Already applied — this is a record.
           {:else if proposal.status === 'rejected'}Rejected — nothing was written.
-          {:else if store.mode === 'auto'}Auto mode applies these as they are proposed.
+          {:else if outdated}{staleSummary(proposal)} — nothing was written.
+          {:else if modeAppliesEdits(store.mode)}This mode applies edits as they are proposed.
           {:else}Nothing is written until you apply.{/if}
         </span>
         <div class="actions">
@@ -113,6 +128,8 @@
             <Button variant="primary" size="sm" tooltip={{ content: 'Apply all changes', shortcut: 'Ctrl+Enter' }} onclick={() => decide('applied')}>
               <Check size={13} /> Apply all
             </Button>
+          {:else if outdated && store.review}
+            <AssistantOutdatedActions {proposal} conversationId={store.review.conversationId} onDone={close} shortcut />
           {:else}
             <Button variant="secondary" size="sm" onclick={close}>Close</Button>
           {/if}
@@ -149,6 +166,7 @@
   .add { color: var(--success); font-weight: 600; }
   .del { color: var(--error);   font-weight: 600; }
 
+  .stale-mark { display: inline-flex; color: var(--warning); }
   .note { font-size: var(--font-size-xs); color: var(--text-muted); }
   .actions { display: flex; align-items: center; gap: 8px; }
 </style>

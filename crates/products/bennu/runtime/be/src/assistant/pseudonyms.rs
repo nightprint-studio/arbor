@@ -75,6 +75,15 @@ impl Authors {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
+        // Another conversation may have added ids since this one loaded the map: keep them, or restoring
+        // a name in its older messages would fail after a restart.
+        if let Some(on_disk) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Authors>(&t).ok()) {
+            if on_disk.salt == self.salt {
+                for (id, real) in on_disk.ids {
+                    self.ids.entry(id).or_insert(real);
+                }
+            }
+        }
         if let Ok(text) = serde_json::to_string(self) {
             if std::fs::write(&path, text).is_ok() {
                 self.dirty = false;

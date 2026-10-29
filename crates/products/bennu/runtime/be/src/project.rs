@@ -140,6 +140,8 @@ fn bennu_activate_project(ctx: &BennuState, args: ActivateProjectArgs) -> Result
 #[arbor_rpc::handler]
 fn bennu_loaded_projects(_ctx: &BennuState) -> Result<Vec<String>, String> {
     let mut roots = crate::index_service::IndexService::global().indexed_roots();
+    // The isolated copy of an assistant conversation is indexed but is not a project of the user's.
+    roots.retain(|r| !crate::hidden_projects::is_hidden(r));
     // A language server counts only for a root that has no index to be judged by (a Cargo root),
     // and only while it is actually up. A Java member whose server was started in passing — a
     // request against one of its files, a failed or exited slot left in the registry — is not

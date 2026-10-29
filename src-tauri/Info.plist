@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the app bundle's Info.plist by the Tauri bundler. Voice dictation (voice-be)
+       and the screen recorder capture the microphone; macOS shows this text in its prompt. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Arbor uses the microphone for voice dictation and for screen recordings with audio. Audio is processed on this computer and is never sent anywhere.</string>
+</dict>
+</plist>

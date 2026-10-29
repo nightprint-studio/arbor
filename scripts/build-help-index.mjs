@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeImberDocs } from './imber-docs-md.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const docsDir = path.join(root, 'src/lib/components/bennu/docs');
@@ -75,8 +76,16 @@ function chunksOf(page, text) {
   return out;
 }
 
+/** Every page under the docs folder, subfolders included (Imber's pages live in `imber/`), in a stable order. */
+function pageFiles(dir, prefix = '') {
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory() ? pageFiles(path.join(dir, e.name), `${prefix}${e.name}/`) : e.name.endsWith('.svelte') ? [prefix + e.name] : []))
+    .sort();
+}
+
+const pages = pageFiles(docsDir);
 const chunks = [];
-for (const file of fs.readdirSync(docsDir).filter((f) => f.endsWith('.svelte')).sort()) {
+for (const file of pages) {
   const html = fs.readFileSync(path.join(docsDir, file), 'utf8');
   const text = toText(html);
   const h1 = text.match(/^\u0001H1 (.*)$/m)?.[1];
@@ -103,4 +112,7 @@ chunks.push({
 
 fs.writeFileSync(out, JSON.stringify(chunks));
 const kb = Math.round(fs.statSync(out).size / 1024);
-console.log(`help index: ${chunks.length} sections from ${fs.readdirSync(docsDir).filter((f) => f.endsWith('.svelte')).length} pages, ${kb} KB → ${path.relative(root, out)}`);
+console.log(`help index: ${chunks.length} sections from ${pages.length} pages, ${kb} KB → ${path.relative(root, out)}`);
+
+// The same pages, for readers that are not the app: Imber's pages as plain Markdown under docs/imber.
+await writeImberDocs(root);

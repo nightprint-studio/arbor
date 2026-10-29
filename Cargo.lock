@@ -961,6 +961,7 @@ name = "bennu-be"
 version = "0.3.0"
 dependencies = [
  "arbor-be",
+ "arbor-brp",
  "arbor-core",
  "arbor-exe-icon",
  "arbor-feedback",
@@ -1001,6 +1002,7 @@ dependencies = [
  "bennu-jpa",
  "bennu-jsp",
  "bennu-jsp-grammar",
+ "bennu-live",
  "bennu-lsp",
  "bennu-mapstruct",
  "bennu-maven",
@@ -1010,10 +1012,12 @@ dependencies = [
  "bennu-npm",
  "bennu-plugin",
  "bennu-pomedit",
+ "bennu-profile",
  "bennu-project",
  "bennu-proto",
  "bennu-query",
  "bennu-refactor",
+ "bennu-ron",
  "bennu-scheduling",
  "bennu-sheet",
  "bennu-spring",
@@ -1031,6 +1035,7 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "toml 0.8.23",
  "tree-sitter",
@@ -1304,6 +1309,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-live"
+version = "0.3.0"
+dependencies = [
+ "arbor-logscan",
+ "arbor-process-ext",
+ "libc",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "bennu-lombok"
 version = "0.3.0"
 
@@ -1400,6 +1419,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-profile"
+version = "0.3.0"
+dependencies = [
+ "flate2",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bennu-project"
 version = "0.3.0"
 dependencies = [
@@ -1439,6 +1467,14 @@ dependencies = [
  "bennu-java",
  "serde",
  "tree-sitter",
+]
+
+[[package]]
+name = "bennu-ron"
+version = "0.3.0"
+dependencies = [
+ "arbor-studio-ron",
+ "arbor-studio-types",
 ]
 
 [[package]]
@@ -1595,6 +1631,8 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "itertools 0.13.0",
+ "log",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -10632,6 +10670,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "voice-be"
+version = "0.3.0"
+dependencies = [
+ "arbor-be",
+ "arbor-core",
+ "arbor-feedback",
+ "arbor-ipc",
+ "arbor-rpc",
+ "cpal",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sysinfo",
+ "tokio",
+ "voice-core",
+ "whisper-rs",
+]
+
+[[package]]
+name = "voice-core"
+version = "0.3.0"
+dependencies = [
+ "arbor-core",
+ "arbor-ipc",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "vorbis_rs"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11273,6 +11342,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81995fafaaaf6ae47a7d0cc83c67caf92aeb7e5331650ae6ff856f7c0c60c459"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "whisper-rs"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2088172d00f936c348d6a72f488dc2660ab3f507263a195df308a3c2383229f6"
+dependencies = [
+ "libc",
+ "whisper-rs-sys",
+]
+
+[[package]]
+name = "whisper-rs-sys"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6986c0fe081241d391f09b9a071fbcbb59720c3563628c3c829057cf69f2a56f"
+dependencies = [
+ "bindgen 0.72.1",
+ "cfg-if",
+ "cmake",
+ "fs_extra",
+ "semver",
 ]
 
 [[package]]

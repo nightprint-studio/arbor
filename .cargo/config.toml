@@ -10,3 +10,16 @@
 # need to follow.
 [build]
 target-dir = "src-tauri/target"
+
+# whisper.cpp (voice-be, via whisper-rs-sys -> cmake-rs) is compiled by CMake. On MSVC, cmake-rs
+# replaces CMAKE_<LANG>_FLAGS_RELEASE with the flags `cc` would use minus every `/O*`, which leaves
+# the Release configuration with NO optimisation and no NDEBUG (measured: ggml's matrix multiply ran
+# at ~2 GMAC/s on a 4-core i7, i.e. a "large" model took minutes per phrase). Defining the variables
+# ourselves makes cmake-rs leave them alone. `-O2 -DNDEBUG` is the stock Release value on gcc/clang
+# and is accepted by cl.exe, so one value is right on every platform. Needs a clean of
+# whisper-rs-sys (`cargo clean -p whisper-rs-sys --release`) the first time it is applied.
+[env]
+CMAKE_C_FLAGS_RELEASE = "-O2 -DNDEBUG"
+CMAKE_CXX_FLAGS_RELEASE = "-O2 -DNDEBUG"
+CMAKE_C_FLAGS_RELWITHDEBINFO = "-O2 -DNDEBUG"
+CMAKE_CXX_FLAGS_RELWITHDEBINFO = "-O2 -DNDEBUG"

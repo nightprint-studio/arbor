@@ -152,6 +152,13 @@ export function isWgslFile(path: string | null | undefined): boolean {
   return ext(path) === 'wgsl';
 }
 
+/** A RON file. In the diagnostics set only: the backend checks its brackets and syntax, and — when
+ *  the file names a Rust type with a `ron-studio:` directive — its fields against that type. There
+ *  is no navigation to offer, so it stays out of {@link supportsCodeNav}. */
+export function isRonFile(path: string | null | undefined): boolean {
+  return ext(path) === 'ron';
+}
+
 /**
  * A **build-tool configuration file with a documented vocabulary** — `lombok.config`,
  * `junit-platform.properties` and `struts.properties`.
@@ -208,7 +215,7 @@ const PROSE_EXTS = new Set([
  */
 export function supportsDiagnostics(path: string | null | undefined): boolean {
   return isAnalyzedFile(path) || isLspFile(path) || isCargoManifest(path) || isWgslFile(path)
-    || isToolConfigFile(path) || PROSE_EXTS.has(ext(path));
+    || isRonFile(path) || isToolConfigFile(path) || PROSE_EXTS.has(ext(path));
 }
 
 /**

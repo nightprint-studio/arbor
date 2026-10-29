@@ -59,7 +59,7 @@ use bennu_test::prelude::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::build::{BuildGuard, BUSY_MSG};
+use crate::build_queue::{BuildGuard, Kind as QueueKind};
 use crate::test_report::RunEnd;
 
 // ── event topics (the wire contract for the FE) ────────────────────────────────
@@ -240,8 +240,14 @@ pub(crate) struct MavenRun {
 
 /// Spawn `mvn test` for `scope` and register it, without waiting for anything.
 pub(crate) fn start_maven_run(ctx: &BennuState, args: &RunTestsArgs) -> Result<MavenRun, String> {
-    // Same lock as the build: two Maven processes on one tree fight over `target/`.
-    let guard = BuildGuard::acquire(&args.root).ok_or_else(|| BUSY_MSG.to_string())?;
+    // Same queue as the build: two Maven processes on one tree fight over `target/`.
+    let guard = BuildGuard::acquire(ctx.event_sink(), &args.root, QueueKind::Test, "mvn test")?;
+    start_maven_run_with(ctx, args, guard)
+}
+
+/// [`start_maven_run`] for a caller that already holds the tree's turn (the coalescing wrapper passes
+/// `BuildGuard::already_held()`).
+pub(crate) fn start_maven_run_with(ctx: &BennuState, args: &RunTestsArgs, guard: BuildGuard) -> Result<MavenRun, String> {
 
     let root = PathBuf::from(&args.root);
     // Online, not `-o` — see the module doc.

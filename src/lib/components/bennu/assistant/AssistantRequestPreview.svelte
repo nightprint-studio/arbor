@@ -39,11 +39,18 @@
   // is read back at a tenth of it on every later request, so the first one is the expensive one.
   // Worked out by the backend from the price list, cache rates and long-prompt tier included.
 
-  const parts = $derived([
-    { id: 'system', label: 'Instructions', value: p?.breakdown.system ?? 0, tone: 'muted' as const },
-    { id: 'tools', label: 'Tool definitions', value: p?.breakdown.tools ?? 0, tone: 'info' as const },
-    { id: 'messages', label: 'Conversation', value: p?.breakdown.messages ?? 0, tone: 'accent' as const },
-  ]);
+  // The standing parts (tools, rules, project instructions, skills) are told apart from what the conversation
+  // holds (talk, tool calls, tool results, pictures); older backends only send the three coarse figures.
+  const STANDING = new Set(['tools', 'system', 'instructions', 'skills']);
+  const parts = $derived(
+    p?.parts?.length
+      ? p.parts.map((x) => ({ id: x.id, label: x.label, value: x.tokens, tone: (STANDING.has(x.id) ? (x.id === 'tools' ? 'info' : 'muted') : x.id === 'tool_results' ? 'warning' : 'accent') as 'info' | 'muted' | 'warning' | 'accent' }))
+      : [
+          { id: 'system', label: 'Instructions', value: p?.breakdown.system ?? 0, tone: 'muted' as const },
+          { id: 'tools', label: 'Tool definitions', value: p?.breakdown.tools ?? 0, tone: 'info' as const },
+          { id: 'messages', label: 'Conversation', value: p?.breakdown.messages ?? 0, tone: 'accent' as const },
+        ],
+  );
 
   const copy = () => p && copyToClipboard(p.body, { successToast: 'Request copied' });
   const close = () => store.closePreview();
@@ -91,8 +98,9 @@
             </ul>
             <p class="cost">
               {#if p.estimate}
-                About <b>${p.estimate.first.toFixed(3)}</b> for this request on {store.model.name} — then about
-                <b>${p.estimate.next.toFixed(4)}</b> a request once the instructions and tools are cached.
+                About <b>${p.estimate.first.toFixed(3)}</b> for this request on {store.model.name} with a cold cache — then about
+                <b>${p.estimate.next.toFixed(4)}</b> a request once it is warm, plus what the request adds{#if p.estimate.uncached} (without the cache it would be ${p.estimate.uncached.toFixed(3)} every time){/if}.
+                {#if p.cache}The cache marks the {p.cache.marks.join(', ')}{p.cache.longStanding ? '; the standing part is kept for an hour' : ''}.{/if}
               {:else}
                 No price is listed for {store.model.name}, so no cost is shown.
               {/if}
@@ -141,7 +149,7 @@
   .l { flex: 1; }
   .v { font-family: var(--font-code); font-variant-numeric: tabular-nums; }
   .dot { width: 8px; height: 8px; border-radius: 50%; }
-  .t-muted { background: var(--text-muted); } .t-info { background: var(--info); } .t-accent { background: var(--accent); }
+  .t-muted { background: var(--text-muted); } .t-info { background: var(--info); } .t-accent { background: var(--accent); } .t-warning { background: var(--warning); }
   .cost { margin: 0; font-size: var(--font-size-xs); line-height: 1.55; color: var(--text-muted); }
   .cost b { color: var(--text-primary); font-weight: 600; }
 

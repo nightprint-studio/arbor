@@ -28,6 +28,9 @@
      * provides the header instead, so we don't render a duplicate bar.
      */
     hideHeader?: boolean;
+    /** Double-click on the header's empty space (not on a button or field in it). A mouse shortcut for
+     *  something that also has a button and a key — never the only way. */
+    onheaderdblclick?: () => void;
   }
 
   let {
@@ -40,14 +43,20 @@
     footer,
     scrollable = true,
     hideHeader = false,
+    onheaderdblclick,
     class: extraClass = '',
   }: Props = $props();
+
+  function headerDblClick(e: MouseEvent) {
+    if ((e.target as Element).closest('button, input, textarea, select, [role="radio"], [role="slider"]')) return;
+    onheaderdblclick?.();
+  }
 </script>
 
 <div class="panel-shell {extraClass}">
   <!-- ── Header (skipped when an outer chrome owns the title bar) ── -->
   {#if !hideHeader}
-    <div class="ps-header">
+    <div class="ps-header" role="presentation" ondblclick={onheaderdblclick ? headerDblClick : undefined}>
       <div class="ps-left">
         {#if icon}
           <span class="ps-icon">{@render icon()}</span>

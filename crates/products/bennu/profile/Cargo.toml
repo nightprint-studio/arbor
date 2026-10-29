@@ -1,0 +1,13 @@
+[package]
+name         = "bennu-profile"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu profiler core — the call-tree model and the pure parsers behind the profiler tool window: JFR (JDK Flight Recorder) availability detection and event aggregation, Node `.cpuprofile`, and the Firefox-profiler format `samply` emits. Leaf crate: bytes and text in, a compact aggregated profile out; it spawns nothing and knows no Tauri."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+flate2     = { workspace = true }

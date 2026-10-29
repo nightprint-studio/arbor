@@ -74,8 +74,11 @@
   Only an <code>unordered</code> pair is also mentioned in the editor, as a single informational note on the name of each system that lists its peers (<em>contends with 3 unordered
   systems (a, b, c) over Score</em>). Contention without a declared order is the normal state of most Bevy projects, so it is never a warning. Ordering is followed transitively —
   <code>a.before(b)</code> plus <code>b.before(c)</code> orders <code>a</code> against <code>c</code> — and <code>.after</code> and <code>.chain()</code> count the same way.
-  The note is left out when Bennu cannot stand behind it: a system in a <strong>set</strong> (a set's ordering is declared by <code>configure_sets</code>, which Bennu does not
-  read), an <strong>exclusive</strong> one, a system registered with a <code>.run_if(…)</code>, and a pair that only meets through a message buffer, one side writing and the other
+  <strong>Sets</strong> count too: <code>configure_sets(Update, (Input, Logic).chain())</code>, <code>Input.before(Logic)</code>, <code>Logic.after(Input)</code> and a set nested
+  with <code>.in_set(…)</code> order every system in them, and <code>sys.after(Input)</code> orders a system against a whole set. Only what this project writes is read, so
+  a pair that only a plugin's <code>configure_sets</code> could order is shown as <code>unordered</code> in the panel, never as a guess in either direction.
+  The note is left out when Bennu cannot stand behind it: a system in a <strong>set</strong> (the set may be ordered by a plugin Bennu never reads), an <strong>exclusive</strong> one,
+  a system registered with a <code>.run_if(…)</code> — its own, or its set's — and a pair that only meets through a message buffer, one side writing and the other
   reading. All of them still appear in the panel.
 </Callout>
 

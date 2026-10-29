@@ -1529,6 +1529,21 @@ pub struct Breakpoint {
     /// Skipped when empty, so a project breakpoint persists exactly as it always has.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub class: String,
+    /// Set by the AI assistant rather than by the user. Only changes how the breakpoint is drawn
+    /// (a distinct gutter marker) and what the assistant may remove: it never touches a breakpoint the
+    /// user set, and the user can delete or disable this one like any other.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub by_assistant: bool,
+    /// A **logpoint**: when set, a hit does not stop the program — it prints this message to the run
+    /// console and goes on. `{path}` placeholders (`{order.id}`, `{items[0]}`) are read from the frame
+    /// the way a watch is; anything else is printed as written. Empty = an ordinary breakpoint.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub log_message: String,
+    /// Paths (`order.id`, `items[0].price`) the AI assistant asked to have read **at hit time**: the values are
+    /// captured with the stop, so the assistant gets them even when it is not awake to ask. Read-only paths, like
+    /// a watch. Empty = nothing extra.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capture: Vec<String>,
 }
 
 impl Default for Breakpoint {
@@ -1540,6 +1555,9 @@ impl Default for Breakpoint {
             condition: String::new(),
             hit_count: 0,
             class: String::new(),
+            by_assistant: false,
+            log_message: String::new(),
+            capture: Vec::new(),
         }
     }
 }
@@ -1560,6 +1578,9 @@ pub struct ExceptionBreakpoint {
     /// Stop on throws that nothing catches.
     pub uncaught: bool,
     pub enabled: bool,
+    /// Set by the AI assistant (`debug_break_on_exception`); it takes only these down, and they end with its session.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub by_assistant: bool,
 }
 
 impl Default for ExceptionBreakpoint {
@@ -1570,6 +1591,7 @@ impl Default for ExceptionBreakpoint {
             caught: false,
             uncaught: true,
             enabled: true,
+            by_assistant: false,
         }
     }
 }

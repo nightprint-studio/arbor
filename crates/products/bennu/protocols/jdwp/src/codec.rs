@@ -159,6 +159,22 @@ impl Value {
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Object { id: 0, .. })
     }
+
+    /// The tag this value travels under.
+    pub fn tag(&self) -> Tag {
+        match *self {
+            Value::Void => Tag::Void,
+            Value::Boolean(_) => Tag::Boolean,
+            Value::Byte(_) => Tag::Byte,
+            Value::Char(_) => Tag::Char,
+            Value::Short(_) => Tag::Short,
+            Value::Int(_) => Tag::Int,
+            Value::Long(_) => Tag::Long,
+            Value::Float(_) => Tag::Float,
+            Value::Double(_) => Tag::Double,
+            Value::Object { tag, .. } => tag,
+        }
+    }
 }
 
 // ── reading ─────────────────────────────────────────────────────────────────────
@@ -326,6 +342,33 @@ impl Writer {
         self
     }
 
+    pub fn u16(&mut self, v: u16) -> &mut Self {
+        self.data.extend_from_slice(&v.to_be_bytes());
+        self
+    }
+
+    /// A value with its tag byte in front — what `StackFrame.SetValues` and the invoke commands take.
+    pub fn value(&mut self, v: &Value) -> &mut Self {
+        self.u8(v.tag().to_byte());
+        self.untagged_value(v)
+    }
+
+    /// A value's payload alone, the shape `ObjectReference.SetValues` takes (the field's type already says what it is).
+    pub fn untagged_value(&mut self, v: &Value) -> &mut Self {
+        match *v {
+            Value::Void => self,
+            Value::Boolean(b) => self.u8(u8::from(b)),
+            Value::Byte(x) => self.u8(x as u8),
+            Value::Char(x) => self.u16(x),
+            Value::Short(x) => self.u16(x as u16),
+            Value::Int(x) => self.i32(x),
+            Value::Long(x) => self.i64(x),
+            Value::Float(x) => self.i32(x.to_bits() as i32),
+            Value::Double(x) => self.i64(x.to_bits() as i64),
+            Value::Object { id, .. } => self.object_id(id),
+        }
+    }
+
     pub fn i64(&mut self, v: i64) -> &mut Self {
         self.data.extend_from_slice(&v.to_be_bytes());
         self
@@ -443,6 +486,41 @@ mod tests {
         let bytes = [0u8, 0, 0];
         let err = Reader::new(&bytes, IdSizes::default()).i32();
         assert!(matches!(err, Err(JdwpError::Protocol(_))));
+    }
+
+    #[test]
+    fn every_value_round_trips_tagged_and_untagged() {
+        let sizes = IdSizes::default();
+        let values = [
+            Value::Boolean(true),
+            Value::Byte(-3),
+            Value::Char(0x20AC),
+            Value::Short(-300),
+            Value::Int(-70_000),
+            Value::Long(1 << 40),
+            Value::Float(1.5),
+            Value::Double(-0.25),
+            Value::Object { tag: Tag::String, id: 77 },
+            Value::Object { tag: Tag::Object, id: 0 },
+        ];
+        for v in values {
+            let mut w = Writer::new(sizes);
+            w.value(&v);
+            let tagged = w.into_bytes();
+            assert_eq!(Reader::new(&tagged, sizes).value().unwrap(), v, "{v:?} tagged");
+            let mut w = Writer::new(sizes);
+            w.untagged_value(&v);
+            let bare = w.into_bytes();
+            assert_eq!(bare.len() + 1, tagged.len(), "{v:?}: the tag is exactly one byte");
+            assert_eq!(Reader::new(&bare, sizes).value_of(v.tag()).unwrap(), v, "{v:?} untagged");
+        }
+    }
+
+    #[test]
+    fn a_void_value_is_a_tag_and_nothing_else() {
+        let mut w = Writer::new(IdSizes::default());
+        w.value(&Value::Void);
+        assert_eq!(w.into_bytes(), vec![b'V']);
     }
 
     #[test]

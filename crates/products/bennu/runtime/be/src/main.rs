@@ -25,6 +25,10 @@ use bennu_core::prelude::BennuState;
 mod fd_limit;
 mod selftest;
 
+// The live Bevy inspector: a Bevy Remote Protocol client over `arbor-brp` — connection + reconnect,
+// the entity snapshot, watch streams, resources, the type registry and the write verbs.
+mod brp;
+
 // `JobHandle`: register the background analysis warm-up as a tracked job in the shell registry
 // (over the reverse channel) so it appears in the bennu Jobs overlay.
 mod jobs;
@@ -45,6 +49,8 @@ mod project;
 mod java_structure;
 // Giving back what opening a project took — see the module doc for why it is driven by the watched roots.
 mod project_close;
+// Isolated copies an assistant conversation works in: indexed like projects, never listed as one.
+mod hidden_projects;
 // What this backend holds in memory, for the process monitor's `__memory` breakdown.
 mod memory_report;
 // Local history — the record of what every project file used to be. Sits beside
@@ -54,17 +60,30 @@ mod history;
 // The built-in AI assistant: its HTTP transport, the tools backed by Bennu's own handlers, the
 // conversations on disk and the run each message starts. The loop and the rules are `bennu-assistant`.
 mod assistant;
+// Live runs: managed processes, recipes, loopback HTTP, the unified timeline and scenarios (Live panel + assistant tools).
+mod live;
+// What the Run console printed, kept (bounded) so the assistant can read the user's own runs.
+mod run_console;
 // Deleting project files, and taking it back — the two halves of one operation, built on
 // the history that makes the second half possible.
 mod file_ops;
 // Capabilities: `bennu_capabilities` — re-detect the Spike-D capability bitset for a
 // project without re-opening it.
 mod capabilities;
+// The queue every build, test run and validation takes a ticket in; plus who wrote what, for blaming a broken build.
+mod build_queue;
+mod build_attribution;
 mod cargo_cmd;
 mod cargo_intel;
 // WGSL, for a project with no language server installed: naga for the diagnostics (the
 // compiler wgpu really runs), a tolerant scanner for everything the editor wants while the
 // file is still being typed.
+// A `.ron`: brackets and syntax on every request, and — on the full tier — the document checked
+// against the Rust type its `ron-studio:` directive names.
+mod ron_intel;
+// The profiler: record a JVM (JFR) / Node / native program, read the recording back as a call tree,
+// and serve per-file numbers to the editor's inline hints. Parsing lives in `bennu-profile`.
+mod profiler;
 mod shader_mesh;
 mod shader_render;
 mod shader_uniform;
@@ -338,6 +357,12 @@ mod debug_path;
 // refusal by name for everything else. Java-only — a native condition is the adapter's own
 // expression and is forwarded untouched.
 mod debug_cond;
+// A breakpoint with a message instead of a stop: `{path}` placeholders read from the frame, printed
+// to the run console while the program goes on.
+mod debug_logpoint;
+// What the program looked like when it stopped (location, stack, locals, captured values), taken at hit time
+// for the AI assistant.
+mod debug_snapshot;
 // The Rust side of a watch: route a path to our own walk over the DAP variables tree, hand anything
 // else to the adapter's evaluator in the right dialect, and say what Rust cannot evaluate at all
 // rather than forwarding LLDB's C++ prose about a Rust type.
@@ -518,6 +543,9 @@ fn main() {
     // `fd_limit`.
     fd_limit::raise_open_file_limit();
 
+    // Isolated copies an assistant conversation left behind (a crash, a deleted conversation, a stale one).
+    assistant::sweep_worktrees_in_background();
+
     // Seed the classpath's extra JDK search directories from the settings (`jdk_paths`), so a
     // JDK installed somewhere non-standard is found. Re-seeded on config save (`config_cmds`).
     bennu_classpath::prelude::set_extra_jdk_homes(
@@ -589,6 +617,10 @@ fn main() {
     // is not enough for these — see `child::kill_tree` — so they go through the same path as Stop.
     build::kill_all_runs();
     tests::kill_all_runs();
+    // And the services the Live panel or the assistant started.
+    live::stop_everything();
+    // And the programs the assistant left under the debugger.
+    assistant::release_debug_sessions(None, "");
 
     if let Err(e) = outcome {
         eprintln!("bennu-be: serve loop ended with error: {e}");

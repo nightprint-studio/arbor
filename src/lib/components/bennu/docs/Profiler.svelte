@@ -1,0 +1,106 @@
+<script lang="ts">
+  /**
+   * The profiler: recording a JVM, Node or native program, reading the recording, and the numbers
+   * in the editor. What each language needs and what is deliberately not claimed.
+   */
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
+<span class="eyebrow">Build, run &amp; test</span>
+<h1>Profiler</h1>
+
+<p class="doc-lead">
+  Where does the time go, and what allocates? The profiler records a run, folds the samples into a call tree and shows it as a flame graph, a table of hot methods,
+  allocations, garbage-collection pauses and lock waits. The same numbers are written <em>in the editor</em>, on the method they belong to.
+</p>
+
+<h2>Opening it</h2>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F9</kbd>, the flame button on the right rail, or <strong>Toggle Profiler</strong> in the command palette. Recordings are kept per
+  project, newest first (the last twenty), and survive restarting Bennu.
+</p>
+
+<h2>Recording</h2>
+<dl class="meta-grid">
+  <dt>Java</dt>
+  <dd>
+    <strong>Record</strong> runs the application or Spring Boot configuration selected in the title bar under JDK Flight Recorder, in the Run console like any other run, and reads
+    the recording when the program exits. <strong>Stop and read</strong> takes the recording from the live JVM and then ends the run. <strong>Attach</strong> records inside a JVM that is
+    already running (listed from <code>jcmd</code>); it needs a JDK with <code>jcmd</code>, and the target must run as you.
+  </dd>
+  <dt>Node</dt>
+  <dd>
+    Give a command (<code>node server.js</code>, <code>npm run dev</code>, an Angular or Vite dev server). It runs with <code>NODE_OPTIONS=--cpu-prof</code>, so every Node process it
+    starts writes a <code>.cpuprofile</code> <em>when it exits</em> — stop a dev server with its own shutdown (Ctrl+C in the console). Killing it leaves no profile. Frames are reported at
+    the file V8 ran; source maps are not applied, so a bundled application shows its bundle.
+  </dd>
+  <dt>Rust</dt>
+  <dd>
+    Uses <a href="https://github.com/mstange/samply" target="_blank" rel="noreferrer">samply</a>. Bennu picks the first one it finds, in this order: the executable you chose in the panel,
+    the copy Bennu downloaded, then <code>samply</code> on PATH. The panel shows which one is in use and its version. The command is wrapped in
+    <code>samply record --save-only</code>. Build with debug info (<code>[profile.release] debug = true</code>); without it frames are raw addresses and the recording says so.
+  </dd>
+  <dt>Getting samply</dt>
+  <dd>
+    <strong>Choose…</strong> picks an executable you already have; Bennu runs <code>samply --version</code> on it and shows the version it found. <strong>Download samply</strong> fetches the latest official release
+    (github.com/mstange/samply) for your operating system and CPU, after showing the version, file, size and source. The download is checked against the SHA-256 published with the release; if none can be
+    obtained, Bennu says so and installs only if you tick the explicit confirmation. The copy goes into Bennu's data folder and can be updated or removed from the same row. On macOS and Linux unpacking the
+    <code>.tar.xz</code> uses the system <code>tar</code> (with xz support); on Windows the <code>.zip</code> is unpacked by Bennu. A path you chose always wins over the downloaded copy, and a chosen path that no longer exists is reported rather than skipped.
+  </dd>
+  <dt>Import</dt>
+  <dd>The upload button reads a <code>.jfr</code>, a <code>.cpuprofile</code> or a samply profile (<code>.json</code> or gzip-compressed <code>.json.gz</code>) made elsewhere. Compressed files are recognised by content, and a profile that
+    expands past 512 MB is refused.</dd>
+</dl>
+
+<h2>Which JDKs can be recorded</h2>
+<p>Bennu checks the project's JDK before recording and, when it cannot, says why and what to do — it never fails silently.</p>
+<table>
+  <thead><tr><th>JDK</th><th>Recording</th><th>Reading the file</th></tr></thead>
+  <tbody>
+    <tr><td>12 and newer</td><td>yes</td><td>the JDK's own <code>jfr</code> tool</td></tr>
+    <tr><td>11</td><td>yes</td><td><code>jfr</code> of another installed JDK 12+, otherwise a built-in reader run with <code>java</code></td></tr>
+    <tr><td>8u262 and newer</td><td>yes</td><td>a built-in reader compiled with <code>javac</code> (a JRE alone cannot)</td></tr>
+    <tr><td>8 before 8u262</td><td>no</td><td>Oracle's older builds need a commercial license flag, which Bennu does not enable; update the JDK</td></tr>
+    <tr><td>9, 10</td><td>no</td><td>Flight Recorder was open-sourced in 11</td></tr>
+    <tr><td>OpenJ9, IBM Semeru</td><td>no</td><td>they have no Flight Recorder; use a HotSpot JDK (Temurin, Corretto, Zulu, Oracle)</td></tr>
+    <tr><td>jlink image without <code>jdk.jfr</code></td><td>no</td><td>rebuild it with <code>--add-modules jdk.jfr</code></td></tr>
+  </tbody>
+</table>
+
+<h2>Reading a recording</h2>
+<dl class="meta-grid">
+  <dt>Flame graph</dt>
+  <dd>
+    Width is share of the samples. Click a box to open its source; double-click or <kbd>Enter</kbd> zooms; <kbd>Backspace</kbd> zooms out; arrows move between boxes; the search dims
+    what does not match; the thread picker narrows to one thread.
+  </dd>
+  <dt>Hot methods</dt>
+  <dd>Self time (in the method itself) and total time (with its callees), the hottest source lines of each. <kbd>Enter</kbd> opens the source. A recursive method is counted once per call path.</dd>
+  <dt>Memory</dt>
+  <dd>Sampled allocations by type and by site, and the pauses of each collector. These are samples, not an exact count — a large number of small allocations is under-represented.</dd>
+  <dt>Locks</dt>
+  <dd>Monitors threads waited on, with the method that blocked most often. JFR reports waits over 20 ms.</dd>
+  <dt>Compare</dt>
+  <dd>Against an earlier recording of the same language, by change in each method's share of the run (percentage points), so recordings of different lengths compare fairly.</dd>
+</dl>
+
+<h2>Numbers in the editor</h2>
+<p>
+  After a recording, a method carries its cost after the signature — <code>38% CPU · 120 ms self · 4.2 MB alloc</code> — and a heat bar in the gutter marks the hot lines. Hover for the
+  details. Matching is by qualified name from the current text of the file, so the hints follow the code while you edit; if the file changed after the recording they are drawn dimmed and
+  labelled stale. <strong>Profiler: show hints in editor</strong> / <strong>hide hints in editor</strong> in the palette, or <em>Settings › Editor › Profiler hints</em>, toggles them.
+</p>
+
+<Callout variant="info">
+  Samples are statistical: a method that ran for a few milliseconds may not appear, and a short recording is noisy. Record a representative scenario for at least a few seconds.
+</Callout>
+
+<h2>For Imber</h2>
+<p>Imber, the assistant, can read the newest recording (hottest methods, allocation sites, lock waits, GC) to propose a change. It only reads; it never starts a recording. See the page <strong>Imber: Bevy games and the profiler</strong>.</p>
+
+<h2>What is not claimed</h2>
+<ul>
+  <li>Bennu downloads samply on request, but does not install Node or a JDK for you.</li>
+  <li>Native frames inside the JVM (garbage collector threads, JIT) are not sampled by Flight Recorder's Java sampler.</li>
+  <li>Source maps (Node) and inlined frames (Rust) are shown as the runtime reports them.</li>
+</ul>

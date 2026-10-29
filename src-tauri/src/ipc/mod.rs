@@ -239,6 +239,11 @@ pub fn build_router(app: &AppHandle) -> Router {
     // catch-all sink. Routing flips at attach/detach time.
     router.register("garrulus", Arc::new(SplitBroker::pure_oop("garrulus")));
 
+    // Voice backend: local speech-to-text (Whisper) for any product. Platform-level, so no
+    // window of its own: it is borrowed through `ensure_product_backend("voice")` and exits by
+    // itself after an idle period. `pure_oop` like the other lazy backends.
+    router.register("voice", Arc::new(SplitBroker::pure_oop("voice")));
+
     router
 }
 
@@ -1314,6 +1319,27 @@ fn host_dispatch(
         return dispatch_rpc(state.inner(), "corvus", &name, serde_json::json!({ "args": args })).map_err(|e| e.to_string());
     }
 
+    // ── Assistant isolated copy (git worktree) ─────────────────────────────────────
+    //
+    // The assistant can work on a detached linked worktree of the project so nothing it does reaches the real
+    // files until the user applies it. Corvus owns git, so Bennu asks it through the shell — and only for the two
+    // operations the copy needs (add, remove), never for the worktree manager's other verbs.
+    if method == "__assistant_worktree" {
+        const OPS: [&str; 2] = ["assistant_worktree_add", "assistant_worktree_remove"];
+        let op = params
+            .get("op")
+            .and_then(|m| m.as_str())
+            .ok_or_else(|| "__assistant_worktree: missing op".to_string())?
+            .to_string();
+        if !OPS.contains(&op.as_str()) {
+            return Err(format!("__assistant_worktree: `{op}` is not an operation the assistant may ask of git"));
+        }
+        ensure_corvus_be(app);
+        let state = app.state::<AppState>();
+        let args = params.get("args").cloned().unwrap_or(serde_json::Value::Null);
+        return dispatch_rpc(state.inner(), "corvus", &op, serde_json::json!({ "args": args })).map_err(|e| e.to_string());
+    }
+
     // ── Garrulus sync remote ──────────────────────────────────────────────────
     //
     // Minting the repository a vault will sync to. `garrulus-be` owns neither the
@@ -1488,6 +1514,7 @@ pub fn product_backend_installed(app: &AppHandle, program: &str) -> bool {
     let name = match program {
         "corvus" => "corvus-be",
         "picus" => "picus-be",
+        "voice" => "voice-be",
         _ => return false,
     };
     backend_binary(app, name).is_some()
@@ -1903,6 +1930,71 @@ fn spawn_tyto_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)
         Ok(pair) => Some(pair),
         Err(e) => {
             tracing::warn!("failed to spawn tyto-be ({e}) — Tyto stays in preview mode");
+            None
+        }
+    }
+}
+
+/// Lazily spawn `voice-be` and attach it to the router, **idempotently**. Unlike the product
+/// backends it has no window: any product that wants dictation borrows it through
+/// `ensure_product_backend("voice")`, and the backend exits by itself when idle (the disconnect
+/// callback then detaches it, so the next use respawns a fresh one). Must run on the blocking
+/// pool — the spawn parks on the child's first `Hello`.
+pub fn ensure_voice_be(app: &AppHandle) {
+    static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = match SPAWN_LOCK.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if split_broker::is_attached("voice") {
+        return;
+    }
+    let gen = split_broker::next_gen();
+    tracing::info!("ensure_voice_be: spawning voice-be (gen={gen})");
+    match spawn_voice_be(app, gen) {
+        Some((child, methods)) => {
+            split_broker::attach(
+                "voice",
+                gen,
+                methods.into_iter().collect(),
+                Arc::new(child) as Arc<dyn BrokerClient>,
+            );
+        }
+        None => tracing::info!("voice-be not available — dictation is disabled"),
+    }
+}
+
+fn spawn_voice_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
+    use crate::process_ext::NoWindowExt;
+
+    let bin = match backend_binary(app, "voice-be") {
+        Some(b) => b,
+        None => {
+            tracing::info!("voice-be binary not found (backends/ resource or beside the launcher)");
+            return None;
+        }
+    };
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.no_window();
+
+    let app_for_events = app.clone();
+    let app_for_host = app.clone();
+    let app_for_disc = app.clone();
+    match ChildClient::spawn(
+        cmd,
+        // `voice://*` events go to every window: whichever product asked for dictation listens.
+        move |topic, payload| forward_backend_event(&app_for_events, "voice", topic, payload),
+        move |method, params| host_dispatch(&app_for_host, method, params),
+        move || {
+            use tauri::Emitter;
+            if split_broker::detach_if_current("voice", gen, "disconnect") {
+                let _ = app_for_disc.emit("arbor://voice-be-down", ());
+            }
+        },
+    ) {
+        Ok(pair) => Some(pair),
+        Err(e) => {
+            tracing::warn!("failed to spawn voice-be ({e})");
             None
         }
     }

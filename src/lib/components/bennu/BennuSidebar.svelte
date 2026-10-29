@@ -22,9 +22,10 @@
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
-    History, Tag, Trash2, ExternalLink, FolderPlus, FolderInput, Package, Boxes, ClipboardPaste,
+    History, Tag, Trash2, ExternalLink, FolderPlus, FolderInput, Package, Boxes, ClipboardPaste, Sparkles, Info,
   } from 'lucide-svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
+  import FilePropertiesModal from '$lib/components/shared/internal/FilePropertiesModal.svelte';
   import { tick, untrack } from 'svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
@@ -58,7 +59,10 @@
   import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
   import { bennuFileOpsStore } from '$lib/stores/bennu/file-ops.svelte';
   import { lspWillRename } from '$lib/ipc/bennu/lsp';
-  import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
+  import type { MenuAction, MenuItem } from '$lib/components/shared/ContextMenu.svelte';
+  import { askAssistant, draftInAssistant } from './assistant/assistant-launch';
+  import { groupedMenuItems } from './assistant/menu-groups';
+  import { treeActionsFor, treeDraft, treePrompt, type TreeActionId } from './assistant/tree-actions';
   import { isTruncationMarker, type DiscoveredRustTest, type DiscoveredTest, type TreeNode } from '$lib/types/bennu';
   import type { NewFileKind } from '$lib/ipc/bennu/scaffold';
   import { packageTree, isInPackageRoot, isSourceRoot, packageOfDir } from './package-tree';
@@ -598,13 +602,8 @@
           { id: 'new', label: 'New', icon: Plus, children: newSubmenu(newDir) },
           { separator: true, id: 'sep-new', label: '' },
           ...runItem,
-          { id: 'delete', label: 'Delete…', icon: Trash2, shortcut: 'Del', danger: true },
-          { separator: true, id: 'sep-del-dir', label: '' },
           { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
           { separator: true, id: 'sep-hist-dir', label: '' },
-          { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V',
-            disabled: treeClipboardStore.isEmpty },
-          { separator: true, id: 'sep-paste-dir', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
           { id: 'reveal-fs',     label: 'Reveal in File Explorer', icon: ExternalLink },
@@ -612,26 +611,21 @@
           expandedPaths.has(node.path)
             ? { id: 'collapse', label: 'Collapse', icon: ChevronRight }
             : { id: 'expand',   label: 'Expand',   icon: ChevronDown },
+          { separator: true, id: 'sep-props-dir', label: '' },
+          { id: 'props', label: 'Properties', icon: Info },
         ]
       : [
           { id: 'open',          label: 'Open',               icon: FolderOpen },
           { id: 'new', label: 'New', icon: Plus, children: newSubmenu(newDir) },
           { separator: true, id: 'sep-file', label: '' },
-          // Files only. Renaming a DIRECTORY is a different operation — for Rust it moves a whole
-          // module path, and `willRenameFiles` would have to be asked per file inside it — so it is
-          // absent rather than offered and then half-done.
-          { id: 'rename',        label: 'Rename…',            icon: FileType2, shortcut: 'F2' },
           // The same move a drag performs, for the hand that is not on the mouse — and for the
           // destination that is nowhere near the source on screen, which is most of them in a
-          // project deep enough to want moving files around.
+          // project deep enough to want moving files around. (Cut / copy / paste / rename / delete are in
+          // the icon bar at the top of the menu; rename is files only — renaming a DIRECTORY is a different
+          // operation: for Rust it moves a whole module path, and `willRenameFiles` would have to be asked
+          // per file inside it — so it is absent rather than offered and then half-done.)
           { id: 'move',          label: 'Move to folder…',    icon: FolderInput },
-          { id: 'delete',        label: 'Delete…',            icon: Trash2, shortcut: 'Del', danger: true },
-          { separator: true, id: 'sep-rename', label: '' },
-          // Copy the FILE, not its path — the pair that makes duplicating a class one gesture.
-          { id: 'copy-node', label: 'Copy', icon: Copy, shortcut: 'Ctrl+C' },
-          { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V',
-            disabled: treeClipboardStore.isEmpty },
-          { separator: true, id: 'sep-paste-file', label: '' },
+          { separator: true, id: 'sep-move', label: '' },
           ...runItem,
           { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
           { separator: true, id: 'sep-hist-file', label: '' },
@@ -639,7 +633,18 @@
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
           { id: 'reveal',        label: 'Reveal in Project',  icon: LocateFixed },
           { id: 'reveal-fs',     label: 'Reveal in File Explorer', icon: ExternalLink },
+          { separator: true, id: 'sep-props-file', label: '' },
+          { id: 'props', label: 'Properties', icon: Info },
         ];
+    // The verbs everyone reaches for, as icons at the top (the way the file explorer's menu does): copy the file
+    // (not its path — the pair that makes duplicating a class one gesture), paste, rename (files), delete, and Imber.
+    const quick: MenuAction[] = [
+      ...(node.is_dir ? [] : [{ id: 'copy-node', label: 'Copy', icon: Copy, shortcut: 'Ctrl+C' } as MenuAction]),
+      { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V', disabled: treeClipboardStore.isEmpty },
+      ...(node.is_dir ? [] : [{ id: 'rename', label: 'Rename…', icon: FileType2, shortcut: 'F2' } as MenuAction]),
+      { id: 'delete', label: 'Delete…', icon: Trash2, shortcut: 'Del', danger: true },
+      { id: 'imber', label: 'Ask Imber…', icon: Sparkles },
+    ];
     bennuContextMenuStore.show(x, y, items, (id) => {
       switch (id) {
         // The submenu leaf decides which shape the dialog opens in — a Java type, with its
@@ -652,6 +657,8 @@
         case 'rename':    renamePath = node.path; break;
         case 'move':      movePicker = node; break;
         case 'delete':    deleting = node; break;
+        case 'props':     propsPath = node.path; break;
+        case 'imber':     openImberMenu(node, x, y); break;
         case 'open':      void projectStore.openFile(node.path); break;
         case 'copy-node': copyToTreeClipboard(node); break;
         case 'paste':     pasteInto(node); break;
@@ -669,6 +676,19 @@
         case 'expand':    setFoldersOpen([node.path], true); break;
         case 'collapse':  setFoldersOpen([node.path], false); break;
       }
+    }, { actions: quick });
+  }
+
+  /** The path whose Properties dialog is open (null = closed). */
+  let propsPath = $state<string | null>(null);
+
+  /** The Imber icon of the row menu: what it can do with this file or folder, as a menu with submenus. */
+  function openImberMenu(node: TreeNode, x: number, y: number) {
+    const rel = projectStore.relativePath(node.path);
+    const items = groupedMenuItems(treeActionsFor(node.is_dir), Sparkles);
+    bennuContextMenuStore.show(x, y, items, (id) => {
+      if (id === 'ask') void draftInAssistant(treeDraft(rel));
+      else void askAssistant(treePrompt(id as Exclude<TreeActionId, 'ask'>, rel, node.is_dir));
     });
   }
 
@@ -701,9 +721,12 @@
       { separator: true, id: 'sep-root-hist', label: '' },
       { id: 'copy-path', label: 'Copy path', icon: Copy },
       { id: 'reveal-fs', label: 'Reveal in File Explorer', icon: ExternalLink },
+      { separator: true, id: 'sep-root-props', label: '' },
+      { id: 'props', label: 'Properties', icon: Info },
     ];
     bennuContextMenuStore.show(x, y, items, (id) => {
       switch (id) {
+        case 'props': propsPath = root; break;
         case 'new-class':
         case 'new-file':
         case 'new-folder': runNew(id, root); break;
@@ -1182,6 +1205,9 @@
   />
 {/if}
 
+{#if propsPath}
+  <FilePropertiesModal path={propsPath} onClose={() => (propsPath = null)} />
+{/if}
 {#if renamePath !== null}
   <BennuRenameFileModal path={renamePath} onClose={() => (renamePath = null)} />
 {/if}

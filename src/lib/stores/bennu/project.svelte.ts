@@ -681,13 +681,13 @@ function createProjectStore() {
     return modulesFromKind(info?.kind);
   }
 
-  /** Every workspace module, flattened. */
+  /** The modules of the ACTIVE project, flattened. The other projects of the workspace are not listed:
+   *  the tool windows and the rail follow the project you are working in, and switching to another one
+   *  switches them with it. */
   function allModuleRefs(): ModuleRef[] {
-    // The active project counts even when it is not a workspace member (the demo project is not).
-    const roots = project && !workspaceRoots.includes(project.root) ? [...workspaceRoots, project.root] : workspaceRoots;
-    const byRoot: Record<string, readonly ProjectModule[]> = {};
-    for (const r of roots) byRoot[r] = modulesOfRoot(r);
-    return moduleRefs(roots, byRoot);
+    if (!project) return [];
+    const root = project.root;
+    return moduleRefs([root], { [root]: modulesOfRoot(root) });
   }
 
   /** Read `root`'s module list in the background. A failure keeps what is there (or the primary-kind

@@ -238,6 +238,14 @@ fn route_diagnostics(args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
     if let Some(diags) = crate::wgsl_intel::diagnostics(&args.file, args.source.as_deref()) {
         return Ok(diags);
     }
+    // A `.ron`: syntax everywhere, and a check against the Rust type its directive names on the
+    // full tier. Not a language-server file (rust-analyzer has never heard of one), so nothing
+    // above can claim it.
+    if let Some(diags) =
+        crate::ron_intel::diagnostics(&args.file, args.source.as_deref(), args.resolved.unwrap_or(true))
+    {
+        return Ok(diags);
+    }
     // Action refs to check: the FE's explicit list when present, else — for a JSP — the
     // refs the BE extracts itself (reusing `bennu-web`'s scan), so squiggles work with no
     // FE change. A plain Java file with no actions falls to the native syntactic stub.

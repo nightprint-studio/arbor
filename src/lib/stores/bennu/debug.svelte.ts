@@ -63,6 +63,12 @@ function inFile(b: BreakpointDto, file: string, cls?: string): boolean {
   return !!cls && !!b.class && outerClass(b.class) === cls;
 }
 
+/** The two newer fields are filled in rather than trusted: a project whose `[bennu.debug]` predates
+ *  them has neither, and everything downstream reads `b.condition` without checking. */
+function normalizeBreakpoints(list: BreakpointDto[] | undefined): BreakpointDto[] {
+  return (list ?? []).map((b) => ({ ...b, condition: b.condition ?? '', hit_count: b.hit_count ?? 0 }));
+}
+
 /**
  * One row of the variables tree.
  *
@@ -324,6 +330,19 @@ function createBennuDebugStore() {
     void focusWindow(getCurrentWindow().label).catch(() => {});
   }
 
+  /** The assistant set or removed breakpoints on disk: take that version. Only for a root already
+   *  shown — `load` reads the file itself the first time. Its own edit in flight is not lost: the
+   *  assistant wrote the whole set it read, so what the user had is in it. */
+  async function reloadBreakpoints(root: string): Promise<void> {
+    if (!hydrated.has(root)) return;
+    try {
+      const cfg = await getDebugConfig(root);
+      patch(root, { breakpoints: normalizeBreakpoints(cfg.breakpoints), exceptions: cfg.exceptions ?? [] });
+    } catch {
+      /* the next edit retries */
+    }
+  }
+
   function detach(): void {
     for (const f of unlisteners) f();
     unlisteners = [];
@@ -358,14 +377,7 @@ function createBennuDebugStore() {
       try {
         const cfg = await getDebugConfig(root);
         configs.set(root, {
-          // The two newer fields are filled in here rather than trusted: a project whose
-          // `[bennu.debug]` predates them has neither, and everything downstream reads
-          // `b.condition` without checking.
-          breakpoints: (cfg.breakpoints ?? []).map((b) => ({
-            ...b,
-            condition: b.condition ?? '',
-            hit_count: b.hit_count ?? 0,
-          })),
+          breakpoints: normalizeBreakpoints(cfg.breakpoints),
           exceptions: cfg.exceptions ?? [],
           watches: cfg.watches ?? [],
         });
@@ -621,6 +633,8 @@ function createBennuDebugStore() {
           patchSession(e.payload.session_id, { statuses: next });
         }),
       );
+
+      add(await listen<{ root: string }>('arbor://bennu/debug-config', (e) => void reloadBreakpoints(e.payload.root)));
 
       return detach;
     },

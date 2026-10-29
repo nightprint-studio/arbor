@@ -88,7 +88,7 @@ impl ToolHost {
             let (current, stamp) = self.read_text(file)?;
             return self.submit(file, &current, restored, Some(stamp), None);
         }
-        if self.session.auto {
+        if self.session.applies_edits() {
             if let Some(parent) = file.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }

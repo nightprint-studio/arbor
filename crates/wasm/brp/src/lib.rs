@@ -19,8 +19,11 @@
 //! `arbor_brp::prelude::...`.
 
 pub mod client;
+pub mod dialect;
 pub mod prelude;
+pub mod registry;
 pub mod sse;
+pub mod world;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -160,7 +163,7 @@ impl BrpCapabilities {
     }
 }
 
-fn locate_type_map(value: &serde_json::Value) -> Option<&serde_json::Map<String, serde_json::Value>> {
+pub(crate) fn locate_type_map(value: &serde_json::Value) -> Option<&serde_json::Map<String, serde_json::Value>> {
     fn looks_like_type_map(map: &serde_json::Map<String, serde_json::Value>) -> bool {
         map.keys().any(|k| k.contains("::"))
     }
@@ -340,7 +343,9 @@ pub mod methods {
     pub const WORLD_QUERY: &str = "world.query";
     pub const WORLD_GET_COMPONENTS: &str = "world.get_components";
     pub const WORLD_SPAWN_ENTITY: &str = "world.spawn_entity";
-    pub const WORLD_DESPAWN_ENTITIES: &str = "world.despawn_entities";
+    // Singular, one `entity` param — the only despawn verb `bevy_remote` has ever shipped under
+    // `world.*` (a plural `despawn_entities` was guessed here once and does not exist).
+    pub const WORLD_DESPAWN_ENTITY: &str = "world.despawn_entity";
     pub const WORLD_INSERT_COMPONENTS: &str = "world.insert_components";
     pub const WORLD_REMOVE_COMPONENTS: &str = "world.remove_components";
     pub const WORLD_MUTATE_COMPONENTS: &str = "world.mutate_components";

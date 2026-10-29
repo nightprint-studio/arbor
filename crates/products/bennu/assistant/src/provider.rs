@@ -73,8 +73,9 @@ pub enum Event {
     Usage(Usage),
     /// The response is over.
     Stop(StopReason),
-    /// The provider reported an error in the stream itself.
-    Error(String),
+    /// The provider reported an error in the stream itself: its error type (`overloaded_error`, …) when it
+    /// named one, and its message.
+    Error { error_type: Option<String>, message: String },
 }
 
 /// Where and how to send a request.

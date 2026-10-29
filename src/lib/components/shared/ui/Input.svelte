@@ -30,6 +30,10 @@
     name?: string;
     id?: string;
     ariaLabel?: string;
+    /** Extra attributes spread onto the underlying `<input>` — ARIA wiring a host owns (a
+     *  combobox's `role` / `aria-controls`) or a `data-*` hook, without this widget growing a
+     *  prop for each. */
+    attrs?: Record<string, unknown>;
     /** Leading icon snippet (rendered inside the input on the left). */
     iconStart?: Snippet;
     /** Trailing icon snippet (rendered inside the input on the right, before the clear button). */
@@ -66,6 +70,7 @@
     min, max, step,
     name, id,
     ariaLabel,
+    attrs,
     iconStart, iconEnd,
     prefix, suffix,
     onchange, oninput, onkeydown, onfocus, onblur, onclear,
@@ -115,6 +120,7 @@
     bind:this={element}
     aria-label={ariaLabel}
     aria-invalid={error ? true : undefined}
+    {...attrs}
     onchange={(e) => onchange?.((e.target as HTMLInputElement).value)}
     oninput={(e) => oninput?.((e.target as HTMLInputElement).value)}
     {onkeydown}

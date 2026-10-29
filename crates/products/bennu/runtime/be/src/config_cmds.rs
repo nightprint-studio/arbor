@@ -21,7 +21,10 @@ fn get_bennu_config(_state: &BennuState) -> Result<BennuConfig, String> {
 /// re-seeds the classpath's extra JDK search dirs so a newly-added `jdk_paths` entry takes
 /// effect on the next index build without a restart.
 #[arbor_rpc::handler]
-fn set_bennu_config(_state: &BennuState, config: BennuConfig) -> Result<(), String> {
+fn set_bennu_config(_state: &BennuState, mut config: BennuConfig) -> Result<(), String> {
+    // The profiler tool paths have their own pair of handlers (`profiler::samply`); a settings
+    // snapshot that predates them must not wipe what the user picked there.
+    config.profiler_tools = load().profiler_tools;
     bennu_classpath::prelude::set_extra_jdk_homes(
         config.jdk_paths.iter().map(std::path::PathBuf::from).collect(),
     );

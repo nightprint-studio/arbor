@@ -20,7 +20,9 @@
 //! / `.chain` are for. Two that are *not* run in whichever order the schedule happens to pick,
 //! which is the latent bug: a frame-order dependency nobody wrote down. This module records which
 //! of the two a pair is, from the ordering it could see, and says `unordered` only in the sense of
-//! "no ordering appears in this project's own `add_systems` calls".
+//! "no ordering appears in this project's own `add_systems` / `configure_sets` calls". The latter
+//! orders *sets*, and is expanded to the systems in them: `configure_sets(Update, (A, B).chain())`
+//! orders every system `.in_set(A)` before every one `.in_set(B)`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -86,13 +88,52 @@ pub struct Conflict {
 ///   `a` and `c` unordered, and an undirected closure would have merged them.
 /// * **Undirected pairs** (`.ambiguous_with`, [`add`](Self::add)): a statement about exactly that
 ///   pair, which says nothing about anyone else.
+///
+/// ## Sets
+///
+/// A node is a system **or a set** — `configure_sets(Update, (A, B).chain())` is an edge `A → B`
+/// exactly as `a.before(b)` is `a → b`, and the graph does not care which kind of name it holds.
+/// What links the two kinds is [`add_member`](Self::add_member): a system in `A` carries `A`'s
+/// edges, and a set in `P` carries `P`'s. [`contains`](Self::contains) therefore asks whether any
+/// of `a`'s *positions* (itself, its sets, their parents) leads to any of `b`'s — which expands a
+/// set-level edge to its member systems without ever materialising the cross product.
+///
+/// Sets that an external plugin configures simply have no edges here: a pair that only they could
+/// order is reported as not proven, which is the cautious answer (see [`warnable`]).
 #[derive(Debug, Default)]
 pub struct OrderIndex {
     pairs: HashSet<(String, String)>,
     next: HashMap<String, Vec<String>>,
+    /// `member → sets it was put in with `.in_set(…)``, for systems and sets alike.
+    parents: HashMap<String, Vec<String>>,
 }
 
 impl OrderIndex {
+    /// Record that `member` (a system, or a set) was put in `set` with `.in_set(…)`.
+    pub fn add_member(&mut self, member: &str, set: &str) {
+        if member != set {
+            let sets = self.parents.entry(member.to_string()).or_default();
+            if !sets.iter().any(|s| s == set) {
+                sets.push(set.to_string());
+            }
+        }
+    }
+
+    /// `name` and every set it sits in, directly or through nested sets.
+    pub fn positions(&self, name: &str) -> Vec<String> {
+        let mut out = vec![name.to_string()];
+        let mut i = 0;
+        while i < out.len() {
+            for p in self.parents.get(&out[i]).into_iter().flatten() {
+                if !out.contains(p) {
+                    out.push(p.clone());
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+
     /// Record that `a` and `b` are ordered (or declared not to matter), direction unknown.
     pub fn add(&mut self, a: &str, b: &str) {
         if a != b {
@@ -108,16 +149,19 @@ impl OrderIndex {
     }
 
     pub fn contains(&self, a: &str, b: &str) -> bool {
-        self.pairs.contains(&key(a, b)) || self.reaches(a, b) || self.reaches(b, a)
+        let from = self.positions(a);
+        let to = self.positions(b);
+        let paired = from.iter().any(|x| to.iter().any(|y| x != y && self.pairs.contains(&key(x, y))));
+        paired || self.reaches(&from, &to) || self.reaches(&to, &from)
     }
 
-    /// Whether a chain of `before` edges leads from `from` to `to`.
-    fn reaches(&self, from: &str, to: &str) -> bool {
+    /// Whether a chain of `before` edges leads from any of `from` to any of `to`.
+    fn reaches(&self, from: &[String], to: &[String]) -> bool {
         let mut seen: HashSet<&str> = HashSet::new();
-        let mut stack = vec![from];
+        let mut stack: Vec<&str> = from.iter().map(String::as_str).collect();
         while let Some(at) = stack.pop() {
             for n in self.next.get(at).into_iter().flatten() {
-                if n == to {
+                if to.iter().any(|t| t == n) {
                     return true;
                 }
                 if seen.insert(n.as_str()) {
@@ -198,9 +242,10 @@ pub fn skipped_schedules(systems: &[SystemDecl]) -> Vec<String> {
 ///
 /// Narrower than "the ordering says unordered", because a warning has to be right about a negative:
 ///
-/// * A system in a **set** is never accused. A set's ordering is declared by `configure_sets`,
-///   which this crate does not read — so two systems in sets may well be ordered by something it
-///   cannot see, and saying otherwise would be a squiggle under working code.
+/// * A system in a **set** is never accused. The project's own `configure_sets` calls are read and
+///   do count towards [`Ordering::Explicit`], but a set can equally be ordered by a plugin this
+///   crate never sees (the engine's, a dependency's) — so "not proven ordered" is not "unordered"
+///   for a set member, and a squiggle under working code is the price of getting that wrong.
 /// * An **exclusive** system is never accused. It contends with everything in its schedule by
 ///   construction; that is what taking `&mut World` means, not an oversight to report on every peer.
 ///
@@ -407,6 +452,48 @@ mod tests {
         fan_in.add_edge("a", "b");
         fan_in.add_edge("c", "b");
         assert!(!fan_in.contains("a", "c"), "both run before b; nothing says which is first");
+    }
+
+    #[test]
+    fn a_set_edge_orders_the_systems_in_the_sets() {
+        let mut order = OrderIndex::default();
+        order.add_edge("Input", "Logic");
+        order.add_member("read_keys", "Input");
+        order.add_member("move_player", "Logic");
+        assert!(order.contains("read_keys", "move_player"));
+        assert!(order.contains("move_player", "read_keys"));
+        assert!(!order.contains("read_keys", "elsewhere"));
+    }
+
+    #[test]
+    fn set_edges_follow_nesting_and_pass_through_an_empty_set() {
+        let mut order = OrderIndex::default();
+        order.add_edge("A", "B");
+        order.add_edge("B", "C");
+        order.add_member("a_sys", "Inner");
+        order.add_member("Inner", "A");
+        order.add_member("c_sys", "C");
+        // `B` has no member here, as when a plugin fills it: the order still holds through it.
+        assert!(order.contains("a_sys", "c_sys"));
+    }
+
+    #[test]
+    fn a_system_ordered_against_a_set_is_ordered_against_its_members() {
+        let mut order = OrderIndex::default();
+        order.add_edge("Physics", "draw"); // `draw.after(Physics)`
+        order.add_member("step", "Physics");
+        assert!(order.contains("step", "draw"));
+        assert!(!order.contains("other", "draw"));
+    }
+
+    #[test]
+    fn two_sets_both_before_a_third_stay_unordered_against_each_other() {
+        let mut order = OrderIndex::default();
+        order.add_edge("A", "C");
+        order.add_edge("B", "C");
+        order.add_member("a_sys", "A");
+        order.add_member("b_sys", "B");
+        assert!(!order.contains("a_sys", "b_sys"));
     }
 
     #[test]

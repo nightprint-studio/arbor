@@ -193,7 +193,19 @@ bennu-npm   = { path = "../../build/npm" }
 # WGSL: naga-backed validation and a tolerant scanner, for a shader with no language
 # server installed. Leaf crate — no Tauri, no IPC.
 bennu-plugin      = { path = "../plugin" }
+# The Bevy Remote Protocol client (JSON-RPC + SSE watch), the method-name dialects, the type
+# registry and the entity snapshot — shared with the shell's `arbor.brp` Lua namespace. The `brp`
+# module owns only the connection and the handlers. Workspace-internal; no new external crate.
+arbor-brp = { path = "../../../../wasm/brp" }
 bennu-wgsl = { path = "../../formats/wgsl" }
+# RON diagnostics: bracket and syntax errors with positions, and a document checked against the
+# Rust type a `ron-studio:` directive names. Rides on arbor-studio-ron (workspace-internal).
+bennu-ron  = { path = "../../formats/ron" }
+# The profiler's pure core: call-tree model, JFR detection + aggregation, Node / samply parsers.
+bennu-profile = { path = "../../profile" }
+# Live runs: managed processes, recipes, loopback HTTP, the unified timeline, scenarios. The
+# process-tree kill in `child.rs` lives there too, so a run, a test and a managed service stop alike.
+bennu-live = { path = "../live" }
 
 # The rendered shader preview crosses the MCP seam as base64 PNG — the same shape and the same
 # workspace dependency tyto-be uses for its screenshots.
@@ -233,6 +245,8 @@ regex      = { workspace = true }
 # entry/size caps). A workspace-internal crate that already owns the `zip` dependency — Bennu does
 # not take `zip` itself.
 arbor-fs   = { path = "../../../../foundation/fs" }
+# Digest of the samply download (already a workspace dependency; arbor-auth pins the same one).
+sha2       = { workspace = true }
 
 # `setrlimit(RLIMIT_NOFILE)` at start-up — see `fd_limit.rs`. macOS hands a GUI app a soft limit
 # of 256 open files, and a project with 150 dependency jars holds every one of them open for the

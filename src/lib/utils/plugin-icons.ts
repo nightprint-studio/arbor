@@ -84,7 +84,7 @@ import {
   Gamepad, Gamepad2, ScanLine, Joystick, Pin, PinOff,
   // Product palettes — Bennu, Garrulus, Picus and Merula resolve their commands here rather
   // than in registries of their own.
-  Command, ListTree, FileCode2, Wand2, Lightbulb, SlidersHorizontal, Library, Target, ListTodo, IndentIncrease, TextCursorInput, BookOpen, FlaskConical, Beaker, ListRestart, Languages, LayoutDashboard, ArrowUpFromLine, CalendarDays, RotateCcw, FolderCog, FormInput, PackageMinus, Tags, SkipBack, Music4, Minimize2, Maximize2, Piano, FileInput, FileAudio, SearchCode, AlignLeft, PenLine, FolderPen, Repeat, PlayCircle, Hourglass, ZoomIn, ZoomOut, StretchVertical, FileMusic, PackageOpen, Crop, Snowflake, FilePen,
+  Command, ListTree, FileCode2, Wand2, Lightbulb, SlidersHorizontal, Library, Target, ListTodo, IndentIncrease, TextCursorInput, BookOpen, FlaskConical, Beaker, Flame, ListRestart, Languages, LayoutDashboard, ArrowUpFromLine, CalendarDays, RotateCcw, FolderCog, FormInput, PackageMinus, Tags, SkipBack, Music4, Minimize2, Maximize2, Piano, FileInput, FileAudio, SearchCode, AlignLeft, PenLine, FolderPen, Repeat, PlayCircle, Hourglass, ZoomIn, ZoomOut, StretchVertical, FileMusic, PackageOpen, Crop, Snowflake, FilePen,
 } from 'lucide-svelte';
 import type { IconComponent } from '$lib/types/icon';
 
@@ -135,7 +135,7 @@ export const PLUGIN_ICONS: Record<string, any> = {
   Bot,
   Gift,
   Gamepad, Gamepad2, ScanLine, Joystick, Pin, PinOff,
-  Command, ListTree, FileCode2, Wand2, Lightbulb, SlidersHorizontal, Library, Target, ListTodo, IndentIncrease, TextCursorInput, BookOpen, FlaskConical, Beaker, ListRestart, Languages, LayoutDashboard, ArrowUpFromLine, CalendarDays, RotateCcw, FolderCog, FormInput, PackageMinus, Tags, SkipBack, Music4, Minimize2, Maximize2, Piano, FileInput, FileAudio, SearchCode, AlignLeft, PenLine, FolderPen, Repeat, PlayCircle, Hourglass, ZoomIn, ZoomOut, StretchVertical, FileMusic, PackageOpen, Crop, Snowflake, FilePen,
+  Command, ListTree, FileCode2, Wand2, Lightbulb, SlidersHorizontal, Library, Target, ListTodo, IndentIncrease, TextCursorInput, BookOpen, FlaskConical, Beaker, Flame, ListRestart, Languages, LayoutDashboard, ArrowUpFromLine, CalendarDays, RotateCcw, FolderCog, FormInput, PackageMinus, Tags, SkipBack, Music4, Minimize2, Maximize2, Piano, FileInput, FileAudio, SearchCode, AlignLeft, PenLine, FolderPen, Repeat, PlayCircle, Hourglass, ZoomIn, ZoomOut, StretchVertical, FileMusic, PackageOpen, Crop, Snowflake, FilePen,
 };
 
 /**

@@ -2,8 +2,10 @@
 //!
 //! **Out**: one JSON body per request, streamed (`stream: true`). The standing instructions and the
 //! tool list are marked cacheable — they are the same on every request of a conversation, and the cache
-//! turns re-reading them from full price to a fraction. Only what is stable goes before the cache marks;
-//! the messages, which grow, come after.
+//! turns re-reading them from full price to a fraction. The provider's prefix order is tools, then
+//! instructions, then messages, and a change anywhere invalidates everything after it — so what is stable
+//! goes first, and the conversation, which only ever grows at its end, carries a third mark on its last
+//! block: each request then pays full price only for what the previous one did not already send.
 //!
 //! **Back**: a server-sent-event stream, decoded by [`AnthropicDecoder`]. Text and reasoning arrive as
 //! deltas; a tool call arrives as a start (its id and name) followed by pieces of its JSON arguments,
@@ -78,17 +80,19 @@ impl Provider for Anthropic {
     }
 
     fn body(&self, request: &Request) -> Value {
+        let mut messages: Vec<Value> = request.messages.iter().map(message).collect();
+        mark_conversation_tail(&mut messages);
         let mut body = json!({
             "model": request.model,
             "max_tokens": request.max_tokens,
             "stream": true,
-            "messages": request.messages.iter().map(message).collect::<Vec<_>>(),
+            "messages": messages,
         });
         if !request.system.trim().is_empty() {
             body["system"] = json!([{
                 "type": "text",
                 "text": request.system,
-                "cache_control": { "type": "ephemeral" },
+                "cache_control": standing_mark(request.long_cache),
             }]);
         }
         if !request.tools.is_empty() {
@@ -109,7 +113,7 @@ impl Provider for Anthropic {
                         });
                         // The cache mark on the LAST tool covers the whole list before it.
                         if i == last {
-                            tool["cache_control"] = json!({ "type": "ephemeral" });
+                            tool["cache_control"] = standing_mark(request.long_cache);
                         }
                         tool
                     })
@@ -130,25 +134,70 @@ impl Provider for Anthropic {
     }
 }
 
+/// The cache mark on the standing prefix (tools, then instructions). With `long` it asks for the one-hour cache:
+/// written once at twice the input price, read at the usual fraction, and shared by every conversation that sends
+/// the same prefix. The provider requires a one-hour entry to come before any five-minute one, which is why the
+/// conversation's own mark (see [`mark_conversation_tail`]) stays on the short cache.
+fn standing_mark(long: bool) -> Value {
+    if long {
+        json!({ "type": "ephemeral", "ttl": "1h" })
+    } else {
+        json!({ "type": "ephemeral" })
+    }
+}
+
+/// The third and last cache mark: on the final block of the final message, so the whole conversation so far is
+/// read from the cache by the next request instead of being paid for again. Only the few tokens added since
+/// the previous request are new. The provider looks back from a mark for an earlier write, at most twenty
+/// blocks, and a request adds two messages, so the previous mark is always within reach.
+fn mark_conversation_tail(messages: &mut [Value]) {
+    let Some(last) = messages.last_mut().and_then(|m| m.get_mut("content")).and_then(Value::as_array_mut).and_then(|c| c.last_mut()) else {
+        return;
+    };
+    last["cache_control"] = json!({ "type": "ephemeral" });
+}
+
 fn message(m: &Message) -> Value {
     json!({
         "role": match m.role { Role::User => "user", Role::Assistant => "assistant" },
-        "content": m.blocks.iter().map(block).collect::<Vec<_>>(),
+        "content": m.blocks.iter().filter_map(|b| block(b, m)).collect::<Vec<_>>(),
     })
 }
 
-fn block(b: &Block) -> Value {
-    match b {
+/// One block of `m` as the API wants it. A picture is not a block of its own: the API takes it *inside*
+/// the `tool_result` it belongs to, so the result gathers the pictures that follow it in the message.
+fn block(b: &Block, m: &Message) -> Option<Value> {
+    Some(match b {
         Block::Text { text } => json!({ "type": "text", "text": text }),
         Block::ToolUse { id, name, input } => json!({ "type": "tool_use", "id": id, "name": name, "input": input }),
         Block::ToolResult { tool_use_id, content, is_error } => {
-            let mut v = json!({ "type": "tool_result", "tool_use_id": tool_use_id, "content": content });
+            let pictures: Vec<Value> = m
+                .blocks
+                .iter()
+                .filter_map(|x| match x {
+                    Block::ToolImage { tool_use_id: id, media_type, data: Some(data), .. } if id == tool_use_id => {
+                        Some(json!({ "type": "image", "source": { "type": "base64", "media_type": media_type, "data": data } }))
+                    }
+                    _ => None,
+                })
+                .collect();
+            let body = if pictures.is_empty() {
+                json!(content)
+            } else {
+                let mut parts = vec![json!({ "type": "text", "text": content })];
+                parts.extend(pictures);
+                Value::Array(parts)
+            };
+            let mut v = json!({ "type": "tool_result", "tool_use_id": tool_use_id, "content": body });
             if *is_error {
                 v["is_error"] = json!(true);
             }
             v
         }
-    }
+        // Already inside its result when it has bytes. One without them (never loaded, or its file is gone)
+        // is said in words by the host before the request; a stray one is dropped rather than sent broken.
+        Block::ToolImage { .. } => return None,
+    })
 }
 
 // ── the stream ────────────────────────────────────────────────────────────────────────────────
@@ -197,7 +246,10 @@ impl AnthropicDecoder {
         }
         let Ok(v) = serde_json::from_str::<Value>(&data) else {
             // A line that is not JSON cannot be an event; saying so beats skipping it silently.
-            out.push(Event::Error(format!("unreadable event from the provider: {}", truncate(&data, 120))));
+            out.push(Event::Error {
+                error_type: Some("unreadable_event".into()),
+                message: format!("unreadable event from the provider: {}", truncate(&data, 120)),
+            });
             return;
         };
         // The JSON's own `type` is authoritative; the SSE `event:` line repeats it.
@@ -259,7 +311,8 @@ impl AnthropicDecoder {
             }
             "error" => {
                 let message = v.pointer("/error/message").and_then(Value::as_str).unwrap_or("the provider reported an error");
-                out.push(Event::Error(message.to_string()));
+                let error_type = v.pointer("/error/type").and_then(Value::as_str).map(str::to_string);
+                out.push(Event::Error { error_type, message: message.to_string() });
             }
             // `message_stop` and `ping` carry nothing the neutral model needs.
             _ => {}
@@ -342,10 +395,51 @@ mod tests {
             ],
             max_tokens: 4096,
             effort: Some(Effort::High),
+            long_cache: false,
         }
     }
 
     // ── going out ──
+
+    #[test]
+    fn the_conversation_itself_is_cached_up_to_its_last_block() {
+        let mut r = request();
+        r.messages = vec![
+            Message::user("go"),
+            Message::assistant(vec![Block::ToolUse { id: "t".into(), name: "read_file".into(), input: json!({}) }]),
+            Message::tool_results(vec![Block::ToolResult { tool_use_id: "t".into(), content: "x".into(), is_error: false }]),
+        ];
+        let body = Anthropic.body(&r);
+        let marks: usize = body["messages"].as_array().unwrap().iter().flat_map(|m| m["content"].as_array().unwrap()).filter(|b| b.get("cache_control").is_some()).count();
+        assert_eq!(marks, 1, "one mark, on the end of the conversation");
+        assert_eq!(body["messages"][2]["content"][0]["cache_control"]["type"], "ephemeral");
+        // 3 of the provider's 4 allowed marks: tools, instructions, conversation.
+        assert!(body["tools"][1].get("cache_control").is_some() && body["system"][0].get("cache_control").is_some());
+    }
+
+    #[test]
+    fn the_long_cache_applies_to_the_standing_prefix_only_and_comes_first() {
+        let mut r = request();
+        r.long_cache = true;
+        let body = Anthropic.body(&r);
+        assert_eq!(body["system"][0]["cache_control"]["ttl"], "1h");
+        assert_eq!(body["tools"][1]["cache_control"]["ttl"], "1h");
+        // A one-hour entry must precede any five-minute one: the conversation's mark has no ttl (the short default).
+        assert!(body["messages"][0]["content"][0]["cache_control"].get("ttl").is_none());
+        assert!(Anthropic.body(&request())["system"][0]["cache_control"].get("ttl").is_none());
+    }
+
+    #[test]
+    fn the_cacheable_prefix_is_the_same_for_requests_that_differ_only_after_it() {
+        let a = Anthropic.body(&request());
+        let mut r = request();
+        r.messages.push(Message::assistant(vec![Block::Text { text: "ok".into() }]));
+        r.messages.push(Message::user("and now?"));
+        let b = Anthropic.body(&r);
+        assert_eq!(a["system"], b["system"]);
+        assert_eq!(a["tools"], b["tools"]);
+        assert_eq!(a["messages"][0]["content"][0]["text"], b["messages"][0]["content"][0]["text"], "the earlier turn is word for word the same");
+    }
 
     #[test]
     fn the_request_asks_for_a_stream_and_marks_what_is_stable_cacheable() {
@@ -410,6 +504,32 @@ mod tests {
         let results = &body["messages"][2]["content"];
         assert!(results[0].get("is_error").is_none(), "a success does not say so");
         assert_eq!(results[1]["is_error"], json!(true));
+    }
+
+    #[test]
+    fn a_picture_travels_inside_the_result_it_belongs_to() {
+        let mut r = request();
+        let image = |id: &str, data: Option<&str>| Block::ToolImage {
+            tool_use_id: id.into(),
+            media_type: "image/png".into(),
+            path: "s.png".into(),
+            tokens: 900,
+            data: data.map(String::from),
+        };
+        r.messages = vec![
+            Message::tool_results(vec![
+                Block::ToolResult { tool_use_id: "a".into(), content: "shot taken".into(), is_error: false },
+                Block::ToolResult { tool_use_id: "b".into(), content: "plain".into(), is_error: false },
+                image("a", Some("QUJD")),
+                image("b", None),
+            ]),
+        ];
+        let content = &Anthropic.body(&r)["messages"][0]["content"];
+        assert_eq!(content.as_array().unwrap().len(), 2, "pictures are not blocks of their own");
+        assert_eq!(content[0]["content"][0]["text"], "shot taken");
+        assert_eq!(content[0]["content"][1]["type"], "image");
+        assert_eq!(content[0]["content"][1]["source"]["data"], "QUJD");
+        assert_eq!(content[1]["content"], "plain", "a result without a picture is still a plain string");
     }
 
     #[test]
@@ -531,7 +651,7 @@ data: {\"type\":\"message_stop\"}
     #[test]
     fn an_error_in_the_stream_is_reported_with_its_message() {
         let s = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n";
-        assert_eq!(decode_all(&[s]), vec![Event::Error("Overloaded".into())]);
+        assert_eq!(decode_all(&[s]), vec![Event::Error { error_type: Some("overloaded_error".into()), message: "Overloaded".into() }]);
     }
 
     #[test]

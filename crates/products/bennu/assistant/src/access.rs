@@ -12,8 +12,11 @@
 //!    as a [`Grant`]; a read-only grant asks again, as an upgrade, the first time something wants to
 //!    write there. Under `Disk` there is no outside to ask about. The user's extra folders and the Temp
 //!    folders are always inside, whatever the scope.
-//! 2. **What.** Changing anything (write, create, delete) needs edits switched on. **Deleting always
-//!    asks**, in every scope and every folder, and is not something a setting can turn off.
+//! 2. **What.** Changing anything (write, create, delete) needs edits switched on. **Deleting** follows
+//!    [`Policy::check_counted`]: free in the assistant's own Temp area in every mode; free inside the
+//!    scope when the mode applies edits (`delete_unasked`) and the call is not past
+//!    [`MAX_UNASKED_DELETE_FILES`]; otherwise it asks — always in Manual, always outside the scope, and
+//!    always for the project folder itself.
 //! 3. **Secrets and the repository's own files.** Environment files, keys and certificates are never
 //!    written, and reading one asks; nothing under `.git` is ever written.
 //!
@@ -22,6 +25,10 @@
 //! must resolve them *before* asking — a link out of the project is a path out of the project.
 
 use std::path::{Component, Path, PathBuf};
+
+/// The most files one delete call may remove without a question, even where deleting is otherwise free.
+/// A directory delete counts the files inside it.
+pub const MAX_UNASKED_DELETE_FILES: usize = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Scope {
@@ -59,15 +66,17 @@ pub struct Ask {
     pub message: String,
     /// The folder the access request is about; `None` for a plain confirmation (a deletion).
     pub grant: Option<PathBuf>,
+    /// The question is about writing in a folder the user opened for reading only, rather than about reaching it.
+    pub upgrade: bool,
 }
 
 impl Ask {
     fn confirm(message: String) -> Self {
-        Ask { message, grant: None }
+        Ask { message, grant: None, upgrade: false }
     }
 
     fn access(message: String, folder: PathBuf) -> Self {
-        Ask { message, grant: Some(folder) }
+        Ask { message, grant: Some(folder), upgrade: false }
     }
 }
 
@@ -107,11 +116,35 @@ pub struct Policy {
     pub temp_dirs: Vec<PathBuf>,
     pub allow_temp: bool,
     pub allow_edits: bool,
+    /// Deleting inside the scope needs no yes: true in the modes that apply edits as they are made.
+    pub delete_unasked: bool,
     /// What the user has opened beyond the scope, folder by folder, while answering prompts.
     pub grants: Vec<Grant>,
+    /// Single files the run opened for itself (see [`crate::autonomy`]), read and write. Unlike `grants`
+    /// they are never remembered: a policy is built per run, so they end with it.
+    pub run_files: Vec<PathBuf>,
 }
 
 impl Policy {
+    /// Open one file for reading and writing for the rest of this run.
+    pub fn grant_file(&mut self, file: &Path) {
+        let file = normalize(file);
+        if !self.run_files.iter().any(|f| same(f, &file)) {
+            self.run_files.push(file);
+        }
+    }
+
+    /// Close a file opened with [`Self::grant_file`]. Returns whether it was open.
+    pub fn revoke_file(&mut self, file: &Path) -> bool {
+        let before = self.run_files.len();
+        self.run_files.retain(|f| !same(f, file));
+        self.run_files.len() != before
+    }
+
+    fn run_granted(&self, path: &Path, op: Op) -> bool {
+        matches!(op, Op::Read | Op::Write) && self.run_files.iter().any(|f| same(path, f))
+    }
+
     /// Record the answer to an access prompt. Granting a folder again replaces what was there, so a
     /// read-only grant upgraded to read-write is one entry, not two.
     pub fn grant(&mut self, root: PathBuf, write: bool) {
@@ -121,6 +154,12 @@ impl Policy {
     }
 
     pub fn check(&self, path: &Path, op: Op) -> Decision {
+        self.check_counted(path, op, 1)
+    }
+
+    /// Like [`Self::check`], for an operation that touches `files` files at once — a delete of a folder
+    /// counts what is inside it, because the cap on unasked deletes is about how much goes in one call.
+    pub fn check_counted(&self, path: &Path, op: Op, files: usize) -> Decision {
         if !path.is_absolute() {
             return Decision::Deny(format!("`{}` is not an absolute path", path.display()));
         }
@@ -140,14 +179,12 @@ impl Policy {
         }
 
         // Where it is.
-        if !self.in_always_allowed(&path) && !self.in_scope(&path, op) && self.scope != Scope::Disk {
+        if !self.in_always_allowed(&path) && !self.in_scope(&path, op) && !self.run_granted(&path, op) && self.scope != Scope::Disk {
             match self.grants.iter().find(|g| within(&path, &g.root)) {
                 // Opened for reading, and now something wants to write: the one case that asks again.
                 Some(g) if op.changes() && !g.write => {
-                    return Decision::Ask(Ask::access(
-                        format!("Allow writing in `{}`? You opened it for reading only.", g.root.display()),
-                        g.root.clone(),
-                    ));
+                    let ask = Ask::access(format!("Allow writing in `{}`? You opened it for reading only.", g.root.display()), g.root.clone());
+                    return Decision::Ask(Ask { upgrade: true, ..ask });
                 }
                 Some(_) => {}
                 None => {
@@ -167,13 +204,50 @@ impl Policy {
 
         // What it does there.
         if op == Op::Delete {
-            return Decision::Ask(Ask::confirm(format!("Delete `{}`? It stays in Local History.", path.display())));
+            return self.delete_decision(&path, files);
         }
         if matches!(op, Op::Read) && is_secret_file(&path) {
             return Decision::Ask(Ask::confirm(format!(
-                "`{}` may contain secrets. Let the assistant read it?",
+                "`{}` may contain secrets. Let Imber read it?",
                 file_name(&path)
             )));
+        }
+        Decision::Allow
+    }
+
+    /// Whether `path` is in the assistant's own Temp area (and that area is switched on).
+    pub fn is_temp(&self, path: &Path) -> bool {
+        self.allow_temp && self.temp_dirs.iter().any(|t| within(path, t))
+    }
+
+    /// The delete rule, once the path is known to be reachable and writable (`path` is normalized):
+    /// the Temp area is free in every mode; inside the scope it is free where the mode applies edits;
+    /// the project folder itself and anything past the file cap always ask; outside the scope asks.
+    fn delete_decision(&self, path: &Path, files: usize) -> Decision {
+        let ask = |why: String| Decision::Ask(Ask::confirm(format!("Delete `{}`? {why} It stays in Local History.", path.display())));
+        let is_root = self
+            .project_root
+            .iter()
+            .chain(&self.workspace_roots)
+            .chain(&self.extra_folders)
+            .chain(&self.temp_dirs)
+            .chain(self.grants.iter().map(|g| &g.root))
+            .any(|r| same(path, r));
+        if is_root {
+            return ask("This is a whole project or allowed folder, not a file in it.".into());
+        }
+        if self.is_temp(path) {
+            return Decision::Allow;
+        }
+        let inside = self.in_scope(path, Op::Delete) || self.extra_folders.iter().any(|f| within(path, f));
+        if !inside {
+            return ask("It is outside what you allowed.".into());
+        }
+        if !self.delete_unasked {
+            return ask(String::new());
+        }
+        if files > MAX_UNASKED_DELETE_FILES {
+            return ask(format!("It removes {files} files."));
         }
         Decision::Allow
     }
@@ -197,7 +271,7 @@ impl Policy {
         }
     }
 
-    fn scope_words(&self) -> &'static str {
+    pub fn scope_words(&self) -> &'static str {
         match self.scope {
             Scope::File => "this file only",
             Scope::Project => "this project",
@@ -238,16 +312,16 @@ fn parts(path: &Path) -> Vec<String> {
 
 /// Whether `path` is `root` or something inside it — compared by whole components, so `/proj-other` is
 /// not inside `/proj`.
-fn within(path: &Path, root: &Path) -> bool {
+pub(crate) fn within(path: &Path, root: &Path) -> bool {
     let (p, r) = (parts(path), parts(&normalize(root)));
     !r.is_empty() && p.len() >= r.len() && p[..r.len()] == r[..]
 }
 
-fn same(a: &Path, b: &Path) -> bool {
-    parts(a) == parts(&normalize(b))
+pub(crate) fn same(a: &Path, b: &Path) -> bool {
+    parts(&normalize(a)) == parts(&normalize(b))
 }
 
-fn has_component(path: &Path, name: &str) -> bool {
+pub(crate) fn has_component(path: &Path, name: &str) -> bool {
     path.components().any(|c| fold(c.as_os_str()) == name)
 }
 
@@ -259,12 +333,13 @@ fn folder_of(path: &Path, op: Op) -> PathBuf {
     path.parent().map(Path::to_path_buf).unwrap_or_else(|| path.to_path_buf())
 }
 
-fn file_name(path: &Path) -> String {
+pub(crate) fn file_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// Environment files, private keys and certificates — the files whose content is the secret.
-fn is_secret_file(path: &Path) -> bool {
+/// Environment files, private keys, certificates, keystores and package-registry credentials — the files
+/// whose content is the secret.
+pub(crate) fn is_secret_file(path: &Path) -> bool {
     let name = file_name(path).to_lowercase();
     name == ".env"
         || name.starts_with(".env.")
@@ -272,10 +347,16 @@ fn is_secret_file(path: &Path) -> bool {
         || name.ends_with(".key")
         || name.ends_with(".p12")
         || name.ends_with(".pfx")
+        || name.ends_with(".jks")
+        || name.ends_with(".keystore")
         || name.starts_with("id_rsa")
+        || name.starts_with("id_dsa")
+        || name.starts_with("id_ecdsa")
         || name.starts_with("id_ed25519")
         || name == "credentials"
+        || name == "credentials.json"
         || name == ".npmrc"
+        || name == ".pypirc"
         || name == ".netrc"
 }
 
@@ -298,7 +379,9 @@ mod tests {
             temp_dirs: vec![p("tmp")],
             allow_temp: true,
             allow_edits: true,
+            delete_unasked: true,
             grants: Vec::new(),
+            run_files: Vec::new(),
         }
     }
 
@@ -359,7 +442,7 @@ mod tests {
         assert_eq!(policy.grants.len(), 1, "an upgrade is one entry, not two");
         assert_eq!(policy.check(&p("work/lib/Other.java"), Op::Write), Decision::Allow);
         assert_eq!(policy.check(&p("work/lib/New.java"), Op::Create), Decision::Allow);
-        // Deleting is its own question whatever was granted.
+        // A granted folder is outside the scope: deleting there still asks.
         assert!(matches!(policy.check(&p("work/lib/Other.java"), Op::Delete), Decision::Ask(_)));
     }
 
@@ -421,22 +504,77 @@ mod tests {
     fn with_the_whole_disk_there_is_no_outside_to_ask_about() {
         assert_eq!(check(Scope::Disk, "elsewhere/x.txt", Op::Read), Decision::Allow);
         assert_eq!(check(Scope::Disk, "elsewhere/x.txt", Op::Write), Decision::Allow);
-        // Still not a secret, and still not a deletion without a yes.
+        // Still not a secret, and a deletion outside the workspace still asks.
         assert!(matches!(check(Scope::Disk, "elsewhere/.env", Op::Write), Decision::Deny(_)));
         assert!(matches!(check(Scope::Disk, "elsewhere/x.txt", Op::Delete), Decision::Ask(_)));
     }
 
+    fn delete_check(unasked: bool, scope: Scope, path: &str, files: usize) -> Decision {
+        let mut policy = policy(scope);
+        policy.delete_unasked = unasked;
+        policy.check_counted(&p(path), Op::Delete, files)
+    }
+
     #[test]
-    fn deleting_always_asks_in_every_scope() {
-        for scope in [Scope::File, Scope::Project, Scope::Workspace, Scope::Disk] {
-            // Asked, in every scope. (Under `File` it is first asked about the folder — the file scope
-            // covers one file for reading and writing and nothing else — and a deletion is a plain
-            // confirmation under every other.)
-            let d = check(scope, "work/app/src/A.java", Op::Delete);
-            assert!(matches!(d, Decision::Ask(_)), "{scope:?}: {d:?}");
+    fn the_temp_area_is_free_to_delete_in_every_mode() {
+        for unasked in [false, true] {
+            assert_eq!(delete_check(unasked, Scope::Project, "tmp/scratch.txt", 1), Decision::Allow, "unasked={unasked}");
+            assert_eq!(delete_check(unasked, Scope::File, "tmp/dir", 500), Decision::Allow, "no cap in the agent's own area");
         }
-        // And inside the Temp folders, where nothing else asks.
-        assert!(matches!(check(Scope::Project, "tmp/scratch.txt", Op::Delete), Decision::Ask(_)));
+        // Switched off, it is just another folder outside the scope.
+        let mut off = policy(Scope::Project);
+        off.allow_temp = false;
+        assert!(matches!(off.check(&p("tmp/scratch.txt"), Op::Delete), Decision::Ask(_)));
+    }
+
+    #[test]
+    fn inside_the_scope_a_delete_is_free_where_the_mode_applies_edits_and_asks_in_manual() {
+        assert_eq!(delete_check(true, Scope::Project, "work/app/src/A.java", 1), Decision::Allow);
+        assert_eq!(delete_check(true, Scope::Workspace, "work/lib/Other.java", 1), Decision::Allow);
+        assert_eq!(delete_check(true, Scope::Project, "scratch/notes/todo.md", 1), Decision::Allow, "an extra folder is inside");
+        for scope in [Scope::File, Scope::Project, Scope::Workspace, Scope::Disk] {
+            assert!(matches!(delete_check(false, scope, "work/app/src/A.java", 1), Decision::Ask(_)), "manual {scope:?}");
+        }
+    }
+
+    #[test]
+    fn outside_the_scope_a_delete_asks_in_every_mode() {
+        for unasked in [false, true] {
+            assert!(matches!(delete_check(unasked, Scope::Disk, "elsewhere/x.txt", 1), Decision::Ask(_)));
+            assert!(matches!(delete_check(unasked, Scope::Project, "work/lib/Other.java", 1), Decision::Ask(_)));
+        }
+        // The file scope covers one file for reading and writing, not for deleting.
+        assert!(matches!(delete_check(true, Scope::File, "work/app/src/A.java", 1), Decision::Ask(_)));
+    }
+
+    #[test]
+    fn the_project_folder_itself_always_asks() {
+        for scope in [Scope::Project, Scope::Workspace, Scope::Disk] {
+            let d = delete_check(true, scope, "work/app", 1);
+            match d {
+                Decision::Ask(ask) => assert!(ask.message.contains("whole project"), "{}", ask.message),
+                other => panic!("{scope:?}: {other:?}"),
+            }
+        }
+        assert!(matches!(delete_check(true, Scope::Workspace, "work/lib", 1), Decision::Ask(_)));
+        assert!(matches!(delete_check(true, Scope::Project, "tmp", 1), Decision::Ask(_)), "the Temp root itself");
+    }
+
+    #[test]
+    fn a_big_delete_asks_even_where_deleting_is_free() {
+        assert_eq!(delete_check(true, Scope::Project, "work/app/gen", MAX_UNASKED_DELETE_FILES), Decision::Allow);
+        match delete_check(true, Scope::Project, "work/app/gen", MAX_UNASKED_DELETE_FILES + 1) {
+            Decision::Ask(ask) => assert!(ask.message.contains("51 files"), "{}", ask.message),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn secrets_and_git_files_are_denied_not_deleted_in_any_mode() {
+        for unasked in [false, true] {
+            assert!(matches!(delete_check(unasked, Scope::Project, "work/app/.env", 1), Decision::Deny(_)));
+            assert!(matches!(delete_check(unasked, Scope::Project, "work/app/.git/HEAD", 1), Decision::Deny(_)));
+        }
     }
 
     #[test]
@@ -482,6 +620,38 @@ mod tests {
     #[test]
     fn a_secret_inside_temp_is_still_a_secret() {
         assert!(matches!(check(Scope::Project, "tmp/.env", Op::Write), Decision::Deny(_)));
+    }
+
+    #[test]
+    fn a_file_opened_for_the_run_is_read_and_write_and_nothing_around_it() {
+        let mut policy = policy(Scope::File);
+        let granted = p("work/app/src/B.java");
+        assert!(matches!(policy.check(&granted, Op::Write), Decision::Ask(_)));
+        policy.grant_file(&granted);
+        assert_eq!(policy.check(&granted, Op::Read), Decision::Allow);
+        assert_eq!(policy.check(&granted, Op::Write), Decision::Allow);
+        // Neighbours, listings, creation and deletion are not part of it.
+        assert!(matches!(policy.check(&p("work/app/src/C.java"), Op::Write), Decision::Ask(_)));
+        assert!(matches!(policy.check(&p("work/app/src"), Op::List), Decision::Ask(_)));
+        assert!(matches!(policy.check(&granted, Op::Delete), Decision::Ask(_)));
+        assert!(policy.revoke_file(&granted));
+        assert!(matches!(policy.check(&granted, Op::Write), Decision::Ask(_)));
+        assert!(!policy.revoke_file(&granted), "revoking twice finds nothing");
+    }
+
+    #[test]
+    fn a_file_opened_for_the_run_does_not_unlock_a_secret() {
+        let mut policy = policy(Scope::Project);
+        let env = p("work/app/.env");
+        policy.grant_file(&env);
+        assert!(matches!(policy.check(&env, Op::Write), Decision::Deny(_)));
+    }
+
+    #[test]
+    fn registry_credentials_and_keystores_are_secrets() {
+        for name in [".pypirc", "release.jks", "app.keystore", "credentials.json", "id_ecdsa"] {
+            assert!(is_secret_file(&p(&format!("work/app/{name}"))), "{name}");
+        }
     }
 
     #[test]

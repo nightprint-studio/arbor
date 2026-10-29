@@ -1,0 +1,44 @@
+[package]
+name         = "voice-be"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Voice backend — local Whisper dictation and wake word as a headless, idle-exiting process for Model D. Captures the microphone with cpal, transcribes with whisper.cpp (feature `whisper`), manages the ggml models."
+
+[[bin]]
+name = "voice-be"
+path = "src/main.rs"
+
+[features]
+# Off by default: whisper.cpp is built from source and needs CMake + a C++ toolchain. Without
+# the feature the backend still runs (devices, level meter, models, config) and transcription
+# answers with a clear "built without the speech engine" error, so the rest of the workspace
+# never depends on a C++ toolchain. Release builds enable it: `--features voice-be/whisper`.
+default = []
+whisper = ["dep:whisper-rs"]
+# GPU back ends — opt-in, each needs its own SDK. `metal` is the one meant for macOS releases.
+metal  = ["whisper", "whisper-rs/metal"]
+vulkan = ["whisper", "whisper-rs/vulkan"]
+cuda   = ["whisper", "whisper-rs/cuda"]
+
+[dependencies]
+arbor-ipc      = { path = "../../../foundation/ipc" }
+arbor-rpc      = { path = "../../../foundation/rpc" }
+arbor-be       = { path = "../../../foundation/be" }
+arbor-core     = { path = "../../../foundation/core" }
+arbor-feedback = { path = "../../feedback" }
+voice-core     = { path = "../core" }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+tokio          = { workspace = true }
+# Microphone capture. Same 0.15 pin as merula-audio / tyto-be: one cpal artifact in the workspace.
+cpal    = "0.15"
+# Model download (streamed, hashed on the way) and verification; free-space and RAM probes.
+reqwest = { workspace = true }
+sha2    = { workspace = true }
+sysinfo = { workspace = true }
+# The speech engine: whisper.cpp bindings. Optional (see [features]).
+# `raw-api` re-exports whisper-rs-sys (already linked) for the matmul throughput probe in diag.rs.
+whisper-rs = { version = "0.16", optional = true, features = ["raw-api"] }

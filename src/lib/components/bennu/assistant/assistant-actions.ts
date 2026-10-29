@@ -66,6 +66,9 @@ export type ActionId =
 export interface AssistantAction {
   id: ActionId;
   label: string;
+  /** The submenu it is shown under, and its label there (see `menu-groups.ts`). */
+  group?: string;
+  child?: string;
 }
 
 /** The longest piece of code put into a request. A selection past this is cut, with a note. */
@@ -80,14 +83,14 @@ export function actionsFor(c: ActionContext): AssistantAction[] {
   }
   if (c.selection) {
     out.push({ id: 'explain', label: 'Explain the selection' });
-    out.push({ id: 'bugs', label: 'Look for bugs' });
-    out.push({ id: 'improve', label: 'Suggest improvements' });
+    out.push({ id: 'bugs', label: 'Look for bugs', group: 'Review', child: 'Look for bugs' });
+    out.push({ id: 'improve', label: 'Suggest improvements', group: 'Review', child: 'Suggest improvements' });
     out.push({ id: 'tests', label: 'Write tests for it' });
   } else if (c.declaration) {
     out.push({ id: 'explain', label: 'Explain this' });
-    out.push({ id: 'tests', label: 'Write tests for it' });
+    out.push({ id: 'tests', label: 'Write tests for it', group: 'Write', child: 'Tests' });
     out.push({ id: 'usages', label: 'Where is it used?' });
-    if (c.undocumented) out.push({ id: 'document', label: 'Write documentation' });
+    if (c.undocumented) out.push({ id: 'document', label: 'Write documentation', group: 'Write', child: 'Documentation' });
   } else if (!c.problems.length && c.lineText.trim()) {
     out.push({ id: 'explain', label: 'Explain this line' });
   }

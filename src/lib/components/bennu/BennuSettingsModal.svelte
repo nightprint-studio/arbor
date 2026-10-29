@@ -30,8 +30,9 @@
   import {
     Settings, Coffee, TextCursorInput, ListTree, Bug, FoldVertical, Braces, RotateCcw, Wand2,
     ServerCog, Monitor, Sparkles, Command, Terminal, Beaker, FileCode2, Save, Boxes, Workflow,
-    FileStack, CaseSensitive, SpellCheck,
+    FileStack, CaseSensitive, SpellCheck, Mic,
   } from 'lucide-svelte';
+  import VoiceSettings from '$lib/components/shared/internal/VoiceSettings.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -158,8 +159,9 @@
     ] },
     // The assistant is its own group: its key and its limits are not an editor setting, and a page of
     // its own is where the question "what can it touch?" gets a complete answer.
-    { label: 'Assistant', items: [
-      { id: 'assistant', label: 'Assistant', icon: Sparkles },
+    { label: 'Imber', items: [
+      { id: 'assistant', label: 'Imber', icon: Sparkles },
+      { id: 'voice', label: 'Voice', icon: Mic },
     ] },
     { label: 'Languages & Frameworks', items: [
       // The languages and the frameworks are told apart by colour rather than by reading four labels
@@ -241,6 +243,8 @@
         <BennuCompletionSettings />
       {:else if active === 'assistant'}
         <BennuAssistantSettings />
+      {:else if active === 'voice'}
+        <VoiceSettings />
       {:else if active === 'folding'}
         <BennuFoldingSettings />
       {:else if active === 'naming'}

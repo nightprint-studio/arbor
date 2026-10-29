@@ -50,6 +50,53 @@ impl Spent {
             month_usd: self.month_usd + usd,
         }
     }
+
+    /// The same amounts plus a run in progress (`own_usd`, counted in every window) and the runs of *other*
+    /// conversations still in flight (`others_usd`): those are not in this conversation's own figure but they
+    /// are money the day, week and month have already committed.
+    pub fn plus_run(self, own_usd: f64, others_usd: f64) -> Spent {
+        Spent {
+            session_usd: self.session_usd + own_usd,
+            day_usd: self.day_usd + own_usd + others_usd,
+            week_usd: self.week_usd + own_usd + others_usd,
+            month_usd: self.month_usd + own_usd + others_usd,
+        }
+    }
+}
+
+/// What the runs that have not finished yet have spent so far, in dollars, by run.
+///
+/// The ledger only learns of a run's cost when it ends. Two conversations running at once each read the
+/// same ledger, each add only their own spending to it, and together overshoot a day, week or month limit
+/// neither reached alone. Every run reports its running figure here as it goes, so each sees the others'.
+/// A run takes its figure out when it ends, after its line is in the ledger, so the money is never in
+/// neither place.
+#[derive(Default)]
+pub struct InFlight {
+    runs: std::sync::Mutex<std::collections::HashMap<String, f64>>,
+}
+
+impl InFlight {
+    fn lock(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<String, f64>> {
+        self.runs.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Record `run`'s spending so far; returns what all the *other* runs in flight have spent.
+    pub fn report(&self, run: &str, usd: f64) -> f64 {
+        let mut runs = self.lock();
+        runs.insert(run.to_string(), usd.max(0.0));
+        runs.iter().filter(|(id, _)| id.as_str() != run).map(|(_, v)| v).sum()
+    }
+
+    /// The run ended (or failed to start).
+    pub fn finish(&self, run: &str) {
+        self.lock().remove(run);
+    }
+
+    /// Everything in flight: what a run about to start must count before it is allowed to begin.
+    pub fn total(&self) -> f64 {
+        self.lock().values().sum()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,6 +290,49 @@ mod tests {
     fn a_run_in_progress_counts_against_every_window() {
         let spent = Spent { session_usd: 1.0, day_usd: 1.0, week_usd: 1.0, month_usd: 1.0 }.plus(0.5);
         assert_eq!(spent, Spent { session_usd: 1.5, day_usd: 1.5, week_usd: 1.5, month_usd: 1.5 });
+    }
+
+    #[test]
+    fn concurrent_runs_cannot_together_pass_a_limit_neither_reached_alone() {
+        // Day limit 5 EUR at 0.5 EUR/USD is 10 USD. Each run has spent 6 USD of its own; alone neither is over.
+        let limits = Limits { session_eur: 0.0, ..limits() };
+        let baseline = Spent::default();
+        let flight = InFlight::default();
+        let others_a = flight.report("a", 6.0);
+        assert!(limits.breach(&baseline.plus_run(6.0, others_a)).is_none());
+        let others_b = flight.report("b", 6.0);
+        assert_eq!(others_b, 6.0);
+        let (m, _) = limits.breach(&baseline.plus_run(6.0, others_b)).expect("together they are 12 USD");
+        assert_eq!(m.period, Period::Day);
+    }
+
+    #[test]
+    fn the_per_conversation_limit_ignores_what_other_runs_spend() {
+        // Session limit 1 EUR = 2 USD: another run's 50 USD does not count against this conversation.
+        let spent = Spent::default().plus_run(1.0, 50.0);
+        assert!(limits().breach(&spent).map(|(m, _)| m.period) != Some(Period::Session));
+        let own = Spent::default().plus_run(2.5, 0.0);
+        assert_eq!(limits().breach(&own).unwrap().0.period, Period::Session);
+    }
+
+    #[test]
+    fn a_run_that_ends_stops_counting_against_the_others() {
+        let flight = InFlight::default();
+        flight.report("a", 4.0);
+        assert_eq!(flight.report("b", 1.0), 4.0);
+        flight.finish("a");
+        assert_eq!(flight.report("b", 2.0), 0.0);
+        assert_eq!(flight.total(), 2.0);
+        flight.finish("b");
+        assert_eq!(flight.total(), 0.0);
+    }
+
+    #[test]
+    fn a_run_reporting_again_replaces_its_figure_rather_than_adding() {
+        let flight = InFlight::default();
+        flight.report("a", 1.0);
+        flight.report("a", 3.0);
+        assert_eq!(flight.report("b", 0.0), 3.0);
     }
 
     #[test]

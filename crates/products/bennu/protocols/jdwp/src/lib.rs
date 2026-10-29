@@ -75,6 +75,7 @@ pub mod codec;
 pub mod command;
 pub mod error;
 pub mod event;
+pub mod mutate;
 pub mod packet;
 pub mod prelude;
 

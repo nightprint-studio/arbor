@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip as tooltipAction } from '$lib/actions/tooltip';
   import type { Snippet } from 'svelte';
 
   /**
@@ -26,6 +27,8 @@
     /** Show a small leading dot (filled, currentColor). */
     dot?: boolean;
     label?: string;
+    /** Plain-text tooltip (the reason behind the badge). */
+    tooltip?: string;
     icon?: Snippet;
     children?: Snippet;
   }
@@ -39,6 +42,7 @@
     border,
     dot     = false,
     label,
+    tooltip,
     icon,
     children,
   }: Props = $props();
@@ -61,6 +65,7 @@
   class:tone-tag={variant === 'tone' && tone === 'tag'}
   class:tone-stash={variant === 'tone' && tone === 'stash'}
   style={style || undefined}
+  use:tooltipAction={tooltip ?? null}
 >
   {#if dot}<span class="badge-dot"></span>{/if}
   {#if icon}{@render icon()}{/if}

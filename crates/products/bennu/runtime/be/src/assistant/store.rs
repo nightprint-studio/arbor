@@ -32,6 +32,23 @@ pub(super) struct Conversation {
     /// had are part of what its earlier messages mean, and the panel keeps the two kinds apart.
     #[serde(default)]
     pub chat: bool,
+    /// Where this conversation's builds compile: `shared` (the project's target, queued behind the others) or
+    /// `separate` (a target of its own). Fixed when the conversation starts, like `chat`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub build_isolation: String,
+    /// The kind of isolated copy this conversation works in (`copy` or `git`), fixed when it began, until the
+    /// copy is applied or discarded. Where the copy is lives beside it (see `worktree`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<String>,
+    /// This conversation's own decision level (`ask_forks`, `ask_big`, `decide`); empty inherits the setting.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub decision_level: String,
+    /// This conversation's own words about decisions, appended to the global ones.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub decision_notes: String,
+    /// This conversation's own sub-agents switch: `on`, `off`, or empty to follow the setting.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subagents: String,
     /// What the panel draws.
     #[serde(default)]
     pub messages: Vec<Value>,
@@ -41,10 +58,17 @@ pub(super) struct Conversation {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub(super) struct Context {
+    /// Everything that is the same on every request: the rules, the project instructions, the skills index
+    /// and the tool definitions. `tools`, `instructions` and `skills` are parts of it, told apart so the
+    /// meter can show them (zero in a conversation saved before they were counted).
     pub system: u64,
     pub project: u64,
     pub conversation: u64,
+    pub tools: u64,
+    pub instructions: u64,
+    pub skills: u64,
 }
 
 /// A row of the conversation list.
@@ -92,7 +116,10 @@ pub(super) fn load_in(dir: &Path, id: &str) -> Result<Conversation, String> {
 }
 
 pub(super) fn delete_in(dir: &Path, id: &str) -> Result<(), String> {
-    match fs::remove_file(file(dir, id)?) {
+    let path = file(dir, id)?;
+    // The screenshots the conversation took live beside it (`images/<id>/`): they go with it.
+    let _ = fs::remove_dir_all(dir.join("images").join(id));
+    match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.to_string()),
@@ -172,6 +199,17 @@ mod tests {
             assert!(load_in(&d, bad).is_err(), "{bad:?}");
             assert!(delete_in(&d, bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn deleting_a_conversation_deletes_its_screenshots() {
+        let d = scratch("shots");
+        save_in(&d, &conv("c1", 1)).unwrap();
+        fs::create_dir_all(d.join("images").join("c1")).unwrap();
+        fs::write(d.join("images").join("c1").join("shot-1.png"), b"x").unwrap();
+        fs::create_dir_all(d.join("images").join("c2")).unwrap();
+        delete_in(&d, "c1").unwrap();
+        assert!(!d.join("images").join("c1").exists() && d.join("images").join("c2").exists());
     }
 
     #[test]

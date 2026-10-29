@@ -25,11 +25,13 @@
     TerminalSquare, Hammer, 
     Library, Play, ListTodo, 
     TextCursorInput, Beaker, Bug, Braces, 
-    Cog, GitBranch, Database, Sparkles,
+    Cog, GitBranch, Database, Sparkles, Radar, Flame, Activity,
   } from 'lucide-svelte';
   import BennuPicusPanel from './picus/BennuPicusPanel.svelte';
   import BennuAssistantPanel from './assistant/BennuAssistantPanel.svelte';
+  import BennuSkillsModal from './assistant/BennuSkillsModal.svelte';
   import { openUi, type UiHost } from './assistant/assistant-ui-targets';
+  import { MODES } from './assistant/assistant-mode';
   import { bennuPicusStore } from '$lib/stores/bennu/picus.svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -86,6 +88,9 @@
 
   import BennuTitleBar from './BennuTitleBar.svelte';
   import BennuStatusBar from './BennuStatusBar.svelte';
+  import VoiceHost from './assistant/VoiceHost.svelte';
+  import VoiceArmedIndicator from '$lib/components/shared/internal/VoiceArmedIndicator.svelte';
+  import { voiceCommands } from './assistant/voice-commands';
   import BennuSidebar from './BennuSidebar.svelte';
   import BennuStructurePanel from './BennuStructurePanel.svelte';
   import BennuDependenciesPanel from './BennuDependenciesPanel.svelte';
@@ -218,7 +223,13 @@
   import { discoverCargoTests } from '$lib/ipc/bennu/cargo-tests';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { bennuDtoLabStore } from '$lib/stores/bennu/dtolab.svelte';
+  import { bennuBrpStore } from '$lib/stores/bennu/brp.svelte';
+  import { bennuProfilerStore } from '$lib/stores/bennu/profiler.svelte';
+  import { bennuLiveStore } from '$lib/stores/bennu/live.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
+  import { bennuWorktreeStore } from '$lib/stores/bennu/assistant-worktree.svelte';
+  import { bennuAgentsStore } from '$lib/stores/bennu/assistant-agents.svelte';
+  import { assistantLayoutStore } from '$lib/stores/bennu/assistant-layout.svelte';
 
   // Which file the editor is on, announced to the plugins as `bennu:file_opened`.
   //
@@ -812,6 +823,25 @@
   // The DTO Lab reads the caret and writes into an open test file through the editor. Bound once:
   // both closures read `editor` when called, so a remounted editor is picked up without re-binding.
   // The assistant sends the text selected in the editor along with the message.
+  /** Open the assistant panel (the palette entries below need it on screen: it owns the review window). */
+  function showAssistant() {
+    if (bennuUiStore.rightPanel !== 'assistant') bennuUiStore.toggleRight('assistant');
+  }
+
+  /** Cover the editor area with the assistant (opening it first if it is closed), or give it back. */
+  function expandAssistant() {
+    showAssistant();
+    assistantLayoutStore.expand();
+  }
+
+  /** A fresh agent conversation whose first message will be made in an isolated copy of the given kind. */
+  function startCopyConversation(kind: 'copy' | 'git') {
+    showAssistant();
+    bennuAssistantStore.setChatOnly(false);
+    bennuAssistantStore.newChat();
+    bennuWorktreeStore.setKind(kind);
+  }
+
   bennuAssistantStore.bindEditor({ selectedText: () => editor?.getSelectedText() ?? '' });
   bennuAssistantStore.bindUiOpener((target, query) => openUi(bennuUiStore as unknown as UiHost, target, query));
   bennuDtoLabStore.bindEditor({
@@ -1019,6 +1049,15 @@
   const dtoLabTools = $derived(
     javaTools && (projectStore.capabilities?.bean_validation === true || projectStore.capabilities?.jackson === true),
   );
+  /** The live Bevy inspector needs a Bevy project to be inspecting a game of. */
+  const bevyTools = $derived(projectStore.capabilities?.bevy === true);
+  // The profiler records a JVM, Node or a native program — whatever the project holds — so it only
+  // needs a project. Whether THIS machine can profile (a JDK with Flight Recorder, samply…) is the
+  // panel's to explain, not a reason to hide the door.
+  const profilerTools = $derived(!!projectStore.project);
+  // Live runs start and watch whatever the project runs (a Spring service, `npm run dev`, a Cargo binary),
+  // so like the profiler they only need a project.
+  const liveTools = $derived(!!projectStore.project);
   // The Struts `*-validation.xml` tooling — meaningless on a project that doesn't use Struts.
   const hasStruts = $derived(
     projectStore.capabilities?.struts_xml_config === true
@@ -1314,7 +1353,7 @@
       : []),
     // The assistant. A design preview for now — it needs nothing from the project, so it is offered
     // wherever the right dock is.
-    { id: 'assistant', tooltip: 'Assistant — chat and agent', shortcut: 'Alt+A', icon: Sparkles, active: bennuUiStore.rightPanel === 'assistant', onclick: () => bennuUiStore.toggleRight('assistant') },
+    { id: 'assistant', tooltip: 'Imber — chat and agent', shortcut: 'Alt+A', icon: Sparkles, active: bennuUiStore.rightPanel === 'assistant', onclick: () => bennuUiStore.toggleRight('assistant') },
     ...pluginRail('right', 'top'),
   ]);
   // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
@@ -1325,6 +1364,15 @@
       : []),
     ...(dtoLabTools
       ? [{ id: 'dtolab', tooltip: 'DTO Lab', shortcut: 'Alt+Shift+J', icon: Beaker, active: bennuUiStore.bottomPanel === 'dtolab', onclick: () => bennuUiStore.toggleBottom('dtolab') }]
+      : []),
+    ...(bevyTools
+      ? [{ id: 'bevyremote', tooltip: 'Bevy Remote — inspect the running game', shortcut: 'Ctrl+Shift+A', icon: Radar, active: bennuUiStore.bottomPanel === 'bevyremote', onclick: () => bennuUiStore.toggleBottom('bevyremote') }]
+      : []),
+    ...(profilerTools
+      ? [{ id: 'profiler', tooltip: 'Profiler — CPU, memory and locks of a run', shortcut: 'Ctrl+Shift+F9', icon: Flame, active: bennuUiStore.bottomPanel === 'profiler', onclick: () => bennuUiStore.toggleBottom('profiler') }]
+      : []),
+    ...(liveTools
+      ? [{ id: 'live', tooltip: 'Live — running services, recipes, scenarios and the timeline', shortcut: 'Ctrl+Shift+F11', icon: Activity, active: bennuUiStore.bottomPanel === 'live', onclick: () => bennuUiStore.toggleBottom('live') }]
       : []),
     // The framework catalogs that asked for a rail button — a list you keep open while working
     // rather than one you go and fetch: Endpoints on a web project, Components on a Bevy one. The
@@ -1373,6 +1421,7 @@
     const tooling = hasProjectTooling;
     const jsp = jspTools;
     const dtoLab = dtoLabTools;
+    const bevy = bevyTools;
     const picus = picusTools;
     const available = catalogIds;
     // `untrack`: the call reads the very panel state it writes, and an effect that depends
@@ -1399,6 +1448,9 @@
           'problems', 'terminal', 'build', 'todos', 'run', 'hierarchy', 'changes',
           ...(jsp ? ['forms' as const] : []),
           ...(dtoLab ? ['dtolab' as const] : []),
+          ...(bevy ? ['bevyremote' as const] : []),
+          ...(profilerTools ? ['profiler' as const] : []),
+          ...(liveTools ? ['live' as const] : []),
           // Most framework catalogs have no rail button, so one left open after switching to a
           // project that doesn't offer it would be unclosable from the rail.
           ...available,
@@ -1437,6 +1489,15 @@
   const wideRight  = $derived(
     bennuUiStore.rightPanel === 'i18n' || bennuUiStore.rightPanel === 'assistant'
       || activePluginView !== null || rightPluginPanel !== null,
+  );
+  // The assistant, expanded: its content is lifted over the editor column (and the bottom dock under
+  // it) instead of resizing the card, so the editors keep their width, scroll and caret — they are
+  // covered, not re-laid-out — and the docked width is untouched for when it is restored.
+  let mainColWidth = $state(0);
+  const assistantLift = $derived(
+    assistantLayoutStore.expanded && bennuUiStore.rightPanel === 'assistant' && mainColWidth > 0
+      ? bennuPanelSizes.rightFor(wideRight) + 4 + mainColWidth
+      : null,
   );
   const showBottom = $derived(bennuUiStore.bottomPanel !== null);
   // A job's output was opened from the (shared) Jobs overlay — the shared uiStore drives it, exactly
@@ -1726,7 +1787,7 @@
       // because what comes back is text rather than a file it knows.
       // The assistant's margin mark, from the keyboard: what it offers depends on the selection, a problem
       // on the line, or the declaration the caret is on.
-      { id: 'assistant-here', title: 'Ask the assistant about this…', icon: 'Sparkles',
+      { id: 'assistant-here', title: 'Ask Imber about this…', icon: 'Sparkles',
         action: () => run(() => editor?.askAssistantHere()), when: !!path },
       { id: 'expandmacro', title: 'Expand macro', icon: 'Wand2', shortcut: 'Alt+Shift+M',
         action: () => run(() => editor?.expandMacro()), when: isLspFile(path) },
@@ -1788,6 +1849,43 @@
         action: () => run(() => bennuDtoLabStore.openAtCaret('payload')), when: dtoLabTools && !!path?.toLowerCase().endsWith('.java') },
       { id: 'dtolab-tests', title: 'DTO Lab: generate validation tests for the class at the caret', icon: 'Beaker',
         action: () => run(() => bennuDtoLabStore.openAtCaret('tests')), when: dtoLabTools && !!path?.toLowerCase().endsWith('.java') },
+      // The profiler. Starting, stopping and the in-editor hints are things done with the editor focused.
+      { id: 'profiler', title: 'Toggle Profiler', icon: 'Flame', shortcut: 'Ctrl+Shift+F9',
+        action: () => run(() => { if (bennuUiStore.bottomPanel === 'profiler') bennuUiStore.closeBottom(); else void bennuProfilerStore.open(); }), when: profilerTools },
+      { id: 'profiler-record', title: 'Profiler: record the selected run configuration', icon: 'Flame',
+        action: () => run(() => { void bennuProfilerStore.open(); const cfg = bennuProfilerStore.activeJavaConfig(); if (cfg) void bennuProfilerStore.recordConfig(cfg); }),
+        when: profilerTools && bennuProfilerStore.phase === 'idle' && !!bennuProfilerStore.activeJavaConfig() },
+      { id: 'profiler-stop', title: 'Profiler: stop recording', icon: 'StopCircle',
+        action: () => run(() => void bennuProfilerStore.stop()), when: profilerTools && bennuProfilerStore.phase === 'recording' },
+      { id: 'profiler-hints-on', title: 'Profiler: show hints in editor', icon: 'Flame',
+        action: () => run(() => bennuSettingsStore.setProfilerHints(true)), when: profilerTools && !bennuSettingsStore.profilerHints },
+      // Live runs: the services the assistant or a recipe started, and the checks over them.
+      { id: 'live', title: 'Toggle Live (running services)', icon: 'Activity', shortcut: 'Ctrl+Shift+F11',
+        action: () => run(() => bennuUiStore.toggleBottom('live')), when: liveTools },
+      { id: 'live-recipes', title: 'Live: recipes (start a stack of services)', icon: 'Activity',
+        action: () => run(() => { bennuUiStore.showBottom('live'); void bennuLiveStore.setTab('recipes'); }), when: liveTools },
+      { id: 'live-scenarios', title: 'Live: scenarios (run and review)', icon: 'Activity',
+        action: () => run(() => { bennuUiStore.showBottom('live'); void bennuLiveStore.setTab('scenarios'); }), when: liveTools },
+      { id: 'live-timeline', title: 'Live: timeline (logs and requests of every service)', icon: 'Activity',
+        action: () => run(() => { bennuUiStore.showBottom('live'); void bennuLiveStore.setTab('timeline'); }), when: liveTools },
+      { id: 'live-stop-all', title: 'Live: stop all processes', icon: 'StopCircle',
+        action: () => run(() => void bennuLiveStore.stopAll()), when: liveTools },
+      { id: 'profiler-hints-off', title: 'Profiler: hide hints in editor', icon: 'Flame',
+        action: () => run(() => bennuSettingsStore.setProfilerHints(false)), when: profilerTools && bennuSettingsStore.profilerHints },
+      // The live Bevy inspector. Every verb a palette entry, because attaching to a game, refreshing
+      // and spawning are things you do while the editor has focus, not while the panel does.
+      { id: 'bevyremote', title: 'Toggle Bevy Remote inspector', icon: 'Plug', shortcut: 'Ctrl+Shift+A',
+        action: () => run(() => bennuUiStore.toggleBottom('bevyremote')), when: bevyTools },
+      { id: 'bevyremote-connect', title: 'Bevy Remote: connect to the running game', icon: 'Plug',
+        action: () => run(() => { bennuUiStore.showBottom('bevyremote'); if (!bennuBrpStore.connected) void bennuBrpStore.connect(); }),
+        when: bevyTools && !bennuBrpStore.connected },
+      { id: 'bevyremote-disconnect', title: 'Bevy Remote: disconnect', icon: 'Unplug',
+        action: () => run(() => void bennuBrpStore.disconnect()), when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-refresh', title: 'Bevy Remote: refresh the world', icon: 'RefreshCw',
+        action: () => run(() => void bennuBrpStore.reload()), when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-spawn', title: 'Bevy Remote: spawn an empty entity', icon: 'Plus',
+        action: () => run(() => { bennuUiStore.showBottom('bevyremote'); void bennuBrpStore.spawn(); }),
+        when: bevyTools && bennuBrpStore.connected && bennuBrpStore.status.can.spawn },
       { id: 'dependencies', title: 'Dependencies',  icon: 'Library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: hasProjectTooling },
       // The same subject from the other angle: the list says what each module needs, the graph says
       // who needs *it*, what a change to it rebuilds, and whether the project has a cycle. Named for
@@ -1824,7 +1922,32 @@
       // it is otherwise reached from, and gated on the ecosystem: there is nothing to add to a pom.
       { id: 'cargoadd',  title: 'Add dependency… (cargo add)', icon: 'Library',
         action: () => run(() => withModule(['Cargo'], 'Add dependency', (m) => { moduleFocusStore.select(m.id); bennuUiStore.openCargoAdd(); })), when: hasCargo },
-      { id: 'assistant', title: 'Toggle Assistant', icon: 'Sparkles', shortcut: 'Alt+A', action: () => run(() => bennuUiStore.toggleRight('assistant')), when: true },
+      { id: 'assistant', title: 'Toggle Imber', icon: 'Sparkles', shortcut: 'Alt+A', action: () => run(() => bennuUiStore.toggleRight('assistant')), when: true },
+      ...voiceCommands(run, () => bennuUiStore.openSettings('voice')),
+      { id: 'assistant-expand', title: 'Imber:Expand panel', icon: 'Maximize2', shortcut: 'Ctrl+Shift+U', action: () => run(expandAssistant), when: !assistantLayoutStore.expanded || bennuUiStore.rightPanel !== 'assistant' },
+      { id: 'assistant-restore', title: 'Imber:Restore panel', icon: 'Minimize2', shortcut: 'Ctrl+Shift+U', action: () => run(() => assistantLayoutStore.restore()), when: assistantLayoutStore.expanded && bennuUiStore.rightPanel === 'assistant' },
+      // A failed request is sent again as it stood; while one waits to retry, "now" skips the wait.
+      { id: 'assistant-retry', title: 'Imber:Retry the failed request', icon: 'RotateCw', action: () => run(() => { showAssistant(); void bennuAssistantStore.retry(); }), when: bennuAssistantStore.canRetry },
+      { id: 'assistant-retry-now', title: 'Imber:Retry now (skip the wait)', icon: 'RotateCw', action: () => run(() => void bennuAssistantStore.retryNow()), when: bennuAssistantStore.retrying !== null },
+      { id: 'assistant-skills', title: 'Imber:Manage skills…', icon: 'Wand2', action: () => run(() => bennuAssistantStore.openSkills()), when: true },
+      // How much the agent decides for itself. One verb per mode, so the choice is a few keystrokes from anywhere.
+      ...MODES.map((m) => ({
+        id: `assistant-mode-${m.id}`, title: `Imber: Mode —${m.label}`, icon: m.id === 'manual' ? 'ShieldCheck' : m.id === 'autonomous' ? 'Bot' : 'Zap',
+        action: () => run(() => bennuAssistantStore.setMode(m.id)), when: bennuAssistantStore.mode !== m.id,
+      })),
+      // How much it decides alone, for the conversation in front of you; the text is edited in the same window.
+      { id: 'assistant-decisions', title: 'Imber:Decisions in this conversation…', icon: 'SlidersHorizontal', action: () => run(() => { showAssistant(); bennuAssistantStore.openDecision(); }), when: true },
+      // Sub-agents: helpers with a clean context. The verbs are the panel's, for the conversation in front of you.
+      { id: 'assistant-agents-cycle', title: 'Imber:Sub-agents in this conversation — next (follow settings → on → off)', icon: 'Network', action: () => run(() => { showAssistant(); bennuAssistantStore.cycleChatSubagents(); }), when: !bennuAssistantStore.chatOnly },
+      { id: 'assistant-agents-open', title: 'Imber:Open the latest sub-agent’s thread…', icon: 'Bot', action: () => run(() => { showAssistant(); void bennuAgentsStore.openLatest(bennuAssistantStore.activeId); }), when: bennuAgentsStore.list(bennuAssistantStore.activeId).length > 0 },
+      { id: 'assistant-agents-stop', title: 'Imber:Stop all sub-agents', icon: 'Square', action: () => run(() => void bennuAgentsStore.stopAll(bennuAssistantStore.activeId)), when: bennuAgentsStore.running(bennuAssistantStore.activeId) > 0 },
+      { id: 'assistant-mode-cycle', title: 'Imber:Next mode (Manual → Accept edits → Autonomous)', icon: 'Repeat', shortcut: 'Ctrl+Shift+Q', action: () => run(() => bennuAssistantStore.cycleMode()), when: true },
+      // An isolated copy of the project for one conversation: nothing reaches the real files until it is applied.
+      { id: 'assistant-review-apply', title: 'Imber:Review and apply the isolated copy', icon: 'Check', shortcut: 'Ctrl+Shift+Enter', action: () => run(() => void bennuWorktreeStore.openDiff()), when: bennuWorktreeStore.active },
+      { id: 'assistant-copy-text', title: 'Imber:New conversation in an isolated copy (text only)', icon: 'Copy', action: () => run(() => startCopyConversation('copy')), when: true },
+      { id: 'assistant-copy-git', title: 'Imber:New conversation in a git worktree (indexed)', icon: 'GitBranch', action: () => run(() => startCopyConversation('git')), when: true },
+      { id: 'assistant-copy-apply', title: 'Imber:Review and apply the isolated copy…', icon: 'GitBranch', action: () => run(() => { showAssistant(); void bennuWorktreeStore.openDiff(); }), when: bennuWorktreeStore.active },
+      { id: 'assistant-copy-discard', title: 'Imber:Discard the isolated copy…', icon: 'Trash2', action: () => run(() => { showAssistant(); bennuWorktreeStore.askDiscard(); }), when: bennuWorktreeStore.active },
       { id: 'ast',       title: 'Toggle Trees — syntax and model', icon: 'Braces',    shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('ast')), when: javaTools },
       { id: 'ssr',       title: 'Structural search / replace…', icon: 'Search', shortcut: 'Ctrl+Shift+M', action: () => run(() => bennuUiStore.openSsr()), when: javaTools },
       // The framework catalogs. Palette-only by design (see `framework-catalogs.ts`) and gated
@@ -2401,6 +2524,28 @@
       e.preventDefault(); bennuUiStore.toggleBottom('bevycomponents'); return;
     }
 
+    // Profiler (Ctrl+Shift+F9) — toggles the tool window; opening it also refreshes what the machine
+    // can profile with and the recordings list.
+    if (mod && e.shiftKey && !e.altKey && e.key === 'F9') {
+      if (!profilerTools) return;
+      e.preventDefault();
+      if (bennuUiStore.bottomPanel === 'profiler') bennuUiStore.closeBottom(); else void bennuProfilerStore.open();
+      return;
+    }
+
+    // Live (Ctrl+Shift+F11) — toggles the tool window of running services, recipes, scenarios and the timeline.
+    // Not Ctrl+Shift+L: the editor owns that one (select every occurrence).
+    if (mod && e.shiftKey && !e.altKey && e.key === 'F11') {
+      if (!liveTools) return;
+      e.preventDefault(); bennuUiStore.toggleBottom('live'); return;
+    }
+
+    // Bevy Remote inspector (Ctrl+Shift+A, "attach") — silent on a project that is not a Bevy one.
+    if (mod && e.shiftKey && !e.altKey && isKey(e, 'a')) {
+      if (!bevyTools) return;
+      e.preventDefault(); bennuUiStore.toggleBottom('bevyremote'); return;
+    }
+
     // Spring beans (Ctrl+Shift+F12) — the framework catalog with a keyboard door, since it
     // is the one you reach for while reading code. Its siblings (Endpoints, Config) stay
     // palette-only. Silent on a project that declares none: no panel to open.
@@ -2669,7 +2814,7 @@
           </PanelCard>
         {/if}
 
-        <div class="main-col">
+        <div class="main-col" bind:clientWidth={mainColWidth}>
           <div class="card grow">
             <BennuEditorSplit
               bind:first={editorFirst}
@@ -2714,6 +2859,7 @@
             minSize={wideRight ? 280 : 200}
             maxSize={wideRight ? 760 : 520}
             onResize={(px) => bennuPanelSizes.setRight(px, wideRight)}
+            liftWidth={assistantLift}
           >
             {#if bennuUiStore.rightPanel === 'maven'}<BennuMavenPanel />{/if}
             {#if bennuUiStore.rightPanel === 'cargo'}<BennuCargoPanel />{/if}
@@ -2773,10 +2919,14 @@
       <!-- Keep the relevant status badges (jobs · notifications); the transfers
            (download/export) badge is dropped — Bennu never registers transfers,
            so without the `transfers` flag it stays hidden. -->
+      <VoiceArmedIndicator />
       <FeedbackStatusButtons />
     {/snippet}
   </BennuStatusBar>
 </div>
+
+<!-- Voice: the push-to-talk / toggle shortcuts and the voice overlay. Idle until asked. -->
+<VoiceHost />
 
 <!-- The keyboard-inputs overlay. Pure presentation: the store owns the capture listener and only
      attaches it while the overlay is on. It lives in every window and not only in Corvus, because
@@ -2800,6 +2950,9 @@
 {#if bennuUiStore.settingsOpen}
   <BennuSettingsModal onClose={() => bennuUiStore.closeSettings()} />
 {/if}
+
+<!-- The skills manager opens from the palette, the assistant panel and Settings, so it lives here. -->
+<BennuSkillsModal />
 
 {#if bennuUiStore.projectConfigOpen}
   <BennuProjectConfigModal onClose={() => bennuUiStore.closeProjectConfig()} />
@@ -3048,6 +3201,8 @@
     items={bennuContextMenuStore.items}
     x={bennuContextMenuStore.x}
     y={bennuContextMenuStore.y}
+    above={bennuContextMenuStore.above}
+    actions={bennuContextMenuStore.actions}
     onSelect={(id) => bennuContextMenuStore.select(id)}
     onClose={() => bennuContextMenuStore.close()}
   />

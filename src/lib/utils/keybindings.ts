@@ -30,6 +30,18 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // Corvus's repository tabs, this is Bennu's open projects, and each product only listens in its
   // own window. Hold the modifier, press Tab to walk, release to switch.
   switch_project:      { key: 'Tab',  ctrl: true,                description: 'Switch project (Bennu)',     group: 'Navigation' },
+  // The assistant panel's two keyboard verbs, active while focus is inside the panel (Bennu's window only).
+  // Ctrl+Shift+Enter shares its chord with commit_and_push on purpose: Corvus's commit field is a different
+  // window. Ctrl+Shift+M would be the natural "mode" key but Bennu's structural search owns it.
+  assistant_review_apply: { key: 'Enter', ctrl: true, shift: true, description: "Review and apply Imber's isolated copy (Bennu)", group: 'Navigation' },
+  assistant_next_mode:    { key: 'q',     ctrl: true, shift: true, description: 'Imber: next permission mode (Bennu)',               group: 'Navigation' },
+  // Whenever the panel is on screen. Ctrl+Shift+U is Corvus's "unstage all" — another window.
+  assistant_expand:       { key: 'u',     ctrl: true, shift: true, description: 'Imber: expand the panel over the editor, or restore it (Bennu)', group: 'Navigation' },
+  // Voice dictation (Bennu), one chord for both habits: HOLD it to talk (records while it is down and sends on
+  // release), TAP it to leave the microphone open and tap again to stop - the mic button does the same.
+  // Space, not a letter: every Ctrl+Shift+letter is taken in Bennu (Ctrl+Shift+E is Recent locations), and
+  // Alt+Shift is Windows' input-language switch.
+  voice_push_to_talk:     { key: ' ',     ctrl: true, shift: true, description: 'Voice: hold to talk to Imber, or tap to start / stop (Bennu)', group: 'Navigation' },
   // The searchable counterpart of switch_project: every project of every workspace plus recents,
   // found by typing. Ctrl+Shift+D — free in Bennu and in the global map, and not a Chromium
   // DevTools chord (unlike Ctrl+Shift+J / C / I).
@@ -225,7 +237,7 @@ export function matchesBinding(event: KeyboardEvent, binding: Keybinding): boole
 
 // Friendlier display names for keys whose `KeyboardEvent.key` value reads
 // awkwardly (the dedicated context-menu key reports as 'ContextMenu').
-const KEY_DISPLAY: Record<string, string> = { ContextMenu: 'Menu' };
+const KEY_DISPLAY: Record<string, string> = { ContextMenu: 'Menu', ' ': 'Space' };
 
 // macOS renders modifiers as glyphs. Arbor's logical `ctrl` maps to Cmd on the
 // Mac (see matchesBinding: `event.metaKey` counts as ctrl), so Ctrl → ⌘; the

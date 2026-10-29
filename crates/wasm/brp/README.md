@@ -31,6 +31,14 @@ Reach the surface through `arbor_brp::prelude::...`: `BrpClient`, `BrpError`,
   the command boundary).
 - **`sse`** — `run_watch_stream`: a hand-parsed SSE client for `*+watch`
   methods; `WatchEvent` (`Open` / `Data` / `RpcError` / `Error` / `Close`).
+- **`dialect`** — `MethodMap`: resolves the logical ops (query, get, despawn, …) to the
+  method names the connected game lists in `rpc.discover` (`world.*` on Bevy 0.17+, `bevy/*`
+  before). Nothing branches on a Bevy version.
+- **`registry`** — `TypeRegistry`: `registry.schema` as a searchable list of components and
+  resources, plus `Shape` / `skeleton` — the hint a typed editor needs (`$ref`s chased, cycles
+  cut, field order recovered from `required`).
+- **`world`** — `Snapshot`: every entity's name and parent, indexed for tree / search / page
+  queries; the `get_components` / `get_resources` envelope normalisers.
 - **lib root** — `BrpSession` + `BrpCapabilities` (the capability matrix and
   its `ingest_discover` / `ingest_schema`), `BrpRegistry` (singleton session +
   watch bookkeeping), `BrpStatus` (FE/Lua status payload), `probe_capabilities`,
@@ -51,4 +59,5 @@ HTTP/SSE transport itself needs a live BRP endpoint and isn't unit-tested.
 ## Consumed by
 
 `arbor` (the shell): `commands/brp_commands.rs` (Tauri commands) and
-`plugin/ns_shell/brp.rs` (the `arbor.brp.*` Lua namespace).
+`plugin/ns_shell/brp.rs` (the `arbor.brp.*` Lua namespace); `bennu-be` (the `brp` module —
+the live Bevy inspector).

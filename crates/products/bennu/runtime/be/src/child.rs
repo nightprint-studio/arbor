@@ -8,9 +8,6 @@
 
 use std::process::{Child, Command};
 
-#[cfg(windows)]
-use arbor_process_ext::prelude::NoWindowExt;
-
 /// Put a child at the head of its own process group, so [`kill_tree`] can take its descendants
 /// with it. Call it on every `Command` whose output the console streams, **before** `spawn`.
 ///
@@ -29,15 +26,8 @@ use arbor_process_ext::prelude::NoWindowExt;
 /// The cost is that the child no longer shares our process group, so a `SIGINT` sent to ours does
 /// not reach it. Nothing here relies on that: every child is stopped explicitly, by id.
 pub(crate) fn own_group(cmd: &mut Command) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // 0 = "a new group, led by the child" — so its pgid is its own pid, which is what
-        // `kill_tree` checks before signalling a group.
-        cmd.process_group(0);
-    }
-    #[cfg(not(unix))]
-    let _ = cmd;
+    // One implementation for every long-lived child (runs, tests, managed live processes).
+    bennu_live::prelude::own_group(cmd);
 }
 
 /// Announce a freshly spawned run to the exit watchdog, so it is killed even if this backend is
@@ -70,25 +60,7 @@ pub(crate) fn untrack(child: &std::sync::Mutex<Child>) {
 ///
 /// `kill` follows in both cases: it reaps the handle so the waiting thread's `wait()` returns.
 pub(crate) fn kill_tree(child: &mut Child) {
-    #[cfg(windows)]
-    {
-        let mut tk = Command::new("taskkill");
-        tk.arg("/PID").arg(child.id().to_string()).arg("/T").arg("/F");
-        tk.no_window();
-        let _ = tk.output();
-    }
-    #[cfg(unix)]
-    {
-        // Only when the child really leads a group of its own. A child spawned without
-        // `own_group` shares OUR group, and its pid names either nothing or — one chance in a very
-        // large number — somebody else's group: signalling that would kill an unrelated tree.
-        // `getpgid(pid) == pid` is exactly the "we set this up" test, and it costs a syscall.
-        let pid = child.id() as libc::pid_t;
-        if pid > 0 && unsafe { libc::getpgid(pid) } == pid {
-            unsafe { libc::killpg(pid, libc::SIGKILL) };
-        }
-    }
-    let _ = child.kill();
+    bennu_live::prelude::kill_tree(child);
 }
 
 /// What a streamed child left behind.

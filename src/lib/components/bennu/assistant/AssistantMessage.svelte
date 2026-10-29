@@ -15,15 +15,23 @@
   import AssistantToolRow from './AssistantToolRow.svelte';
   import AssistantProposal from './AssistantProposal.svelte';
   import AssistantCode from './AssistantCode.svelte';
+  import MermaidDiagram from '$lib/components/shared/ui/MermaidDiagram.svelte';
   import AssistantQuestions from './AssistantQuestions.svelte';
   import AssistantAccessRequest from './AssistantAccessRequest.svelte';
+  import AssistantAccessGrant from './AssistantAccessGrant.svelte';
   import Collapsible from '$lib/components/shared/ui/Collapsible.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import AssistantConfirm from './AssistantConfirm.svelte';
+  import AssistantErrorNotice from './AssistantErrorNotice.svelte';
   import AssistantPlan from './AssistantPlan.svelte';
+  import AssistantLiveSummary from './AssistantLiveSummary.svelte';
+  import AssistantScreenshot from './AssistantScreenshot.svelte';
+  import AssistantAgentCard from './AssistantAgentCard.svelte';
   import AssistantText from './AssistantText.svelte';
+  import AssistantUserText from './AssistantUserText.svelte';
+  import { hasFence, inlineSpans as inline } from './assistant-fences';
   import AssistantDocModal from './AssistantDocModal.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
@@ -39,15 +47,6 @@
   const store = bennuAssistantStore;
   let docOpen = $state(false);
 
-  /** `code` spans become `<code>` and **bold** becomes `<strong>`; everything else stays text. No HTML is
-   *  ever injected. */
-  function inline(text: string): { code: boolean; bold: boolean; text: string }[] {
-    return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean).map((part) => {
-      if (part.length > 1 && part.startsWith('`') && part.endsWith('`')) return { code: true, bold: false, text: part.slice(1, -1) };
-      if (part.length > 4 && part.startsWith('**') && part.endsWith('**')) return { code: false, bold: true, text: part.slice(2, -2) };
-      return { code: false, bold: false, text: part };
-    });
-  }
 
   type Shown = Exclude<MessageBlock, { type: 'tool' }> | { type: 'tools'; calls: ToolCall[] };
 
@@ -82,7 +81,7 @@
   );
   const time = $derived(new Date(message.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }));
 
-  const plainText = $derived(message.blocks.flatMap((b) => (b.type === 'text' ? [b.text] : b.type === 'code' ? [b.code] : [])).join('\n\n'));
+  const plainText = $derived(message.blocks.flatMap((b) => (b.type === 'text' ? [b.text] : b.type === 'code' ? [b.code] : b.type === 'diagram' ? ['```mermaid\n' + b.diagram.source + '\n```'] : [])).join('\n\n'));
 </script>
 
 <div class="msg" in:fly={{ y: 8, duration: animStore.dFast, easing: cubicOut }}>
@@ -92,7 +91,9 @@
         <IconButton tooltip="Copy" size={22} onclick={() => copyToClipboard(plainText, { successToast: 'Copied' })}><Copy size={12} /></IconButton>
       </div>
       {#each message.blocks as b}
-        {#if b.type === 'text'}
+        {#if b.type === 'text' && hasFence(b.text)}
+          <div class="bubble rich"><AssistantUserText text={b.text} /></div>
+        {:else if b.type === 'text'}
           <p class="bubble">{#each inline(b.text) as s}{#if s.code}<code>{s.text}</code>{:else if s.bold}<strong>{s.text}</strong>{:else}{s.text}{/if}{/each}</p>
         {/if}
       {/each}
@@ -101,7 +102,7 @@
     <div class="assistant">
       <div class="who">
         <span class="avatar" class:asst-live={last && store.running}><Sparkles size={10} /></span>
-        <span class="name">{modelName || 'Assistant'}</span>
+        <span class="name">{modelName || 'Imber'}</span>
         <span class="when">{time}</span>
       </div>
 
@@ -115,12 +116,18 @@
             <AssistantPlan plan={b.plan} />
           {:else if b.type === 'confirm'}
             <AssistantConfirm confirm={b.confirm} {conversationId} />
+          {:else if b.type === 'notice' && b.level === 'error' && (b.detail || b.canRetry)}
+            <AssistantErrorNotice text={b.text} detail={b.detail} canRetry={b.canRetry} {last} />
           {:else if b.type === 'notice'}
             <Alert variant={b.level} text={b.text} compact />
           {:else if b.type === 'access'}
             <AssistantAccessRequest request={b.request} {conversationId} />
+          {:else if b.type === 'grant'}
+            <AssistantAccessGrant grant={b.grant} />
           {:else if b.type === 'code'}
             <AssistantCode language={b.language} code={b.code} />
+          {:else if b.type === 'diagram'}
+            <MermaidDiagram source={b.diagram.source} title={b.diagram.title} />
           {:else if b.type === 'tools'}
             <div class="tools asst-enter">
               <Collapsible>
@@ -137,6 +144,12 @@
             </div>
           {:else if b.type === 'proposal'}
             <AssistantProposal proposal={b.proposal} {conversationId} {mode} />
+          {:else if b.type === 'live_summary'}
+            <AssistantLiveSummary summary={b.summary} />
+          {:else if b.type === 'screenshot'}
+            <AssistantScreenshot shot={b.shot} />
+          {:else if b.type === 'agent'}
+            <AssistantAgentCard agent={b.agent} />
           {/if}
         {/each}
       </div>
@@ -157,6 +170,8 @@
   .user { display: flex; justify-content: flex-end; align-items: flex-start; gap: 4px; }
   .user-actions { order: -1; opacity: 0; transition: opacity var(--transition-fast); align-self: center; }
   .user:hover .user-actions, .user:focus-within .user-actions { opacity: 1; }
+  /* A message with code in it takes the width of the column: code is read wide. */
+  .bubble.rich { flex: 1; min-width: 0; max-width: 100%; }
   .bubble {
     margin: 0; max-width: 90%;
     padding: 8px 12px;
@@ -193,6 +208,8 @@
     font-size: var(--font-size-md); line-height: 1.6;
     color: var(--text-primary);
     overflow-wrap: anywhere;
+    /* Set by the thread when the panel is expanded: prose keeps a readable line, code stays wide. */
+    max-width: var(--asst-text-max, none);
   }
   .bubble { white-space: pre-wrap; }
   .bubble strong { font-weight: 650; }

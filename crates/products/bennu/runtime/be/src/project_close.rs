@@ -216,6 +216,10 @@ pub(crate) fn release_closed(previous: &[PathBuf], current: &[PathBuf]) {
         for root in closed {
             if still_due(&root, schedule) {
                 release(&root);
+                // Services the Live panel or the assistant started for it go with the project. Only on a real
+                // close, not on the idle release above: a background project's server is not abandoned.
+                crate::live::stop_root(&root);
+                crate::assistant::release_debug_sessions(Some(&root), "the project was closed");
             }
         }
     });
@@ -273,6 +277,13 @@ fn take_keys(root: &str) -> HashSet<String> {
     keys
 }
 
+/// Release `root` now, with no settle and no watched set: for a project that was never in the window's
+/// set to begin with (an assistant conversation's isolated copy).
+pub(crate) fn release_now(root: &str) {
+    cancel([norm(root)]);
+    release(&norm(root));
+}
+
 /// Give back everything the engines hold for `root`.
 ///
 /// One window remains, and it is narrow: a reopen landing between the settle check and the end of
@@ -297,6 +308,7 @@ fn release(root: &str) {
         crate::main_classes::forget_main_classes(&key);
         crate::library_beans::forget(&key);
         crate::library_search::forget(&key);
+        crate::run_console::forget(&key);
         crate::wgsl_library::forget(Path::new(&key));
         crate::cargo_intel::forget_under(&key);
         eprintln!("bennu-be: released {key} — {servers} language server(s) stopped");

@@ -77,6 +77,10 @@ const EVT_SOURCES_READY: &str = "arbor://bennu/sources-ready";
 
 /// Emit a single index-progress event (`start` / `end` of a phase) for `root`.
 fn emit_progress(sink: &Arc<dyn EventSink>, root: &str, phase: &str, state: &str) {
+    // An isolated copy of an assistant conversation reports to its conversation, not to the editor.
+    if crate::hidden_projects::relay_progress(sink, root, phase, state) {
+        return;
+    }
     sink.emit(EVT_INDEX_PROGRESS, json!({ "root": root, "phase": phase, "state": state }));
 }
 
@@ -1535,9 +1539,18 @@ impl IndexService {
         let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
         let mut out = Vec::new();
         for slot in slots.values() {
+            // A hidden copy's classes would show up twice in the user's own searches.
+            if crate::hidden_projects::is_hidden(&slot.root.to_string_lossy()) {
+                continue;
+            }
             out.extend(slot.classes.read().unwrap_or_else(|p| p.into_inner()).iter().cloned());
         }
         out
+    }
+
+    /// Delete the index files kept on disk for `root`: an isolated copy's index has no reason to outlive it.
+    pub fn discard_index_files(&self, root: &str) {
+        let _ = std::fs::remove_dir_all(index_base_for(root));
     }
 
     /// The source files that weren't valid in the project's declared encoding (recovered +

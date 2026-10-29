@@ -57,7 +57,7 @@ use bennu_test::prelude::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::build::{BuildGuard, BUSY_MSG};
+use crate::build_queue::{BuildGuard, Kind as QueueKind};
 use crate::test_report::RunEnd;
 use crate::tests::{next_run_id, registry, LiveRun, EVT_TEST_EXIT, EVT_TEST_OUTPUT};
 
@@ -249,9 +249,15 @@ pub(crate) struct CargoRun {
 
 /// Spawn `cargo test` for `scope` and register it, without waiting for anything.
 pub(crate) fn start_cargo_run(ctx: &BennuState, args: &RunArgs) -> Result<CargoRun, String> {
-    // The same lock the build takes: two cargo processes on one workspace queue on cargo's own
+    // The same queue the build takes: two cargo processes on one workspace would wait on cargo's own
     // `target/` lock, which looks like a hang rather than like a queue.
-    let guard = BuildGuard::acquire(&args.root).ok_or_else(|| BUSY_MSG.to_string())?;
+    let guard = BuildGuard::acquire(ctx.event_sink(), &args.root, QueueKind::Test, "cargo test")?;
+    start_cargo_run_with(ctx, args, guard)
+}
+
+/// [`start_cargo_run`] for a caller that already holds the tree's turn (the coalescing wrapper passes
+/// `BuildGuard::already_held()`).
+pub(crate) fn start_cargo_run_with(ctx: &BennuState, args: &RunArgs, guard: BuildGuard) -> Result<CargoRun, String> {
 
     let root = PathBuf::from(&args.root);
     let plan = cargo_plan(&args.scope, args.include_ignored);
@@ -266,6 +272,8 @@ pub(crate) fn start_cargo_run(ctx: &BennuState, args: &RunArgs) -> Result<CargoR
     // Belt and braces with `--color never`: a config file can turn colour on for every invocation,
     // and an escape sequence inside a `Running` line is a target the panel cannot name.
     cmd.env("CARGO_TERM_COLOR", "never");
+    // A conversation that builds apart tests in its own target directory.
+    crate::build_queue::apply_target_dir(&mut cmd, &args.root);
     cmd.no_window();
     // Its own process group: `cargo test` runs the test binaries as children, and Stop has to
     // reach those rather than only cargo. See `child::own_group`.

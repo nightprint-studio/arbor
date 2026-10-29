@@ -15,6 +15,8 @@
   } from 'lucide-svelte';
   import Card from '$lib/components/shared/ui/Card.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import ImberOrb from '$lib/components/shared/internal/ImberOrb.svelte';
+  import ImberAurora from '$lib/components/shared/internal/ImberAurora.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { formatEur, relativeTime } from './assistant-format';
@@ -26,6 +28,8 @@
   // What an agent can begin with: things about the project it is in, which it reads for itself.
   const AGENT: Starter[] = [
     { icon: Wand2, title: 'Explain this file', hint: 'What it does and how it fits', text: 'Explain what this file does and how it fits into the project.' },
+    { icon: BookOpen, title: 'Explain the project', hint: 'Structure, modules, where to start', text: 'Give me a tour of this project: its structure, the main modules and where to start reading. Open the panels that help.' },
+    { icon: ListChecks, title: 'Show me a panel', hint: 'Dependencies, problems, tests…', text: 'Open the dependencies panel for this project and tell me what stands out.' },
     { icon: Bug, title: 'Find why it fails', hint: 'Start from the problems list', text: 'Look at the project\'s current problems and tell me what is wrong and how to fix it.' },
     { icon: BookOpen, title: 'Document it', hint: 'Javadoc for the public methods', text: 'Write documentation comments for the public methods of this file that have none.' },
     { icon: GitCompareArrows, title: 'Review my changes', hint: 'What could go wrong in the diff', text: 'Review the uncommitted changes of this project and point out what could go wrong.' },
@@ -55,22 +59,21 @@
   }
 </script>
 
-<section class="home" class:chat aria-label="Assistant home">
-  <div class="aurora" aria-hidden="true"><i class="b1"></i><i class="b2"></i><i class="b3"></i></div>
+<section class="home" class:chat aria-label="Imber home">
+  <ImberAurora hue="var(--hue)" />
 
   <div class="hero">
-    <div class="emblem" aria-hidden="true">
-      <span class="halo"></span>
-      <span class="core">{#if chat}<MessageSquare size={22} />{:else}<Sparkles size={22} />{/if}</span>
-      <span class="orbit o1"><i></i></span>
-      <span class="orbit o2"><i></i></span>
+    <div class="emblem">
+      <ImberOrb size={76} hue="var(--hue)">
+        {#if chat}<MessageSquare size={22} />{:else}<Sparkles size={22} />{/if}
+      </ImberOrb>
     </div>
     <h2>{chat ? 'What’s on your mind?' : 'What are we working on?'}</h2>
     <p class="lead">
       {#if chat}
-        Just a conversation. It cannot read, search or change anything — it only sees what you type.
+        Just a conversation with Imber. It cannot read, search or change your project — it only sees what you type. It can explain how Bennu works and open any panel for you.
       {:else}
-        Ask about the project or describe a change. It works through Bennu’s own tools, never a shell.
+        Ask Imber about the project or describe a change. It can explain the project, open any panel for you, and works through Bennu’s own tools, never a shell.
       {/if}
     </p>
 
@@ -124,38 +127,9 @@
   }
   .home.chat { --hue: var(--info); }
 
-  /* A slow aurora: three soft colour fields drifting behind everything. Gradients and transforms only —
-     no blur filter, no backdrop-filter, which would keep the compositor busy for as long as the panel is open. */
-  .aurora { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-  .aurora i { position: absolute; border-radius: 50%; opacity: 0.5; will-change: transform; }
-  .b1 { width: 260px; height: 260px; top: -90px; left: -70px;
-        background: radial-gradient(circle, color-mix(in srgb, var(--hue) 38%, transparent), transparent 68%);
-        animation: asst-drift-a calc(var(--anim-dur-slow, 240ms) * 60) ease-in-out infinite alternate; }
-  .b2 { width: 300px; height: 300px; top: 30px; right: -120px;
-        background: radial-gradient(circle, color-mix(in srgb, var(--info) 30%, transparent), transparent 68%);
-        animation: asst-drift-b calc(var(--anim-dur-slow, 240ms) * 75) ease-in-out infinite alternate; }
-  .b3 { width: 240px; height: 240px; bottom: -110px; left: 20%;
-        background: radial-gradient(circle, color-mix(in srgb, var(--success) 20%, transparent), transparent 68%);
-        animation: asst-drift-a calc(var(--anim-dur-slow, 240ms) * 90) ease-in-out infinite alternate-reverse; }
-
   .hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding-top: 4px; }
 
-  .emblem { position: relative; width: 76px; height: 76px; display: grid; place-items: center; margin-bottom: 6px; }
-  .halo {
-    position: absolute; inset: 6px; border-radius: 50%;
-    background: radial-gradient(circle, color-mix(in srgb, var(--hue) 45%, transparent), transparent 70%);
-    animation: asst-breathe calc(var(--anim-dur-slow, 240ms) * 16) ease-in-out infinite;
-  }
-  .core {
-    position: relative; z-index: 1; width: 46px; height: 46px; border-radius: 15px;
-    display: grid; place-items: center; color: var(--text-on-accent);
-    background: linear-gradient(140deg, var(--hue), color-mix(in srgb, var(--hue) 45%, var(--info)));
-    box-shadow: 0 8px 22px color-mix(in srgb, var(--hue) 38%, transparent);
-  }
-  .orbit { position: absolute; inset: 0; animation: asst-spin calc(var(--anim-dur-slow, 240ms) * 40) linear infinite; }
-  .orbit i { position: absolute; top: 2px; left: 50%; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--hue); box-shadow: 0 0 8px var(--hue); }
-  .o2 { inset: 9px; animation-duration: calc(var(--anim-dur-slow, 240ms) * 62); animation-direction: reverse; }
-  .o2 i { background: var(--info); box-shadow: 0 0 8px var(--info); width: 4px; height: 4px; }
+  .emblem { margin-bottom: 6px; }
 
   h2 { margin: 0; font-size: var(--font-size-lg); font-weight: 650; color: var(--text-primary); letter-spacing: -0.01em; }
   .lead { margin: 0; max-width: 290px; font-size: var(--font-size-xs); line-height: 1.55; color: var(--text-secondary); }
@@ -188,6 +162,6 @@
   .foot { margin: auto 0 0; font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   @media (prefers-reduced-motion: reduce) {
-    .aurora i, .halo, .orbit, .starter { animation: none; }
+    .starter { animation: none; }
   }
 </style>

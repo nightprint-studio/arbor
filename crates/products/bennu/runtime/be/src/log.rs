@@ -70,6 +70,19 @@ impl ClassIndex {
         self.files.get(outer).or_else(|| self.files.get(class))
     }
 
+    /// The project file declaring `class`, for readers outside the console (the assistant's log facets).
+    pub(crate) fn project_file(&self, class: &str) -> Option<&String> {
+        self.file_of(class)
+    }
+
+    /// The rules this project's logs are read with: its own layout over the Java dialect, as the console does.
+    pub(crate) fn rules(&self) -> RuleSet {
+        match &self.layout {
+            Some(layout) => layout.clone().over_java(),
+            None => RuleSet::java(),
+        }
+    }
+
     /// What a NAME in a log line points at — `com.acme.Order`, `com.acme.Order.total`,
     /// `Order#total`, a bare or abbreviated logger — as the file to open and the method to land
     /// on. `None` when no class of this project answers to it, or more than one does: a click

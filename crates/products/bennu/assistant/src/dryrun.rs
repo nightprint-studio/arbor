@@ -101,6 +101,7 @@ mod tests {
             tools: vec![ToolSpec { name: "rename".into(), description: "Rename a symbol".into(), input_schema: json!({"type": "object"}) }],
             max_tokens: 4096,
             effort: Some(Effort::High),
+            long_cache: false,
         }
     }
 

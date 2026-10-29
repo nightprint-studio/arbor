@@ -6,6 +6,7 @@
     maxSize = 800,
     onResize,
     reverse = false,
+    liftWidth = null,
     children,
   }: {
     direction?: 'horizontal' | 'vertical';
@@ -14,6 +15,12 @@
     maxSize?: number;
     onResize?: (size: number) => void;
     reverse?: boolean;
+    /**
+     * Lift the content out of its slot and over the siblings, `liftWidth` px wide and flush with this
+     * panel's inner edge. The slot keeps its width, so the neighbours do not move or reflow: what is
+     * underneath is covered, not squeezed. `null` is the panel as it always was.
+     */
+    liftWidth?: number | null;
     children: any;
   } = $props();
 
@@ -23,6 +30,7 @@
   let panelEl = $state<HTMLElement | null>(null);
 
   const isH = $derived(direction === 'horizontal');
+  const lifted = $derived(liftWidth !== null && isH);
 
   function onMouseDown(e: MouseEvent) {
     e.preventDefault();
@@ -70,12 +78,13 @@
   style={isH ? `width: ${size}px` : `height: ${size}px`}
 >
   {#if !reverse}
-    <div class="panel-content">
+    <div class="panel-content" class:lifted style={lifted ? `--lift-w: ${liftWidth}px` : undefined}>
       {@render children()}
     </div>
     <div
       class="resize-handle {isH ? 'resize-handle-h' : 'resize-handle-v'}"
       class:active={dragging}
+      class:lift-hidden={lifted}
       onmousedown={onMouseDown}
       onkeydown={onKeyDown}
       role="slider"
@@ -90,6 +99,7 @@
     <div
       class="resize-handle {isH ? 'resize-handle-h' : 'resize-handle-v'}"
       class:active={dragging}
+      class:lift-hidden={lifted}
       onmousedown={onMouseDown}
       onkeydown={onKeyDown}
       role="slider"
@@ -100,7 +110,7 @@
       aria-valuemax={maxSize}
       tabindex="0"
     ></div>
-    <div class="panel-content">
+    <div class="panel-content" class:lifted style={lifted ? `--lift-w: ${liftWidth}px` : undefined}>
       {@render children()}
     </div>
   {/if}
@@ -166,6 +176,21 @@
   .panel-v {
     flex-direction: column;
     width: 100%;
+  }
+
+  .resize-handle.lift-hidden { display: none; }
+
+  /* Over the neighbours rather than beside them; see `liftWidth`. */
+  .panel-content.lifted {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    flex: none;
+    width: var(--lift-w);
+    z-index: 6;
+    background: var(--bg-base);
+    border-radius: var(--radius-lg);
   }
 
   .panel-content {

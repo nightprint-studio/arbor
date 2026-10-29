@@ -80,6 +80,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::build_freshness;
+use crate::build_queue::{Kind as QueueKind, Served};
 use crate::index_service::IndexService;
 use crate::reactor::{self, ReactorModule};
 use crate::log::{class_map, ClassMap, LogAnnotator};
@@ -101,54 +102,8 @@ const EVT_RUN_OUTPUT: &str = "arbor://bennu/run-output";
 /// The run process exited — carries the exit code.
 const EVT_RUN_EXIT: &str = "arbor://bennu/run-exit";
 
-// ── single-run guard (build + project validation) ───────────────────────────────
-
-/// The project roots with a build, a test run or a validation in flight. A build and a validation
-/// of the SAME project share one slot, so only one of them runs on a tree at a time — two `mvn`
-/// processes (or a build racing a validation) on one tree would thrash `target/` and the index.
-///
-/// **Per project**, not per process: two different projects share no `target/` and no index, and
-/// making one wait for the other's compile was the reason a launch could not start until the
-/// previous project's had.
-static BUSY_ROOTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
-
-/// How a project root is told apart from another spelling of it: separators unified, trailing
-/// separator dropped, and — on Windows, where paths are case-insensitive — lower-cased.
-pub(crate) fn busy_key(root: &str) -> String {
-    let unified = root.replace('\\', "/");
-    let trimmed = unified.trim_end_matches('/');
-    if cfg!(windows) { trimmed.to_lowercase() } else { trimmed.to_string() }
-}
-
-/// RAII lock over one project's slot in [`BUSY_ROOTS`]. [`acquire`](BuildGuard::acquire) returns
-/// `None` when that project already has one held; the slot is released on drop (so an early
-/// return / panic can't leave it stuck).
-pub(crate) struct BuildGuard {
-    key: String,
-}
-
-impl BuildGuard {
-    /// Take `root`'s lock, or `None` if a build/validation of that project is already in progress.
-    pub(crate) fn acquire(root: &str) -> Option<Self> {
-        let key = busy_key(root);
-        let mut busy = BUSY_ROOTS.lock().unwrap_or_else(|p| p.into_inner());
-        if busy.contains(&key) {
-            return None;
-        }
-        busy.push(key.clone());
-        Some(BuildGuard { key })
-    }
-}
-
-impl Drop for BuildGuard {
-    fn drop(&mut self) {
-        let mut busy = BUSY_ROOTS.lock().unwrap_or_else(|p| p.into_inner());
-        busy.retain(|k| *k != self.key);
-    }
-}
-
-/// The message returned when a concurrent build/validation is refused.
-pub(crate) const BUSY_MSG: &str = "A build or validation is already running for this project";
+// The single-run guard lives in `crate::build_queue`: builds, test runs and validations of a project take
+// numbered tickets there instead of being refused while another is running.
 
 // ── bennu_build ────────────────────────────────────────────────────────────────
 
@@ -174,7 +129,7 @@ pub struct BuildArgs {
 /// all").
 #[arbor_rpc::handler]
 fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String> {
-    let outcome = compile_project(ctx, &args.root, args.module.as_deref())?;
+    let outcome = compile_project(ctx, &args.root, args.module.as_deref())?.value;
     Ok(BuildResult { tool: outcome.tool, ok: outcome.ok, diagnostics: outcome.diagnostics })
 }
 
@@ -183,13 +138,34 @@ fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String>
 /// Split out for the agent-facing facade, which has no build panel behind it and so needs the log
 /// when the diagnostic parser recognised nothing. The handler stays the thin shape it was; the two
 /// cannot diverge because there is only one of them.
+///
+/// Takes a ticket in the build queue first: builds of one project run one at a time, in the order they were
+/// asked for, and a request for the same module queued before a build starts is served by that build —
+/// every waiter gets the same outcome. `Served` says which tree it is about and who shared it.
 pub(crate) fn compile_project(
     ctx: &BennuState,
     root_path: &str,
     module: Option<&str>,
+) -> Result<Served<CompileOutcome>, String> {
+    let module = module.map(str::trim).filter(|m| !m.is_empty());
+    let label = match (is_cargo_root(Path::new(root_path)), module) {
+        (true, Some(package)) => format!("cargo check -p {package}"),
+        (true, None) => "cargo check --workspace".to_string(),
+        (false, Some(module)) => format!("build {module}"),
+        (false, None) => "build".to_string(),
+    };
+    let class = format!("build:{}", module.unwrap_or(""));
+    crate::build_queue::coalesced(ctx.event_sink(), root_path, QueueKind::Build, class, &label, |o: &CompileOutcome| o.ok, || {
+        compile_project_now(ctx, root_path, module)
+    })
+}
+
+/// The compile itself, with the turn already taken.
+fn compile_project_now(
+    ctx: &BennuState,
+    root_path: &str,
+    module: Option<&str>,
 ) -> Result<CompileOutcome, String> {
-    // Refuse to start a second build/validation while one is running (only one at a time).
-    let _guard = BuildGuard::acquire(root_path).ok_or_else(|| BUSY_MSG.to_string())?;
     let sink = ctx.event_sink();
     let root = PathBuf::from(root_path);
     let module = module.map(str::trim).filter(|m| !m.is_empty());
@@ -205,7 +181,7 @@ pub(crate) fn compile_project(
             None,
             None,
         );
-        let (ok, raw) = run_cargo_check(&root, module)?;
+        let (ok, raw) = run_cargo_check(&root, root_path, module)?;
         finish_compile("cargo", ok, raw, &sink, &root)
     } else {
         compile_java(&root, root_path, module, &sink)?
@@ -295,7 +271,7 @@ fn compile_java(
 
 /// Whether `root` is governed by Cargo — the same precedence `bennu-project`'s
 /// `open_project` uses (Maven first: a polyglot root is the Java project).
-fn is_cargo_root(root: &Path) -> bool {
+pub(crate) fn is_cargo_root(root: &Path) -> bool {
     !root.join("pom.xml").is_file() && root.join("Cargo.toml").is_file()
 }
 
@@ -506,6 +482,8 @@ pub(crate) fn spawn_streamed<F: FnOnce(&str)>(
 
     let child = Arc::new(Mutex::new(child));
     RunRegistry::global().register(&run_id, child.clone(), stdin);
+    // The output is also kept here (bounded), so the assistant can read what the user ran.
+    let console = crate::run_console::begin(root, &run_id, &label, &command_line);
     after_register(&run_id);
 
     // Resolved once for the whole run, not once per line: the class index answers "which file
@@ -528,10 +506,11 @@ pub(crate) fn spawn_streamed<F: FnOnce(&str)>(
                     run_id_thread.clone(),
                     sink.clone(),
                     classes.clone(),
+                    console.clone(),
                 ));
             }
             if let Some(err) = stderr {
-                pumps.push(spawn_pump(err, "stderr", run_id_thread.clone(), sink.clone(), classes));
+                pumps.push(spawn_pump(err, "stderr", run_id_thread.clone(), sink.clone(), classes, console.clone()));
             }
             // POLLED, not `wait()`: the canceller needs the same handle to kill the tree, and
             // a thread parked inside `wait()` holds the lock for the entire run.
@@ -550,6 +529,7 @@ pub(crate) fn spawn_streamed<F: FnOnce(&str)>(
                 let _ = p.join();
             }
             RunRegistry::global().finish(&run_id_thread);
+            console.finish(code);
             sink.emit(EVT_RUN_EXIT, json!({ "run_id": run_id_thread, "code": code }));
         })
         .map_err(|e| format!("spawn run thread: {e}"))?;
@@ -661,6 +641,7 @@ fn bennu_run_input(_ctx: &BennuState, args: RunInputArgs) -> Result<(), String> 
 
 /// The outcome of a compile: the tool that ran, whether it exited 0, and the parsed
 /// diagnostics. The raw log is streamed as events (not carried here).
+#[derive(Clone)]
 pub(crate) struct CompileOutcome {
     pub(crate) tool: String,
     pub(crate) ok: bool,
@@ -729,7 +710,7 @@ fn finish_compile(
 /// fallback compiler to try, unlike the `mvn` → `javac` path: `rustc` invoked by hand
 /// cannot resolve a single dependency, so offering it would produce a wall of
 /// unresolved-import errors that say nothing about the code.
-fn run_cargo_check(root: &Path, package: Option<&str>) -> Result<(bool, String), String> {
+fn run_cargo_check(root: &Path, root_path: &str, package: Option<&str>) -> Result<(bool, String), String> {
     let launcher = cargo_launcher();
     let mut cmd = Command::new(&launcher);
     cmd.current_dir(root).arg("check");
@@ -741,6 +722,8 @@ fn run_cargo_check(root: &Path, package: Option<&str>) -> Result<(bool, String),
         None => cmd.arg("--workspace"),
     };
     cmd.arg("--message-format=short").arg("--color=never");
+    // A conversation that builds apart compiles into a target directory of its own.
+    crate::build_queue::apply_target_dir(&mut cmd, root_path);
     cmd.no_window();
     let out = cmd
         .output()
@@ -943,7 +926,7 @@ pub(crate) fn ensure_compiled(ctx: &BennuState, root: &str) -> Result<(), String
     if !build_freshness::assess(Path::new(root), None).plan.needs_compile {
         return Ok(());
     }
-    let outcome = compile_project(ctx, root, None)?;
+    let outcome = compile_project(ctx, root, None)?.value;
     if outcome.ok {
         return Ok(());
     }
@@ -1649,12 +1632,16 @@ fn spawn_pump<R: std::io::Read + Send + 'static>(
     run_id: String,
     sink: Arc<dyn EventSink>,
     classes: ClassMap,
+    console: Arc<crate::run_console::ConsoleRun>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut log = LogAnnotator::new(classes);
         let buf = BufReader::new(reader);
         for line in buf.lines().map_while(Result::ok) {
             let mut payload = log.line(&line);
+            if let Some(text) = payload.get("text").and_then(|t| t.as_str()) {
+                console.push(if stream == "stderr" { bennu_live::prelude::Stream::Stderr } else { bennu_live::prelude::Stream::Stdout }, text);
+            }
             if let Some(map) = payload.as_object_mut() {
                 map.insert("run_id".into(), json!(run_id));
                 map.insert("stream".into(), json!(stream));
@@ -2178,45 +2165,5 @@ mod tests {
     fn quoting_only_kicks_in_for_whitespace() {
         assert_eq!(quoted("-Xmx512m"), "-Xmx512m");
         assert_eq!(quoted("C:/Program Files/jdk/bin/java.exe"), "\"C:/Program Files/jdk/bin/java.exe\"");
-    }
-
-    // ── the per-project guard ───────────────────────────────────────────────────
-
-    /// The reported case: one project compiling must not stop another from compiling.
-    #[test]
-    fn two_projects_build_at_the_same_time() {
-        let a = BuildGuard::acquire("/guard-test/alpha").expect("alpha is free");
-        let b = BuildGuard::acquire("/guard-test/beta").expect("beta is not blocked by alpha");
-        drop((a, b));
-    }
-
-    #[test]
-    fn one_project_builds_one_thing_at_a_time() {
-        let first = BuildGuard::acquire("/guard-test/gamma").expect("free");
-        assert!(BuildGuard::acquire("/guard-test/gamma").is_none(), "a second build of the same tree is refused");
-        drop(first);
-        assert!(BuildGuard::acquire("/guard-test/gamma").is_some(), "and is accepted once the first is done");
-    }
-
-    /// `C:\p\app` and `C:/p/app/` are one tree; a trailing separator must not open a second slot.
-    #[test]
-    fn spellings_of_one_root_share_a_slot() {
-        let first = BuildGuard::acquire("/guard-test/delta/").expect("free");
-        assert!(BuildGuard::acquire("/guard-test/delta").is_none());
-        assert!(BuildGuard::acquire("\\guard-test\\delta").is_none());
-        drop(first);
-    }
-
-    #[test]
-    fn a_dropped_guard_never_leaves_its_slot_taken() {
-        {
-            let _g = BuildGuard::acquire("/guard-test/epsilon").expect("free");
-        }
-        assert!(BuildGuard::acquire("/guard-test/epsilon").is_some());
-    }
-
-    #[test]
-    fn the_key_ignores_separator_style() {
-        assert_eq!(busy_key("C:\\p\\app\\"), busy_key("C:/p/app"));
     }
 }

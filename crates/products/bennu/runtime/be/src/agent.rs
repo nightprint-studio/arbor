@@ -3130,15 +3130,54 @@ fn bennu_test_run(
                 .to_string(),
         );
     }
+    // A ticket in the build queue, like a build: one run of a tree at a time, in order, and a request for
+    // exactly the same selection queued before a run starts is served by that run.
+    let label = format!("{} test", if is_cargo_root(&args.root) { "cargo" } else { "mvn" });
+    let served = crate::build_queue::coalesced(
+        ctx.event_sink(),
+        &args.root,
+        crate::build_queue::Kind::Test,
+        test_class(&args),
+        &label,
+        |_: &crate::test_report::TestRunReport| false,
+        || run_tests_now(ctx, &args, limit),
+    )?;
+    let note = crate::build_queue::served_note(crate::build_queue::Kind::Test, &args.root, &served);
+    let mut report = served.value;
+    if let Some(note) = note {
+        prepend_note(&mut report, note);
+    }
+    Ok(report)
+}
+
+/// What makes two test requests the same request: the same selection, scope and flags.
+fn test_class(args: &RunTestsAtArgs) -> String {
+    let mut tests = args.tests.clone();
+    tests.sort();
+    format!(
+        "test:{}|{}|{}",
+        tests.join(","),
+        args.module.as_deref().map(str::trim).unwrap_or(""),
+        args.include_ignored
+    )
+}
+
+/// The test run itself, with the tree's turn already taken.
+fn run_tests_now(
+    ctx: &BennuState,
+    args: &RunTestsAtArgs,
+    limit: std::time::Duration,
+) -> Result<crate::test_report::TestRunReport, String> {
     if is_cargo_root(&args.root) {
-        let scope = cargo_scope(ctx, &args)?;
-        let run = crate::cargo_tests::start_cargo_run(
+        let scope = cargo_scope(ctx, args)?;
+        let run = crate::cargo_tests::start_cargo_run_with(
             ctx,
             &crate::cargo_tests::RunArgs {
                 root: args.root.clone(),
                 scope,
                 include_ignored: args.include_ignored,
             },
+            crate::build_queue::BuildGuard::already_held(),
         )?;
         let handle = run.handle();
         // Armed before the wait, disarmed after it: the window in which a hang could hold
@@ -3152,7 +3191,7 @@ fn bennu_test_run(
     }
 
     let (scope, widened) = maven_scope(&args.tests, args.module.as_deref());
-    let run = crate::tests::start_maven_run(
+    let run = crate::tests::start_maven_run_with(
         ctx,
         &crate::tests::RunTestsArgs {
             root: args.root.clone(),
@@ -3161,6 +3200,7 @@ fn bennu_test_run(
             // and a suspended fork waiting for one would hang the call.
             debug: false,
         },
+        crate::build_queue::BuildGuard::already_held(),
     )?;
     // The plan's own widening (a selection too long for one command line) matters more than
     // ours, and both must reach the caller: a run that quietly ran more than it was asked to
@@ -4011,6 +4051,14 @@ pub struct BuildReport {
     /// How many problems were left out of `problems`.
     pub truncated: usize,
     pub note: Option<String>,
+    /// How the result came about when it was not an ordinary solo run: shared with other requests, waited for
+    /// in the build queue, the tree it is about and the files that changed after it started.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue: Option<String>,
+    /// For a failed build run by a conversation: whose files the errors are in, and who else changed the
+    /// project since it last compiled. A guess from the edit record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<String>,
 }
 
 /// Compile the project and report what the compiler said.
@@ -4038,7 +4086,10 @@ pub struct BuildReport {
     safety = destructive,
 ))]
 fn bennu_build_project(ctx: &BennuState, args: BuildProjectArgs) -> Result<BuildReport, String> {
-    let outcome = crate::build::compile_project(ctx, &args.root, args.module.as_deref())?;
+    let served = crate::build::compile_project(ctx, &args.root, args.module.as_deref())?;
+    let queue = crate::build_queue::served_note(crate::build_queue::Kind::Build, &args.root, &served);
+    let target = served.target.clone();
+    let outcome = served.value;
 
     let mut problems: Vec<BuildProblem> = outcome
         .diagnostics
@@ -4062,8 +4113,16 @@ fn bennu_build_project(ctx: &BennuState, args: BuildProjectArgs) -> Result<Build
     });
     let truncated = problems.len().saturating_sub(MAX_BUILD_PROBLEMS);
     problems.truncate(MAX_BUILD_PROBLEMS);
+    let attribution = (!outcome.ok)
+        .then(|| {
+            let errors = problems.iter().filter(|p| p.severity == "error").map(|p| (p.file.clone(), p.line, p.message.clone())).collect();
+            crate::build_attribution::explain(&args.root, &target, errors)
+        })
+        .flatten();
 
     Ok(BuildReport {
+        queue,
+        attribution,
         note: build_note(&outcome.tool, outcome.ok, errors, truncated, &outcome.raw),
         tool: outcome.tool,
         ok: outcome.ok,

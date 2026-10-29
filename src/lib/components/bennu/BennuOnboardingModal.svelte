@@ -13,7 +13,7 @@
    */
   import {
     Rocket, FolderOpen, Compass, ServerCog, Command as CommandIcon,
-    LayoutDashboard, Search, History, ShieldCheck, Boxes, Cog, Gamepad2, Check,
+    LayoutDashboard, Search, History, ShieldCheck, Boxes, Cog, Gamepad2, Check, Sparkles, Mic,
   } from 'lucide-svelte';
 
   import OnboardingShell, { type OnboardingStep } from '$lib/components/shared/OnboardingShell.svelte';
@@ -30,6 +30,7 @@
     { id: 'project',  label: 'Project'   },
     { id: 'layout',   label: 'Layout'    },
     { id: 'navigate', label: 'Navigate'  },
+    { id: 'imber',    label: 'Imber'     },
     { id: 'languages', label: 'Languages' },
     { id: 'finish',   label: 'Ready'     },
   ];
@@ -208,6 +209,40 @@
         </Callout>
       </section>
 
+    {:else if stepId === 'imber'}
+      <section class="step-section">
+        <div class="step-header">
+          <span class="step-icon"><Sparkles size={20} /></span>
+          <h2>Imber, the assistant that works in your project</h2>
+          <p>
+            Imber reads, runs, debugs and edits the project with you. It starts in <strong>Manual</strong> mode:
+            nothing changes until you have seen it and accepted it.
+          </p>
+        </div>
+
+        <ul class="feature-list" role="list">
+          <li>
+            <IconCard size="sm" title="Ask from where you are" description="Right-click in the editor or in the project tree: the ✦ Imber icon opens its actions for that code, file or folder.">
+              {#snippet icon()}<Sparkles size={16} />{/snippet}
+            </IconCard>
+          </li>
+          <li>
+            <IconCard size="sm" title="Changes are proposals" description="Review each one as a diff, apply it, and undo it if it was wrong. Permission modes and spending limits are yours to set.">
+              {#snippet icon()}<ShieldCheck size={16} />{/snippet}
+            </IconCard>
+          </li>
+          <li>
+            <IconCard size="sm" title="Talk to it" description="Hold Ctrl+Shift+Space and speak, or say “Ehi Imber” if you turn the wake word on. Speech is recognised on this computer.">
+              {#snippet icon()}<Mic size={16} />{/snippet}
+            </IconCard>
+          </li>
+        </ul>
+
+        <Callout variant="info" title="Needs an API key">
+          Imber is off until you add your own Anthropic API key in its settings. The documentation has a section on it.
+        </Callout>
+      </section>
+
     {:else if stepId === 'languages'}
       <section class="step-section">
         <div class="step-header">
@@ -244,7 +279,7 @@
         <div class="finish-mark"><Check size={40} strokeWidth={3} /></div>
         <h1>That is the tour</h1>
         <p class="tagline">
-          The manual is under <kbd>F1</kbd> — forty short pages, searchable, one per topic.
+          The manual is under <kbd>F1</kbd> — short pages, searchable, one per topic.
         </p>
         <div class="finish-links">
           <Button variant="secondary" onclick={openDocs}>Open the documentation</Button>

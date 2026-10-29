@@ -91,18 +91,22 @@
     color: var(--text-primary);
     margin: 0 0 14px;
     padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: 1px solid transparent;
+    /* The rule under a title fades out from the accent instead of a flat grey line. */
+    border-image: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 12%, transparent) 55%, transparent) 1;
     letter-spacing: -0.2px;
   }
   .doc-block :global(h2) {
     font-size: var(--font-size-xs);
     font-weight: 700;
-    color: var(--text-secondary);
-    margin: 22px 0 10px;
-    padding-bottom: 6px;
+    color: var(--text-primary);
+    margin: 24px 0 10px;
+    padding: 0 0 6px 10px;
     border-bottom: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--accent);
     text-transform: uppercase;
     letter-spacing: 0.7px;
+    line-height: 1.3;
   }
   .doc-block :global(h2 code) {
     text-transform: none;
@@ -207,9 +211,9 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--text-muted);
-    background: rgba(255, 255, 255, 0.02);
-    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
   }
   .doc-block :global(td) {
     padding: 6px 12px;
@@ -223,7 +227,7 @@
   }
   .doc-block :global(tbody tr:last-child td) { border-bottom: none; }
   /* Hover feedback for the denser comparison tables the reference pages use. */
-  .doc-block :global(tbody tr:hover) { background: rgba(255, 255, 255, 0.015); }
+  .doc-block :global(tbody tr:hover) { background: color-mix(in srgb, var(--accent) 5%, transparent); }
   .doc-block :global(a) { color: var(--accent); }
 
   /* ═══════════════════════════════════════════════════════════════════

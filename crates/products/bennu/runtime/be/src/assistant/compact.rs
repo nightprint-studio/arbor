@@ -10,7 +10,8 @@
 //! The last user turn is never folded: it is what the model is about to answer.
 
 use bennu_assistant::prelude::{
-    run, AgentEvent, Anthropic, Block, Gate, Host, Message, Request, Role, ToolCall, ToolSpec, Transport, Usage,
+    compose_summary_note, dropped_report, image_tokens, run, AgentEvent, Anthropic, Block, ErrorKind, Gate, Host, Message, ProviderError, Request, RetryPolicy, Role, ToolCall, ToolSpec,
+    Transport, Usage, SUMMARY_SYSTEM,
 };
 
 /// The marker left where an old tool result was.
@@ -24,7 +25,8 @@ pub(super) fn tokens(text: &str) -> u64 {
 pub(super) fn estimate_request(request: &Request) -> u64 {
     let tools = serde_json::to_string(&request.tools).unwrap_or_default();
     let messages = serde_json::to_string(&request.messages).unwrap_or_default();
-    tokens(&request.system) + tokens(&tools) + tokens(&messages)
+    // A picture is a path in the JSON above but thousands of pixels on the wire: counted from its own estimate.
+    tokens(&request.system) + tokens(&tools) + tokens(&messages) + image_tokens(&request.messages)
 }
 
 /// Blank the bulky tool results that come before the last `keep_turns` assistant turns. The calls
@@ -93,14 +95,13 @@ pub(super) fn render_for_summary(messages: &[Message]) -> String {
                     let more = if content.chars().count() > RESULT_CHARS { " …" } else { "" };
                     out.push_str(&format!("[{} {head}{more}]", if *is_error { "error" } else { "result" }));
                 }
+                Block::ToolImage { .. } => out.push_str("[a screenshot]"),
             }
             out.push_str("\n\n");
         }
     }
     out
 }
-
-const SUMMARY_SYSTEM: &str = "You write the note that replaces the early part of a long conversation between a developer and a coding assistant, so the conversation can go on in less room. Be factual and dense. Keep: what the user wants overall; decisions made and why; files read, changed or proposed (with paths); symbols and names that matter; things tried that did not work; what is still to do. Leave out pleasantries and anything that can be looked up again with a tool. Write plain text, no preamble.";
 
 pub(super) fn summary_request(older: &[Message], instructions: Option<&str>, model: &str) -> Request {
     let mut ask = format!("Here is the part of the conversation to fold into a note:\n\n{}", render_for_summary(older));
@@ -115,6 +116,7 @@ pub(super) fn summary_request(older: &[Message], instructions: Option<&str>, mod
         tools: Vec::new(),
         max_tokens: 4096,
         effort: None,
+        long_cache: false,
     }
 }
 
@@ -146,6 +148,11 @@ impl Host for NoTools {
     fn cancelled(&self) -> bool {
         false
     }
+    /// Something is waiting on this note (a message the user is about to send, or the compact button): a short
+    /// grace for a blip, then the failure — the conversation is left as it was.
+    fn retry_policy(&self) -> RetryPolicy {
+        RetryPolicy::quick()
+    }
 }
 
 /// Ask the model for the note. Returns it and what the request used.
@@ -155,11 +162,14 @@ pub(super) fn summarize(
     model: &str,
     older: &[Message],
     instructions: Option<&str>,
-) -> Result<(String, Usage), String> {
-    let outcome = run(&Anthropic, transport, &NoTools, key, summary_request(older, instructions, model), 1)?;
+) -> Result<(String, Usage), ProviderError> {
+    let outcome = run(&Anthropic, transport, &NoTools, key, summary_request(older, instructions, model), 1);
+    if let Some(error) = outcome.error {
+        return Err(error);
+    }
     let text = outcome.added.iter().map(Message::text).collect::<Vec<_>>().join("\n");
     if text.trim().is_empty() {
-        return Err("the model returned an empty summary".into());
+        return Err(ProviderError::new(ErrorKind::Server, "the model returned an empty summary"));
     }
     Ok((text, outcome.usage))
 }
@@ -169,6 +179,8 @@ pub(super) struct Compacted {
     pub transcript: Vec<Message>,
     pub summarized: bool,
     pub usage: Usage,
+    /// What the user is told was dropped; empty when nothing was summarised.
+    pub dropped: String,
 }
 
 /// Compact `transcript`: clear old tool output, then — when `always_summarize` or the result is still
@@ -182,17 +194,20 @@ pub(super) fn compact(
     always_summarize: bool,
     size_of: &dyn Fn(&[Message]) -> u64,
     limit_tokens: u64,
-) -> Result<Compacted, String> {
+) -> Result<Compacted, ProviderError> {
     let (cleared, _) = clear_old_tool_results(transcript, 2);
     if !always_summarize && size_of(&cleared) < limit_tokens {
-        return Ok(Compacted { transcript: cleared, summarized: false, usage: Usage::default() });
+        return Ok(Compacted { transcript: cleared, summarized: false, usage: Usage::default(), dropped: String::new() });
     }
     let (older, kept) = split_for_summary(&cleared, 1);
     if older.is_empty() {
-        return Ok(Compacted { transcript: cleared, summarized: false, usage: Usage::default() });
+        return Ok(Compacted { transcript: cleared, summarized: false, usage: Usage::default(), dropped: String::new() });
     }
     let (summary, usage) = summarize(transport, key, model, &older, instructions)?;
-    Ok(Compacted { transcript: fold(&summary, kept), summarized: true, usage })
+    // The model writes the sections; the files changed and the plan are added from the record, word for word.
+    let note = compose_summary_note(&summary, &older, &kept);
+    let dropped = dropped_report(&older, &note);
+    Ok(Compacted { transcript: fold(&note, kept), summarized: true, usage, dropped })
 }
 
 #[cfg(test)]
@@ -302,7 +317,7 @@ mod tests {
     /// Answers every request with one scripted text reply.
     struct Reply(&'static str, RefCell<usize>);
     impl Transport for Reply {
-        fn stream(&self, _r: &HttpRequest, on_chunk: &mut dyn FnMut(&str) -> bool) -> Result<(), String> {
+        fn stream(&self, _r: &HttpRequest, on_chunk: &mut dyn FnMut(&str) -> bool) -> Result<(), ProviderError> {
             *self.1.borrow_mut() += 1;
             let sse = format!(
                 "data: {}\n\ndata: {}\n\ndata: {}\n\ndata: {}\n\n",
@@ -336,6 +351,26 @@ mod tests {
         assert!(out.transcript[0].text().contains("They want EUR"));
         assert_eq!(out.usage.output_tokens, 7);
         assert!(out.transcript.len() < long().len());
+    }
+
+    /// Never reaches the API.
+    struct Down;
+    impl Transport for Down {
+        fn stream(&self, _r: &HttpRequest, _on_chunk: &mut dyn FnMut(&str) -> bool) -> Result<(), ProviderError> {
+            Err(ProviderError::new(ErrorKind::Auth, "invalid x-api-key"))
+        }
+    }
+
+    #[test]
+    fn a_note_that_cannot_be_written_is_an_error_and_the_transcript_is_untouched() {
+        let before = long();
+        let e = match compact(&before, &Down, "k", "m", None, true, &size, 0) {
+            Err(e) => e,
+            Ok(_) => panic!("no note was written"),
+        };
+        assert_eq!(e.kind, ErrorKind::Auth);
+        assert!(e.detail.contains("invalid x-api-key"));
+        assert_eq!(before.len(), long().len(), "compact only reads the conversation it is given");
     }
 
     #[test]

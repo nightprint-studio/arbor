@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
-   * Dependencies: how the classpath is resolved without a build, the actions that change what is on disk, and the
-   * tool window that lists it.
+   * Dependencies, overview: how the classpath is resolved without a build, the actions that change what is on disk,
+   * the tool window that lists it, and what it will not compute. Versions and vulnerabilities have their own pages.
    */
   import Callout from '$lib/components/shared/ui/Callout.svelte';
 </script>
@@ -113,7 +113,7 @@
   <li><strong>Version conflicts</strong>a group at the top with every artifact the project sees at more than one version. Each lists the version Maven kept, the ones it dropped, and for each version the chain of dependencies that asked for it.</li>
   <li><strong>via …</strong>every transitive row names the declared dependencies that bring it in</li>
   <li><strong>Details</strong>a declared row opens (chevron) to show what it pulls in and, when conflicted, its versions</li>
-  <li><strong>Vulnerability badge</strong>a dependency (declared or transitive) with known CVEs carries a shield with the count, coloured by the worst severity — it uses the same OSV answer as the Vulnerabilities window, so it appears only while that check is on</li>
+  <li><strong>Vulnerability badge</strong>a shield with the count on a dependency with known CVEs — see <strong>Dependency security</strong></li>
 </ul>
 <p>
   On a Cargo workspace the same button runs <code>cargo tree --workspace</code>. Cargo never drops a version — two incompatible
@@ -147,9 +147,21 @@
 
 <h2>What it will not compute</h2>
 <p>
-  Reading the list runs nothing: the poms are files, and the classpath is the one already resolved for the index. Imported
-  BOMs and version ranges are the two things it will not work out — a version only they can answer stays blank, unless the
-  resolved classpath settles it, which is not a guess but the jar the compiler is being given.
+  Reading the list runs nothing: the poms are files, and the classpath is the one already resolved for the index. The list
+  itself does not work out imported BOMs, version ranges or which of two transitive versions wins — a version only they can
+  answer stays blank, unless the resolved classpath settles it, which is not a guess but the jar the compiler is being given.
+</p>
+<p>
+  The classpath resolve, by contrast, does apply BOMs, nearest-wins and exclusions, but it never picks a version out of a
+  range and never activates a profile — both are decisions about a build. Where those rules come from and what they decide is
+  covered in <strong>Dependency versions</strong>.
+</p>
+
+<h2>Versions and vulnerabilities</h2>
+<p>
+  <strong>Dependency versions</strong> explains where a version comes from, scopes, exclusions, duplicates and the
+  newer-version offers. <strong>Dependency security</strong> covers the known-vulnerability check and the Vulnerabilities
+  window.
 </p>
 
 <h2>The module graph</h2>

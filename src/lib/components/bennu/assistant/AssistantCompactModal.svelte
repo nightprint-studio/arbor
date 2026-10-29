@@ -40,6 +40,8 @@
         Say what it must not lose.
       </p>
       <Textarea
+        framed
+        ariaLabel="What the summary must not lose"
         bind:value={note}
         placeholder="e.g. the decision about the EUR fallback, and which callers are still to update"
         minRows={3}

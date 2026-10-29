@@ -83,6 +83,10 @@ export interface BennuSettingsSnapshot {
   historyDiffSplit: boolean;
   /** Add the commit message to the Git Blame text drawn after a line. Config-backed. */
   blameShowMessage: boolean;
+  /** Draw the profiler's per-method numbers in the editor. Config-backed. */
+  profilerHints: boolean;
+  /** Show Imber's ✦ button by the caret (doc comment, selected text). Config-backed. */
+  askChip: boolean;
   /** Mark lines changed since HEAD in the gutter; off, the editor makes no diff calls. Config-backed. */
   showChangeMarkers: boolean;
   /** Minutes the DTO Lab's JVM may go without a question before it is stopped. Config-backed. */
@@ -174,6 +178,8 @@ const DEFAULTS: BennuSettingsSnapshot = {
   markdownLivePreview: true,
   historyDiffSplit: true,
   blameShowMessage: false,
+  profilerHints: true,
+  askChip: true,
   showChangeMarkers: true,
   dtoLabIdleMinutes: 10,
   autosave: true,
@@ -276,6 +282,8 @@ function createSettingsStore() {
   let markdownLivePreview = $state(DEFAULTS.markdownLivePreview);
   let historyDiffSplit = $state(DEFAULTS.historyDiffSplit);
   let blameShowMessage = $state(DEFAULTS.blameShowMessage);
+  let profilerHints = $state(DEFAULTS.profilerHints);
+  let askChip = $state(DEFAULTS.askChip);
   let showChangeMarkers = $state(DEFAULTS.showChangeMarkers);
   let dtoLabIdleMinutes = $state(DEFAULTS.dtoLabIdleMinutes);
 
@@ -297,7 +305,7 @@ function createSettingsStore() {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
       highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, inlayHints,
       usageCounts, rightMargin,
-      sqlDialect, htmlScriptsAllowed, mavenAutoDownload, markdownLivePreview, historyDiffSplit, blameShowMessage, showChangeMarkers, dtoLabIdleMinutes, autosave,
+      sqlDialect, htmlScriptsAllowed, mavenAutoDownload, markdownLivePreview, historyDiffSplit, blameShowMessage, profilerHints, showChangeMarkers, dtoLabIdleMinutes, autosave,
       collapseLibraryFrames, searchDependencies,
       localHistory, localHistoryDays, localHistoryMaxMb, localHistoryMaxFileMb,
       autoPopup, popupDelayMs, caseSensitive, importCensus, autoImport,
@@ -305,7 +313,7 @@ function createSettingsStore() {
       javaBlankLines, javaIndentCaseBody,
       finalParams, useLombokVal, entityLombok, entityFluent, useLocalVar, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
       rustVisibility, rustDerives, rustDocComments, rustErrorStyle, rustSelfInImpl,
-      defaultEncoding, rebuildIndexOnOpen, excludedDirs,
+      defaultEncoding, rebuildIndexOnOpen, excludedDirs, askChip,
     };
   }
 
@@ -348,6 +356,8 @@ function createSettingsStore() {
         markdown_live_preview: markdownLivePreview,
         history_diff_split: historyDiffSplit,
         blame_show_message: blameShowMessage,
+        profiler_hints: profilerHints,
+        ask_chip: askChip,
         show_change_markers: showChangeMarkers,
         dtolab_idle_minutes: dtoLabIdleMinutes,
         autosave,
@@ -598,6 +608,10 @@ function createSettingsStore() {
     setHistoryDiffSplit(v: boolean) { historyDiffSplit = v; void persistConfigBacked(); },
     get blameShowMessage() { return blameShowMessage; },
     setBlameShowMessage(v: boolean) { blameShowMessage = v; void persistConfigBacked(); },
+    get profilerHints() { return profilerHints; },
+    setProfilerHints(v: boolean) { profilerHints = v; void persistConfigBacked(); },
+    get askChip() { return askChip; },
+    setAskChip(v: boolean) { askChip = v; void persistConfigBacked(); },
     get showChangeMarkers() { return showChangeMarkers; },
     setShowChangeMarkers(v: boolean) { showChangeMarkers = v; void persistConfigBacked(); },
     get dtoLabIdleMinutes() { return dtoLabIdleMinutes; },
@@ -637,6 +651,8 @@ function createSettingsStore() {
         markdownLivePreview = cfg.markdown_live_preview ?? DEFAULTS.markdownLivePreview;
         historyDiffSplit = cfg.history_diff_split ?? DEFAULTS.historyDiffSplit;
         blameShowMessage = cfg.blame_show_message ?? DEFAULTS.blameShowMessage;
+        profilerHints = cfg.profiler_hints ?? DEFAULTS.profilerHints;
+        askChip = cfg.ask_chip ?? DEFAULTS.askChip;
         showChangeMarkers = cfg.show_change_markers ?? DEFAULTS.showChangeMarkers;
         dtoLabIdleMinutes = clampIdleMinutes(cfg.dtolab_idle_minutes ?? DEFAULTS.dtoLabIdleMinutes);
         autosave = cfg.autosave;
@@ -706,6 +722,8 @@ function createSettingsStore() {
       markdownLivePreview = DEFAULTS.markdownLivePreview;
       historyDiffSplit = DEFAULTS.historyDiffSplit;
       blameShowMessage = DEFAULTS.blameShowMessage;
+      profilerHints = DEFAULTS.profilerHints;
+      askChip = DEFAULTS.askChip;
       showChangeMarkers = DEFAULTS.showChangeMarkers;
       dtoLabIdleMinutes = DEFAULTS.dtoLabIdleMinutes;
       autosave = DEFAULTS.autosave;

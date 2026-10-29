@@ -34,6 +34,7 @@ const BACKENDS = [
   'garrulus-be',
   'bennu-be',
   'tyto-be',
+  'voice-be',
 ];
 const destDir = 'src-tauri/backends';
 

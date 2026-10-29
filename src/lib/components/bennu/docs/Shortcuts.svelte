@@ -29,7 +29,7 @@
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd></td><td><strong>i18n</strong> — the fulcrum translation under the caret, rendered. Only on a translation bundle, so there is no rail button</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>0</kbd></td><td><strong>Build</strong>, bottom dock</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>R</kbd></td><td><strong>Run</strong> — the launched program's console, and the debugger when it is one</td></tr>
-    <tr><td><kbd>Alt</kbd> + <kbd>A</kbd></td><td><strong>Assistant</strong> — the chat and agent panel, right rail</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>A</kbd></td><td><strong>Imber</strong> — the assistant, a chat and agent panel on the right rail. Its other keys (expand, next mode, apply the isolated copy) are listed on the page <em>Imber: Keyboard and palette</em></td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>6</kbd></td><td><strong>Problems</strong></td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>7</kbd></td><td><strong>TODO</strong></td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>3</kbd></td><td><strong>Forms</strong> — JSP form analysis</td></tr>
@@ -152,6 +152,9 @@
     <tr><td><kbd>Alt</kbd> + <kbd>4</kbd></td><td><strong>Endpoints</strong> — request mappings and Struts actions in one list</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F12</kbd></td><td><strong>Spring beans</strong></td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td><td><strong>Bevy components</strong>, each expanding into the systems reading and writing it</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>A</kbd></td><td><strong>Bevy Remote</strong> — the live inspector of a running game (attach)</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F9</kbd></td><td><strong>Profiler</strong> — record a run, flame graph, hot methods, memory and locks</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F11</kbd></td><td><strong>Live</strong> — running services, recipes, scenarios and the timeline</td></tr>
     <tr><td>Command palette</td><td><strong>Message bundles</strong>, <strong>Spring configuration</strong>, <strong>Spring bound properties</strong></td></tr>
   </tbody>
 </table>

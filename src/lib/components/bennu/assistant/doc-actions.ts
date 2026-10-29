@@ -15,14 +15,17 @@ export interface DocAction {
   id: DocActionId;
   label: string;
   hint: string;
+  /** The submenu it is shown under, and its label there (see `menu-groups.ts`). */
+  group?: string;
+  child?: string;
 }
 
 const COMMENT_ACTIONS: DocAction[] = [
-  { id: 'improve', label: 'Improve this comment', hint: 'Clearer wording, same facts' },
+  { id: 'improve', label: 'Improve this comment', hint: 'Clearer wording, same facts', group: 'Improve', child: 'Clearer wording' },
   { id: 'review', label: 'Check against the code', hint: 'Parameters, return value, exceptions, stale statements' },
-  { id: 'shorten', label: 'Make it shorter', hint: 'Keep what a reader needs' },
-  { id: 'translate-en', label: 'Translate to English', hint: '' },
-  { id: 'translate-it', label: 'Translate to Italian', hint: '' },
+  { id: 'shorten', label: 'Make it shorter', hint: 'Keep what a reader needs', group: 'Improve', child: 'Shorter' },
+  { id: 'translate-en', label: 'Translate to English', hint: '', group: 'Translate', child: 'English' },
+  { id: 'translate-it', label: 'Translate to Italian', hint: '', group: 'Translate', child: 'Italian' },
 ];
 
 const WRITE_ACTIONS: DocAction[] = [

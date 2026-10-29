@@ -25,8 +25,23 @@
   const tone = $derived(contextTone(percent));
   const over = $derived(used > max);
 
+  // The standing part is split when the backend counted its pieces; an older conversation shows it as one.
+  const split = $derived((context.tools ?? 0) + (context.instructions ?? 0) + (context.skills ?? 0) > 0);
+  const rules = $derived(context.system - (context.tools ?? 0) - (context.instructions ?? 0) - (context.skills ?? 0));
+  const standing = $derived(
+    split
+      ? [
+          { id: 'tools', label: 'Tool definitions', value: context.tools ?? 0, tone: 'muted' as const },
+          { id: 'rules', label: 'Imber rules', value: Math.max(0, rules), tone: 'muted' as const },
+          ...((context.instructions ?? 0) > 0 ? [{ id: 'instructions', label: 'Project instructions', value: context.instructions ?? 0, tone: 'muted' as const }] : []),
+          ...((context.skills ?? 0) > 0 ? [{ id: 'skills', label: 'Skills index', value: context.skills ?? 0, tone: 'muted' as const }] : []),
+        ]
+      : [{ id: 'system', label: 'Instructions & tools', value: context.system, tone: 'muted' as const }],
+  );
+  const last = $derived(store.lastRequest);
+  const percentCached = $derived(last ? Math.round(100 * last.cacheRead / Math.max(1, last.cacheRead + last.cacheWrite + last.input)) : 0);
   const parts = $derived([
-    { id: 'system', label: 'Instructions & tools', value: context.system, tone: 'muted' as const },
+    ...standing,
     { id: 'project', label: 'Files & search results', value: context.project, tone: 'info' as const },
     { id: 'conversation', label: 'Conversation', value: context.conversation, tone: 'accent' as const },
   ]);
@@ -61,6 +76,13 @@
         </li>
       {/each}
     </ul>
+    {#if last}
+      <p class="cache">
+        Last request: <b>{percentCached}%</b> read from the cache
+        (<span>{formatTokens(last.cacheRead)} read</span> · <span>{formatTokens(last.cacheWrite)} written</span> · <span>{formatTokens(last.input)} new</span>).
+        The cache is why a long conversation stays cheap.
+      </p>
+    {/if}
     <p class="note">An estimate, at about four characters a token. The exact count comes back with each answer.</p>
     <div class="actions">
       <Button
@@ -108,6 +130,8 @@
   .t-muted { background: var(--text-muted); }
   .t-info { background: var(--info); }
   .t-accent { background: var(--accent); }
+  .cache { margin: 0; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-secondary); }
+  .cache b { color: var(--text-primary); }
   .note { margin: 0; font-size: var(--font-size-2xs); line-height: 1.45; color: var(--text-muted); }
   .actions { display: flex; }
 </style>

@@ -133,7 +133,7 @@
         level={l.level}
         onopen={openLogLink}
         onsql={copySql}
-      />{#if traces.has(index)}<button type="button" class="bc-ai" title="Ask the assistant to find the cause and fix it" onclick={() => askAboutTrace(index)}><Sparkles size={10} />Fix with the assistant</button>{/if}{/if}
+      />{#if traces.has(index)}<button type="button" class="bc-ai" title="Ask Imber to find the cause and fix it" onclick={() => askAboutTrace(index)}><Sparkles size={10} />Fix with Imber</button>{/if}{/if}
   {/snippet}
 </VirtualTextView>
 

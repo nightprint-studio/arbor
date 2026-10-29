@@ -31,6 +31,14 @@ export interface BreakpointDto {
    *  The library breakpoint's real identity — `file` is only where its view is cached. It is what
    *  the VM is asked about, and what reopens the view from the Breakpoints list. */
   class?: string;
+  /** Set by the AI assistant rather than by the user: drawn with its own gutter marker, and the
+   *  only kind the assistant may remove. The user can disable or delete it like any other. */
+  by_assistant?: boolean;
+  /** A **logpoint**: a hit prints this message (with `{path}` placeholders) to the run console
+   *  and does not stop the program. Empty/absent = an ordinary breakpoint. */
+  log_message?: string;
+  /** Paths the assistant asked to have read at hit time (captured with the stop). */
+  capture?: string[];
 }
 
 /** A breakpoint on a **throw** rather than on a line.
@@ -44,6 +52,8 @@ export interface ExceptionBreakpointDto {
   caught: boolean;
   uncaught: boolean;
   enabled: boolean;
+  /** Set by the assistant (`debug_break_on_exception`). */
+  by_assistant?: boolean;
 }
 
 /** The per-repo `[bennu.debug]` section. */

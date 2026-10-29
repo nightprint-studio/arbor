@@ -61,10 +61,14 @@
    */
   import { untrack, type Snippet } from 'svelte';
   import type { IconComponent } from '$lib/types/icon';
-  import { Search, CornerDownLeft } from 'lucide-svelte';
+  import { Search } from 'lucide-svelte';
   import Modal from '../Modal.svelte';
+  import ModalHeader from '../ModalHeader.svelte';
   import Tabs, { type TabItem } from '../ui/Tabs.svelte';
   import Spinner from '../ui/Spinner.svelte';
+  import Input from '../ui/Input.svelte';
+  import Badge from '../ui/Badge.svelte';
+  import EmptyState from '../ui/EmptyState.svelte';
   import CodePreview from '../ui/CodePreview.svelte';
   import Select from '../ui/Select.svelte';
   import type { LanguageDescriptor } from '../ui/code-editor';
@@ -275,6 +279,9 @@
   const PER_CATEGORY_IN_ALL = 5;
   /** Cap on one category's own list — beyond this nobody is reading, they retype. */
   const MAX_ROWS = 200;
+  /** Kind-icon size in px. Also the box's `font-size` (see `.nv-icon`), because the drawn kind
+   *  marks size themselves in `em` and ignore the `size` prop lucide icons take. */
+  const ICON_SIZE = 18;
 
   // svelte-ignore state_referenced_locally
   let query = $state(initialQuery);
@@ -652,99 +659,109 @@
 
 <Modal
   {onClose}
-  width={anyPreview ? '1000px' : '700px'}
-  height={anyPreview ? '600px' : '520px'}
+  width={anyPreview ? 'min(1000px, 100%)' : 'min(700px, 100%)'}
+  height="max(480px, 60vh)"
   padBody={false}
   ariaLabel={title}
 >
+  {#snippet header()}
+    <!-- The tabs ARE the header, the way IntelliJ's Search Everywhere has no title bar: they say
+         what is being searched, and a control that changes the meaning of the field below it
+         belongs above that field. The shared header supplies the close button and the compact
+         height, so this is not a second kind of title bar.
+         The keydown lives here as well as on the body so Tab / arrows keep working whichever of
+         the two holds focus. -->
+    <ModalHeader {onClose}>
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div class="nv-head" role="group" onkeydown={onKeydown}>
+        <Tabs
+          items={tabs}
+          value={active}
+          variant="pill"
+          size="sm"
+          ariaLabel="What to search"
+          onSelect={selectTab}
+        />
+        <span class="nv-spacer"></span>
+        {#if parsed.directives.length}
+          <!-- Shown back, because a directive that silently did nothing is worse
+               than one that was never typed. -->
+          {#each parsed.directives as d (d.key + d.value)}
+            <span class="nv-directive">{d.key}:{d.value}</span>
+          {/each}
+        {/if}
+        <span class="nv-count">{rows.length}</span>
+        <!-- Beside the tabs rather than the field: both narrow the same thing the tabs do —
+             which slice of the project is on the table — so the field row stays a field row. -->
+        {#if sourceOptions.length > 1}
+          <Select
+            value={sourceId}
+            options={sourceOptions}
+            size="sm"
+            highlight={sourceId !== sourceOptions[0]?.value}
+            ariaLabel={sourceLabel}
+            onchange={(v) => (sourceId = v)}
+          />
+        {/if}
+        {#if facetCategory && facetValues.length}
+          <Select
+            value={facet}
+            options={[
+              { value: '', label: `All ${facetCategory.facetLabel?.toLowerCase()}s` },
+              ...facetValues.map((v) => ({ value: v, label: v })),
+            ]}
+            size="sm"
+            highlight={!!facet}
+            searchable={facetValues.length > 12}
+            searchPlaceholder={`Filter ${facetCategory.facetLabel?.toLowerCase()}s…`}
+            ariaLabel={facetCategory.facetLabel}
+            onchange={(v) => (facet = v)}
+          />
+        {/if}
+      </div>
+    </ModalHeader>
+  {/snippet}
+
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="nv" role="group" onkeydown={onKeydown}>
-    <!-- The tabs come FIRST: they say what is being searched, and a control that changes the
-         meaning of the field below it belongs above that field, not under it. -->
-    <div class="nv-tabs">
-      <Tabs
-        items={tabs}
-        value={active}
-        variant="pill"
-        size="sm"
-        ariaLabel="What to search"
-        onSelect={selectTab}
-      />
-      <span class="nv-spacer"></span>
-      {#if parsed.directives.length}
-        <!-- Shown back, because a directive that silently did nothing is worse
-             than one that was never typed. -->
-        {#each parsed.directives as d (d.key + d.value)}
-          <span class="nv-directive">{d.key}:{d.value}</span>
-        {/each}
-      {/if}
-      <span class="nv-count">{rows.length}</span>
-      <!-- On the header row rather than beside the field: both narrow the same thing the tabs
-           do — which slice of the project is on the table — so they belong with them, and the
-           field row stays a field row. -->
-      {#if sourceOptions.length > 1}
-        <Select
-          value={sourceId}
-          options={sourceOptions}
-          size="sm"
-          highlight={sourceId !== sourceOptions[0]?.value}
-          ariaLabel={sourceLabel}
-          onchange={(v) => (sourceId = v)}
-        />
-      {/if}
-      {#if facetCategory && facetValues.length}
-        <Select
-          value={facet}
-          options={[
-            { value: '', label: `All ${facetCategory.facetLabel?.toLowerCase()}s` },
-            ...facetValues.map((v) => ({ value: v, label: v })),
-          ]}
-          size="sm"
-          highlight={!!facet}
-          searchable={facetValues.length > 12}
-          searchPlaceholder={`Filter ${facetCategory.facetLabel?.toLowerCase()}s…`}
-          ariaLabel={facetCategory.facetLabel}
-          onchange={(v) => (facet = v)}
-        />
-      {/if}
-    </div>
-
     <div class="nv-search">
-      <Search size={14} />
-      <input
-        bind:this={field}
-        bind:value={query}
-        class="nv-field"
-        type="text"
-        data-modal-autofocus
-        spellcheck="false"
-        autocomplete="off"
-        placeholder="Type to search — try sort:new or ext:sql"
-        aria-label={title}
-        role="combobox"
-        aria-expanded={rows.length > 0}
-        aria-controls="nv-results"
-      />
-      {#if loading || searching}<Spinner size={13} />{/if}
+      <div class="nv-field">
+        <Input
+          bind:value={query}
+          bind:element={field}
+          size="lg"
+          placeholder="Type to search — try sort:new or ext:sql"
+          ariaLabel={title}
+          attrs={{
+            role: 'combobox',
+            'aria-expanded': rows.length > 0,
+            'aria-controls': 'nv-results',
+            'data-modal-autofocus': '',
+            spellcheck: false,
+            autocomplete: 'off',
+          }}
+        >
+          {#snippet iconStart()}<Search size={14} />{/snippet}
+          {#snippet iconEnd()}{#if loading || searching}<Spinner size={13} />{/if}{/snippet}
+        </Input>
+      </div>
       {#if fieldActions}<div class="nv-actions">{@render fieldActions()}</div>{/if}
     </div>
 
     <div class="nv-body" class:nv-split={anyPreview}>
     <div class="nv-list" id="nv-results" role="listbox" aria-label="Results" bind:this={list}>
       {#if loading}
-        <p class="nv-note">Reading…</p>
+        <div class="nv-state"><Spinner size={14} /><span>Reading…</span></div>
       {:else if !rows.length && searching}
         <!-- Only when there is nothing else to read: a remote answer landing under results
              that are already useful must not blank them out first. -->
-        <p class="nv-note">Searching…</p>
+        <div class="nv-state"><Spinner size={14} /><span>Searching…</span></div>
       {:else if !rows.length}
-        <p class="nv-note">
-          {#if query.trim()}
-            Nothing matches <b>{query.trim()}</b>.
-          {:else}
-            {emptyNote}
-          {/if}
-        </p>
+        {#if query.trim()}
+          <EmptyState message={`Nothing matches “${query.trim()}”.`} />
+        {:else}
+          <EmptyState message={emptyNote} />
+        {/if}
         {#if !query.trim()}
           <!-- The syntax is only discoverable if it is somewhere, and the empty
                state is the one moment nobody is busy reading results. -->
@@ -774,9 +791,9 @@
               onclick={() => open(row)}
             >
               {#if row.icon}
-                <span class="nv-icon"><row.icon size={13} {...row.iconProps ?? {}} /></span>
+                <span class="nv-icon"><row.icon size={ICON_SIZE} {...row.iconProps ?? {}} /></span>
               {:else}
-                <span class="nv-icon nv-icon-gap"></span>
+                <span class="nv-icon"></span>
               {/if}
               <span class="nv-name">
                 {#each segments(row.name, row.nameRanges) as part, i (i)}
@@ -795,7 +812,7 @@
                    this build compiles, the project for a sibling of it, the artifact for
                    something it merely depends on. -->
               {#if row.origin}<span class="nv-origin">{row.origin}</span>{/if}
-              {#if row.tag}<span class="nv-tag">{row.tag}</span>{/if}
+              {#if row.tag}<Badge variant="tone" tone="neutral">{row.tag}</Badge>{/if}
             </button>
           {/each}
         {/each}
@@ -814,56 +831,51 @@
             />
           </div>
         {:else if previewing}
-          <p class="nv-note">Reading…</p>
+          <div class="nv-state"><Spinner size={14} /><span>Reading…</span></div>
         {:else}
-          <p class="nv-note">Nothing to preview.</p>
+          <EmptyState message="Nothing to preview." />
         {/if}
       </div>
     {/if}
     </div>
+  </div>
 
+  {#snippet footer()}
+    <!-- The modal's own footer chrome (same recipe as every other dialog), not a bar of ours. -->
     <div class="nv-foot">
       <Kbd keys={["↑"]} size="sm" /><Kbd keys={["↓"]} size="sm" /><span>move</span>
       <Kbd keys={["Tab"]} size="sm" /><span>category</span>
-      <span class="nv-foot-open"><CornerDownLeft size={11} /> open</span>
+      <Kbd keys={["Enter"]} size="sm" /><span>open</span>
       <span class="nv-spacer"></span>
       <Kbd keys={["Esc"]} size="sm" /><span>close</span>
     </div>
-  </div>
+  {/snippet}
 </Modal>
 
 <style>
   .nv { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 
+  /* The field is the shared Input in its large size — its own border and focus ring, so this row
+     adds spacing and nothing else. The single hairline of the modal body sits under it. */
   .nv-search {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 11px 14px;
+    padding: 8px;
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
   }
-  .nv-search :global(svg) { color: var(--text-disabled); flex-shrink: 0; }
-  .nv-field {
-    flex: 1;
-    min-width: 0;
-    background: none;
-    border: none;
-    outline: none;
-    color: var(--text-primary);
-    font-size: var(--font-size-lg);
-  }
-  .nv-field::placeholder { color: var(--text-disabled); }
+  .nv-field { flex: 1; min-width: 0; }
   .nv-actions { display: flex; gap: 4px; flex-shrink: 0; }
 
-  .nv-tabs {
+  /* Sits in the modal header, which already pads and centres: this only lays the controls out and
+     lets the tabs shrink before anything else does. */
+  .nv-head {
+    flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 7px 12px;
-    border-bottom: 1px solid var(--border-subtle);
-    background: var(--bg-elevated);
-    flex-shrink: 0;
   }
   .nv-spacer { flex: 1; }
   .nv-directive {
@@ -886,8 +898,28 @@
      layout it had, and the split never appears as an empty half. */
   .nv-body { flex: 1; min-height: 0; display: flex; }
   .nv-body.nv-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .nv-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; }
+  /* `overflow-anchor: none` and a stable scrollbar gutter: the list is re-rendered on every
+     keystroke, and neither the scroll position nor the row width may shift under the pointer. */
+  .nv-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-anchor: none;
+    scrollbar-gutter: stable;
+    padding: 6px;
+  }
   .nv-body.nv-split .nv-list { border-right: 1px solid var(--border-subtle); }
+
+  /* Loading: the spinner and the word, centred in the room the rows will take. */
+  .nv-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 28px 14px;
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+  }
 
   .nv-preview { min-height: 0; display: flex; flex-direction: column; background: var(--bg-base); }
   .nv-pv-head {
@@ -908,76 +940,76 @@
   .nv-pv-body { flex: 1; min-height: 0; }
 
   .nv-group {
-    padding: 8px 14px 3px;
+    padding: 10px 8px 4px;
     font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--text-muted);
   }
+  .nv-group:first-child { padding-top: 4px; }
 
+  /* A fixed row height, so a result that gains an origin or a tag does not make the list
+     breathe, and `content-visibility` so a 200-row tab costs what the visible rows cost. */
   .nv-row {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
+    align-items: center;
+    gap: 10px;
     width: 100%;
-    padding: 5px 14px;
+    height: 34px;
+    padding: 0 10px;
     background: none;
     border: none;
+    border-radius: var(--radius-md);
     text-align: left;
     color: var(--text-secondary);
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-md);
     cursor: pointer;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 34px;
   }
   /* Hover and the cursor are drawn separately even though moving the mouse over a row also
      moves the cursor: a pointer resting where the list re-rendered under it gets no
      `mousemove`, and a row you are pointing at that looks identical to the forty around it
      is a list that appears not to respond to the mouse at all. */
   .nv-row:hover { background: var(--bg-hover); }
-  /* Was `--bg-active`, which is not a token this theme defines — so it resolved to nothing
-     and NEITHER the hovered nor the keyboard-selected row was marked. */
-  .nv-on, .nv-on:hover { background: var(--bg-selected); color: var(--text-primary); }
+  .nv-on, .nv-on:hover { background: var(--accent-subtle); color: var(--text-primary); }
   .nv-on .nv-detail { color: var(--text-secondary); }
-  /* On the selection fill the kind colours go muddy — hand the icon the row's own colour
-     (see SymbolKindIcon's `--jki-color`). */
-  .nv-on .nv-icon { color: var(--text-primary); --jki-color: currentColor; }
-  .nv-icon { display: inline-flex; align-self: center; color: var(--text-muted); flex-shrink: 0; }
-  .nv-icon-gap { width: 13px; }
-  .nv-name { color: var(--text-primary); white-space: nowrap; }
+  /* The kind marks size themselves in `em`, so the box's font-size IS the icon size. */
+  .nv-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  /* The name never shrinks — the path is what gives way, since it is the part you can lose. */
+  .nv-name { color: var(--text-primary); white-space: nowrap; flex-shrink: 0; }
   /* The matched characters, and the only thing bold in the row — which is what
      makes a subsequence match legible instead of mysterious. */
-  .nv-name :global(b) { color: var(--accent); font-weight: 700; }
+  .nv-name b { color: var(--accent); font-weight: 700; }
   .nv-detail {
     font-family: var(--font-code);
-    font-size: var(--font-size-2xs);
-    color: var(--text-disabled);
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
   }
-  .nv-detail :global(b) { color: var(--text-secondary); font-weight: 600; }
-  .nv-tag {
-    flex-shrink: 0;
-    font-size: var(--font-size-2xs);
-    color: var(--text-disabled);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    padding: 0 4px;
-  }
-  /* Where the row is from. Filled rather than outlined, so it reads as a label on the row and
-     not as a second kind tag beside `nv-tag`. */
+  .nv-detail b { color: var(--text-secondary); font-weight: 600; }
+  /* Where the row is from: plain muted text rather than a second chip beside the kind badge. */
   .nv-origin {
     flex-shrink: 0;
     max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--font-size-2xs);
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
-    background: var(--bg-elevated);
-    border-radius: var(--radius-sm);
-    padding: 0 5px;
   }
 
   /* Not the user's own — a row that opens something read-only. Tinted in the same hue and for
@@ -992,31 +1024,28 @@
   /* The selection has to win over the tint, and equal specificity would leave that to source
      order — which is exactly the kind of thing that breaks when a rule moves. */
   .nv-row.nv-ext.nv-on, .nv-row.nv-ext.nv-on:hover {
-    background: var(--bg-selected);
+    background: var(--accent-subtle);
     box-shadow: inset 2px 0 0 var(--warning);
   }
 
-  .nv-note { padding: 14px; font-size: var(--font-size-sm); line-height: 1.55; color: var(--text-muted); }
   .nv-help {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
-    gap: 5px 12px;
-    padding: 0 14px 14px;
+    gap: 6px 12px;
+    padding: 8px 20px 14px;
     font-size: var(--font-size-xs);
   }
   .nv-help dt code { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary); }
   .nv-help dd { color: var(--text-muted); }
 
+  /* Content only — the padding, the chrome background and the lack of a border come from the
+     modal's footer, like every other dialog. */
   .nv-foot {
+    flex: 1;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 7px 12px;
-    border-top: 1px solid var(--border-subtle);
-    background: var(--bg-elevated);
-    font-size: var(--font-size-2xs);
-    color: var(--text-disabled);
-    flex-shrink: 0;
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
   }
-  .nv-foot-open { display: inline-flex; align-items: center; gap: 4px; }
 </style>

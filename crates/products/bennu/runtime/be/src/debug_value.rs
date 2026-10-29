@@ -222,6 +222,19 @@ pub(crate) fn walk_path(
     Ok(value)
 }
 
+/// A path read in a named frame, as the text a variables row would show. For the logpoint, which
+/// renders in a frame the session has not announced a pause for — see [`walk_path`].
+pub(crate) fn render_path(
+    session: &Session,
+    thread: Id,
+    at: &Frame,
+    expression: &str,
+) -> Result<String, String> {
+    let steps = debug_path::parse(expression, debug_path::JAVA)?;
+    let value = walk_path(session, thread, at, &steps)?;
+    Ok(describe(session, expression, "watch", None, value).value)
+}
+
 /// The first segment: a local of the frame, else a field of its receiver — which is how
 /// watching a bare field name works inside an instance method.
 fn root_value(session: &Session, thread: Id, at: &Frame, name: &str) -> Result<Value, String> {

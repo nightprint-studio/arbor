@@ -17,7 +17,7 @@
 
 <h2>The Cargo tool window</h2>
 <p>
-  <kbd>Alt</kbd> + <kbd>8</kbd> opens it on a Rust project. Its rail button is there whenever the workspace has a Cargo project — at a project's root
+  <kbd>Alt</kbd> + <kbd>8</kbd> opens it on a Rust project. Its rail button is there whenever the active project has a Cargo crate — at its root
   or in a subfolder, as in a Tauri app — and sits beside Maven's when it also has a Java one.
 </p>
 

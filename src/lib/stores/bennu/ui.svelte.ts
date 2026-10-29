@@ -111,6 +111,15 @@ export type BottomPanel =
   /** The DTO Lab — a class tried out as JSON, validated on the project's JVM, and turned into tests.
    *  Wide data (a payload beside what came out of it), so it docks at the bottom. */
   | 'dtolab'
+  /** The live Bevy inspector — entities, resources and types of a running game, over the Bevy Remote
+   *  Protocol. Wide data (a hierarchy beside an inspector), so it docks at the bottom. */
+  | 'bevyremote'
+  /** The profiler — flame graph, hot methods, memory and locks of a recording (JFR, Node, samply).
+   *  Wide data, so it docks at the bottom. */
+  | 'profiler'
+  /** The live session — managed processes the assistant or a recipe started, their output, recipes,
+   *  scenarios and the unified timeline. Wide data, so it docks at the bottom. */
+  | 'live'
   /** A plugin panel registered with `position = "bottom"` — wide data a plugin wants read
    *  beside the editor rather than in a column. Same key shape as the other two docks. */
   | `plugin:${string}`

@@ -121,6 +121,7 @@
     <tr><td><strong>Hollow</strong></td><td>The class is not loaded yet — resolves itself the moment the program touches it.</td></tr>
     <tr><td><strong>Grey outline</strong></td><td>Disabled. Right-click a breakpoint to disable one you will want back in ten minutes.</td></tr>
     <tr><td><strong>A ring</strong></td><td>It carries a condition or a pass count — below.</td></tr>
+    <tr><td><strong>A sparkle</strong></td><td>Set by Imber, the assistant — see <em>Imber debugging</em> below. Fainter while its class is not loaded, grey when disabled.</td></tr>
   </tbody>
 </table>
 
@@ -181,3 +182,24 @@
   <li>The <strong>pass count</strong> goes as that adapter's hit-condition expression, <code>%3</code> for every third, which not all read alike: a breakpoint stopping every time is the adapter
     not doing it. An adapter declaring it supports neither has the field dropped instead, because a request setting a file's breakpoints sets <em>all</em> of them.</li>
 </ul>
+
+<h2>Logpoints</h2>
+<p>
+  A breakpoint with a <strong>log message</strong> does not stop the program: each hit prints the message to the run console and the program goes on. It is how to watch a line in a loop or a
+  request handler without freezing it. The message is plain text with <code>{'{'}path{'}'}</code> placeholders — <code>order {'{'}order.id{'}'} has {'{'}items[0].qty{'}'} lines</code> — read from the frame the way a
+  watch is read (a name, <code>.field</code>, <code>[0]</code>), and <code>{'{{'}</code> / <code>{'}}'}</code> are literal braces. A placeholder that cannot be read prints the reason in its place rather than
+  nothing. A condition and a pass count apply first, so a logpoint can say "only when <code>total &gt; 100</code>". Imber can set them too (below); the breakpoint list marks them <em>logpoint</em>.
+</p>
+
+<h2>Imber debugging</h2>
+<p>
+  With the <em>Debugger</em> group of tools on (Settings › Imber), Imber, the assistant, can debug a Java program the way you would, on the very session this panel shows: it sets breakpoints and logpoints, launches or attaches (each asks first), waits for a stop, reads the stack and values, steps and lets go. You watch the same stop and can take over with the buttons you already have.
+</p>
+<ul>
+  <li><strong>Its breakpoints are yours to control.</strong> They are drawn with a sparkle in the gutter, badged <em>Imber</em> in the list, and you can disable or delete them like any other.</li>
+  <li><strong>When the program stops while Imber is not waiting</strong>, Bennu takes a snapshot itself and shows a card in the conversation with <em>Send to Imber now</em>.</li>
+  <li><strong>Changing the program</strong> is a separate switch, off by default, with no undo; every change is listed in the Debug panel as an <em>Imber action</em>.</li>
+</ul>
+<p>
+  The full description (what each tool does, what asks, session lifetime, snapshots, the mutate tools) is on the page <strong>Imber: Debugging with Imber</strong>.
+</p>

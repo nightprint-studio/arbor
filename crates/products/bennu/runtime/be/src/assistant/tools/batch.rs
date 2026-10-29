@@ -87,6 +87,8 @@ impl ToolHost {
             drafts[at].text = text_tools::replace(&drafts[at].text, old_text, new_text, expected)
                 .map_err(|m| format!("edit {n} ({}): {m}. Nothing was changed.", self.display_path(&file.display().to_string())))?;
         }
+        // The whole set or none of it, before anything is submitted.
+        self.reserve_files(&drafts.iter().map(|d| d.file.as_path()).collect::<Vec<_>>())?;
         let mut report = Vec::new();
         for d in drafts {
             match self.submit(&d.file, &d.original, d.text, Some(d.stamp), None) {
@@ -113,6 +115,9 @@ impl ToolHost {
             ));
         }
 
+        if !args.dry_run {
+            self.reserve_files(&files.iter().map(PathBuf::as_path).collect::<Vec<_>>())?;
+        }
         let mut report = Vec::new();
         let mut total = 0usize;
         for file in &files {

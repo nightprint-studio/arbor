@@ -1,0 +1,31 @@
+# Imber
+
+> Imber is the AI assistant built into the Bennu code editor (part of the Arbor suite). It runs on Claude with the user's own Anthropic API key and works on the open project through Bennu's own tools. These pages describe how it behaves, what it asks before doing, and every setting.
+
+<!-- Generated from the in-app docs - do not edit. Edit the Svelte pages and run `node scripts/build-help-index.mjs`. -->
+
+Read the pages in this order, or open ALL.md for everything in one file. Each page starts with a one-sentence summary and stands on its own.
+
+## Docs
+- [Imber: the assistant in Bennu](00-overview.md): What Imber is, how it works in one page, and a map of every Imber page.
+- [Imber: Getting started](01-getting-started.md): Open the panel, store the Anthropic API key, choose a model and effort, send a first request.
+- [Imber: Conversations](02-conversations.md): Saved conversations, rename and delete, Agent versus Chat, the home screen, the step plan.
+- [Imber: Permissions and modes](03-permissions.md): Manual, Accept edits and Autonomous modes, the four reaches, and one table of what asks when.
+- [Imber: Reviewing changes](04-reviewing-changes.md): Proposals, outdated proposals, Undo, Local History and the isolated copy with Apply.
+- [Imber: Tools it can use](05-tools.md): Every family of tools with its purpose, how to switch one off, git access and several projects.
+- [Imber: Running and observing](06-running-and-observing.md): Managed processes, recipes, scenarios, requests, log reading, the shared build queue and build-error attribution.
+- [Imber: Debugging with Imber](07-debugging.md): Breakpoints, launching and attaching, stops and snapshots, and the off-by-default tools that change a running program.
+- [Imber: Bevy games and the profiler](08-bevy-and-profiler.md): Looking into a running Bevy game over BRP, changing it behind a separate switch, and reading a profiler recording.
+- [Imber: Screenshots and diagrams](09-screenshots-and-diagrams.md): Seeing a front end on localhost and drawing Mermaid diagrams in the thread.
+- [Imber: Skills](10-skills.md): SKILL.md folders that teach Imber a kind of task: format, locations, the manager, limits.
+- [Imber: Sub-agents](11-sub-agents.md): Clean-context helpers for side tasks: when to use them, permissions, cost cap, how to watch and stop them.
+- [Imber: Decisions and questions](12-decisions-and-questions.md): How much Imber decides alone (ask at forks, only big decisions, decide itself) and how its questions work.
+- [Imber: Cost and context](13-cost-and-context.md): Context meter, models and prices, cache, compaction, confirm-on-change and spending limits in euros.
+- [Imber: Working from the editor](14-editor.md): The sparkle in the margin, doc comments, Markdown selections, stack traces, pasted code and the expanded panel.
+- [Imber: Settings reference](15-settings.md): Every Imber setting: what it does, its default, the config key and whether a conversation can override it.
+- [Imber: Keyboard and palette](16-keyboard-and-palette.md): Shortcuts and Command Palette verbs for Imber.
+- [Imber: Privacy and safety](17-privacy-and-safety.md): What leaves the machine, what is masked, what is never granted, and the safeguards in place.
+- [Imber: Troubleshooting](18-troubleshooting.md): Common messages and what to do about them.
+
+## Optional
+- [All pages in one file](ALL.md): the same content, concatenated in reading order

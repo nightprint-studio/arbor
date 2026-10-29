@@ -83,7 +83,18 @@ Pre-built binaries for Windows, macOS, and Linux are attached to each [release](
 
 ### Build from source
 
-Requires Rust, Node.js, and Yarn:
+Requires Rust, Node.js, and Yarn. A **release** build also compiles the local speech engine (whisper.cpp, used by voice dictation), which needs a few extra native tools:
+
+| Tool | Why | Where to get it |
+|---|---|---|
+| **CMake** (3.20+) | builds whisper.cpp | [cmake.org/download](https://cmake.org/download/) — on Windows the portable `.zip` is enough; put its `bin` folder on `PATH` |
+| **libclang** (the `libclang` shared library, LLVM 14+) | `bindgen` generates the Rust bindings of whisper.cpp | Windows: set `LIBCLANG_PATH` to a folder that contains `libclang.dll` (LLVM from [llvm.org](https://releases.llvm.org/), or the DLL inside the `libclang` wheel on PyPI). macOS: Xcode command line tools. Linux: `libclang-dev` |
+| **A C++ toolchain** | compiles whisper.cpp | Windows: Visual Studio Build Tools (C++ workload). macOS: Xcode command line tools. Linux: `build-essential` |
+| **ALSA headers** (Linux only) | microphone capture | `libasound2-dev` |
+
+Development builds (`yarn backends:dev`, `cargo tauri dev`) do **not** build the speech engine, so none of the tools above is needed to work on Arbor itself; dictation then answers "built without the speech engine".
+
+> whisper.cpp must be compiled **optimised**. `cmake-rs` drops `/O2` and `NDEBUG` on MSVC, which makes the engine about ten times slower; `.cargo/config.toml` therefore sets `CMAKE_C_FLAGS_RELEASE` / `CMAKE_CXX_FLAGS_RELEASE` (and the `RELWITHDEBINFO` pair) to `-O2 -DNDEBUG`, which every compiler accepts. After changing them run `cargo clean -p whisper-rs-sys --release` once. CPU features (AVX2/AVX-512) come from `GGML_NATIVE`; ask the engine with the hidden `voice_system_info` RPC.
 
 ```bash
 git clone https://github.com/nightprint-studio/arbor.git

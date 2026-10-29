@@ -34,6 +34,7 @@ use serde_json::json;
 // inventory, so `arbor_rpc::registry()` collects them and `Hello` advertises
 // them. The shell pushes repo paths to `repo_registry`; `bisect` and `stash`
 // are the git domains served out-of-process so far.
+mod assistant_worktree;
 mod avatar;
 mod bisect;
 mod branch;

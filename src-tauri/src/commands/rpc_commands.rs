@@ -101,6 +101,7 @@ pub async fn ensure_product_backend(
     let ensure: fn(&AppHandle) = match program.as_str() {
         "corvus" => crate::ipc::ensure_corvus_be,
         "picus" => crate::ipc::ensure_picus_be,
+        "voice" => crate::ipc::ensure_voice_be,
         other => return Err(AppError::Other(format!("'{other}' is not a borrowable backend"))),
     };
     // The caller is a borrower unless it is the product's own window (which already owns the

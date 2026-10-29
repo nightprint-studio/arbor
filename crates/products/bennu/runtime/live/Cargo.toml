@@ -1,0 +1,26 @@
+[package]
+name         = "bennu-live"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu live runs — LEAF crate. Managed long-running processes (ring-buffered logs, readiness, process-tree kill), recipes (named stacks), a loopback-only HTTP client, the unified timeline with correlation ids, and scenarios (steps + assertions) runnable without the AI. Std-only plumbing: threads and TcpStream, no async runtime, no Tauri, no IPC."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Recipe and scenario files. Same pin bennu-be and bennu-core already use.
+toml       = "0.8"
+regex      = { workspace = true }
+# The recipe-file content hash an approval is bound to.
+sha2       = { workspace = true }
+# Reading a log: levels, timestamps, exceptions and stack frames per line. The same crate the Run console
+# uses (serde-only, a foundation crate of this workspace), so the assistant and the user read logs alike.
+arbor-logscan = { path = "../../../../foundation/logscan" }
+# `NoWindowExt` for the spawned children on Windows.
+arbor-process-ext = { path = "../../../../platform/process-ext" }
+
+# Process groups: `killpg` / `getpgid`, as in bennu-be's child.rs.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

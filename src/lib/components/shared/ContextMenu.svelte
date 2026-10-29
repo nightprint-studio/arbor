@@ -69,6 +69,7 @@
     actions,
     x = 0,
     y = 0,
+    above = false,
     onSelect,
     onClose,
   }: {
@@ -77,6 +78,9 @@
     actions?: MenuAction[];
     x?: number;
     y?: number;
+    /** Open the menu above `y` (its bottom edge just over it) instead of below — for a menu that belongs to a block
+     *  of text, which it must not cover. Falls back to below when there is no room above. */
+    above?: boolean;
     onSelect: (id: string) => void;
     onClose: () => void;
   } = $props();
@@ -94,7 +98,9 @@
     const vh = window.innerHeight;
     const rect = menuEl.getBoundingClientRect();
     adjustedX = Math.min(x, vw - rect.width - 8);
-    adjustedY = Math.min(y, vh - rect.height - 8);
+    // Above: the bottom edge sits a few pixels over `y`; with no room up there, it opens below as usual.
+    const upY = y - rect.height - 6;
+    adjustedY = above && upY >= 8 ? upY : Math.min(y, vh - rect.height - 8);
   });
 
   // ── Submenu (one level deep) ───────────────────────────────────────────────

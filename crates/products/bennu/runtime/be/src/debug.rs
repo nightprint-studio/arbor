@@ -66,6 +66,10 @@ use serde_json::json;
 
 use crate::index_service::IndexService;
 
+// Works on the session's private state, so it lives under this module (see its own docs).
+#[path = "debug_mutate.rs"]
+pub(crate) mod mutate;
+
 // ── event topics (the wire contract for the FE) ────────────────────────────────
 
 /// The session as a whole moved: attaching, running, paused, gone.
@@ -74,6 +78,10 @@ const EVT_DEBUG_STATUS: &str = "arbor://bennu/debug-status";
 const EVT_DEBUG_PAUSED: &str = "arbor://bennu/debug-paused";
 /// A breakpoint's verification changed — a class loaded, or a line turned out to have no code.
 const EVT_DEBUG_BREAKPOINTS: &str = "arbor://bennu/debug-breakpoints";
+/// The program's console: where a logpoint writes. The same topic the run pumps use.
+const EVT_RUN_OUTPUT: &str = "arbor://bennu/run-output";
+/// The persisted breakpoint set changed behind the panel's back (the assistant set one): reload it.
+pub(crate) const EVT_DEBUG_CONFIG: &str = "arbor://bennu/debug-config";
 
 /// Packages a *step into* passes straight through.
 ///
@@ -207,6 +215,40 @@ pub(crate) fn start(
         });
 }
 
+/// How long an attach waits for the port to answer and speak JDWP. Loopback, so anything slower is a
+/// port that is not a debug port.
+const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Attach to a JVM that is already running with `-agentlib:jdwp=…,server=y` on loopback `port`.
+///
+/// The mirror image of [`start`]: there the debugger listens and the VM connects back, here the VM
+/// has been listening all along. The connection is made on the calling thread so that "nothing is
+/// listening" comes back as an error to the caller; the session itself then runs on a thread of its
+/// own like any other. The program is not owned by the session — detaching leaves it running.
+pub(crate) fn attach(
+    session_id: String,
+    root: String,
+    port: u16,
+    sink: Arc<dyn EventSink>,
+) -> Result<(), String> {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let stream = TcpStream::connect_timeout(&addr, ATTACH_TIMEOUT)
+        .map_err(|e| format!("nothing is listening for a debugger on 127.0.0.1:{port} ({e})"))?;
+    // The handshake reads; a port that accepts and never answers must not park the caller.
+    let _ = stream.set_read_timeout(Some(ATTACH_TIMEOUT));
+    let keep = stream.try_clone().map_err(|e| e.to_string())?;
+    let (client, events) = Client::from_stream(stream)
+        .map_err(|e| format!("127.0.0.1:{port} did not answer as a Java debug port: {e}"))?;
+    // The reader thread shares the socket: a timeout left on would end the session after 5 idle seconds.
+    let _ = keep.set_read_timeout(None);
+    emit_status(&sink, &session_id, "starting", "", "");
+    std::thread::Builder::new()
+        .name(format!("bennu-debug-{session_id}"))
+        .spawn(move || serve(session_id, root, client, events, sink))
+        .map(|_| ())
+        .map_err(|e| format!("could not start the debug session: {e}"))
+}
+
 /// Poll for the VM's connection until [`CONNECT_TIMEOUT`].
 ///
 /// Polled rather than blocking on `accept()`: a program that dies before its agent connects —
@@ -330,6 +372,18 @@ impl crate::debug_backend::DebugBackend for Session {
         self.set_exceptions(config.exceptions.clone());
         Ok(())
     }
+
+    fn paused(&self) -> Option<DebugPause> {
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).paused.as_ref().map(|p| p.pause.clone())
+    }
+
+    fn breakpoint_states(&self) -> Vec<BreakpointStatus> {
+        self.statuses()
+    }
+
+    fn mutate(&self, op: &mutate::Mutation) -> Result<mutate::Mutated, String> {
+        Session::mutate(self, op)
+    }
 }
 
 fn emit_status(sink: &Arc<dyn EventSink>, id: &str, status: &str, vm: &str, message: &str) {
@@ -429,6 +483,9 @@ fn new_bp(at: Breakpoint, views: &Path) -> Bp {
 struct Paused {
     thread: Id,
     frames: Vec<Frame>,
+    /// The stop as it was announced — what a caller that was not listening for the event (the AI
+    /// assistant, which waits by polling) reads to see the same frames the panel shows.
+    pause: DebugPause,
 }
 
 #[derive(Default)]
@@ -556,7 +613,13 @@ impl Session {
                     let _ = resume_vm(&self.client);
                     return;
                 }
-                self.on_stop(thread, "breakpoint", None);
+                // A logpoint prints and lets the program go: nobody is told it stopped.
+                if let Some((at, message)) = self.logpoint_of(request) {
+                    self.print_logpoint(thread, &at, &message);
+                    let _ = resume_vm(&self.client);
+                    return;
+                }
+                self.on_stop(thread, "breakpoint", None, self.capture_of(request));
             }
             Event::Step { thread, location, .. } => {
                 self.clear_step();
@@ -565,11 +628,11 @@ impl Session {
                 if self.is_opaque(location) && self.step_again(thread) {
                     return;
                 }
-                self.on_stop(thread, "step", None);
+                self.on_stop(thread, "step", None, Vec::new());
             }
             Event::Exception { thread, exception, .. } => {
                 let name = self.type_name_of(exception.1);
-                self.on_stop(thread, "exception", name);
+                self.on_stop(thread, "exception", name, Vec::new());
             }
             Event::ThreadStart { .. } | Event::ThreadDeath { .. } | Event::Other { .. } => {}
         }
@@ -616,6 +679,30 @@ impl Session {
             }
         }
         self.count_hit(index, every)
+    }
+
+    /// The `(file:line, message)` of the logpoint behind `request`, when that breakpoint is one.
+    fn logpoint_of(&self, request: i32) -> Option<(String, String)> {
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let bp = state
+            .breakpoints
+            .iter()
+            .find(|b| b.requests.iter().any(|(k, r)| *k == kind::BREAKPOINT && *r == request))?;
+        let message = bp.at.log_message.trim();
+        (!message.is_empty()).then(|| (format!("{}:{}", file_name_of(&bp.at.file), bp.at.line), message.to_string()))
+    }
+
+    /// Render a logpoint's message in frame 0 and write it to the run console under this session's
+    /// id (the run id), the place the program's own output goes.
+    fn print_logpoint(&self, thread: Id, at: &str, message: &str) {
+        let line = match frames(&self.client, thread).ok().and_then(|f| f.into_iter().next()) {
+            Some(frame) => crate::debug_logpoint::render(self, thread, &frame, message),
+            None => message.to_string(),
+        };
+        self.sink.emit(
+            EVT_RUN_OUTPUT,
+            json!({ "run_id": self.id, "stream": "stdout", "text": format!("[logpoint {at}] {line}") }),
+        );
     }
 
     /// Evaluate one breakpoint's condition in frame 0 of the stopped thread — the frame its line is
@@ -707,7 +794,7 @@ impl Session {
     }
 
     /// The program stopped: read the stack while it is still suspended, then say so.
-    fn on_stop(&self, thread: Id, reason: &str, exception: Option<String>) {
+    fn on_stop(&self, thread: Id, reason: &str, exception: Option<String>, captures: Vec<String>) {
         self.state.lock().unwrap_or_else(|p| p.into_inner()).skips = 0;
         let stack = frames(&self.client, thread).unwrap_or_default();
         let cut: Vec<Frame> = stack.into_iter().take(MAX_FRAMES).collect();
@@ -718,11 +805,6 @@ impl Session {
             .collect();
         let thread_name = thread_name(&self.client, thread).unwrap_or_default();
 
-        // Stored last, and briefly: the round trips above must not happen under the lock a
-        // handler needs to answer "what are the variables here".
-        self.state.lock().unwrap_or_else(|p| p.into_inner()).paused =
-            Some(Paused { thread, frames: cut });
-
         let payload = DebugPause {
             session_id: self.id.clone(),
             thread: thread.to_string(),
@@ -731,12 +813,42 @@ impl Session {
             exception,
             frames: described,
         };
+        // Stored last, and briefly: the round trips above must not happen under the lock a
+        // handler needs to answer "what are the variables here".
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).paused =
+            Some(Paused { thread, frames: cut, pause: payload.clone() });
         self.sink.emit(EVT_DEBUG_PAUSED, serde_json::to_value(payload).unwrap_or(json!({})));
         emit_status(&self.sink, &self.id, "paused", "", "");
         // The hit counts moved, and a stop is the one moment they are worth publishing: they are
         // read while the program is standing still, and emitting on every rejected hit of a hot
         // line would be the slowest thing in the debugger.
         self.emit_breakpoints();
+        self.notify_assistant(thread, reason, &captures);
+    }
+
+    /// When an AI assistant conversation owns this session, read what it will want to know about the stop —
+    /// while the thread is still suspended — and hand it over (see `assistant::stop_watch`). A step is the
+    /// assistant's own doing, so it is not announced.
+    fn notify_assistant(&self, thread: Id, reason: &str, captures: &[String]) {
+        if reason == "step" || !crate::assistant::stop_watch::is_watched(&self.id) {
+            return;
+        }
+        let pause = self.state.lock().unwrap_or_else(|p| p.into_inner()).paused.as_ref().map(|p| p.pause.clone());
+        if let Some(pause) = pause {
+            let snapshot = crate::debug_snapshot::take(self, thread, &pause, captures);
+            crate::assistant::stop_watch::on_stopped(&self.id, snapshot);
+        }
+    }
+
+    /// The paths breakpoint `request` was asked to capture at hit time (empty for any other request).
+    fn capture_of(&self, request: i32) -> Vec<String> {
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state
+            .breakpoints
+            .iter()
+            .find(|b| b.requests.iter().any(|(k, r)| *k == kind::BREAKPOINT && *r == request))
+            .map(|b| b.at.capture.clone())
+            .unwrap_or_default()
     }
 
     /// A watched class just loaded — one this project declares, or one of a library file a
@@ -1187,22 +1299,25 @@ impl Session {
         self.install_exceptions();
     }
 
+    /// What the VM made of each breakpoint, in the order the set holds them.
+    fn statuses(&self) -> Vec<BreakpointStatus> {
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state
+            .breakpoints
+            .iter()
+            .map(|b| BreakpointStatus {
+                file: b.at.file.clone(),
+                line: b.at.line,
+                verified: b.verified,
+                message: b.message.clone(),
+                condition_error: b.condition_error.clone(),
+                hits: b.hits,
+            })
+            .collect()
+    }
+
     fn emit_breakpoints(&self) {
-        let states: Vec<BreakpointStatus> = {
-            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            state
-                .breakpoints
-                .iter()
-                .map(|b| BreakpointStatus {
-                    file: b.at.file.clone(),
-                    line: b.at.line,
-                    verified: b.verified,
-                    message: b.message.clone(),
-                    condition_error: b.condition_error.clone(),
-                    hits: b.hits,
-                })
-                .collect()
-        };
+        let states = self.statuses();
         self.sink.emit(
             EVT_DEBUG_BREAKPOINTS,
             json!({ "session_id": self.id, "root": self.root, "breakpoints": states }),
@@ -1272,6 +1387,11 @@ fn same_file(a: &str, b: &str) -> bool {
 /// for every row and buys nothing.
 pub(crate) fn simple_name(fqcn: &str) -> String {
     fqcn.rsplit('.').next().unwrap_or(fqcn).to_string()
+}
+
+/// The last component of a path, whichever separator it uses.
+fn file_name_of(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
 // ── handlers ───────────────────────────────────────────────────────────────────
@@ -1355,12 +1475,18 @@ fn bennu_get_debug_config(_ctx: &BennuState, args: RootArgs) -> Result<DebugConf
 /// nothing is installed for a watch, it is evaluated when a frame is selected.
 #[arbor_rpc::handler]
 fn bennu_set_debug_config(_ctx: &BennuState, args: SetDebugConfigArgs) -> Result<(), String> {
-    crate::repo_config::save(&args.root, "debug", &args.config)?;
+    apply_config(&args.root, &args.config)
+}
+
+/// Persist `config` and push it to every live session of `root`. The one definition of "the
+/// breakpoints changed", shared by the panel's handler and the assistant's tools.
+pub(crate) fn apply_config(root: &str, config: &DebugConfig) -> Result<(), String> {
+    crate::repo_config::save(root, "debug", config)?;
 
     // Every live session of that root, whichever protocol it speaks: a push that silently reached the
     // Java one and not the Rust one would be worse than one that reached neither.
-    for session in live_sessions_of(&args.root) {
-        let _ = session.reinstall(&args.config);
+    for session in live_sessions_of(root) {
+        let _ = session.reinstall(config);
     }
     Ok(())
 }

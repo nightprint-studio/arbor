@@ -681,6 +681,7 @@ mod tests {
             caught: false,
             uncaught: true,
             enabled: true,
+            by_assistant: false,
         });
         assert_eq!(exception_filters(&cfg), vec!["rust_panic".to_string()]);
 
@@ -690,6 +691,7 @@ mod tests {
             caught: true,
             uncaught: true,
             enabled: true,
+            by_assistant: false,
         });
         assert!(exception_filters(&named).is_empty());
 
@@ -699,6 +701,7 @@ mod tests {
             caught: true,
             uncaught: true,
             enabled: false,
+            by_assistant: false,
         });
         assert!(exception_filters(&disabled).is_empty());
     }

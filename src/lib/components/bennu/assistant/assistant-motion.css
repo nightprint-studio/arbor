@@ -101,22 +101,7 @@
   .asst-caret { opacity: 1; }
 }
 
-/* The home screen: a slow drift for the aurora, a breath for the halo, a rise for the cards. */
-@keyframes asst-drift-a {
-  from { transform: translate3d(0, 0, 0) scale(1); }
-  to   { transform: translate3d(46px, 38px, 0) scale(1.18); }
-}
-
-@keyframes asst-drift-b {
-  from { transform: translate3d(0, 0, 0) scale(1.05); }
-  to   { transform: translate3d(-52px, 30px, 0) scale(0.9); }
-}
-
-@keyframes asst-breathe {
-  0%, 100% { transform: scale(0.92); opacity: 0.7; }
-  50%      { transform: scale(1.12); opacity: 1; }
-}
-
+/* The home screen: a rise for the cards. (The aurora and the emblem animate themselves: shared/internal/ImberAurora, ImberOrb.) */
 @keyframes asst-rise {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: none; }

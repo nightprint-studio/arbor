@@ -184,6 +184,21 @@ interface JvmRunSpec {
   classpathScope: string;
 }
 
+/** `arbor://bennu/assistant-run`: the assistant launched a program under the debugger. */
+interface AssistantRunEvent {
+  run_id: string;
+  root: string;
+  label: string;
+  main_class: string;
+  module: string;
+  args: string[];
+  vm_args: string[];
+  command?: string | null;
+  working_dir?: string | null;
+  suspend: boolean;
+  classpath_scope: string;
+}
+
 /** A `cargo <subcommand>` launch. */
 interface CargoRunSpec {
   kind: 'cargo';
@@ -546,6 +561,11 @@ function createBennuRunStore() {
         if (tab && tab.id !== activeTabId) focusTab(tab.id);
       }),
     );
+    add(
+      // A program the assistant started under the debugger gets a console tab like any launch of
+      // the user's, so its output and its stops are read where they are expected.
+      await listen<AssistantRunEvent>('arbor://bennu/assistant-run', (e) => adoptRun(e.payload)),
+    );
     return detach;
   }
   function detach() {
@@ -715,6 +735,28 @@ function createBennuRunStore() {
     focusTab(id);
     bennuUiStore.showBottom('run');
     return id;
+  }
+
+  /** Open a console tab for a run the assistant already started (the backend launched it). The
+   *  output that arrived before this tab existed is replayed by {@link claimRun}. */
+  function adoptRun(p: AssistantRunEvent) {
+    const spec: JvmRunSpec = {
+      kind: 'jvm',
+      root: p.root,
+      module: p.module,
+      mainClass: p.main_class,
+      args: p.args,
+      vmArgs: p.vm_args,
+      workingDir: p.working_dir ?? '',
+      env: {},
+      label: p.label,
+      debug: true,
+      debugSuspend: p.suspend,
+      classpathScope: p.classpath_scope,
+    };
+    const id = openTab(spec, p.label, p.main_class);
+    patchTab(id, { live: true, startedAt: Date.now() });
+    claimRun(id, p.run_id, { command: p.command ?? '', workingDir: p.working_dir ?? '' });
   }
 
   async function launch(spec: JvmRunSpec): Promise<void> {

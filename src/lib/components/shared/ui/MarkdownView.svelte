@@ -11,6 +11,9 @@
    * is closed for the render, so a half-written block shows as code instead of as stray backticks that
    * snap into a block when the closing fence finally lands.
    */
+  import { mount, unmount, untrack } from 'svelte';
+  import MermaidDiagram from './MermaidDiagram.svelte';
+  import { MERMAID_MAX_SOURCE } from '$lib/utils/mermaid';
   import { renderMarkdown } from '$lib/utils/markdown';
   import { copyToClipboard } from '$lib/utils/clipboard';
 
@@ -25,6 +28,27 @@
   const html = $derived(renderMarkdown(streaming ? closeOpenFence(text) : text));
 
   let host = $state<HTMLElement | null>(null);
+
+  // A ```mermaid fence is drawn, not printed. The diagram is a component mounted over the rendered code
+  // block, so the library is fetched only when a fence actually appears (see `utils/mermaid.ts`). A fence
+  // still being written is left as code: half a diagram is only an error. Declared before the copy-button
+  // effect so a diagram never grows a "Copy" of its own on top of the diagram's.
+  $effect(() => {
+    void html;
+    if (!host) return;
+    const open = untrack(() => streaming) && (text.match(/^```/gm) ?? []).length % 2 === 1;
+    const all = host.querySelectorAll<HTMLElement>('pre.md-pre');
+    const last = all[all.length - 1];
+    const mounted: Record<string, unknown>[] = [];
+    for (const pre of host.querySelectorAll<HTMLElement>('pre.md-pre[data-lang="mermaid"]')) {
+      const source = pre.querySelector('code')?.textContent ?? '';
+      if ((open && pre === last) || source.length > MERMAID_MAX_SOURCE) continue;
+      const slot = document.createElement('div');
+      pre.replaceWith(slot);
+      mounted.push(mount(MermaidDiagram, { target: slot, props: { source } }));
+    }
+    return () => { for (const m of mounted) void unmount(m); };
+  });
 
   // A copy button on every code block. Added to the rendered DOM rather than to the renderer's output, so
   // the other places that render Markdown do not grow a button they have no style for.

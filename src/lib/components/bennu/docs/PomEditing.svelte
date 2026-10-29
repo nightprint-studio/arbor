@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
-   * Editing a pom.xml: colour, coordinate completion from the local repository, the checks, where a version comes from,
-   * and the one thing that reaches the network.
+   * Editing a pom.xml: colour, coordinate completion from the local repository, and the checks. Versions and the
+   * network-backed checks live in the Dependency pages.
    */
   import Callout from '$lib/components/shared/ui/Callout.svelte';
   import { highlightCode } from '$lib/utils/highlight';
@@ -123,7 +123,6 @@
     <tr><td>Declared twice</td><td>The same artifact twice in one block. Maven keeps the last, silently.</td></tr>
     <tr><td>Not a Maven scope</td><td>A misspelled <code>&lt;scope&gt;</code> is treated as <code>compile</code> without a word.</td></tr>
     <tr><td>Missing module</td><td>A <code>&lt;module&gt;</code> with no <code>pom.xml</code> — the reactor drops it, and every type in it stops resolving everywhere else.</td></tr>
-    <tr><td>A newer version, already here</td><td>A hint, not a problem: a newer release of the library is already in your repository, so switching costs nothing.</td></tr>
   </tbody>
 </table>
 <Callout variant="info" title="Quiet where it cannot be sure">
@@ -133,70 +132,12 @@
   is a warning rather than an error — neither is necessarily fetched on a machine that has not run it.
 </Callout>
 
-<h2>Where a version comes from</h2>
+<h2>Versions, navigation and vulnerabilities</h2>
 <p>
-  Reading a pom means opening four files, and every one of them is a jump from here:
+  <kbd>Ctrl</kbd> + <kbd>B</kbd> and hover on a coordinate or a <code>$&#123;property&#125;</code>, a dependency's own pom,
+  scopes, exclusions and the newer-version offers are covered in <strong>Dependency versions</strong>. The one check that
+  sends your coordinates to a third party, the known-vulnerability warning, is covered in <strong>Dependency security</strong>.
 </p>
-<table>
-  <thead><tr><th><kbd>Ctrl</kbd> + <kbd>B</kbd> on</th><th>Goes to</th></tr></thead>
-  <tbody>
-    <tr><td>A coordinate of one of your modules</td><td>The module that builds it</td></tr>
-    <tr><td>A coordinate something else pins</td><td>The parent's <code>&lt;dependencyManagement&gt;</code> entry</td></tr>
-    <tr><td>Any other coordinate</td><td>The artifact's own <code>.pom</code> in the repository — where what it drags in is written</td></tr>
-    <tr><td>A <code>$&#123;property&#125;</code></td><td>The pom that defines it, on the line that does</td></tr>
-    <tr><td>A <code>&lt;module&gt;</code></td><td>That module</td></tr>
-  </tbody>
-</table>
-<p>
-  Hover says the same without moving: what the coordinate resolves to on disk, what the version expands to and who decided it,
-  the scope, and every version of that artifact you have installed.
-</p>
-
-<h2>A dependency's own pom</h2>
-<p>
-  The <code>.pom</code> you land in from a coordinate lives in the local repository, not in your project — and it is still a
-  pom. The colour, the hover and the same <kbd>Ctrl</kbd> + <kbd>B</kbd> on <em>its</em> dependencies and its
-  <code>&lt;parent&gt;</code> all work there, so "what does this actually drag in" is followed as far as it goes, not one step.
-</p>
-<Callout variant="info" title="A pom in the repository is never marked">
-  The checks are written against a file you can fix. An artifact was built against dependencies your machine had no reason to
-  download, so there the check that finds a real problem in your own pom would underline the ordinary state of a repository,
-  on a line nobody can edit.
-</Callout>
-
-<h2>When a newer version exists</h2>
-<p>
-  Above a dependency that is behind, a line says which version Maven Central has, and one press writes it.
-</p>
-<Callout variant="warning" title="Reaches the network">
-  The local repository holds only what somebody here has already asked for, so by its measure a dependency nobody updated is
-  permanently current. Turn the check off in <strong>Settings → Java → Check Maven Central for newer versions</strong>.
-</Callout>
-<ul>
-  <li>Only what <em>this</em> pom pins. A version inherited from a parent or a BOM, or written as a <code>$&#123;property&#125;</code>,
-    is left alone: the line the hint would sit above is not the line that would have to change.</li>
-  <li>Answers are cached on disk for a day per artifact, and a failed lookup falls back to whatever is cached, however old — on a
-    train, last week's answer is the right one.</li>
-  <li>A milestone or a release candidate is never offered as the newer version.</li>
-</ul>
-
-<h2>Known vulnerabilities</h2>
-<p>
-  With <strong>Settings → Java → Check dependencies for known vulnerabilities</strong> on (the default), a dependency of the pom that has a published
-  advisory is underlined as a warning. The message names the CVE (or the advisory id), its severity, a one-line summary and the nearest
-  version that fixes it — hover to read it, and use the <em>newer version</em> line above the dependency to move.
-</p>
-<Callout variant="warning" title="Different from the version check">
-  The version check reads a public file and says nothing about your project. This one sends each dependency's
-  <code>groupId:artifactId</code> and version to <strong>api.osv.dev</strong> — nothing else. Turn it off in the same setting.
-</Callout>
-<ul>
-  <li>It runs in the background: a cold lookup can take a few seconds, and typing never waits for it. The warnings appear when the answer arrives.</li>
-  <li>A dependency with no literal version — managed by a BOM or a parent, or written as a property — is checked at the version the build <em>resolved</em>. The warning sits on the version when there is one, otherwise on the <code>&lt;dependency&gt;</code> tag. It needs the classpath to be resolved, which happens as the project indexes.</li>
-  <li><strong>Vulnerabilities…</strong> (Command Palette, or the shield button in the Dependencies panel) opens the whole-project view: every vulnerability on the classpath, transitive jars included, in the same window the Corvus security dashboard uses — severity tabs with counts, worst first, and a detail view per advisory with the fixed version and a link to osv.dev.</li>
-  <li>Answers are cached on disk for a day per dependency and version, and a request looks up a bounded number of them, so a large pom fills in over a few passes.</li>
-  <li>The warnings are drawn in the editor; the Problems panel lists the synchronous checks only.</li>
-</ul>
 
 <h2>When something is missing</h2>
 <p>

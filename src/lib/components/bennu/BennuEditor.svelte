@@ -103,6 +103,8 @@
   import { isI18nBundle } from './i18n/bundle-path';
   import { markupEdit } from './i18n/markup-edit';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
+  import { bennuProfilerStore } from '$lib/stores/bennu/profiler.svelte';
+  import { heatMarks, type HeatMark } from './profiler/profiler-format';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { bennuPicusStore } from '$lib/stores/bennu/picus.svelte';
   import { diagnostics as ipcDiagnostics, projectTree as ipcProjectTree } from '$lib/ipc/bennu';
@@ -186,6 +188,7 @@
     type ActionContext, type ActionId as AssistantActionId,
   } from './assistant/assistant-actions';
   import { actionsFor, docPrompt, type DocActionId } from './assistant/doc-actions';
+  import { groupedMenuItems } from './assistant/menu-groups';
   import { askAssistant, draftInAssistant } from './assistant/assistant-launch';
   import { WRITING_ACTIONS, writingDraft, writingPrompt, type WritingActionId } from './assistant/assistant-writing';
   import { bennuNavStore, type NavPlace } from '$lib/stores/bennu/nav-history.svelte';
@@ -193,7 +196,7 @@
   import { lineEditsOf } from './nav-ring';
   import type { ChangeSet, Text as CmText } from '@codemirror/state';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
-  import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
+  import type { MenuAction, MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { orderIntentions, type GenerateMode, type IntentionItem } from './bennu-intentions';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
@@ -252,7 +255,8 @@
     lineColOfByteOffset: (byteOffset: number) => { line: number; col: number } | null;
     scrollToByteOffset: (byteOffset: number) => void;
     replaceByteRange: (startByte: number, endByte: number, text: string) => void;
-    coordsAtCaret: () => { x: number; y: number } | null;
+    coordsAtCaret: () => { x: number; y: number; top: number } | null;
+    coordsAtLine: (line: number) => { x: number; top: number; bottom: number } | null;
     coordsAtByteOffset: (byteOffset: number) => { x: number; y: number } | null;
     setCaretAtCoords: (x: number, y: number) => boolean;
     wordAtCaret: () => string | null;
@@ -1879,6 +1883,39 @@
     return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
+  // ── Profiler hints ──────────────────────────────────────────────────────────────
+  //
+  // What the profiler measured, drawn on the method it belongs to ("38% CPU · 120 ms self") with a
+  // heat bar in the gutter. The declarations are read from the LIVE buffer and matched to the
+  // recording by qualified name, so the hints follow the code while it is edited; a buffer changed
+  // since the recording is flagged stale and drawn dimmed rather than silently trusted.
+  //
+  // Debounced like the other document-keyed layers, and silent when there is nothing to show: no
+  // recording means no request at all.
+  let profilerMarks = $state<HeatMark[]>([]);
+  $effect(() => {
+    const path = activePath;
+    const revision = docRevision;
+    const on = bennuSettingsStore.profilerHints;
+    void bennuProfilerStore.metricsEpoch;
+    if (on) bennuProfilerStore.ensureLoaded();
+    if (!path || !on || !bennuProfilerStore.hasRecordings || !/\.(java|[cm]?[jt]sx?|vue|svelte|rs)$/i.test(path)) {
+      profilerMarks = [];
+      return;
+    }
+    void revision;
+    const src = editorComp?.getValue() ?? '';
+    let cancelled = false;
+    const t = setFocusedTimeout(() => {
+      void bennuProfilerStore.metricsFor(path, src).then((fm) => {
+        if (cancelled || activePath !== path) return;
+        if (fm && projectStore.editedAt(path) > fm.created_ms) fm = { ...fm, stale: true };
+        profilerMarks = heatMarks(fm, true);
+      });
+    }, 700);
+    return () => { cancelled = true; clearFocusedTimeout(t); };
+  });
+
   // ── Usage counts, and what nothing reaches ──────────────────────────────────────
   //
   // How many places use each declaration, drawn above it, and the name of one nothing reaches drawn
@@ -2445,13 +2482,15 @@
     docTargetList.find((t) => t.kind === 'comment' && caretLine >= t.line && caretLine <= t.endLine) ?? null,
   );
   let chipTick = $state(0);
-  let askChip = $state<{ x: number; y: number } | null>(null);
+  // `top` is the top of the caret's row: the chip sits on its own, above it, never on the text of the line.
+  let askChip = $state<{ x: number; top: number } | null>(null);
   $effect(() => {
-    const on = !!activePath && !isDecompiledView && !isMarkdownTab && (chipComment !== null || selectionStartLine !== null);
+    const on = bennuSettingsStore.askChip && !!activePath && !isDecompiledView && !isMarkdownTab
+      && (chipComment !== null || selectionStartLine !== null);
     void caretLine; void chipTick;
     if (!on) { askChip = null; return; }
     const at = editorComp?.coordsAtCaret();
-    askChip = at && at.y > 0 ? { x: at.x, y: at.y } : null;
+    askChip = at && at.y > 0 ? { x: at.x, top: at.top } : null;
   });
   // Scrolling moves the caret on screen without moving it in the text: look again.
   $effect(() => {
@@ -2463,6 +2502,13 @@
   function onChipClick(event: MouseEvent) {
     if (chipComment) onDocGutterClick(chipComment, event);
     else showAssistantMenu(event.clientX, event.clientY + 14);
+  }
+
+  /** Where the actions of a doc comment open: just above the comment's first line, wherever it was pressed. */
+  function commentAnchor(target: DocTarget, fallback: MouseEvent): { x: number; y: number; above: boolean } {
+    const at = editorComp?.coordsAtLine(target.line);
+    // The comment's own first line is off-screen above: open below the pointer as any menu would.
+    return at ? { x: at.x, y: at.top, above: true } : { x: fallback.clientX, y: fallback.clientY, above: false };
   }
 
   /** What the assistant is being asked about, read from the editor now. */
@@ -2504,7 +2550,7 @@
   function showAssistantMenu(x: number, y: number) {
     const c = assistantContext();
     if (!c) return;
-    const items: MenuItem[] = assistantActionsFor(c).map((a) => ({ id: a.id, label: a.label, icon: Sparkles }));
+    const items: MenuItem[] = groupedMenuItems(assistantActionsFor(c), Sparkles);
     bennuContextMenuStore.show(x, y, items, (id) => void runAssistantAction(id as AssistantActionId, c));
   }
 
@@ -2543,10 +2589,11 @@
     const lang = docLanguage;
     if (!file || !lang) return;
     const actions = actionsFor(target);
-    const items: MenuItem[] = actions.map((a) => ({ id: a.id, label: a.label, icon: Sparkles }));
-    bennuContextMenuStore.show(event.clientX, event.clientY, items, (id) => {
+    const items: MenuItem[] = groupedMenuItems(actions, Sparkles);
+    const where = commentAnchor(target, event);
+    bennuContextMenuStore.show(where.x, where.y, items, (id) => {
       void askAboutDocs(id as DocActionId, target, file, lang);
-    });
+    }, { above: where.above });
   }
 
   async function askAboutDocs(action: DocActionId, target: DocTarget, file: string, lang: 'java' | 'rust') {
@@ -2748,11 +2795,15 @@
       // expensive thing to misread in a debugger, and "it has a condition on it" is the answer
       // ninety per cent of the time. The dot has to say so without being clicked.
       if (restricted) classes.push('cm-bp-cond');
+      // Set by the assistant: its own marker, so the user can tell at a glance whose it is.
+      if (b.by_assistant) classes.push('cm-bp-ai');
+      const noun = b.log_message ? 'Logpoint' : 'Breakpoint';
       return {
         line: b.line,
         className: classes.join(' '),
         tooltip: [
-          b.enabled ? 'Breakpoint' : 'Breakpoint (disabled)',
+          `${b.by_assistant ? `${noun} set by Imber` : noun}${b.enabled ? '' : ' (disabled)'}`,
+          b.log_message ? `prints "${b.log_message}"` : '',
           b.condition.trim() ? `stops when ${b.condition.trim()}` : '',
           b.hit_count > 1 ? `every ${b.hit_count} hits` : '',
           status?.hits ? `hit ${status.hits}×` : '',
@@ -4865,18 +4916,22 @@
     // does. A group with nothing in it contributes no separator, so a plain-text file's menu is
     // just edit + save rather than a column of dividers.
     const sep = (id: string): MenuItem => ({ id, label: '', separator: true });
-    const edit: MenuItem[] = [
-      { id: 'cut', label: 'Cut', icon: Scissors, iconColor: 'var(--text-muted)', shortcut: 'Ctrl+X' },
-      { id: 'copy', label: 'Copy', icon: Copy, iconColor: 'var(--text-muted)', shortcut: 'Ctrl+C' },
-      { id: 'paste', label: 'Paste', icon: ClipboardPaste, iconColor: 'var(--text-muted)', shortcut: 'Ctrl+V' },
+    // The verbs everyone reaches for sit in the icon bar at the top, as in the file tree's menu: cut, copy, paste,
+    // rename (where it can resolve) and Imber, whose icon opens its actions as a menu with submenus.
+    const quick: MenuAction[] = [
+      { id: 'cut', label: 'Cut', icon: Scissors, shortcut: 'Ctrl+X' },
+      { id: 'copy', label: 'Copy', icon: Copy, shortcut: 'Ctrl+C' },
+      { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V' },
+      ...(supportsNav ? [{ id: 'rename', label: 'Rename…', icon: PenLine, shortcut: 'Shift+F6' } as MenuAction] : []),
+      { id: 'imber', label: 'Ask Imber…', icon: Sparkles },
     ];
-    // Navigation actions (go-to / usages / rename) only where they can resolve.
+    editorMenuAt = { x: e.clientX, y: e.clientY };
+    // Navigation actions (go-to / usages) only where they can resolve.
     const navigate: MenuItem[] = supportsNav
       ? [
           { id: 'gotodef', label: 'Go to declaration', icon: Target, iconColor: 'var(--accent)', shortcut: 'Ctrl+B' },
           { id: 'gotoimpl', label: 'Go to implementation', icon: Target, iconColor: 'var(--accent)', shortcut: 'Ctrl+Shift+B' },
           { id: 'usages', label: 'Find usages', icon: SearchCode, iconColor: 'var(--accent)', shortcut: 'Alt+F7' },
-          { id: 'rename', label: 'Rename…', icon: PenLine, iconColor: 'var(--warning)', shortcut: 'Shift+F6' },
         ]
       : [];
     // On a Spring property file: the one thing you reach for that the file cannot tell you —
@@ -4942,11 +4997,13 @@
         ],
       },
     ];
-    const items: MenuItem[] = [edit, navigate, env, generate, save, past]
+    const items: MenuItem[] = [navigate, env, generate, save, past]
       .filter((group) => group.length > 0)
       .flatMap((group, i) => (i === 0 ? group : [sep('sep' + i), ...group]));
-    bennuContextMenuStore.show(e.clientX, e.clientY, items, onEditorMenuSelect);
+    bennuContextMenuStore.show(e.clientX, e.clientY, items, onEditorMenuSelect, { actions: quick });
   }
+  /** Where the editor's menu was opened: the Imber icon in its bar opens the assistant's menu on the same spot. */
+  let editorMenuAt = { x: 0, y: 0 };
   /** Git history of the highlighted lines. The menu greys the entry out without a selection, but
    *  the palette entry can be run anywhere, so the empty case is answered here too. */
   export function showSelectionHistory() {
@@ -4974,6 +5031,7 @@
       case 'cut': editorComp?.cutSelection(); break;
       case 'copy': editorComp?.copySelection(); break;
       case 'paste': void editorComp?.pasteClipboard(); break;
+      case 'imber': showAssistantMenu(editorMenuAt.x, editorMenuAt.y); break;
       case 'gotodef': goToDefinition(); break;
       case 'gotoimpl': void goToImplementation(); break;
       case 'history':
@@ -5388,7 +5446,7 @@
         <!-- Mouse-down is kept from the editor so pressing the button does not collapse the selection it is about. -->
         <button
           type="button" class="md-ai" style="left: {mdSelection.x + 6}px; top: {mdSelection.y + 4}px"
-          title="Ask the assistant about this passage"
+          title="Ask Imber about this passage"
           onmousedown={(e) => e.preventDefault()}
           onclick={(e) => showWritingMenu(e.clientX, e.clientY + 14)}
         ><Sparkles size={11} /></button>
@@ -5408,6 +5466,7 @@
           lineHighlights={editorLineHighlights}
           gutterMarks={allGutterMarks}
           lineAnnotations={blameAnnotations}
+          lineHeat={profilerMarks}
           changeHunks={changeHunks}
           onChangeBlockClick={openChangePopup}
           onGutterClick={onGutterClick}
@@ -5458,11 +5517,11 @@
       {#if askChip}
         <!-- Mouse-down is kept from the editor so pressing the chip does not move the caret or drop the selection. -->
         <button
-          type="button" class="ask-chip" style="left: {askChip.x + 12}px; top: {askChip.y - 28}px"
-          title={chipComment ? 'Improve, check or translate this comment' : 'Ask the assistant about this'}
+          type="button" class="ask-chip" style="left: {askChip.x + 12}px; top: {Math.max(4, askChip.top - 26)}px"
+          title={chipComment ? 'Improve, check or translate this comment' : 'Ask Imber about this'}
           onmousedown={(e) => e.preventDefault()}
           onclick={onChipClick}
-        ><Sparkles size={11} /><span>Assistant</span></button>
+        ><Sparkles size={10} /><span>Imber</span></button>
       {/if}
       {#if htmlPreviewing && !htmlFullscreen}
         <!-- Beside the source, not instead of it: a page is edited and looked at in the same
@@ -6220,6 +6279,18 @@
     outline: 1.5px solid var(--warning);
     outline-offset: 1.5px;
   }
+  /* Set by the assistant: a four-point sparkle in the accent colour instead of the round dot — the
+     same glyph the assistant uses everywhere else. The states keep their meaning through tone and
+     weight, since a mask cannot be hollow: pending is fainter, disabled is muted. */
+  :global(.cm-flag-icon.cm-bp-ai) {
+    width: 12px; height: 12px; border-radius: 0;
+    background: var(--accent);
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 1 14.9 9.1 23 12 14.9 14.9 12 23 9.1 14.9 1 12 9.1 9.1Z'/></svg>") center / contain no-repeat;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 1 14.9 9.1 23 12 14.9 14.9 12 23 9.1 14.9 1 12 9.1 9.1Z'/></svg>") center / contain no-repeat;
+    box-shadow: none; outline: none;
+  }
+  :global(.cm-flag-icon.cm-flag-on.cm-bp-ai.cm-bp-pending) { background: var(--accent); opacity: 0.55; }
+  :global(.cm-flag-icon.cm-flag-on.cm-bp-ai.cm-bp-off) { background: var(--text-muted); opacity: 0.5; }
 
   /* Where the program is stopped, on the frame you are looking at. A full-width band with a
      bar down its left edge — the band says WHICH row and the bar says it is the execution
@@ -6241,13 +6312,18 @@
   /* The assistant's chip by the caret: it pops in from the caret's side, then settles; the label opens on hover. */
   .ask-chip {
     position: fixed; z-index: 50;
-    display: inline-flex; align-items: center; gap: 0; height: 22px; padding: 0 6px;
+    display: inline-flex; align-items: center; gap: 0; height: 20px; padding: 0 5px;
     color: var(--text-on-accent); background: linear-gradient(140deg, var(--accent), var(--info));
-    border: none; border-radius: 11px; cursor: pointer;
+    border: none; border-radius: 10px; cursor: pointer;
     box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 40%, transparent);
     transform-origin: left bottom;
-    animation: ask-chip-in calc(var(--anim-dur-slow, 200ms) * 1.2) cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    /* The bob uses `translate`, which composes with the entrance's `transform` instead of fighting it; slow and small on purpose. */
+    animation:
+      ask-chip-in calc(var(--anim-dur-slow, 200ms) * 1.2) cubic-bezier(0.34, 1.56, 0.64, 1) both,
+      ask-chip-bob 3.2s ease-in-out 0.5s infinite;
   }
+  .ask-chip:hover, .ask-chip:focus-visible { animation-play-state: running, paused; }
+  @keyframes ask-chip-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }
   .ask-chip span {
     max-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--font-size-2xs); font-weight: 600;
     transition: max-width var(--anim-dur-base, 160ms) ease, margin var(--anim-dur-base, 160ms) ease;

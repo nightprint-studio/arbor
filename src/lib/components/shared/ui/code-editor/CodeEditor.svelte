@@ -43,6 +43,7 @@
   } from './extensions';
   import { minimapExtension } from './minimap';
   import { lineAnnotationExtension, pushLineAnnotations, type LineAnnotation } from './line-annotations';
+  import { lineHeatExtension, pushLineHeat, type LineHeat } from './line-heat';
   import { renderDiagnosticMessage } from './diagnostic-message';
   import { changeGutterExtension, pushChangeHunks, changeBlocks as readChangeBlocks, type ChangeBlock, type ChangeHunk } from './change-gutter';
   import { makeByteToU16 } from './highlight';
@@ -89,6 +90,7 @@
     lineHighlights = [],
     gutterMarks = [],
     lineAnnotations = [],
+    lineHeat = [],
     changeHunks = [],
     onChangeBlockClick,
     onGutterClick,
@@ -247,6 +249,9 @@
      * width. See `line-annotations.ts`.
      */
     lineAnnotations?: readonly LineAnnotation[];
+    /** Measurements drawn on their line — a gutter bar plus an optional label after the code (the
+     *  profiler's per-method numbers). Empty by default; an empty set takes no width. See `line-heat.ts`. */
+    lineHeat?: readonly LineHeat[];
     /** Lines that differ from the committed file, drawn as a bar beside the line numbers. Empty by
      *  default and an empty set takes no width. See `change-gutter.ts`. */
     changeHunks?: readonly ChangeHunk[];
@@ -584,6 +589,7 @@
   }
   $effect(() => { void gutterMarks; pushGutter(); });
   $effect(() => { const set = lineAnnotations; if (view) pushLineAnnotations(view, set); });
+  $effect(() => { const set = lineHeat; if (view) pushLineHeat(view, set); });
   $effect(() => { const set = changeHunks; if (view) pushChangeHunks(view, set); });
 
   /**
@@ -783,6 +789,7 @@
         flagGutter,
         // Right of the toggles and left of the line numbers, where an IDE draws blame.
         lineAnnotationExtension,
+        lineHeatExtension,
         changeGutterExtension((block, event) => onChangeBlockClick?.(block, event)),
         extensions,
         markField,
@@ -1537,10 +1544,21 @@
    *  for anchoring a caret-attached popup (intentions / usages). Null when the
    *  editor isn't mounted or the position is off-screen. Mirrors merula's
    *  `anchorAt`. */
-  export function coordsAtCaret(): { x: number; y: number } | null {
+  export function coordsAtCaret(): { x: number; y: number; top: number } | null {
     if (!view) return null;
     const c = view.coordsAtPos(view.state.selection.main.head);
-    return c ? { x: c.left, y: c.bottom } : null;
+    return c ? { x: c.left, y: c.bottom, top: c.top } : null;
+  }
+
+  /** The viewport box of the first character of a 1-based `line`: `x` is its left edge, `top` and `bottom` its
+   *  row. For anchoring something to a whole block (a comment's first line) rather than to the caret or the
+   *  pointer. Null when unmounted, the line does not exist, or it is scrolled out of view. */
+  export function coordsAtLine(line: number): { x: number; top: number; bottom: number } | null {
+    if (!view) return null;
+    const doc = view.state.doc;
+    if (line < 1 || line > doc.lines) return null;
+    const c = view.coordsAtPos(doc.line(line).from);
+    return c ? { x: c.left, top: c.top, bottom: c.bottom } : null;
   }
 
   /** Move the caret to the document position under viewport coords (`x`, `y`) — used to

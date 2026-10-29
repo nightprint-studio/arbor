@@ -104,6 +104,26 @@ pub trait DebugBackend: Send + Sync {
     /// would have to be computed from a copy of the previous one, and two copies of the same set is
     /// how they start disagreeing.
     fn reinstall(&self, config: &bennu_proto::prelude::DebugConfig) -> Result<(), String>;
+
+    /// The stop the program is standing at right now, as the panel was told about it; `None` while it
+    /// runs. For a caller that polls instead of listening for the `debug-paused` event (the AI
+    /// assistant) — it sees exactly the frames the panel shows. A backend that cannot say answers
+    /// `None`, which such a caller reads as "never stops", so it checks [`Self::kind`] first.
+    fn paused(&self) -> Option<bennu_proto::prelude::DebugPause> {
+        None
+    }
+
+    /// What the debugger made of each breakpoint (bound, waiting for its class, hit counts). Empty when
+    /// the backend does not keep that.
+    fn breakpoint_states(&self) -> Vec<bennu_proto::prelude::BreakpointStatus> {
+        Vec::new()
+    }
+
+    /// Change the stopped program (throw, return early, drop a frame, write a value). Only the JVM backend can; the
+    /// caller is the AI assistant, behind its own switch and approval.
+    fn mutate(&self, _op: &crate::debug::mutate::Mutation) -> Result<crate::debug::mutate::Mutated, String> {
+        Err("this debugger cannot change the running program".into())
+    }
 }
 
 /// Every live session, by id. The id is the **run id**, so the console tab and the debugger are the

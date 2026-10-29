@@ -17,6 +17,7 @@ describe('what the assistant says it is doing', () => {
     expect(tool('bennu_find_usages')).toBe('Finding usages');
     expect(tool('bennu_list_problems')).toBe('Checking');
     expect(tool('ask_user')).toBe('Waiting for your answer');
+    expect(tool('load_skill')).toBe('Loading a skill');
     expect(tool('update_plan')).toBe('Updating the plan');
   });
 

@@ -51,6 +51,11 @@ pub struct Registration {
     pub edges: Vec<(String, String)>,
     /// Sets the call put its systems in.
     pub sets: Vec<String>,
+    /// `(member, set)` from `.in_set(…)`, attributed to the member the combinator hung off —
+    /// `(a.in_set(S), b)` puts only `a` in `S`. More exact than [`Self::sets`], which is the
+    /// loose list the "never accuse a system in a set" guard wants; ordering has to be exact,
+    /// because a membership invented here would *prove* an order that does not exist.
+    pub memberships: Vec<(String, String)>,
     /// Systems that carry a `.run_if(…)` — their own, or one on the whole tuple.
     pub conditional: Vec<String>,
     /// The tuple was `.chain()`ed — every system in it is ordered against every other.
@@ -63,6 +68,10 @@ pub struct FileScan {
     pub types: Vec<RawType>,
     pub fns: Vec<RawFn>,
     pub registrations: Vec<Registration>,
+    /// `configure_sets(schedule, sets)` calls, read with the same grammar as `add_systems`: here
+    /// [`Registration::systems`] holds **set** names, and `edges` / `chained` / `memberships` /
+    /// `conditional` are what the call says about them.
+    pub set_configs: Vec<Registration>,
     /// `impl Component for Health` — the hand-written half of what a derive usually says.
     pub trait_impls: Vec<(String, Role)>,
     /// Where a declaration is actually **put into the world**: a `spawn`, an `insert`, an
@@ -181,7 +190,10 @@ pub fn scan_file(masked: &str) -> FileScan {
                 attrs.clear();
             }
             "add_systems" => {
-                i = read_add_systems(masked, after, &mut out);
+                i = read_registration(masked, after, &mut out, false);
+            }
+            "configure_sets" => {
+                i = read_registration(masked, after, &mut out, true);
             }
             w if insert_kind(w).is_some() => {
                 i = read_insert(masked, i, after, insert_kind(w).unwrap_or(InsertKind::Spawn), &mut out);
@@ -362,8 +374,11 @@ fn bare_name(token: &str) -> String {
     last_segment(t)
 }
 
-/// After the `add_systems` identifier: its arguments.
-fn read_add_systems(src: &str, at: usize, out: &mut FileScan) -> usize {
+/// After the `add_systems` / `configure_sets` identifier: its arguments. Both are
+/// `(schedule, expression)` and the expression has the same grammar — a name or a tuple of names,
+/// with `.chain()` / `.before` / `.after` / `.in_set` / `.run_if` hung off it — so one reader
+/// serves both; `sets` only chooses which list the result lands in.
+fn read_registration(src: &str, at: usize, out: &mut FileScan, sets: bool) -> usize {
     let b = src.as_bytes();
     let open = skip_ws(b, at);
     if b.get(open) != Some(&b'(') {
@@ -375,7 +390,11 @@ fn read_add_systems(src: &str, at: usize, out: &mut FileScan) -> usize {
     if !rest.is_empty() {
         let mut reg = systems_in(&rest.join(", "));
         reg.schedule = schedule_label(schedule);
-        out.registrations.push(reg);
+        if sets {
+            out.set_configs.push(reg);
+        } else {
+            out.registrations.push(reg);
+        }
     }
     close + 1
 }
@@ -515,6 +534,7 @@ fn systems_in(expr: &str) -> Registration {
         ordered_with: Vec::new(),
         edges: Vec::new(),
         sets: Vec::new(),
+        memberships: Vec::new(),
         conditional: Vec::new(),
         chained: false,
     };
@@ -552,7 +572,13 @@ fn systems_in(expr: &str) -> Registration {
                     }
                 }
                 "ambiguous_with" => reg.ordered_with.extend(plain_paths(inner)),
-                "in_set" => reg.sets.extend(plain_paths(inner)),
+                "in_set" => {
+                    let sets = plain_paths(inner);
+                    for s in &subjects {
+                        reg.memberships.extend(sets.iter().map(|set| (s.clone(), set.clone())));
+                    }
+                    reg.sets.extend(sets);
+                }
                 "run_if" | "distributive_run_if" => reg.conditional.extend(subjects),
                 _ => {}
             }

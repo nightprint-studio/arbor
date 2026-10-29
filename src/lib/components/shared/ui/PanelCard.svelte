@@ -35,6 +35,9 @@
     minSize?: number;
     maxSize?: number;
     onResize?: (size: number) => void;
+    /** Cover the sibling panels with this card's content, this many px wide, without resizing the card
+     *  (see `ResizablePanel`'s `liftWidth`). `null` (default) leaves the card docked. */
+    liftWidth?: number | null;
     /** Animate the open/close slide (default true). */
     animate?: boolean;
     /** Transition duration in ms (default `animStore.dPanel`). */
@@ -52,6 +55,7 @@
     minSize,
     maxSize,
     onResize,
+    liftWidth = null,
     animate = true,
     duration,
     children,
@@ -71,13 +75,13 @@
 </script>
 
 {#snippet body()}
-  <ResizablePanel {direction} {initialSize} {minSize} {maxSize} {onResize} {reverse}>
+  <ResizablePanel {direction} {initialSize} {minSize} {maxSize} {onResize} {reverse} {liftWidth}>
     {@render children()}
   </ResizablePanel>
 {/snippet}
 
 {#if !animate}
-  <div class="pc-card" class:pc-bottom={isBottom} data-panel={orientation}>{@render body()}</div>
+  <div class="pc-card" class:pc-bottom={isBottom} class:pc-lifted={liftWidth !== null} data-panel={orientation}>{@render body()}</div>
 {:else if isBottom}
   <!-- `|global`: the `{#if}` that mounts/unmounts this card lives in the HOST
        (AppShell / MerulaShell), an ancestor block across the component boundary.
@@ -85,6 +89,7 @@
        would never play here — global makes it react to the ancestor toggle. -->
   <div
     class="pc-card pc-bottom"
+    class:pc-lifted={liftWidth !== null}
     data-panel={orientation}
     transition:bottomSlide|global={{ duration: dur }}
     {onintrostart}
@@ -95,6 +100,7 @@
 {:else}
   <div
     class="pc-card"
+    class:pc-lifted={liftWidth !== null}
     data-panel={orientation}
     transition:sidebarSlide|global={{ duration: dur }}
     {onintrostart}
@@ -114,6 +120,8 @@
     background: var(--bg-base);
     border-radius: var(--radius-lg);
   }
+  /* Its content is lifted over the neighbours, so it must be allowed to leave the card. */
+  .pc-card.pc-lifted { overflow: visible; }
   /* Bottom panel: full-width card stacking downward. */
   .pc-card.pc-bottom {
     flex-direction: column;

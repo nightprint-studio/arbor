@@ -13,6 +13,7 @@ pub(super) fn tool_kind(name: &str) -> &'static str {
         "edit_file" | "create_file" | "delete_file" | "bennu_write_file" => "edit",
         "search_text" | "find_files" => "search",
         "ask_user" => "search",
+        "load_skill" => "read",
         n if n.contains("rename") || n.contains("refactor") || n.contains("parameter") || n.contains("safe_delete") => "refactor",
         n if n.contains("problems") || n.contains("check") || n.contains("compile") || n.contains("test") || n.contains("validate") => "validate",
         n if n.contains("read") || n.contains("contents") => "read",
@@ -48,17 +49,51 @@ pub(super) fn detail_of(result: &Result<String, String>) -> String {
     }
 }
 
+/// Where the message stood when a request began: what a failed attempt of that request may take back.
+struct AttemptMark {
+    /// How many blocks there were.
+    blocks: usize,
+    /// The length of the last block's text when that block was text — the next request's text extends it.
+    tail_text: Option<usize>,
+}
+
 /// The message being built.
 pub(super) struct View {
     id: String,
     model: String,
     at: u64,
     blocks: Vec<Value>,
+    attempt: Option<AttemptMark>,
 }
 
 impl View {
     pub(super) fn new(id: String, model: String, at: u64) -> Self {
-        Self { id, model, at, blocks: Vec::new() }
+        Self { id, model, at, blocks: Vec::new(), attempt: None }
+    }
+
+    /// A request begins: remember where the message stands, so that if it fails midway its streamed text can be
+    /// taken back (cards and receipts other threads added meanwhile stay).
+    pub(super) fn begin_attempt(&mut self) {
+        let tail_text = self.blocks.last().filter(|b| b.get("type").and_then(Value::as_str) == Some("text")).map(|b| b["text"].as_str().map_or(0, str::len));
+        self.attempt = Some(AttemptMark { blocks: self.blocks.len(), tail_text });
+    }
+
+    /// Take back the text streamed since [`Self::begin_attempt`]. Safe to call again after a second failure of the same request.
+    pub(super) fn discard_attempt(&mut self) {
+        let Some(mark) = &self.attempt else { return };
+        let keep = mark.blocks;
+        let mut index = 0;
+        self.blocks.retain(|b| {
+            let at = index;
+            index += 1;
+            at < keep || b.get("type").and_then(Value::as_str) != Some("text")
+        });
+        if let (Some(len), Some(last)) = (mark.tail_text, keep.checked_sub(1).and_then(|i| self.blocks.get_mut(i))) {
+            let text = last["text"].as_str().unwrap_or("");
+            if text.len() > len && text.is_char_boundary(len) {
+                last["text"] = Value::String(text[..len].to_string());
+            }
+        }
     }
 
     /// Append streamed text, extending the last block when it is text too.
@@ -100,6 +135,17 @@ impl View {
         false
     }
 
+    /// Take a block out of the message, found like [`Self::update`]. Returns whether it was there.
+    pub(super) fn remove(&mut self, pointer: &str, id: &str) -> bool {
+        match self.blocks.iter().position(|b| b.pointer(pointer).and_then(Value::as_str) == Some(id)) {
+            Some(at) => {
+                self.blocks.remove(at);
+                true
+            }
+            None => false,
+        }
+    }
+
     pub(super) fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
@@ -135,6 +181,35 @@ mod tests {
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0]["text"], "Hello");
         assert_eq!(blocks[2]["text"], "Done");
+    }
+
+    #[test]
+    fn the_text_of_a_failed_attempt_is_taken_back_and_nothing_else() {
+        let mut v = View::new("m".into(), "x".into(), 0);
+        v.text("Before. ");
+        v.begin_attempt();
+        v.text("half an ans");
+        v.push(json!({"type": "agent", "agent": {"id": "a1"}}));
+        v.text("wer");
+        v.discard_attempt();
+        let blocks = v.snapshot()["blocks"].as_array().unwrap().clone();
+        assert_eq!(blocks.len(), 2, "{blocks:?}");
+        assert_eq!(blocks[0]["text"], "Before. ", "the text the attempt extended is cut back, not removed");
+        assert_eq!(blocks[1]["type"], "agent", "a card another thread added stays");
+        // The retry streams again, and a second failure takes that back too.
+        v.text("The whole answer");
+        v.discard_attempt();
+        assert_eq!(v.snapshot()["blocks"].as_array().unwrap().len(), 2);
+        v.text("Done");
+        assert_eq!(v.snapshot()["blocks"][2]["text"], "Done");
+    }
+
+    #[test]
+    fn discarding_without_an_attempt_changes_nothing() {
+        let mut v = View::new("m".into(), "x".into(), 0);
+        v.text("kept");
+        v.discard_attempt();
+        assert_eq!(v.snapshot()["blocks"][0]["text"], "kept");
     }
 
     #[test]

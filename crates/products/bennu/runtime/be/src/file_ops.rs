@@ -101,6 +101,17 @@ fn record_deletion(st: &HistoryStore, file: &Path, ctx: &RecordCtx) -> bool {
     st.record(file, RevisionKind::Deleted, None, ctx).ok().flatten().is_some()
 }
 
+/// Record a deletion that was already carried out elsewhere (an isolated copy's apply), from the bytes the
+/// file held, so it can be undone from Local History like any other delete. Best effort: the file is gone.
+pub(crate) fn record_deleted_bytes(root: &str, file: &Path, bytes: Option<Vec<u8>>) {
+    let Ok(st) = crate::history::store(root) else { return };
+    let ctx = RecordCtx { change: Some(format!("del-{}", now_ms())), title: Some("Deleted (applied from an isolated copy)".into()), from: None };
+    if let Some(bytes) = bytes {
+        let _ = st.record(file, RevisionKind::Created, Some(&bytes), &ctx);
+    }
+    let _ = st.record(file, RevisionKind::Deleted, None, &ctx);
+}
+
 /// Delete files and directories, keeping what they held so the delete can be undone.
 ///
 /// The whole call shares one change set, so a delete of six files is one row in the

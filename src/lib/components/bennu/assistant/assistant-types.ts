@@ -7,8 +7,11 @@
 
 import type { DiffHunkModel } from '$lib/components/shared/ui/TextDiff.svelte';
 
-/** Who runs the edits: you approve each one, or the agent applies them as it goes. */
-export type AssistantMode = 'manual' | 'auto';
+/**
+ * How much the agent decides for itself. `manual`: every edit is a proposal. `accept_edits`: edits are applied
+ * at once inside what you allowed. `autonomous`: that, and it may open the files its own build reports an error in.
+ */
+export type AssistantMode = 'manual' | 'accept_edits' | 'autonomous';
 
 export interface AssistantModel {
   id: string;
@@ -45,9 +48,14 @@ export interface ProposedFile {
   removed: number;
   /** What changes, as the diff viewer draws it — shown when you review the proposal. */
   hunks: DiffHunkModel[];
+  /** The file is no longer what this was proposed against — it changed since. */
+  stale?: boolean;
+  /** Another undecided proposal edits this file too; applying either makes the other outdated. */
+  shared?: boolean;
 }
 
-export type ProposalStatus = 'pending' | 'applied' | 'rejected';
+/** `outdated`: refused because files changed since the proposal; it is kept, to be re-made or dropped. */
+export type ProposalStatus = 'pending' | 'applied' | 'rejected' | 'outdated' | 'undone';
 
 /** Changes the agent wants to make, shown before they are written. */
 export interface EditProposal {
@@ -114,6 +122,19 @@ export interface AccessRequest {
   answer?: AccessAnswer;
 }
 
+/** Whether a file the agent opened for itself is still open. `expired`: the run ended, and the access with it. */
+export type GrantState = 'active' | 'revoked' | 'expired';
+
+/** A file Autonomous mode opened without asking, because the build reported an error in it. */
+export interface AccessGrant {
+  id: string;
+  /** The file, as the thread names it. */
+  file: string;
+  /** `Access granted to A.java because the build reports an error there`. */
+  reason: string;
+  state: GrantState;
+}
+
 /** A yes/no the assistant needs before it runs something that changes things or runs project code. */
 export interface ConfirmRequest {
   id: string;
@@ -134,16 +155,94 @@ export interface PlanBlock {
   steps: PlanStep[];
 }
 
+/** What a run did with live processes — the card at the end of its message. */
+export interface LiveSummary {
+  started: string[];
+  stopped: string[];
+  still_running: string[];
+  request_count: number;
+  requests_ok: number;
+  requests: { method: string; url: string; status: number | null; corr: string; ms: number | null }[];
+  scenarios: { name: string; passed: boolean; steps: number; failed: number }[];
+  assertions: { passed: number; failed: number };
+  files: string[];
+  /** Changes made to a running Bevy game. It has no undo, so every one is listed; absent in older conversations. */
+  bevy_change_count?: number;
+  bevy_changes?: string[];
+  /** What the run cost, in dollars; absent when the model's prices are unknown. */
+  cost: number | null;
+}
+
+/**
+ * A diagram the assistant drew with `show_diagram`: Mermaid source, checked by the panel before the model
+ * is told it worked. `checking` is the moment the panel parses it; once accepted it stays `ok`.
+ */
+export interface DiagramBlock {
+  id: string;
+  title?: string;
+  source: string;
+  status?: 'checking' | 'ok';
+}
+
+/** Where a sub-agent is. `stopped`: by you, or because the run that started it ended. `failed`: an error, or its steps or money ran out. */
+export type AgentStatus = 'running' | 'done' | 'stopped' | 'failed';
+
+/** The card a sub-agent leaves in the thread of the conversation that started it. */
+export interface AgentCard {
+  id: string;
+  title: string;
+  status: AgentStatus;
+  /** `read` or `read+edit`. */
+  tools: 'read' | 'read+edit';
+  model: string;
+  /** Dollars. */
+  cost: number;
+  startedAt: number;
+  endedAt: number | null;
+  /** The first part of what it answered. */
+  summary: string;
+  /** Why it failed, when it did (a lost connection, a rejected key…). */
+  error?: string | null;
+  /** Set while it waits to send a failed request again. */
+  waiting?: string | null;
+}
+
+/** A sub-agent as the Agents list shows it. */
+export interface AssistantAgent extends Omit<AgentCard, 'summary'> {
+  conversationId: string;
+  runId: string;
+  task: string;
+  summary: string | null;
+  error: string | null;
+}
+
 export type MessageBlock =
   | { type: 'text'; text: string }
+  | { type: 'diagram'; diagram: DiagramBlock; promptId?: string }
   | { type: 'plan'; plan: PlanBlock }
   | { type: 'access'; request: AccessRequest; promptId?: string }
+  | { type: 'grant'; grant: AccessGrant }
   | { type: 'confirm'; confirm: ConfirmRequest; promptId?: string }
-  | { type: 'notice'; level: 'error' | 'warning' | 'info'; text: string }
+  | { type: 'notice'; level: 'error' | 'warning' | 'info'; text: string; detail?: string; kind?: string; retryable?: boolean; canRetry?: boolean }
   | { type: 'questions'; set: QuestionSet; promptId?: string }
   | { type: 'code'; language: string; code: string }
   | { type: 'tool'; call: ToolCall }
-  | { type: 'proposal'; proposal: EditProposal };
+  | { type: 'proposal'; proposal: EditProposal }
+  | { type: 'live_summary'; summary: LiveSummary }
+  | { type: 'screenshot'; shot: ScreenshotShot }
+  | { type: 'agent'; agent: AgentCard };
+
+/** A screenshot the assistant took of a page on this machine. The thread carries a path, never the bytes. */
+export interface ScreenshotShot {
+  id: string;
+  /** `<conversation>/<file>` under the assistant's data folder; fetched with `getAssistantImage`. */
+  path: string;
+  media_type: string;
+  width: number;
+  height: number;
+  /** `http://localhost:3000/ · 1280×800`. */
+  caption: string;
+}
 
 export interface AssistantMessage {
   id: string;
@@ -163,6 +262,10 @@ export interface ContextBreakdown {
   project: number;
   /** What you and the assistant said. */
   conversation: number;
+  /** Parts of `system`, told apart (absent in a conversation saved before they were counted). */
+  tools?: number;
+  instructions?: number;
+  skills?: number;
 }
 
 export interface Conversation {
@@ -177,4 +280,16 @@ export interface Conversation {
   cost: number;
   /** A chat: no tools, no access to files. Absent in conversations saved before chats existed. */
   chat?: boolean;
+  /** The kind of isolated copy this conversation works in, until it is applied or discarded. */
+  worktree?: string;
+  /** `separate` when this conversation compiles in a target of its own; absent means the shared, queued one. */
+  buildIsolation?: string;
+  /** This conversation's own decision level; absent inherits the setting. */
+  decisionLevel?: string;
+  /** This conversation's own words about decisions, added to the global ones. */
+  decisionNotes?: string;
+  /** This conversation's own answer to "start a run when the debugged program stops": `on`, `off`; absent follows the setting. Kept while the panel is open. */
+  autoContinue?: string;
+  /** This conversation's own sub-agents switch: `on`, `off`; absent follows the setting. */
+  subagents?: string;
 }

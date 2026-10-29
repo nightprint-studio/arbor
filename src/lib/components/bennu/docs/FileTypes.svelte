@@ -137,6 +137,32 @@
   <li><code>#![enable(…)]</code> reads as the header it is.</li>
 </ul>
 
+<h3>Checking a <code>.ron</code> as you type</h3>
+<p>
+  Every <code>.ron</code> is checked for <strong>brackets and syntax</strong>: an unclosed <code>(</code> is marked on the bracket that was never closed, not at the end of the file,
+  and a closer that closes the wrong kind says which opener it met. Brackets inside strings, chars and comments do not count.
+</p>
+<p>
+  To check the <strong>contents</strong> against a Rust type, say which type on the first line — the same comment Studio reads:
+</p>
+<pre><code>{`// ron-studio: schema = "src/settings.rs", root = "crate::Settings"
+#![enable(implicit_some)]
+(window_title: "Game", vsync: true)`}</code></pre>
+<p>
+  The path is relative to the <code>.ron</code>; a <code>.arbor/studio.toml</code> with a default and per-glob overrides works instead. Bennu then marks:
+</p>
+<ul>
+  <li>a <strong>field the type does not have</strong> (with <em>did you mean</em>), and an <strong>unknown variant</strong> — warnings;</li>
+  <li>a <strong>required field the document leaves out</strong> — an info on the struct, since a type that is <code>#[serde(default)]</code> as a whole makes them all optional;</li>
+  <li>a <strong>string where a number goes</strong>, and the like — a warning.</li>
+</ul>
+<p>
+  Serde's <code>rename</code>, <code>rename_all</code>, <code>alias</code>, <code>default</code> and <code>flatten</code> on fields are honoured; <code>Option</code> accepts <code>Some(…)</code>,
+  <code>None</code> or a bare value. The check runs after you pause typing, reads the crate once and remembers it for a minute (and again when the <code>.rs</code> named by the directive is saved).
+  A directive that cannot be followed — no crate, no such type — is marked on the directive line. Bevy scene files (<code>.scn.ron</code>) name types by path rather than being one type,
+  so they get the syntax check only.
+</p>
+
 <h2><code>package.json</code></h2>
 <p>
   Recognised by <strong>name</strong>, so a <code>tsconfig.json</code> stays ordinary JSON and a manifest under <code>node_modules</code> is left alone. On top of the

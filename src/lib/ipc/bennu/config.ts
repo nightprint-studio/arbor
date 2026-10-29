@@ -46,6 +46,29 @@ export interface BennuAssistantConfig {
   max_projects: number;
   /** Tool families switched off. */
   tool_families_off: string[];
+  /** Let the assistant change a running Bevy game over BRP. Off by default. */
+  bevy_write_enabled: boolean;
+  debug_mutate_enabled?: boolean;
+  /** Skills the user enabled, as `<scope>/<name>` ids. An allow-list: none until ticked. */
+  skills_on: string[];
+  /** `ask_forks` | `ask_big` | `decide`. */
+  decision_level: string;
+  /** The user's own words about decisions. */
+  decision_notes: string;
+  /** Confirm a model / context-size change that makes a long conversation re-read its history. */
+  confirm_cost_changes: boolean;
+  /** Offer sub-agents. */
+  subagents_enabled: boolean;
+  /** Minutes an unused assistant debug session lives. */
+  debug_idle_minutes: number;
+  /** Start a run by itself when the debugger stops while the assistant is idle. */
+  auto_continue_on_stop: boolean;
+  /** Wrap code pasted into the composer in a fenced block with its language. */
+  wrap_pasted_code: boolean;
+  /** Keep the instructions and tool definitions in the provider's one-hour cache. */
+  long_cache: boolean;
+  /** Model for side jobs (compacting); empty picks the cheapest Haiku-class one. */
+  side_model: string;
 }
 
 /** Mirrors the BE `BennuConfig` (snake_case, field-for-field). */
@@ -117,6 +140,10 @@ export interface BennuConfig {
   history_diff_split: boolean;
   /** Add the commit message to the Git Blame text after a line. */
   blame_show_message: boolean;
+  /** Draw the profiler's numbers in the editor (inline hint + gutter heat). */
+  profiler_hints: boolean;
+  /** Show Imber's ✦ button by the caret (on a doc comment and on selected text). */
+  ask_chip: boolean;
   /** Mark lines changed since HEAD in the editor gutter. */
   show_change_markers: boolean;
   /** Minutes the DTO Lab's JVM may go without a question before it is stopped. */

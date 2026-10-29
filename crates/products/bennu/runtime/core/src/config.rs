@@ -169,6 +169,12 @@ pub struct BennuConfig {
     /// author and age are what is read at a glance, and a long subject next to the code is the
     /// part that turns a margin note into clutter). The full message is always in the hover.
     pub blame_show_message: bool,
+    /// Draw the profiler's numbers in the editor — an inline hint after each measured method and a
+    /// gutter heat bar (`true` by default; nothing is drawn until a recording exists).
+    pub profiler_hints: bool,
+    /// Show Imber's ✦ button by the caret — on a doc comment, and on selected text (`true` by default).
+    /// Off, the editor draws nothing there; Imber is still one shortcut or palette entry away.
+    pub ask_chip: bool,
     /// Mark lines changed since HEAD in the editor gutter (`true` by default). Off, the editor never
     /// asks Corvus for the diff — no repository is opened and no HEAD blob is read for it.
     pub show_change_markers: bool,
@@ -426,6 +432,20 @@ pub struct BennuConfig {
     /// A table: it stays at the end with the others.
     #[serde(default)]
     pub new_project: NewProjectConfig,
+    /// **Profiler tools** — where the external profilers live. See [`ProfilerToolsConfig`].
+    ///
+    /// A table: it stays at the end with the others.
+    #[serde(default)]
+    pub profiler_tools: ProfilerToolsConfig,
+}
+
+/// Where the profiler's external tools are, when the user says so.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ProfilerToolsConfig {
+    /// A `samply` executable the user picked. Empty = use the copy Arbor downloaded, else the one
+    /// on `PATH`. When set, it wins over both and a bad path is reported rather than skipped.
+    pub samply_path: String,
 }
 
 /// What the New Project wizard remembers, so the common case is "type a name, Ctrl+Enter".
@@ -711,7 +731,9 @@ pub struct AssistantConfig {
     pub model: String,
     /// `low` … `max`; ignored by a model with no effort setting.
     pub effort: String,
-    /// `manual` (edits are proposed for review) or `auto` (applied as made).
+    /// `manual` (edits are proposed for review), `accept_edits` (applied as made, inside the scope) or
+    /// `autonomous` (that, and it may open the files the build names). An older `auto` reads as `accept_edits`.
+    #[serde(deserialize_with = "assistant_mode_word")]
     pub mode: String,
     /// `file`, `project`, `workspace` or `disk` — how far it may reach without asking.
     pub scope: String,
@@ -744,6 +766,43 @@ pub struct AssistantConfig {
     /// Tool families switched off (`read`, `project`, `edit`, `refactor`, `run`, `history`, `structural`): not
     /// offered to the model, so it cannot call them and their definitions cost nothing.
     pub tool_families_off: Vec<String>,
+    /// Let the assistant change a running Bevy game over BRP (mutate, insert, remove, spawn, despawn). Off until
+    /// the user turns it on: the game is live state with no proposal and no undo.
+    pub bevy_write_enabled: bool,
+    /// Let the assistant change the program it is debugging (throw an exception, return early, drop a frame, write a
+    /// value). Off until the user turns it on: the program changes and there is no undo.
+    pub debug_mutate_enabled: bool,
+    /// Skills the user enabled, as `<scope>/<name>` ids (scope `user` or `project`). An allow-list: a skill
+    /// found on disk is not shown to the model until it is ticked in the skills manager.
+    pub skills_on: Vec<String>,
+    /// How much it decides alone: `ask_forks` (default), `ask_big` or `decide`.
+    pub decision_level: String,
+    /// The user's own words about decisions, for every conversation (a conversation can add its own).
+    pub decision_notes: String,
+    /// Ask before a change of model or context size that makes a long conversation re-read its history at full price.
+    pub confirm_cost_changes: bool,
+    /// Offer the assistant sub-agents (`spawn_agent`): clean-context helpers with a subset of its permissions.
+    pub subagents_enabled: bool,
+    /// Minutes a debug session the assistant started may sit unused before it is ended.
+    pub debug_idle_minutes: u32,
+    /// When the debugger stops while the assistant is idle, start a run by itself to tell it. Spends money; off by default.
+    pub auto_continue_on_stop: bool,
+    /// Keep the instructions and tool definitions in the provider's one-hour cache instead of the five-minute one.
+    /// Pays off when you pause between messages (or open several conversations in a project): the standing part
+    /// is then read at a fraction instead of being written again. On by default.
+    pub long_cache: bool,
+    /// The cheaper model for side jobs — compacting a conversation, and (when sub-agents exist) read-only
+    /// exploration. Empty: the cheapest Haiku-class model in the price list.
+    pub side_model: String,
+    /// Code pasted into the composer becomes a fenced block with its language (Ctrl+Shift+V pastes plain). On by default.
+    pub wrap_pasted_code: bool,
+}
+
+/// The saved assistant mode, with the word the two-way switch used (`auto`) read as the mode it became.
+/// The file is rewritten with the new word the next time the choice is saved.
+fn assistant_mode_word<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let word = String::deserialize(d)?;
+    Ok(if word.trim().eq_ignore_ascii_case("auto") { "accept_edits".to_string() } else { word })
 }
 
 /// Spending limits, in euros; `0` switches one off. Prices are in dollars, so `eur_per_usd` is the rate
@@ -789,6 +848,18 @@ impl Default for AssistantConfig {
             plan_enabled: true,
             max_projects: 6,
             tool_families_off: Vec::new(),
+            bevy_write_enabled: false,
+            debug_mutate_enabled: false,
+            skills_on: Vec::new(),
+            decision_level: "ask_forks".to_string(),
+            decision_notes: String::new(),
+            confirm_cost_changes: true,
+            subagents_enabled: false,
+            debug_idle_minutes: 30,
+            auto_continue_on_stop: false,
+            long_cache: true,
+            side_model: String::new(),
+            wrap_pasted_code: true,
         }
     }
 }
@@ -830,6 +901,8 @@ impl Default for BennuConfig {
             markdown_live_preview: true,
             history_diff_split: true,
             blame_show_message: false,
+            profiler_hints: true,
+            ask_chip: true,
             show_change_markers: true,
             dtolab_idle_minutes: 10,
             // The names the settings page has always shown in this box. `target` and `.idea` are
@@ -889,6 +962,7 @@ impl Default for BennuConfig {
             maven: MavenConfig::default(),
             onboarding: OnboardingConfig::default(),
             new_project: NewProjectConfig::default(),
+            profiler_tools: ProfilerToolsConfig::default(),
         }
     }
 }
@@ -1062,6 +1136,19 @@ pub fn save_workspaces(store: &BennuWorkspaces) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_auto_mode_reads_as_accept_edits_and_the_new_words_stay() {
+        let read = |word: &str| toml::from_str::<AssistantConfig>(&format!("mode = \"{word}\"")).unwrap().mode;
+        assert_eq!(read("auto"), "accept_edits", "the choice made with the old switch survives");
+        assert_eq!(read("manual"), "manual");
+        assert_eq!(read("accept_edits"), "accept_edits");
+        assert_eq!(read("autonomous"), "autonomous");
+        assert_eq!(toml::from_str::<AssistantConfig>("").unwrap().mode, "manual", "a file with no mode is the cautious one");
+        // And what is written back is the new word.
+        let text = toml::to_string_pretty(&toml::from_str::<AssistantConfig>("mode = \"auto\"").unwrap()).unwrap();
+        assert!(text.contains("mode = \"accept_edits\""), "{text}");
+    }
 
     fn ws(id: &str, name: &str, roots: &[&str]) -> BennuWorkspace {
         BennuWorkspace {

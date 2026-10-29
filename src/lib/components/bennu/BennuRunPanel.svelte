@@ -68,6 +68,7 @@
   import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
   import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
   import BennuDebugControls from './BennuDebugControls.svelte';
+  import AssistantDebugLease from './assistant/AssistantDebugLease.svelte';
   import BennuDebugFrames from './BennuDebugFrames.svelte';
   import BennuDebugValues from './BennuDebugValues.svelte';
   import BennuTestView from './BennuTestView.svelte';
@@ -502,7 +503,7 @@
          While a debugger is attached the left is its transport; otherwise there is nothing
          there, because a row of disabled buttons is chrome pretending to be a feature. -->
     <div class="rp-status">
-      {#if debugging}<BennuDebugControls />{/if}
+      {#if debugging}<BennuDebugControls /><AssistantDebugLease />{/if}
       <span class="rp-status-right">
         {#if status.kind === 'busy'}
           <Spinner size={13} />

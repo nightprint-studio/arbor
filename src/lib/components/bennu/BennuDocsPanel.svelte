@@ -21,8 +21,11 @@
     ServerCog, Cog, Languages, Network, Gamepad2, Search, Coffee, FileCode2, Bug, History,
     FileText, Compass, ListTree, Sparkles, ShieldCheck, Wrench, Download, Package, Braces,
     Database, Layers, Palette, Flame, ScrollText, FileType2, SlidersHorizontal, ArrowLeftRight,
-    ListChecks, FolderPlus,
+    ListChecks, FolderPlus, Activity, Mic,
   } from 'lucide-svelte';
+  import Voice from './docs/Voice.svelte';
+  import type { Component } from 'svelte';
+  import type { IconComponent } from '$lib/types/icon';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
 
   import GettingStarted    from './docs/GettingStarted.svelte';
@@ -32,6 +35,8 @@
   import ProjectTree       from './docs/ProjectTree.svelte';
   import Jdk               from './docs/Jdk.svelte';
   import Dependencies      from './docs/Dependencies.svelte';
+  import DependencyVersions from './docs/DependencyVersions.svelte';
+  import DependencySecurity from './docs/DependencySecurity.svelte';
   import Maven             from './docs/Maven.svelte';
   import PomEditing        from './docs/PomEditing.svelte';
   import ModuleGraph       from './docs/ModuleGraph.svelte';
@@ -43,7 +48,6 @@
   import Structure         from './docs/Structure.svelte';
   import Completion        from './docs/Completion.svelte';
   import Refactoring       from './docs/Refactoring.svelte';
-  import Assistant         from './docs/Assistant.svelte';
   import Validation        from './docs/Validation.svelte';
   import LocalHistory      from './docs/LocalHistory.svelte';
   import FileTypes         from './docs/FileTypes.svelte';
@@ -57,7 +61,13 @@
   import Taglibs           from './docs/Taglibs.svelte';
   import StrutsNavigation  from './docs/StrutsNavigation.svelte';
   import MyBatis           from './docs/MyBatis.svelte';
+  import MyBatisStatements from './docs/MyBatisStatements.svelte';
+  import MyBatisDynamicSql from './docs/MyBatisDynamicSql.svelte';
+  import MyBatisChecks     from './docs/MyBatisChecks.svelte';
   import Spring            from './docs/Spring.svelte';
+  import SpringConfiguration from './docs/SpringConfiguration.svelte';
+  import SpringWeb         from './docs/SpringWeb.svelte';
+  import SpringProxies     from './docs/SpringProxies.svelte';
   import Jpa               from './docs/Jpa.svelte';
   import FormAnalysis      from './docs/FormAnalysis.svelte';
   import MessageBundles    from './docs/MessageBundles.svelte';
@@ -79,7 +89,10 @@
   // Rust
   import Cargo             from './docs/Cargo.svelte';
   import Bevy              from './docs/Bevy.svelte';
+  import BevyRemote        from './docs/BevyRemote.svelte';
   import Shaders           from './docs/Shaders.svelte';
+  import Profiler          from './docs/Profiler.svelte';
+  import Live              from './docs/Live.svelte';
   // Build, run & test
   import Running           from './docs/Running.svelte';
   import Debugging         from './docs/Debugging.svelte';
@@ -98,6 +111,22 @@
     initialSection?: string;
   } = $props();
 
+  // Imber's pages: one file each under docs/imber, listed (title, order, summary) in imber-pages.json, which
+  // `scripts/build-help-index.mjs` also reads to write the Markdown copy under docs/imber and the assistant's help index.
+  import imberPages from './docs/imber/imber-pages.json';
+  const imberModules = import.meta.glob<{ default: Component }>('./docs/imber/*.svelte', { eager: true });
+  const IMBER_ICONS: Record<string, IconComponent> = {
+    'imber': Sparkles, 'imber-start': Rocket, 'imber-conversations': ScrollText, 'imber-permissions': ShieldCheck,
+    'imber-review': History, 'imber-tools': Wrench, 'imber-running': Activity, 'imber-debugging': Bug,
+    'imber-bevy': Gamepad2, 'imber-visuals': Palette, 'imber-skills': BookOpen, 'imber-subagents': Network,
+    'imber-decisions': ListChecks, 'imber-cost': SlidersHorizontal, 'imber-editor': PenLine, 'imber-settings': Cog,
+    'imber-shortcuts': Keyboard, 'imber-privacy': ShieldCheck, 'imber-faq': Compass,
+  };
+  const imberItems: DocsNavItem[] = imberPages.map((p) => ({ id: p.id, label: p.label, icon: IMBER_ICONS[p.id] ?? Sparkles }));
+  const imberSections: Record<string, Component> = Object.fromEntries(
+    imberPages.map((p) => [p.id, imberModules[`./docs/imber/${p.file}.svelte`].default]),
+  );
+
   const topItems: DocsNavItem[] = [
     { id: 'getting-started', label: 'Getting Started', icon: Rocket },
   ];
@@ -108,11 +137,15 @@
       { id: 'new-project',  label: 'New Project',      icon: FolderPlus },
       { id: 'project-tree', label: 'The project tree', icon: ListTree   },
       { id: 'jdk',          label: 'The JDK',          icon: Coffee     },
-      { id: 'maven',        label: 'The Maven window', icon: Play      },
-      { id: 'dependencies', label: 'Dependencies',     icon: Package    },
-      { id: 'pom',          label: 'Editing a pom.xml', icon: FileCode2 },
-      { id: 'module-graph', label: 'The module graph', icon: Network    },
       { id: 'encodings',    label: 'Encodings',        icon: FileType2  },
+    ] },
+    { id: 'maven', label: 'Maven & pom', icon: Package, items: [
+      { id: 'maven',        label: 'The Maven window',  icon: Play      },
+      { id: 'pom',          label: 'Editing a pom.xml', icon: FileCode2 },
+      { id: 'dependencies', label: 'Dependencies',      icon: Package   },
+      { id: 'dependency-versions', label: 'Dependency versions', icon: ListTree },
+      { id: 'dependency-security', label: 'Dependency security', icon: ShieldCheck },
+      { id: 'module-graph', label: 'The module graph',  icon: Network   },
     ] },
     { id: 'editor', label: 'Editor', icon: PenLine, items: [
       { id: 'editing',       label: 'The editor',              icon: PenLine     },
@@ -124,25 +157,40 @@
       { id: 'template-language',  label: 'The template language', icon: Braces   },
       { id: 'template-reference', label: 'Template reference',    icon: BookOpen },
       { id: 'refactoring',   label: 'Refactoring & intentions', icon: Wrench     },
-      { id: 'assistant',     label: 'Assistant (preview)',      icon: Sparkles    },
+      { id: 'voice',         label: 'Voice',                    icon: Mic         },
       { id: 'validation',    label: 'Validation & problems',   icon: ShieldCheck },
       { id: 'local-history', label: 'Local history',           icon: History     },
       { id: 'tool-config',   label: 'Tool configuration files', icon: SlidersHorizontal },
       { id: 'file-types',    label: 'Other file types',        icon: FileText    },
+      { id: 'xml-schemas',   label: 'XML schemas',             icon: FileCode2   },
     ] },
+    { id: 'imber', label: 'Imber, the assistant', icon: Sparkles, items: imberItems },
     { id: 'search', label: 'Structural search', icon: Replace, items: [
       { id: 'structural',       label: 'Structural search',     icon: Replace },
       { id: 'structural-pages', label: 'Searching pages',       icon: FileCode2 },
       { id: 'structural-run',   label: 'Searching & replacing', icon: Search  },
     ] },
-    { id: 'java', label: 'Java & JSP', icon: Coffee, items: [
+    { id: 'jsp', label: 'JSP & Struts', icon: FileCode2, items: [
       { id: 'jsp',              label: 'JSP pages',         icon: FileCode2 },
       { id: 'taglibs',          label: 'Tag libraries',     icon: Braces    },
       { id: 'struts',           label: 'Struts navigation', icon: Compass   },
-      { id: 'mybatis',          label: 'MyBatis mappers',   icon: Database  },
-      { id: 'spring',           label: 'Spring',            icon: Layers    },
-      { id: 'jpa',              label: 'JPA',               icon: Database  },
       { id: 'forms',            label: 'Form analysis',     icon: ScrollText },
+      { id: 'message-bundles',  label: 'Message bundles',   icon: Languages },
+    ] },
+    { id: 'spring-docs', label: 'Spring', icon: Layers, items: [
+      { id: 'spring',           label: 'Beans & injection',         icon: Layers            },
+      { id: 'spring-config',    label: 'Configuration',             icon: SlidersHorizontal },
+      { id: 'spring-web',       label: 'Web & endpoints',           icon: Network           },
+      { id: 'spring-proxies',   label: 'Proxies & declarations',    icon: ShieldCheck       },
+    ] },
+    { id: 'mybatis-docs', label: 'MyBatis', icon: Database, items: [
+      { id: 'mybatis',              label: 'Mappers & navigation',   icon: Database  },
+      { id: 'mybatis-statements',   label: 'Statements & result maps', icon: FileCode2 },
+      { id: 'mybatis-dynamic-sql',  label: 'Dynamic SQL',            icon: Braces    },
+      { id: 'mybatis-checks',       label: 'Mapper checks',          icon: ShieldCheck },
+    ] },
+    { id: 'java', label: 'Java & frameworks', icon: Coffee, items: [
+      { id: 'jpa',              label: 'JPA',               icon: Database  },
       { id: 'bean-validation',  label: 'Bean Validation',   icon: ShieldCheck },
       { id: 'scheduled',        label: 'Scheduled jobs',    icon: History   },
       { id: 'json-types',       label: 'JSON types',        icon: Braces    },
@@ -150,14 +198,13 @@
       { id: 'jakarta-ee',       label: 'Jakarta EE (CDI, EJB, servlets)', icon: Boxes },
       { id: 'jaxrs',            label: 'JAX-RS resources',  icon: Network   },
       { id: 'dto-lab',          label: 'DTO Lab',           icon: Beaker    },
-      { id: 'message-bundles',  label: 'Message bundles',   icon: Languages },
-      { id: 'i18n',             label: 'i18n labels',       icon: Languages },
-      { id: 'xml-schemas',      label: 'XML schemas',       icon: FileCode2 },
+      { id: 'i18n',            label: 'i18n labels',       icon: Languages },
       { id: 'tomcat',           label: 'Tomcat hot-swap',   icon: Flame     },
     ] },
     { id: 'rust', label: 'Rust', icon: Cog, items: [
       { id: 'cargo',   label: 'Rust & Cargo',   icon: Cog      },
       { id: 'bevy',    label: 'Bevy ECS',       icon: Gamepad2 },
+      { id: 'bevy-remote', label: 'Bevy Remote',  icon: Gamepad2 },
       { id: 'shaders', label: 'Shaders (WGSL)', icon: Palette  },
     ] },
     { id: 'run', label: 'Build, run & test', icon: Play, items: [
@@ -167,6 +214,8 @@
       { id: 'testing',      label: 'Testing',                icon: FlaskConical },
       { id: 'mockito',      label: 'Mockito',                icon: FlaskConical },
       { id: 'assertj',      label: 'AssertJ',                icon: ListChecks   },
+      { id: 'profiler',     label: 'Profiler',               icon: Flame        },
+      { id: 'live',         label: 'Live services',          icon: Activity     },
     ] },
     { id: 'reference', label: 'Reference', icon: Keyboard, items: [
       { id: 'lsp',       label: 'Language servers',           icon: ServerCog },
@@ -185,6 +234,8 @@
     'jdk':               Jdk,
     'maven':             Maven,
     'dependencies':      Dependencies,
+    'dependency-versions': DependencyVersions,
+    'dependency-security': DependencySecurity,
     'pom':               PomEditing,
     'module-graph':      ModuleGraph,
     'encodings':         Encodings,
@@ -194,7 +245,7 @@
     'structure':         Structure,
     'completion':        Completion,
     'refactoring':       Refactoring,
-    'assistant':         Assistant,
+    'voice':             Voice,
     'validation':        Validation,
     'local-history':     LocalHistory,
     'tool-config':       ToolConfig,
@@ -206,7 +257,13 @@
     'taglibs':           Taglibs,
     'struts':            StrutsNavigation,
     'mybatis':           MyBatis,
+    'mybatis-statements': MyBatisStatements,
+    'mybatis-dynamic-sql': MyBatisDynamicSql,
+    'mybatis-checks':    MyBatisChecks,
     'spring':            Spring,
+    'spring-config':     SpringConfiguration,
+    'spring-web':        SpringWeb,
+    'spring-proxies':    SpringProxies,
     'jpa':               Jpa,
     'forms':             FormAnalysis,
     'bean-validation':   BeanValidation,
@@ -227,8 +284,11 @@
     'tomcat':            Tomcat,
     'cargo':             Cargo,
     'bevy':              Bevy,
+    'bevy-remote':       BevyRemote,
     'shaders':           Shaders,
     'running':           Running,
+    'profiler':          Profiler,
+    'live':              Live,
     'debugging':         Debugging,
     'debug-values':      DebugValues,
     'testing':           Testing,
@@ -237,6 +297,7 @@
     'index':             TheIndex,
     'appearance':        Appearance,
     'shortcuts':         Shortcuts,
+    ...imberSections,
   };
 </script>
 

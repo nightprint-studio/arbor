@@ -2,8 +2,9 @@
   /**
    * BennuModuleTree — the modules a tool window can act on, grouped by project.
    *
-   * Maven, Cargo, Dependencies and Tests each show the modules of THEIR ecosystem across the whole
-   * workspace; this is the selector that says which one a command applies to. Selecting a node pins
+   * Maven, Cargo, Dependencies and Tests each show the modules of THEIR ecosystem inside the ACTIVE
+   * project (a Tauri app's `src-tauri`, a monorepo's services); this is the selector that says which
+   * one a command applies to. Other projects of the workspace are not listed — switch to them instead. Selecting a node pins
    * it (selecting it again lets go); with nothing pinned the window follows the module that holds
    * the active file — see `moduleFocusStore`.
    *

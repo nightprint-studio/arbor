@@ -27,7 +27,8 @@
    * validation thread caps, in its own settings.
    */
   import { onDestroy } from 'svelte';
-  import { Activity, ChevronDown, ChevronRight, Cpu, MemoryStick, RotateCcw, TriangleAlert } from 'lucide-svelte';
+  import { Activity, ChevronDown, ChevronRight, Cpu, MemoryStick, RotateCcw, Square, TriangleAlert } from 'lucide-svelte';
+  import { voiceApi } from '$lib/ipc/voice';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -360,6 +361,12 @@
                     >
                       {#snippet iconStart()}<RotateCcw size={12} />{/snippet}
                       {restarting === row.pid ? 'Restarting…' : 'Restart'}
+                    </Button>
+                  {:else if row.kind === 'backend' && row.product === 'voice'}
+                    <!-- The speech engine loads again on the next use, so stopping it loses nothing. -->
+                    <Button variant="ghost" size="sm" onclick={() => void voiceApi.shutdown().catch(() => {})}>
+                      {#snippet iconStart()}<Square size={12} />{/snippet}
+                      Stop
                     </Button>
                   {/if}
                 </span>

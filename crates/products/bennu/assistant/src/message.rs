@@ -27,6 +27,31 @@ pub enum Block {
     /// What a tool answered, for the `ToolUse` with this id. An error is an answer too: the model is
     /// told what went wrong and decides what to do, rather than the loop guessing.
     ToolResult { tool_use_id: String, content: String, is_error: bool },
+    /// A picture a tool returned along with its result (a screenshot), for the `ToolResult` with this id.
+    /// Only the file's *name* is persisted: the bytes live on disk, and the host loads them into `data`
+    /// just before a request goes out (this crate has no filesystem). A provider that finds no `data`
+    /// says what was there in words instead of sending nothing.
+    ToolImage {
+        tool_use_id: String,
+        /// `image/png` or `image/jpeg`.
+        media_type: String,
+        /// Where the host keeps the file; opaque here.
+        path: String,
+        /// What the picture costs the model, estimated when it was taken — counted by the context meter.
+        tokens: u32,
+        /// Base64 of the file, filled in for one request and never saved.
+        #[serde(skip)]
+        data: Option<String>,
+    },
+}
+
+/// A picture a tool produced, as the tool host hands it to the loop: where it is stored and what it costs.
+/// The loop turns it into a [`Block::ToolImage`] beside the result it belongs to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImageRef {
+    pub media_type: String,
+    pub path: String,
+    pub tokens: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,6 +118,9 @@ pub struct Request {
     pub max_tokens: u32,
     /// `None` for a model without the setting, or to leave it at the provider's own default.
     pub effort: Option<Effort>,
+    /// Keep the standing prefix (tools and instructions) in the provider's long-lived cache, for a conversation whose
+    /// user pauses longer than the short cache lasts. Costs more to write, nothing to read.
+    pub long_cache: bool,
 }
 
 #[cfg(test)]
@@ -118,6 +146,15 @@ mod tests {
         let text = serde_json::to_string(&b).unwrap();
         assert!(text.contains("\"type\":\"tool_result\""), "{text}");
         assert_eq!(serde_json::from_str::<Block>(&text).unwrap(), b);
+    }
+
+    #[test]
+    fn a_tool_image_is_saved_without_its_bytes() {
+        let b = Block::ToolImage { tool_use_id: "a".into(), media_type: "image/png".into(), path: "s1.png".into(), tokens: 900, data: Some("AAAA".into()) };
+        let text = serde_json::to_string(&b).unwrap();
+        assert!(text.contains("\"type\":\"tool_image\"") && !text.contains("AAAA"), "{text}");
+        let Block::ToolImage { data, tokens, .. } = serde_json::from_str::<Block>(&text).unwrap() else { panic!("an image") };
+        assert_eq!((data, tokens), (None, 900));
     }
 
     #[test]

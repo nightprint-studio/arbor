@@ -17,6 +17,11 @@ pub use crate::command::{
     type_signature, variable_table, version, ClassRef, Field, Frame, LineEntry, Local, Method,
     StepDepth, MOD_STATIC,
 };
+pub use crate::mutate::{
+    capabilities, create_string, decode_capabilities, force_early_return, new_instance, parse_literal, pop_frames,
+    return_descriptor, set_field_value, set_frame_value, stop_thread, typed_value, Capabilities, Literal, NewInstance,
+    Typed,
+};
 pub use crate::error::{error_name, JdwpError, Result};
 pub use crate::event::{kind, parse_composite, Composite, Event, SuspendPolicy};
 pub use crate::packet::{Packet, PacketKind};

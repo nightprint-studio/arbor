@@ -85,6 +85,12 @@
   <FormRow label="Usage counts" description="Draw how many places use each class, method and field above it, and fade the name of one nothing reaches. Java only — it is the whole-project reference index answering, so it says nothing until the index is built. A member carrying an annotation, one that overrides something, and main are never faded: a framework can reach any of them by name, and an index cannot see that.">
     <Toggle checked={s.usageCounts} onchange={(v) => s.setUsageCounts(v)} ariaLabel="Usage counts" />
   </FormRow>
+  <FormRow label="Profiler hints" description="Draw the profiler's numbers where they belong: after each measured method (share of CPU, self time, allocations) and as a heat bar beside the hot lines. Nothing is drawn until you have recorded a profile; numbers from before your last edit of the file are shown dimmed.">
+    <Toggle checked={s.profilerHints} onchange={(v) => s.setProfilerHints(v)} ariaLabel="Profiler hints" />
+  </FormRow>
+  <FormRow label="Imber button" description="Show Imber's ✦ button by the caret: above the selected text, and on a doc comment, where it offers to improve, check or translate it. Off, nothing is drawn in the text; Imber stays one shortcut or palette entry away.">
+    <Toggle checked={s.askChip} onchange={(v) => s.setAskChip(v)} ariaLabel="Imber button" />
+  </FormRow>
   <FormRow label="Commit message in Git Blame" description="Add the commit's subject to the author and age drawn after a line when Git Blame is on. Off by default — the message is always in the hover.">
     <Toggle checked={s.blameShowMessage} onchange={(v) => s.setBlameShowMessage(v)} ariaLabel="Commit message in Git Blame" />
   </FormRow>

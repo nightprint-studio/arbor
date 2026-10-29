@@ -566,7 +566,10 @@
 
   .docs-offscreen { position: fixed; left: -9999px; top: -9999px; visibility: hidden; pointer-events: none; width: 800px; }
 
-  .docs-body { display: flex; flex: 1; height: 100%; overflow: hidden; background: var(--bg-elevated); padding: 4px; }
+  .docs-body {
+    display: flex; flex: 1; height: 100%; overflow: hidden; padding: 4px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, var(--bg-elevated)), var(--bg-elevated) 140px);
+  }
 
   .docs-search-wrap { margin: 8px 8px 4px; }
   .search-empty { font-size: var(--font-size-xs); color: var(--text-muted); padding: 12px; margin: 0; text-align: center; font-style: italic; }
@@ -594,7 +597,10 @@
     border-top: 1px solid var(--border-subtle); padding-top: 10px;
     transition: color var(--transition-fast);
   }
-  .nav-group-header:hover { color: var(--text-secondary); }
+  .nav-group-header:hover { color: var(--text-primary); }
+  /* A group's icon carries the accent so the sections read as coloured landmarks, not a grey list. */
+  .nav-group-header :global(svg:first-child) { color: var(--accent); flex-shrink: 0; }
+  .nav-group-header { font-weight: 600; color: var(--text-secondary); }
   .nav-group-header span:first-of-type { flex: 1; }
   .nav-group-count {
     display: inline-flex; align-items: center; justify-content: center;
@@ -605,6 +611,8 @@
   .nav-group-chevron { display: flex; align-items: center; transition: transform 150ms ease; }
   .nav-group-chevron.open { transform: rotate(90deg); }
   .nav-item-child { padding-left: 28px; font-size: var(--font-size-xs); }
+  .nav-item-child :global(svg) { opacity: 0.75; }
+  .nav-item-child.active :global(svg), .nav-item-child:hover :global(svg) { opacity: 1; color: var(--accent); }
   .nav-item-child.active { background: rgba(77,120,204,0.10); }
 
   /* A muted runtime topic stays readable — it is still documentation, it just

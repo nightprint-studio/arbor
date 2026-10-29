@@ -30,6 +30,11 @@ members = [
     "crates/products/bennu/runtime/plugin",
     "crates/products/bennu/formats/sheet",
     "crates/products/bennu/formats/wgsl",
+    # RON diagnostics for the editor: bracket / syntax errors, and a document checked against a Rust
+    # type. Rides on arbor-studio-ron (parser, schema loader, schema hint) and adds the byte spans.
+    "crates/products/bennu/formats/ron",
+    # The profiler's pure core: call-tree model, JFR detection + aggregation, Node / samply parsers.
+    "crates/products/bennu/profile",
     "crates/products/corvus/core",
     "crates/products/corvus/plugin",
     "crates/products/corvus/plugin-ns",
@@ -86,8 +91,14 @@ members = [
     "crates/products/sitta/be",
     "crates/products/tyto/core",
     "crates/products/tyto/be",
+    # Local voice dictation (Whisper): platform-level, product-agnostic.
+    "crates/platform/voice/core",
+    "crates/platform/voice/be",
     "crates/products/bennu/runtime/proto",
     "crates/products/bennu/runtime/core",
+    # Live runs: managed processes, recipes, localhost HTTP, the unified timeline and scenarios.
+    # Std-only (threads, TcpStream) — the assistant tools and the Live panel are thin glue over it.
+    "crates/products/bennu/runtime/live",
     "crates/products/bennu/build/project",
     "crates/products/bennu/analysis/classpath",
     "crates/products/bennu/analysis/index",
@@ -250,6 +261,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "nat
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 base64  = "0.22"
 sha2    = "0.10"
+# gzip reader (pure-Rust `miniz_oxide` backend, the default) — bennu-profile reads samply's `.json.gz`.
+flate2  = "1.1"
 # Wipe in-memory secrets on drop (credential broker cache, round-2 Model D).
 # Defined here, used from M1 (arbor-shell-common); see docs/migration-roadmap.md.
 zeroize = { version = "1", features = ["derive"] }

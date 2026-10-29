@@ -11,7 +11,7 @@ pub use crate::encoding::{
 pub use crate::entry::{DirSize, DriveUsage, FsEntry, FsRoot, OverviewStats, TrashEntry};
 pub use crate::error::{FsError, Result};
 pub use crate::mutate::RenamePair;
-pub use crate::unzip_limited::{unzip_limited, UnzipLimits, UnzipReport};
+pub use crate::unzip_limited::{entry_components, unzip_limited, UnzipLimits, UnzipReport};
 
 // Operations are also reachable as `arbor_fs::prelude::<module>::fn` so call
 // sites read as `arbor_fs::prelude::read::read_dir(...)`, keeping the verb

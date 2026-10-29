@@ -80,11 +80,13 @@ pub fn build(sources: &[ScannedFile], shaders: &[ScannedFile]) -> BevyModel {
         .map(|t| (t.name.clone(), t.fields.clone()))
         .collect();
 
-    let registrations = index_registrations(&scans);
+    let order = order_index(&scans);
+    let mut registrations = index_registrations(&scans);
+    gate_by_set_conditions(&mut registrations, &conditional_sets(&scans), &order);
     collect_systems(&scans, &custom, &registrations, &mut model);
     collect_inserts(&scans, &mut model);
 
-    model.conflicts = conflict::detect(&model.systems, &order_index(&scans));
+    model.conflicts = conflict::detect(&model.systems, &order);
 
     // Last, because it needs both halves: the materials collected above and the shaders the host
     // walked. A shader outside an `assets/` directory is skipped rather than matched by name —
@@ -102,15 +104,16 @@ pub fn build(sources: &[ScannedFile], shaders: &[ScannedFile]) -> BevyModel {
     model
 }
 
-/// What every `add_systems` call said about order, as one index.
+/// What every `add_systems` and `configure_sets` call said about order, as one index.
 ///
-/// `.chain()` is a run of edges in the order the tuple lists the systems; `.before` / `.after` are
+/// `.chain()` is a run of edges in the order the tuple lists the names; `.before` / `.after` are
 /// single edges. Closing them transitively is [`OrderIndex`]'s job, so that `a.before(b)` plus
-/// `b.before(c)` is not reported as an unordered `a`/`c`.
+/// `b.before(c)` is not reported as an unordered `a`/`c`. A `configure_sets` call is the same
+/// grammar over **set** names, and the index expands it to the systems in those sets.
 fn order_index(scans: &[(&ScannedFile, FileScan)]) -> OrderIndex {
     let mut order = OrderIndex::default();
     for (_, scan) in scans {
-        for reg in &scan.registrations {
+        for reg in scan.registrations.iter().chain(&scan.set_configs) {
             for (first, later) in &reg.edges {
                 order.add_edge(first, later);
             }
@@ -124,9 +127,23 @@ fn order_index(scans: &[(&ScannedFile, FileScan)]) -> OrderIndex {
                     order.add(name, other);
                 }
             }
+            for (member, set) in &reg.memberships {
+                order.add_member(member, set);
+            }
         }
     }
     order
+}
+
+/// The sets that carry a `.run_if(…)` in a `configure_sets` call. A condition on a set gates every
+/// system inside it (nested sets included, via [`OrderIndex::positions`]), so those systems are
+/// as conditional as one with its own `run_if` — and equally never accused of contending.
+fn conditional_sets(scans: &[(&ScannedFile, FileScan)]) -> Vec<String> {
+    scans
+        .iter()
+        .flat_map(|(_, scan)| scan.set_configs.iter())
+        .flat_map(|reg| reg.conditional.iter().cloned())
+        .collect()
 }
 
 /// Every site that puts a declaration into the world, with the function it happens in.
@@ -282,6 +299,24 @@ fn index_registrations(scans: &[(&ScannedFile, FileScan)]) -> HashMap<String, Re
         }
     }
     out
+}
+
+/// Mark every system inside a set that has a run condition as conditional.
+fn gate_by_set_conditions(
+    registrations: &mut HashMap<String, Registered>,
+    gated: &[String],
+    order: &OrderIndex,
+) {
+    if gated.is_empty() {
+        return;
+    }
+    for (name, reg) in registrations.iter_mut() {
+        if !reg.conditional
+            && order.positions(name).iter().any(|p| p != name && gated.contains(p))
+        {
+            reg.conditional = true;
+        }
+    }
 }
 
 /// Declarations, one row per site — and a hand-written `impl Component for Health` adds its role to
@@ -470,5 +505,145 @@ pub fn plugin(app: &mut App) {
         // than guessed at.
         let m = model();
         assert!(m.inserts.iter().all(|s| s.type_name != "key" && s.type_name != "value"));
+    }
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use std::path::PathBuf;
+
+    use bennu_ext::prelude::ScannedFile;
+
+    use crate::conflict::{warnable, Ordering};
+    use crate::model::BevyModel;
+
+    use super::build;
+
+    fn model_of(src: &str) -> BevyModel {
+        build(&[ScannedFile { path: PathBuf::from("/p/src/game.rs"), text: src.to_string() }], &[])
+    }
+
+    /// The ordering the model recorded for the pair, whichever way round it was listed.
+    fn ordering(m: &BevyModel, a: &str, b: &str) -> Ordering {
+        m.conflicts
+            .iter()
+            .find(|c| {
+                let (x, y) = (&m.systems[c.a].name, &m.systems[c.b].name);
+                (x == a && y == b) || (x == b && y == a)
+            })
+            .unwrap_or_else(|| panic!("no conflict between {a} and {b}"))
+            .ordering
+    }
+
+    const PRELUDE: &str = r#"
+#[derive(Resource)] struct Score(u32);
+fn read_input(mut s: ResMut<Score>) {}
+fn apply_input(mut s: ResMut<Score>) {}
+fn draw(s: Res<Score>) {}
+"#;
+
+    fn with(plugin: &str) -> BevyModel {
+        model_of(&format!("{PRELUDE}\npub fn plugin(app: &mut App) {{\n{plugin}\n}}\n"))
+    }
+
+    #[test]
+    fn without_any_ordering_the_pair_is_unordered_and_warnable() {
+        let m = with("app.add_systems(Update, (read_input, apply_input));");
+        assert_eq!(ordering(&m, "read_input", "apply_input"), Ordering::Unordered);
+        let c = &m.conflicts[0];
+        assert!(warnable(c, &m.systems));
+    }
+
+    #[test]
+    fn a_chained_tuple_of_sets_orders_their_members() {
+        let m = with(
+            "app.configure_sets(Update, (Stage::Input, Stage::Logic).chain());
+             app.add_systems(Update, read_input.in_set(Stage::Input));
+             app.add_systems(Update, apply_input.in_set(Stage::Logic));",
+        );
+        assert_eq!(ordering(&m, "read_input", "apply_input"), Ordering::Explicit);
+    }
+
+    #[test]
+    fn before_and_after_on_a_set_order_its_members() {
+        for decl in ["Input.before(Logic)", "Logic.after(Input)"] {
+            let m = with(&format!(
+                "app.configure_sets(Update, {decl});
+                 app.add_systems(Update, (read_input.in_set(Input), apply_input.in_set(Logic)));"
+            ));
+            assert_eq!(ordering(&m, "read_input", "apply_input"), Ordering::Explicit, "{decl}");
+        }
+    }
+
+    #[test]
+    fn membership_is_per_system_not_per_tuple() {
+        // Only `read_input` is in `Input`; `draw` shares the tuple and must not inherit it.
+        let m = with(
+            "app.configure_sets(Update, Input.before(Logic));
+             app.add_systems(Update, (read_input.in_set(Input), draw));
+             app.add_systems(Update, apply_input.in_set(Logic));",
+        );
+        assert_eq!(ordering(&m, "read_input", "apply_input"), Ordering::Explicit);
+        assert_ne!(ordering(&m, "draw", "apply_input"), Ordering::Explicit);
+    }
+
+    #[test]
+    fn a_set_nested_in_an_ordered_set_inherits_the_order() {
+        let m = with(
+            "app.configure_sets(Update, Early.before(Late));
+             app.configure_sets(Update, Keys.in_set(Early));
+             app.add_systems(Update, read_input.in_set(Keys));
+             app.add_systems(Update, apply_input.in_set(Late));",
+        );
+        assert_eq!(ordering(&m, "read_input", "apply_input"), Ordering::Explicit);
+    }
+
+    #[test]
+    fn a_system_after_a_set_is_ordered_against_its_members() {
+        let m = with(
+            "app.add_systems(Update, read_input.in_set(Input));
+             app.add_systems(Update, apply_input.after(Input));",
+        );
+        assert_eq!(ordering(&m, "read_input", "apply_input"), Ordering::Explicit);
+    }
+
+    #[test]
+    fn sets_configured_elsewhere_prove_nothing_and_are_still_not_warned_about() {
+        // No `configure_sets` here: a plugin we cannot see may order `Input` and `Logic`.
+        let m = with(
+            "app.add_systems(Update, read_input.in_set(Input));
+             app.add_systems(Update, apply_input.in_set(Logic));",
+        );
+        assert_eq!(ordering(&m, "read_input", "apply_input"), Ordering::Unordered);
+        assert!(!warnable(&m.conflicts[0], &m.systems), "a set member is never accused");
+    }
+
+    #[test]
+    fn two_sets_ordered_against_a_third_are_not_ordered_against_each_other() {
+        let m = with(
+            "app.configure_sets(Update, (A.before(Last), B.before(Last)));
+             app.add_systems(Update, read_input.in_set(A));
+             app.add_systems(Update, apply_input.in_set(B));",
+        );
+        assert_ne!(ordering(&m, "read_input", "apply_input"), Ordering::Explicit);
+    }
+
+    #[test]
+    fn a_run_condition_on_a_set_makes_its_members_conditional() {
+        let m = with(
+            "app.configure_sets(Update, Playing.run_if(in_state(Phase::Run)));
+             app.add_systems(Update, read_input.in_set(Playing));
+             app.add_systems(Update, apply_input);",
+        );
+        let cond = |n: &str| m.systems.iter().find(|s| s.name == n).unwrap().conditional;
+        assert!(cond("read_input"));
+        assert!(!cond("apply_input"));
+    }
+
+    #[test]
+    fn a_configure_sets_call_is_not_a_system_registration() {
+        // `Input` / `Logic` are sets, not functions: they must not turn up as systems.
+        let m = with("app.configure_sets(Update, (Input, Logic).chain());");
+        assert!(m.systems.iter().all(|s| s.name != "Input" && s.name != "Logic"));
     }
 }

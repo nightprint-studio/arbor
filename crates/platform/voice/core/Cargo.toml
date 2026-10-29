@@ -1,0 +1,15 @@
+[package]
+name         = "voice-core"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Voice dictation core — the pure, Tauri-free logic behind `voice-be`: the Whisper model catalogue + hardware recommendation, audio helpers (downmix / resample / level), the speech gate and end-of-speech state machine, the wake-phrase matcher, the vocabulary prompt builder and the typed config."
+
+[dependencies]
+arbor-ipc  = { path = "../../../foundation/ipc" }
+arbor-core = { path = "../../../foundation/core" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+toml       = "0.8"
