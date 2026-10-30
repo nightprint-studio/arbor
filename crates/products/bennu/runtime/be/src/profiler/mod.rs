@@ -461,7 +461,7 @@ pub(crate) fn running_jvms(root: &str) -> Result<Vec<(u32, String)>, String> {
 
 /// Start recording the JVM `pid`: a session and the recorder started inside it. Returns the session id.
 pub(crate) fn start_recording(ctx: &BennuState, root: &str, pid: u32, label: &str) -> Result<String, String> {
-    let prepared = bennu_profile_prepare(ctx, PrepareArgs { root: root.to_string(), lang: "java".into(), label: label.to_string(), pid: Some(pid), samply_path: None, rate_hz: None })?;
+    let prepared = bennu_profile_prepare(ctx, PrepareArgs { root: root.to_string(), lang: "java".into(), label: label.to_string(), pid: Some(pid), samply_path: None, rate_hz: None, sampling_ms: None })?;
     if let Err(e) = run_jcmd_steps(&prepared.session_id, false) {
         // Nothing is recording: the session and its scratch folder go.
         if let Some(s) = lock(sessions()).remove(&prepared.session_id) {
