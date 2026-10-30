@@ -10,6 +10,7 @@
     pct,
     indeterminate = false,
     height = 4,
+    color,
     ariaLabel,
   }: {
     value?: number;
@@ -17,6 +18,8 @@
     pct?: number;
     indeterminate?: boolean;
     height?: number;
+    /** Fill colour (any CSS colour) — for a bar whose colour carries meaning, such as a severity. Defaults to the accent. */
+    color?: string;
     ariaLabel?: string;
   } = $props();
 
@@ -42,7 +45,7 @@
   <div
     class="progress-fill"
     class:indeterminate
-    style={indeterminate ? '' : `width: ${clamped}%`}
+    style={indeterminate ? '' : `width: ${clamped}%${color ? `; background: ${color}` : ''}`}
   ></div>
 </div>
 

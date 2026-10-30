@@ -7,6 +7,7 @@
 
 import { bennu } from '../rpc';
 import type { RunHandle } from '$lib/types/bennu';
+import type { CargoInvocation } from './cargo';
 
 export type ProfileLang = 'java' | 'node' | 'rust';
 
@@ -70,6 +71,19 @@ export interface LockStat { monitor: string; site: string; count: number; total_
 export interface GcStat { collector: string; count: number; total_pause_ms: number; max_pause_ms: number; top_cause: string }
 export interface ThreadStat { name: string; weight: number }
 
+/** Time threads spent blocked **off the CPU** on one target — what the execution sampler cannot see. */
+export interface WaitStat {
+  /** `socket`, `file`, `park` or `monitor`. */
+  kind: string;
+  /** What was waited on: `db.internal:5432`, a path, a class. */
+  target: string;
+  /** The method that waited longest, `Class.method`. */
+  site: string;
+  count: number;
+  total_ms: number;
+  max_ms: number;
+}
+
 export interface ProfileView {
   meta: ProfileMeta;
   methods: MethodStat[];
@@ -78,6 +92,10 @@ export interface ProfileView {
   locks: LockStat[];
   gc: GcStat[];
   threads: ThreadStat[];
+  waits: WaitStat[];
+  /** The recording kept allocation stacks, so the Memory tab can say which of your methods allocates. */
+  has_alloc_stacks: boolean;
+  has_waits: boolean;
   notes: string[];
 }
 
@@ -112,10 +130,31 @@ export interface MethodMetric {
   total_ms: number;
   alloc_bytes: number;
   alloc_count: number;
+  /** `alloc_bytes` as a share of everything the recording allocated, in percent. */
+  alloc_pct: number;
+  /** The type most of `alloc_bytes` went to (`byte[]`); empty when the recording has no allocation stacks. */
+  alloc_top_type: string;
+  /** Milliseconds threads were blocked in this method or what it called, off the CPU. */
+  wait_ms: number;
+  /** What it waited on longest (`socket db.internal:5432`). */
+  wait_on: string;
+  /** Whether the recording caught the method at all — "not sampled" is not "fast". */
+  sampled: boolean;
   heat: number;
 }
 
-export interface LineMetric { line: number; pct: number; heat: number }
+export interface LineMetric {
+  line: number;
+  /** Share of the CPU samples on the line. */
+  pct: number;
+  heat: number;
+  /** Bytes allocated from this line, including what it calls. */
+  alloc_bytes: number;
+  /** Share of everything the recording allocated. */
+  alloc_pct: number;
+  /** Milliseconds blocked on this line, including what it calls. */
+  wait_ms: number;
+}
 
 export interface FileMetrics {
   recording_id: string | null;
@@ -150,6 +189,8 @@ export function profilePrepare(args: {
   pid?: number;
   samplyPath?: string;
   rateHz?: number;
+  /** Java: the execution sampler's interval in milliseconds (default 10; honoured on JDK 17 and newer). */
+  samplingMs?: number;
 }): Promise<{ session_id: string; plan: StartPlan }> {
   return bennu('bennu_profile_prepare', {
     args: {
@@ -158,6 +199,7 @@ export function profilePrepare(args: {
       label: args.label,
       pid: args.pid ?? null,
       samply_path: args.samplyPath ?? null,
+      sampling_ms: args.samplingMs ?? null,
       rate_hz: args.rateHz ?? null,
     },
   });
@@ -180,6 +222,17 @@ export const profileAttachStop = (sessionId: string): Promise<void> =>
 export const profileDumpRunning = (sessionId: string, mainClass: string): Promise<void> =>
   bennu('bennu_profile_dump_running', { args: { session_id: sessionId, main_class: mainClass } });
 
+/** Build a Cargo target and run its binary under the session's profiler (blocks until it is running or the build fails). Wire: `bennu_profile_run_cargo`. */
+export const profileRunCargo = (
+  root: string,
+  sessionId: string,
+  invocation: CargoInvocation,
+  opts: { workingDir?: string; env?: Record<string, string> } = {},
+): Promise<RunHandle> =>
+  bennu('bennu_profile_run_cargo', {
+    args: { root, session_id: sessionId, invocation, working_dir: opts.workingDir ?? '', env: opts.env ?? {} },
+  });
+
 export const profileFinish = (sessionId: string): Promise<void> =>
   bennu('bennu_profile_finish', { args: { session_id: sessionId } });
 
@@ -192,8 +245,33 @@ export const profileList = (root: string): Promise<ProfileMeta[]> =>
 export const profileGet = (root: string, id: string): Promise<ProfileView> =>
   bennu('bennu_profile_get', { args: { root, id } });
 
-export const profileFlame = (root: string, id: string, thread?: string): Promise<FlameWire> =>
-  bennu('bennu_profile_flame', { args: { root, id, thread: thread ?? null } });
+/** What the boxes of the flame graph weigh: CPU samples, milliseconds blocked, or bytes allocated. */
+export type FlameKind = 'cpu' | 'wait' | 'alloc';
+
+export const profileFlame = (root: string, id: string, thread?: string, kind: FlameKind = 'cpu'): Promise<FlameWire> =>
+  bennu('bennu_profile_flame', { args: { root, id, thread: thread ?? null, kind } });
+
+/** One project method and what it allocated, by type. */
+export interface CodeAlloc {
+  /** Binary class (`a.b.Outer$Inner`); empty for the row of allocations no project frame reached. */
+  class: string;
+  method: string;
+  arity: number | null;
+  bytes: number;
+  /** The types the bytes went to, biggest first. */
+  types: [string, number][];
+}
+
+export interface AllocByCode {
+  /** False for a recording made before allocation stacks were kept. */
+  available: boolean;
+  total_bytes: number;
+  rows: CodeAlloc[];
+}
+
+/** Who allocates: the allocated bytes credited to the project's own methods. Wire: `bennu_profile_alloc_by_code`. */
+export const profileAllocByCode = (root: string, id: string): Promise<AllocByCode> =>
+  bennu('bennu_profile_alloc_by_code', { args: { root, id } });
 
 export const profileCompare = (root: string, oldId: string, newId: string): Promise<MethodDelta[]> =>
   bennu('bennu_profile_compare', { args: { root, old: oldId, new: newId } });
@@ -269,3 +347,33 @@ export const samplyInstall = (assetName: string, allowUnverified: boolean): Prom
   bennu('bennu_samply_install', { args: { asset_name: assetName, allow_unverified: allowUnverified } });
 
 export const samplyRemove = (): Promise<void> => bennu('bennu_samply_remove', {});
+
+// ── per-project preferences ───────────────────────────────────────────────────────────────
+
+/** Which classes the views keep. Wire: `ProfilerFilter` in `profiler/prefs.rs`. */
+export interface ProfilerFilter {
+  project_only: boolean;
+  /** Package prefixes to keep; empty = no restriction by package. */
+  include: string[];
+  /** Package prefixes to drop, whatever else matched. */
+  exclude: string[];
+}
+
+/** The readings at which a value turns yellow, orange and red. */
+export interface SeverityLevels { yellow: number; orange: number; red: number }
+
+export interface ProfilerThresholds {
+  cpu_self_pct: SeverityLevels;
+  gc_pause_pct: SeverityLevels;
+  alloc_share_pct: SeverityLevels;
+  lock_total_ms: SeverityLevels;
+}
+
+export interface ProfilerPrefs { filter: ProfilerFilter; thresholds: ProfilerThresholds }
+
+/** Stored in `[profiler]` of the project's `.arbor/bennu/config.toml`. */
+export const profilePrefsGet = (root: string): Promise<ProfilerPrefs> =>
+  bennu('bennu_profile_prefs_get', { args: { root } });
+
+export const profilePrefsSet = (root: string, prefs: ProfilerPrefs): Promise<void> =>
+  bennu('bennu_profile_prefs_set', { args: { root, prefs } });

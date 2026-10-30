@@ -23,6 +23,9 @@ export interface LineHeat {
   tooltip?: string;
   /** The numbers describe an older version of the file: drawn muted. */
   stale?: boolean;
+  /** Colour of the bar and of the label's tint (any CSS colour). The host decides what a colour means — a severity,
+   *  a coverage band — and this only draws it; without it the bar is the warning colour and a hot line turns red. */
+  color?: string;
 }
 
 class HeatMarker extends GutterMarker {
@@ -35,6 +38,7 @@ class HeatMarker extends GutterMarker {
       other instanceof HeatMarker &&
       other.h.heat === this.h.heat &&
       other.h.stale === this.h.stale &&
+      other.h.color === this.h.color &&
       other.h.label === this.h.label &&
       other.h.tooltip === this.h.tooltip
     );
@@ -45,6 +49,7 @@ class HeatMarker extends GutterMarker {
     el.className = 'cm-line-heat-bar';
     // Floor so the faintest line is still visible; the ramp is perceptual enough at this size.
     el.style.opacity = String(Math.max(0.18, Math.min(1, this.h.heat)) * (this.h.stale ? 0.5 : 1));
+    if (this.h.color) el.style.background = this.h.color;
     if (this.h.tooltip) tooltip(el, this.h.tooltip);
     return el;
   }
@@ -56,12 +61,16 @@ class LabelWidget extends WidgetType {
   }
 
   eq(other: LabelWidget): boolean {
-    return other.h.label === this.h.label && other.h.tooltip === this.h.tooltip && other.h.stale === this.h.stale && other.h.heat === this.h.heat;
+    return other.h.label === this.h.label && other.h.tooltip === this.h.tooltip && other.h.stale === this.h.stale && other.h.heat === this.h.heat && other.h.color === this.h.color;
   }
 
   toDOM() {
     const el = document.createElement('span');
-    el.className = 'cm-line-heat-label' + (this.h.stale ? ' cm-line-heat-stale' : '') + (this.h.heat >= 0.5 ? ' cm-line-heat-hot' : '');
+    el.className = 'cm-line-heat-label' + (this.h.stale ? ' cm-line-heat-stale' : '') + (!this.h.color && this.h.heat >= 0.5 ? ' cm-line-heat-hot' : '');
+    if (this.h.color) {
+      el.style.background = `color-mix(in srgb, ${this.h.color} 18%, transparent)`;
+      el.style.boxShadow = `inset 2px 0 0 ${this.h.color}`;
+    }
     el.textContent = this.h.label ?? '';
     if (this.h.tooltip) tooltip(el, this.h.tooltip);
     return el;

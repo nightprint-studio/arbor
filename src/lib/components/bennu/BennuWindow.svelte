@@ -158,6 +158,8 @@
   import BennuModuleGraphModal from './BennuModuleGraphModal.svelte';
   import BennuMojibakeScanModal from './BennuMojibakeScanModal.svelte';
   import BennuTomcatConfigModal from './BennuTomcatConfigModal.svelte';
+  import ProfilerStartModal from './profiler/ProfilerStartModal.svelte';
+  import ProfilerThresholdsModal from './profiler/ProfilerThresholdsModal.svelte';
   // The job-output bottom panel: shared chrome (lives under corvus/jobs/ but depends only on the
   // shared jobsStore + uiStore — the same one FeedbackHost's JobsOverlay uses). Mounted here so
   // "view output" from Bennu's Jobs overlay opens the panel instead of doing nothing.
@@ -671,6 +673,16 @@
     void bennuRunStore.runActive(root, true).then((ran) => {
       if (!ran) bennuUiStore.openRunConfig();
     });
+  }
+  /**
+   * Shift+F11 / palette Profile — record the selected run configuration under the profiler, or stop the
+   * recording in progress. A configuration that cannot be profiled says why in a toast.
+   */
+  function triggerProfile() {
+    if (!projectStore.project) return;
+    if (bennuProfilerStore.phase === 'recording') { void bennuProfilerStore.stop(); return; }
+    if (bennuRunStore.active || bennuProfilerStore.phase !== 'idle') return;
+    void bennuProfilerStore.recordActive();
   }
   /**
    * Ctrl+F8 — set or clear a breakpoint on the caret's line, without reaching for the gutter.
@@ -1852,13 +1864,26 @@
       // The profiler. Starting, stopping and the in-editor hints are things done with the editor focused.
       { id: 'profiler', title: 'Toggle Profiler', icon: 'Flame', shortcut: 'Ctrl+Shift+F9',
         action: () => run(() => { if (bennuUiStore.bottomPanel === 'profiler') bennuUiStore.closeBottom(); else void bennuProfilerStore.open(); }), when: profilerTools },
-      { id: 'profiler-record', title: 'Profiler: record the selected run configuration', icon: 'Flame',
-        action: () => run(() => { void bennuProfilerStore.open(); const cfg = bennuProfilerStore.activeJavaConfig(); if (cfg) void bennuProfilerStore.recordConfig(cfg); }),
-        when: profilerTools && bennuProfilerStore.phase === 'idle' && !!bennuProfilerStore.activeJavaConfig() },
+      { id: 'profiler-record', title: 'Profile the selected run configuration', icon: 'Gauge', shortcut: 'Shift+F11',
+        action: () => run(triggerProfile), when: profilerTools && bennuProfilerStore.phase === 'idle' },
+      // The profiler's filter and colours — the panel is open or opens with them, so a command never acts on something unseen.
+      { id: 'profiler-search', title: 'Profiler: filter by name', icon: 'Search', shortcut: 'Ctrl+F',
+        action: () => run(() => { void bennuProfilerStore.open(); bennuProfilerStore.requestSearchFocus(); }),
+        when: profilerTools && bennuProfilerStore.hasRecordings },
+      { id: 'profiler-project-only',
+        title: bennuProfilerStore.filter.project_only ? 'Profiler: show all classes' : 'Profiler: only this project’s classes', icon: 'Filter',
+        action: () => run(() => { void bennuProfilerStore.open(); bennuProfilerStore.setFilter({ ...bennuProfilerStore.filter, project_only: !bennuProfilerStore.filter.project_only }); }),
+        when: profilerTools && bennuProfilerStore.hasRecordings },
+      { id: 'profiler-filter-clear', title: 'Profiler: clear the class filter', icon: 'ListFilter',
+        action: () => run(() => bennuProfilerStore.setFilter({ project_only: false, include: [], exclude: [] })),
+        when: profilerTools && bennuProfilerStore.filterActive },
+      { id: 'profiler-thresholds', title: 'Profiler: colour thresholds…', icon: 'SlidersHorizontal',
+        action: () => run(() => bennuProfilerStore.openThresholds()), when: profilerTools },
       { id: 'profiler-stop', title: 'Profiler: stop recording', icon: 'StopCircle',
         action: () => run(() => void bennuProfilerStore.stop()), when: profilerTools && bennuProfilerStore.phase === 'recording' },
-      { id: 'profiler-hints-on', title: 'Profiler: show hints in editor', icon: 'Flame',
-        action: () => run(() => bennuSettingsStore.setProfilerHints(true)), when: profilerTools && !bennuSettingsStore.profilerHints },
+      // One toggle, titled for what pressing it does now.
+      { id: 'profiler-hints', title: bennuSettingsStore.profilerHints ? 'Profiler: hide the numbers in the editor' : 'Profiler: show the numbers in the editor', icon: bennuSettingsStore.profilerHints ? 'EyeOff' : 'Eye',
+        action: () => run(() => bennuSettingsStore.setProfilerHints(!bennuSettingsStore.profilerHints)), when: profilerTools },
       // Live runs: the services the assistant or a recipe started, and the checks over them.
       { id: 'live', title: 'Toggle Live (running services)', icon: 'Activity', shortcut: 'Ctrl+Shift+F11',
         action: () => run(() => bennuUiStore.toggleBottom('live')), when: liveTools },
@@ -1870,8 +1895,6 @@
         action: () => run(() => { bennuUiStore.showBottom('live'); void bennuLiveStore.setTab('timeline'); }), when: liveTools },
       { id: 'live-stop-all', title: 'Live: stop all processes', icon: 'StopCircle',
         action: () => run(() => void bennuLiveStore.stopAll()), when: liveTools },
-      { id: 'profiler-hints-off', title: 'Profiler: hide hints in editor', icon: 'Flame',
-        action: () => run(() => bennuSettingsStore.setProfilerHints(false)), when: profilerTools && bennuSettingsStore.profilerHints },
       // The live Bevy inspector. Every verb a palette entry, because attaching to a game, refreshing
       // and spawning are things you do while the editor has focus, not while the panel does.
       { id: 'bevyremote', title: 'Toggle Bevy Remote inspector', icon: 'Plug', shortcut: 'Ctrl+Shift+A',
@@ -2014,6 +2037,9 @@
       // then launched under a debug adapter.
       { id: 'debug', title: 'Debug', icon: 'Bug', shortcut: 'Shift+F9',
         action: () => run(triggerDebug), when: idle },
+      // The profiler's other door: a command, or a JVM that is already running.
+      { id: 'profiledlg', title: 'Profile a command or running JVM…', icon: 'Activity',
+        action: () => run(() => bennuProfilerStore.openStart()), when: profilerTools },
       // The three that only mean anything while the program is standing still. Offered from
       // the palette as well as the panel because the panel has to be open to press one, and
       // reaching a verb from wherever you are is what the palette is for.
@@ -2396,6 +2422,10 @@
      * resumes. They can never be ambiguous because resume only exists while the program is
      * stopped, and the build guard above already took Ctrl+F9.
      */
+    if (!mod && e.shiftKey && !e.altKey && e.key === 'F11') {
+      if (!projectStore.project) return;
+      e.preventDefault(); triggerProfile(); return;
+    }
     if (!mod && e.shiftKey && !e.altKey && e.key === 'F9') {
       if (!projectStore.project || !javaTools || bennuRunStore.active) return;
       e.preventDefault(); triggerDebug(); return;
@@ -3028,6 +3058,14 @@
 
 {#if bennuUiStore.tomcatConfigOpen}
   <BennuTomcatConfigModal onClose={() => bennuUiStore.closeTomcatConfig()} />
+{/if}
+
+{#if bennuProfilerStore.thresholdsOpen}
+  <ProfilerThresholdsModal onClose={() => bennuProfilerStore.closeThresholds()} />
+{/if}
+
+{#if bennuProfilerStore.startOpen}
+  <ProfilerStartModal onClose={() => bennuProfilerStore.closeStart()} />
 {/if}
 
 <!-- The plugin host's two modal doors. `PluginTools` owns the order they mount in, which is

@@ -346,6 +346,15 @@ function createBennuRunStore() {
     tabs = next;
   }
 
+  /** Move the tab at `from` to position `to` — the strip's drag-to-reorder. Positions are in the run tabs' own order. */
+  function moveTab(from: number, to: number) {
+    if (from === to || from < 0 || to < 0 || from >= tabs.length || to >= tabs.length) return;
+    const next = tabs.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    tabs = next;
+  }
+
   /** Append a line to a tab's transcript, capped. */
   function pushTo(
     id: string,
@@ -1306,6 +1315,9 @@ function createBennuRunStore() {
     runPreferred,
     setPreferredBuildType,
     runConfig,
+    moveTab,
+    /** The environment a configuration launches with — its own rows over its env file — or `null` when the file could not be read (already reported in the console). */
+    launchEnv,
     /**
      * Run a cargo command that is not a saved configuration — what the Cargo tool window's rows do.
      *

@@ -1,11 +1,11 @@
 <script lang="ts">
   /**
-   * The profiler tool window (bottom dock): record, then read the recording as a flame graph, a
+   * The profiler tool window (bottom dock): read a recording as a flame graph, a
    * hot-methods table, allocations and GC, lock contention, or a comparison with an earlier one.
    * The same numbers are drawn in the editor, on the methods they belong to (Settings › Editor ›
    * Profiler hints).
    */
-  import { Flame, FileUp, RefreshCw, Trash2 } from 'lucide-svelte';
+  import { Eye, EyeOff, Flame, FileUp, Gauge, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
@@ -14,6 +14,7 @@
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuProfilerStore as store, type ProfilerTab } from '$lib/stores/bennu/profiler.svelte';
   import ProfilerCompareTab from './ProfilerCompareTab.svelte';
@@ -21,7 +22,7 @@
   import ProfilerLocksTab from './ProfilerLocksTab.svelte';
   import ProfilerMemoryTab from './ProfilerMemoryTab.svelte';
   import ProfilerMethodsTab from './ProfilerMethodsTab.svelte';
-  import ProfilerRecordBar from './ProfilerRecordBar.svelte';
+  import ProfilerStatusBar from './ProfilerStatusBar.svelte';
   import { fmtMs } from './profiler-format';
 
   let picking = $state(false);
@@ -32,9 +33,18 @@
     if (root !== lastRoot) {
       lastRoot = root;
       void store.loadDetect();
+      void store.loadPrefs();
       void store.refresh();
     }
   });
+
+  function onPanelKey(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f' && store.hasRecordings) {
+      e.preventDefault();
+      e.stopPropagation();
+      store.requestSearchFocus();
+    }
+  }
 
   const meta = $derived(store.activeMeta);
   const recordingOptions = $derived(
@@ -44,7 +54,7 @@
     { id: 'flame', label: 'Flame graph' },
     { id: 'methods', label: 'Hot methods' },
     { id: 'memory', label: 'Memory' },
-    { id: 'locks', label: 'Locks' },
+    { id: 'locks', label: 'Waits' },
     { id: 'compare', label: 'Compare' },
   ]);
   const summary = $derived(
@@ -54,12 +64,30 @@
   );
 </script>
 
-<div class="prof">
+<!-- Ctrl+F is the search of whatever is on screen: inside this panel it is the profiler's, not the editor's. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="prof" onkeydown={onPanelKey}>
   <BottomPanelHeader title="Profiler" count={store.recordings.length} onClose={() => bennuUiStore.closeBottom()}>
     {#snippet icon()}<Flame size={13} />{/snippet}
     {#snippet actions()}
+      <!-- The numbers drawn in the editor come from the recording shown here; once they have been read they are
+           noise on the code, so they go away from here as well as from Settings and the palette. -->
+      <IconButton
+        tooltip={bennuSettingsStore.profilerHints ? 'Hide the numbers in the editor' : 'Show the numbers in the editor'}
+        size={22}
+        active={bennuSettingsStore.profilerHints}
+        onclick={() => bennuSettingsStore.setProfilerHints(!bennuSettingsStore.profilerHints)}
+      >
+        {#if bennuSettingsStore.profilerHints}<Eye size={13} />{:else}<EyeOff size={13} />{/if}
+      </IconButton>
+      <IconButton tooltip="Profile… — a command, a running JVM or Java with its own settings" size={22} disabled={store.phase !== 'idle'} onclick={() => store.openStart()}>
+        <Gauge size={13} />
+      </IconButton>
       <IconButton tooltip="Import a recording (.jfr, .cpuprofile, samply .json / .json.gz)" size={22} onclick={() => (picking = true)}>
         <FileUp size={13} />
+      </IconButton>
+      <IconButton tooltip="Colour thresholds (yellow / orange / red)" size={22} onclick={() => store.openThresholds()}>
+        <SlidersHorizontal size={13} />
       </IconButton>
       <IconButton tooltip="Refresh" size={22} onclick={() => { void store.loadDetect(); void store.refresh(); }}>
         <RefreshCw size={13} />
@@ -70,7 +98,7 @@
     {/snippet}
   </BottomPanelHeader>
 
-  <ProfilerRecordBar />
+  <ProfilerStatusBar />
 
   {#if store.recordings.length > 0}
     <div class="sel">
@@ -107,7 +135,7 @@
     <div class="empty">
       <EmptyState
         message="No recordings yet"
-        description="Record a run above, or import a .jfr / .cpuprofile. The numbers then appear next to the methods in the editor."
+        description="Record a run with the gauge button in the title bar (or Profile… for a command or a running JVM), or import a .jfr / .cpuprofile. The numbers then appear next to the methods in the editor."
       />
     </div>
   {/if}

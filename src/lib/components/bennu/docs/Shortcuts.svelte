@@ -118,6 +118,7 @@
     <tr><td><kbd>Shift</kbd> + <kbd>F10</kbd></td><td><strong>Run</strong> the active configuration — a JVM one builds first; a Cargo one is its own build</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd></td><td><strong>Run what is in front of you</strong> — the test at the caret, or a hot-swap deploy of the current JSP</td></tr>
     <tr><td><kbd>Shift</kbd> + <kbd>F9</kbd></td><td><strong>Debug</strong> the active configuration</td></tr>
+    <tr><td><kbd>Shift</kbd> + <kbd>F11</kbd></td><td><strong>Profile</strong> the active configuration (JVM application under JFR, Cargo binary under samply); stops the recording while one is in progress</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>F8</kbd></td><td>Set or clear a <strong>breakpoint</strong> on the caret's line</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F8</kbd></td><td>The <strong>breakpoint list</strong> — disable, remove, add an exception breakpoint</td></tr>
     <tr><td><kbd>F9</kbd></td><td><strong>Resume</strong> the stopped program</td></tr>
@@ -153,7 +154,8 @@
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F12</kbd></td><td><strong>Spring beans</strong></td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td><td><strong>Bevy components</strong>, each expanding into the systems reading and writing it</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>A</kbd></td><td><strong>Bevy Remote</strong> — the live inspector of a running game (attach)</td></tr>
-    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F9</kbd></td><td><strong>Profiler</strong> — record a run, flame graph, hot methods, memory and locks</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F9</kbd></td><td><strong>Profiler</strong> — flame graph, hot methods, memory and locks of a recording</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd> <em>(in the Profiler)</em></td><td>Focus the Profiler's search</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F11</kbd></td><td><strong>Live</strong> — running services, recipes, scenarios and the timeline</td></tr>
     <tr><td>Command palette</td><td><strong>Message bundles</strong>, <strong>Spring configuration</strong>, <strong>Spring bound properties</strong></td></tr>
   </tbody>

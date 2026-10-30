@@ -44,6 +44,12 @@
      * or a log directly under this, and those genuinely need the line.
      */
     divider?: boolean;
+    /**
+     * Draw a thin vertical bar between the title and the content after it, and between that content and
+     * the actions. Default `true`: the three groups — what the panel is, what it is showing, what you
+     * can do to it — read as three, not as one run of controls.
+     */
+    separators?: boolean;
   }
 
   let {
@@ -55,6 +61,7 @@
     onClose,
     hideClose = false,
     divider = true,
+    separators = true,
   }: Props = $props();
 </script>
 
@@ -69,10 +76,12 @@
     <span class="bp-count">{count}</span>
   {/if}
   {#if children}
+    {#if separators && (title || icon)}<span class="bp-sep" aria-hidden="true"></span>{/if}
     {@render children()}
   {/if}
   <span class="bp-spacer"></span>
   {#if actions}
+    {#if separators}<span class="bp-sep" aria-hidden="true"></span>{/if}
     <div class="bp-actions">{@render actions()}</div>
   {/if}
   {#if onClose && !hideClose}
@@ -136,6 +145,14 @@
     font-weight: 600;
     color: var(--text-muted);
     flex-shrink: 0;
+  }
+
+  .bp-sep {
+    width: 1px;
+    height: 16px;
+    flex-shrink: 0;
+    background: var(--border-subtle);
+    margin: 0 4px;
   }
 
   .bp-spacer {

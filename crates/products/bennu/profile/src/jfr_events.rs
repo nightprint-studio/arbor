@@ -14,8 +14,8 @@ use crate::duration::duration_ms;
 use crate::model::*;
 
 /// The events worth asking `jfr print` for.
-pub const WANTED_EVENTS: &str =
-    "jdk.ExecutionSample,jdk.ObjectAllocationSample,jdk.JavaMonitorEnter,jdk.GarbageCollection";
+pub const WANTED_EVENTS: &str = "jdk.ExecutionSample,jdk.ObjectAllocationSample,jdk.JavaMonitorEnter,jdk.GarbageCollection,\
+     jdk.SocketRead,jdk.SocketWrite,jdk.FileRead,jdk.FileWrite,jdk.ThreadPark,jdk.JavaMonitorWait";
 
 /// One decoded frame, owned (the aggregator interns it right away).
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +31,8 @@ pub enum JfrEvent {
     Exec { thread: String, frames: Vec<JfrFrame> },
     Alloc { class: String, bytes: u64, frames: Vec<JfrFrame> },
     Lock { monitor: String, ms: f64, frames: Vec<JfrFrame> },
+    /// A thread blocked off the CPU: `kind` is `socket`, `file`, `park` or `monitor`, `target` what it waited on.
+    Wait { kind: String, target: String, thread: String, ms: f64, frames: Vec<JfrFrame> },
     Gc { collector: String, cause: String, pause_ms: f64, longest_ms: f64 },
 }
 
@@ -135,6 +137,15 @@ fn class_name(v: &Value) -> String {
     }
 }
 
+/// `host:port` of a socket event, preferring the name over the address — `db.internal:5432` says what it is.
+fn socket_target(values: &Value) -> String {
+    let host = values["host"].as_str().filter(|h| !h.is_empty()).or_else(|| values["address"].as_str()).unwrap_or("");
+    match values["port"].as_i64() {
+        Some(port) if port > 0 => format!("{host}:{port}"),
+        _ => host.to_string(),
+    }
+}
+
 fn thread_name(v: &Value) -> String {
     v["javaName"]
         .as_str()
@@ -158,6 +169,34 @@ pub fn parse_print_event(ev: &Value) -> Option<JfrEvent> {
         }),
         "jdk.JavaMonitorEnter" => Some(JfrEvent::Lock {
             monitor: class_name(&values["monitorClass"]),
+            ms: duration_ms(&values["duration"]),
+            frames: frames_of(values),
+        }),
+        "jdk.SocketRead" | "jdk.SocketWrite" => Some(JfrEvent::Wait {
+            kind: "socket".into(),
+            target: socket_target(values),
+            thread: thread_name(&values["eventThread"]),
+            ms: duration_ms(&values["duration"]),
+            frames: frames_of(values),
+        }),
+        "jdk.FileRead" | "jdk.FileWrite" => Some(JfrEvent::Wait {
+            kind: "file".into(),
+            target: values["path"].as_str().unwrap_or("").to_string(),
+            thread: thread_name(&values["eventThread"]),
+            ms: duration_ms(&values["duration"]),
+            frames: frames_of(values),
+        }),
+        "jdk.ThreadPark" => Some(JfrEvent::Wait {
+            kind: "park".into(),
+            target: class_name(&values["parkedClass"]),
+            thread: thread_name(&values["eventThread"]),
+            ms: duration_ms(&values["duration"]),
+            frames: frames_of(values),
+        }),
+        "jdk.JavaMonitorWait" => Some(JfrEvent::Wait {
+            kind: "monitor".into(),
+            target: class_name(&values["monitorClass"]),
+            thread: thread_name(&values["eventThread"]),
             ms: duration_ms(&values["duration"]),
             frames: frames_of(values),
         }),
@@ -198,6 +237,13 @@ pub fn parse_helper_line(line: &str) -> Option<JfrEvent> {
             ms: n as f64 / 1e6,
             frames: frames(),
         }),
+        "w" => Some(JfrEvent::Wait {
+            kind: v["k"].as_str().unwrap_or("").into(),
+            target: v["c"].as_str().unwrap_or("").into(),
+            thread: v["t"].as_str().unwrap_or("").into(),
+            ms: n as f64 / 1e6,
+            frames: frames(),
+        }),
         "g" => Some(JfrEvent::Gc {
             collector: v["c"].as_str().unwrap_or("GC").into(),
             cause: v["cause"].as_str().unwrap_or("").into(),
@@ -230,12 +276,29 @@ struct GcAcc {
     causes: HashMap<String, u64>,
 }
 
+#[derive(Default)]
+struct WaitAcc {
+    count: u64,
+    total_ms: f64,
+    max_ms: f64,
+    /// Milliseconds waited per blocked method — the longest is the row's site.
+    sites: HashMap<String, f64>,
+}
+
+/// The node budget of the allocation and wait trees: smaller than the execution tree's, since their stacks repeat less.
+const SIDE_TREE_NODES: usize = 150_000;
+
 /// Number of distinct allocation sites / lock monitors kept; the rest is dropped (and noted).
 const TABLE_CAP: usize = 20_000;
 
 /// Folds events into the profile's tables.
 pub struct JfrAggregator {
     tree: TreeBuilder,
+    /// Allocated bytes by stack, the allocated type as the leaf — see [`Profile::alloc_tree`].
+    alloc_tree: TreeBuilder,
+    /// Wait milliseconds by stack — see [`Profile::wait_tree`].
+    wait_tree: TreeBuilder,
+    waits: HashMap<(String, String), WaitAcc>,
     alloc_sites: HashMap<String, AllocAcc>,
     alloc_types: HashMap<String, AllocAcc>,
     locks: HashMap<String, LockAcc>,
@@ -249,6 +312,9 @@ impl Default for JfrAggregator {
     fn default() -> Self {
         JfrAggregator {
             tree: TreeBuilder::default(),
+            alloc_tree: TreeBuilder::new(SIDE_TREE_NODES),
+            wait_tree: TreeBuilder::new(SIDE_TREE_NODES),
+            waits: HashMap::new(),
             alloc_sites: HashMap::new(),
             alloc_types: HashMap::new(),
             locks: HashMap::new(),
@@ -295,6 +361,14 @@ impl JfrAggregator {
             }
             JfrEvent::Alloc { class, bytes, frames } => {
                 let site = site_of(&frames);
+                // The type is the tip of the stack, so a path reads from the caller down to what was allocated, and
+                // walking up from a leaf finds who asked for it.
+                {
+                    let mut raws: Vec<RawFrame> = Vec::with_capacity(frames.len() + 1);
+                    raws.push(RawFrame { class: "", method: &class, descriptor: None, file: None, line: None, decl_line: None, kind: FrameKind::Native });
+                    raws.extend(frames.iter().map(raw));
+                    self.alloc_tree.add_stack(None, &raws, bytes);
+                }
                 self.bump_alloc(true, site, bytes);
                 self.bump_alloc(false, class, bytes);
             }
@@ -308,6 +382,28 @@ impl JfrAggregator {
                 a.total_ms += ms;
                 a.max_ms = a.max_ms.max(ms);
                 *a.sites.entry(site_of(&frames)).or_insert(0) += 1;
+            }
+            JfrEvent::Wait { kind, target, thread, ms, frames } => {
+                {
+                    // What was waited on is the tip of the stack, like the type of an allocation, so a path reads
+                    // `Repo.load → Socket.read → [socket db.internal:5432]` and the editor can name the target.
+                    let tip = format!("{kind} {target}");
+                    let mut raws: Vec<RawFrame> = Vec::with_capacity(frames.len() + 1);
+                    raws.push(RawFrame { class: "", method: &tip, descriptor: None, file: None, line: None, decl_line: None, kind: FrameKind::Native });
+                    raws.extend(frames.iter().map(raw));
+                    let name = if thread.is_empty() { "(unknown thread)" } else { thread.as_str() };
+                    self.wait_tree.add_stack(Some(name), &raws, ms.round().max(1.0) as u64);
+                }
+                let key = (kind, target);
+                if !self.waits.contains_key(&key) && self.waits.len() >= TABLE_CAP {
+                    self.table_overflow = true;
+                    return;
+                }
+                let a = self.waits.entry(key).or_default();
+                a.count += 1;
+                a.total_ms += ms;
+                a.max_ms = a.max_ms.max(ms);
+                *a.sites.entry(site_of(&frames)).or_insert(0.0) += ms;
             }
             JfrEvent::Gc { collector, cause, pause_ms, longest_ms } => {
                 let a = self.gc.entry(collector).or_default();
@@ -339,6 +435,25 @@ impl JfrAggregator {
         p.methods = tree.method_stats(5_000);
         p.threads = tree.thread_stats();
         p.tree = tree;
+        p.alloc_tree = self.alloc_tree.finish();
+        p.wait_tree = self.wait_tree.finish();
+        p.waits = {
+            let mut v: Vec<WaitStat> = self
+                .waits
+                .into_iter()
+                .map(|((kind, target), a)| WaitStat {
+                    site: a.sites.into_iter().max_by(|x, y| x.1.total_cmp(&y.1)).map(|(s, _)| s).unwrap_or_default(),
+                    kind,
+                    target,
+                    count: a.count,
+                    total_ms: a.total_ms,
+                    max_ms: a.max_ms,
+                })
+                .collect();
+            v.sort_by(|a, b| b.total_ms.total_cmp(&a.total_ms));
+            v.truncate(500);
+            v
+        };
         p.alloc_sites = top_alloc(self.alloc_sites);
         p.alloc_types = top_alloc(self.alloc_types);
         p.locks = {
@@ -451,6 +566,9 @@ mod tests {
             tree: CallTree::default(),
             methods: vec![],
             alloc_sites: vec![],
+            alloc_tree: Default::default(),
+            wait_tree: Default::default(),
+            waits: vec![],
             alloc_types: vec![],
             locks: vec![],
             gc: vec![],
@@ -469,6 +587,53 @@ mod tests {
         assert_eq!(p.gc[0].collector, "G1New");
         assert!((p.gc[0].total_pause_ms - 5.0).abs() < 1e-6);
         assert_eq!(p.threads[0].name, "main");
+    }
+
+    #[test]
+    fn waits_and_allocation_stacks_are_kept_as_trees() {
+        let mut agg = JfrAggregator::default();
+        for l in [
+            // 250 ms blocked reading a socket, from Repo.load line 31.
+            r#"{"e":"w","k":"socket","c":"db.internal:5432","t":"http-1","n":250000000,"f":[["java.net.Socket","read0","()V",0],["com.acme.Repo","load","()V",31]]}"#,
+            r#"{"e":"w","k":"socket","c":"db.internal:5432","t":"http-1","n":50000000,"f":[["java.net.Socket","read0","()V",0],["com.acme.Repo","load","()V",31]]}"#,
+            r#"{"e":"a","c":"byte[]","n":4096,"f":[["java.util.Arrays","copyOf","()V",0],["com.acme.Repo","load","()V",33]]}"#,
+        ] {
+            agg.feed(parse_helper_line(l).unwrap());
+        }
+        let mut p = Profile {
+            id: "t".into(),
+            lang: Lang::Java,
+            label: "t".into(),
+            created_ms: 0,
+            duration_ms: None,
+            ms_per_unit: 10.0,
+            tree: CallTree::default(),
+            methods: vec![],
+            alloc_sites: vec![],
+            alloc_tree: Default::default(),
+            wait_tree: Default::default(),
+            waits: vec![],
+            alloc_types: vec![],
+            locks: vec![],
+            gc: vec![],
+            threads: vec![],
+            notes: vec![],
+        };
+        agg.finish_into(&mut p);
+
+        assert_eq!(p.waits.len(), 1);
+        let w = &p.waits[0];
+        assert_eq!((w.kind.as_str(), w.target.as_str(), w.count), ("socket", "db.internal:5432", 2));
+        assert!((w.total_ms - 300.0).abs() < 1e-6);
+        assert_eq!(w.site, "java.net.Socket.read0", "the blocked frame is the top of the stack");
+        // The wait tree weighs milliseconds, and the caller's line is kept for the editor.
+        assert_eq!(p.wait_tree.total, 300);
+        assert!(p.wait_tree.hot_lines.iter().any(|h| h.line == 31 && h.weight == 300));
+
+        // The allocation tree weighs bytes and ends in the allocated type.
+        assert_eq!(p.alloc_tree.total, 4096);
+        let leaf = p.alloc_tree.nodes.iter().find(|n| n.self_w == 4096).expect("a leaf carrying the bytes");
+        assert_eq!(p.alloc_tree.frames[leaf.frame as usize].method, "byte[]");
     }
 
     #[test]

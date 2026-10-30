@@ -39,6 +39,9 @@
     /** Lucide (or any Svelte) icon component. */
     icon?:       any;
     iconSize?:   number;
+    /** CSS colour for the icon alone — a state carried by the glyph (running, failed, paused). Without it the icon
+     *  follows the text; the label keeps its own colour, see `labelColor`. */
+    iconColor?:  string;
     /** Marks a tab whose content is **not the user's own** — a read-only view of something
      *  from outside this workspace (a dependency's source, a vendored file). It is tinted
      *  differently in both states, selected and not: a badge alone is read once and then
@@ -593,7 +596,7 @@
         {:else}
           {#if item.icon}
             {@const Icon = item.icon}
-            <Icon size={item.iconSize ?? (size === 'sm' ? 12 : 14)} {...(item.iconProps ?? {})} />
+            <Icon size={item.iconSize ?? (size === 'sm' ? 12 : 14)} color={item.iconColor ?? 'currentColor'} {...(item.iconProps ?? {})} />
           {/if}
           {#if item.label}
             <span class="tab-label" style:color={item.labelColor}>{item.label}</span>

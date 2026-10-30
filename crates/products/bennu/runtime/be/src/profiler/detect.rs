@@ -29,6 +29,8 @@ pub struct JdkProbe {
     pub home: Option<PathBuf>,
     pub jcmd: Option<PathBuf>,
     pub availability: JfrAvailability,
+    /// The JDK's major version, 0 when it could not be read — what decides whether JFR takes event settings as options.
+    pub major: u32,
 }
 
 pub fn probe_jdk(root: &str) -> JdkProbe {
@@ -39,6 +41,7 @@ pub fn probe_jdk(root: &str) -> JdkProbe {
         return JdkProbe {
             home: None,
             jcmd: None,
+            major: 0,
             availability: JfrAvailability {
                 available: false,
                 how_to_parse: None,
@@ -54,6 +57,7 @@ pub fn probe_jdk(root: &str) -> JdkProbe {
         return JdkProbe {
             home: Some(home.clone()),
             jcmd,
+            major: 0,
             availability: JfrAvailability {
                 available: false,
                 how_to_parse: None,
@@ -73,7 +77,7 @@ pub fn probe_jdk(root: &str) -> JdkProbe {
         own_jfr.as_deref(),
         alt.as_deref(),
     );
-    JdkProbe { home: Some(home), jcmd, availability }
+    JdkProbe { home: Some(home), jcmd, availability, major: facts.major }
 }
 
 /// A local JVM `jcmd -l` can see.

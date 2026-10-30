@@ -2,6 +2,7 @@
 
 pub mod prelude;
 
+mod alloc_code;
 mod model;
 mod builder;
 mod jfr_detect;

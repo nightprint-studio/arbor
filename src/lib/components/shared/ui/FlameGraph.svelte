@@ -215,8 +215,19 @@
   function onMove(e: MouseEvent) {
     const b = hit(e);
     if (!b) { hover = null; return; }
-    const r = host!.getBoundingClientRect();
-    hover = { node: b.node, x: Math.min(e.clientX - r.left + 12, Math.max(0, r.width - 280)), y: e.clientY - r.top + 14 };
+    const h = host!;
+    const r = h.getBoundingClientRect();
+    // The tip is absolutely positioned inside the scrolling host, so it lives in CONTENT
+    // coordinates: the pointer's offset in the viewport is not enough once the host has scrolled.
+    // Flipped above the pointer near the bottom edge so it never sits below the visible area.
+    const px = e.clientX - r.left;
+    const py = e.clientY - r.top;
+    const flip = py > r.height - 76;
+    hover = {
+      node: b.node,
+      x: h.scrollLeft + Math.min(px + 12, Math.max(0, r.width - 280)),
+      y: h.scrollTop + (flip ? py - 64 : py + 14),
+    };
   }
 
   function select(n: FlameNodeData | null) {
@@ -286,6 +297,7 @@
   tabindex="0"
   aria-label={ariaLabel}
   onkeydown={onKey}
+  onscroll={() => (hover = null)}
 >
   <canvas
     bind:this={canvas}

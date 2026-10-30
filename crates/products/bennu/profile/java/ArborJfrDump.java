@@ -39,6 +39,21 @@ public class ArborJfrDump {
                         line(out, "l", threadName(ev, "eventThread"), className(ev, "monitorClass"),
                                 ev.getDuration().toNanos(), stack(ev), null, null);
                         break;
+                    // Threads blocked off the CPU, which the execution sampler never sees.
+                    case "jdk.SocketRead":
+                    case "jdk.SocketWrite":
+                        wait(out, ev, "socket", socketTarget(ev));
+                        break;
+                    case "jdk.FileRead":
+                    case "jdk.FileWrite":
+                        wait(out, ev, "file", str(ev, "path"));
+                        break;
+                    case "jdk.ThreadPark":
+                        wait(out, ev, "park", className(ev, "parkedClass"));
+                        break;
+                    case "jdk.JavaMonitorWait":
+                        wait(out, ev, "monitor", className(ev, "monitorClass"));
+                        break;
                     case "jdk.GarbageCollection":
                         line(out, "g", null, str(ev, "name"), ev.getDuration("sumOfPauses").toNanos(), null,
                                 str(ev, "cause"), ev.hasField("longestPause") ? Long.valueOf(ev.getDuration("longestPause").toNanos()) : null);
@@ -49,6 +64,18 @@ public class ArborJfrDump {
             }
         }
         out.flush();
+    }
+
+    private static void wait(BufferedWriter out, RecordedEvent ev, String sub, String target) throws Exception {
+        line(out, "w", threadName(ev, "eventThread"), target, ev.getDuration().toNanos(), stack(ev), null, null, sub);
+    }
+
+    /** host:port of a socket event, the name preferred over the address. */
+    private static String socketTarget(RecordedEvent ev) {
+        String host = str(ev, "host");
+        if (host.isEmpty()) host = str(ev, "address");
+        String port = str(ev, "port");
+        return port.isEmpty() || port.equals("0") ? host : host + ":" + port;
     }
 
     private static String str(RecordedEvent ev, String f) {
@@ -74,8 +101,14 @@ public class ArborJfrDump {
 
     private static void line(BufferedWriter o, String kind, String thread, String cls, long amount,
                              RecordedStackTrace st, String cause, Long longest) throws Exception {
+        line(o, kind, thread, cls, amount, st, cause, longest, null);
+    }
+
+    private static void line(BufferedWriter o, String kind, String thread, String cls, long amount,
+                             RecordedStackTrace st, String cause, Long longest, String sub) throws Exception {
         StringBuilder b = new StringBuilder(256);
         b.append("{\"e\":\"").append(kind).append('"');
+        if (sub != null) { b.append(",\"k\":"); quote(b, sub); }
         if (thread != null) { b.append(",\"t\":"); quote(b, thread); }
         if (cls != null) { b.append(",\"c\":"); quote(b, cls); }
         if (amount != 0) b.append(",\"n\":").append(amount);

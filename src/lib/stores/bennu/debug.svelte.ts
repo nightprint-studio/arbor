@@ -553,6 +553,12 @@ function createBennuDebugStore() {
     /** Whether ANY program is under the debugger — the activity bar's icon, which is about the
      *  window rather than about the tab in front. */
     get anyLive() { return [...sessions.values()].some((s) => s.status !== 'terminated'); },
+    /** What the session of run `runId` is doing, for a tab that is not the one in front. */
+    stateOf(runId: string | null): 'none' | 'running' | 'paused' {
+      const s = runId ? [...sessions.values()].find((x) => x.id === runId) : undefined;
+      if (!s || s.status === 'terminated') return 'none';
+      return s.status === 'paused' ? 'paused' : 'running';
+    },
     /** Whether ANY program is stopped, including one you are not looking at. */
     get anyPaused() { return [...sessions.values()].some((s) => s.status === 'paused'); },
 

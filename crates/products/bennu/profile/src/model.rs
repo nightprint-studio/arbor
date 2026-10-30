@@ -177,6 +177,24 @@ pub struct LockStat {
     pub max_ms: f64,
 }
 
+/// Time threads spent blocked **off the CPU** on one target: a socket (the database), a file, a lock, a park.
+///
+/// What the execution sampler cannot see. It samples threads that are running Java code, so a method that
+/// issues a query and then waits for the answer is on no sample while it waits; these events are how that wait
+/// is recorded, with the stack that was blocked.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaitStat {
+    /// `socket`, `file`, `park` or `monitor`.
+    pub kind: String,
+    /// What was waited on: `db.internal:5432`, a path, a class.
+    pub target: String,
+    /// The method that waited longest on it, `Class.method`.
+    pub site: String,
+    pub count: u64,
+    pub total_ms: f64,
+    pub max_ms: f64,
+}
+
 /// Garbage collection, one row per collector.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GcStat {
@@ -208,6 +226,16 @@ pub struct Profile {
     /// How many milliseconds one unit of tree weight stands for.
     pub ms_per_unit: f64,
     pub tree: CallTree,
+    /// Where allocated bytes were requested from: weights are bytes, and the leaves are the allocated types, so a
+    /// path reads `Service.load → ArrayList.<init> → Arrays.copyOf → [byte[]]`. Empty in a recording made before it
+    /// was kept.
+    #[serde(default)]
+    pub alloc_tree: CallTree,
+    /// Where threads waited (sockets, files, parking, monitors), weighted in milliseconds.
+    #[serde(default)]
+    pub wait_tree: CallTree,
+    #[serde(default)]
+    pub waits: Vec<WaitStat>,
     /// Every method with samples, heaviest self first (capped).
     pub methods: Vec<MethodStat>,
     pub alloc_sites: Vec<AllocStat>,

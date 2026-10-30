@@ -45,6 +45,11 @@
     /** Trailing text affix (e.g. "kg", "%", ".com"). Muted text span after the
      *  input, before the clear button / iconEnd. */
     suffix?: string;
+    /** A completion drawn in muted text right after what has been typed — the part the host would add. Shown
+     *  only while the caret is at the end of the field; Tab or → there takes it, via {@link onacceptghost}. */
+    ghost?: string;
+    /** The user took the ghost text: the host sets the value (this widget does not guess how the completion joins what was typed). */
+    onacceptghost?: () => void;
     onchange?: (value: string) => void;
     oninput?: (value: string) => void;
     onkeydown?: (e: KeyboardEvent) => void;
@@ -73,12 +78,26 @@
     attrs,
     iconStart, iconEnd,
     prefix, suffix,
+    ghost, onacceptghost,
     onchange, oninput, onkeydown, onfocus, onblur, onclear,
   }: Props = $props();
 
   const showClear = $derived(clearable && !disabled && !readonly && value !== '' && value != null);
 
   $effect(() => { if (autofocus) element?.focus(); });
+
+  /** Tab / → at the very end of the text takes the ghost completion; anywhere else the key does what it always does. */
+  function handleKeydown(e: KeyboardEvent) {
+    if (ghost && onacceptghost && (e.key === 'Tab' || e.key === 'ArrowRight') && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      const el = e.currentTarget as HTMLInputElement;
+      if (el.selectionStart === el.value.length && el.selectionEnd === el.value.length) {
+        e.preventDefault();
+        onacceptghost();
+        return;
+      }
+    }
+    onkeydown?.(e);
+  }
 
   function handleClear() {
     value = '';
@@ -105,6 +124,10 @@
     <span class="input-affix input-affix-start">{prefix}</span>
   {/if}
 
+  <span class="input-field">
+  {#if ghost}
+    <span class="input-ghost" aria-hidden="true"><span class="ghost-typed">{value ?? ''}</span><span class="ghost-text">{ghost}</span></span>
+  {/if}
   <input
     class="text-input"
     {type}
@@ -123,10 +146,11 @@
     {...attrs}
     onchange={(e) => onchange?.((e.target as HTMLInputElement).value)}
     oninput={(e) => oninput?.((e.target as HTMLInputElement).value)}
-    {onkeydown}
+    onkeydown={handleKeydown}
     {onfocus}
     {onblur}
   />
+  </span>
 
   {#if suffix}
     <span class="input-affix input-affix-end">{suffix}</span>
@@ -164,6 +188,17 @@
   .input-wrap.disabled { opacity: 0.45; cursor: not-allowed; }
   .input-wrap.readonly { background: var(--bg-elevated); }
 
+  /* The field is a positioning context so the ghost layer can sit exactly over the input's text box. */
+  .input-field { position: relative; display: flex; flex: 1; min-width: 0; }
+  .input-ghost {
+    position: absolute; inset: 0;
+    display: flex; align-items: center;
+    font-family: var(--font-ui-sans);
+    white-space: pre; overflow: hidden; pointer-events: none;
+  }
+  .ghost-typed { visibility: hidden; }
+  .ghost-text { color: var(--text-disabled); }
+
   .text-input {
     flex: 1;
     min-width: 0;
@@ -180,10 +215,13 @@
   /* ---- Sizes ---- */
   .sz-sm { padding: 0 7px; }
   .sz-sm .text-input { padding: 3px 0; font-size: var(--font-size-xs); }
+  .sz-sm .input-ghost { padding: 3px 0; font-size: var(--font-size-xs); }
   .sz-md { padding: 0 8px; }
   .sz-md .text-input { padding: 5px 0; font-size: var(--font-size-sm); }
+  .sz-md .input-ghost { padding: 5px 0; font-size: var(--font-size-sm); }
   .sz-lg { padding: 0 12px; }
   .sz-lg .text-input { padding: 8px 0; font-size: var(--font-size-md); }
+  .sz-lg .input-ghost { padding: 8px 0; font-size: var(--font-size-md); }
 
   /* ---- Affordances ---- */
   .input-icon-start, .input-icon-end {

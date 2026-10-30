@@ -54,9 +54,10 @@
    * Presentation only: the buffer, the lifecycle and the process live in
    * {@link bennuRunStore}.
    */
-  import { Play, Bug, CornerDownLeft, ChevronDown } from 'lucide-svelte';
+  import { Play, Bug, CornerDownLeft, ChevronDown, Pause, Check, CircleX, Square } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
@@ -64,7 +65,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
-  import { bennuRunStore, formatMs } from '$lib/stores/bennu/run.svelte';
+  import { bennuRunStore, formatMs, type RunTab } from '$lib/stores/bennu/run.svelte';
   import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
   import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
   import BennuDebugControls from './BennuDebugControls.svelte';
@@ -159,6 +160,33 @@
    * answers "which one is this" without having to compare labels — and on a chip only where there
    * is something to tell apart.
    */
+  /**
+   * What a run tab is doing, in the words the strip shows it in. A debug session outranks the process
+   * under it: a program stopped at a breakpoint is "paused", not "running", and one with a debugger
+   * attached is "debugging" even before it hits anything — which is the difference between a run and a
+   * debug launch that the strip could not tell apart before.
+   */
+  type RunState = 'starting' | 'running' | 'debugging' | 'paused' | 'ok' | 'bad' | 'stopped';
+  function runStateOf(t: RunTab): RunState {
+    const dbg = bennuDebugStore.stateOf(t.runId);
+    if (dbg === 'paused') return 'paused';
+    if (dbg === 'running') return 'debugging';
+    if (t.live) return 'running';
+    if (!t.finished) return 'starting';
+    if (!t.startedAt) return 'bad';
+    return t.exitCode === null ? 'stopped' : t.exitCode === 0 ? 'ok' : 'bad';
+  }
+  /** One look per state: the glyph, its colour, the label's tint where the state is worth noticing, and the words. */
+  const STATE_LOOK: Record<RunState, { icon: any; color?: string; label?: string; words: string }> = {
+    starting: { icon: Spinner, words: 'Starting' },
+    running: { icon: Play, color: 'var(--success)', words: 'Running' },
+    debugging: { icon: Bug, color: 'var(--error)', label: 'var(--error)', words: 'Debugging' },
+    paused: { icon: Pause, color: 'var(--warning)', label: 'var(--warning)', words: 'Paused at a breakpoint' },
+    ok: { icon: Check, color: 'var(--success)', words: 'Finished' },
+    bad: { icon: CircleX, color: 'var(--error)', label: 'var(--error)', words: 'Failed' },
+    stopped: { icon: Square, words: 'Stopped' },
+  };
+
   const tabItems = $derived<TabItem[]>([
     ...(hasTestRun
       ? [{
@@ -168,19 +196,35 @@
           badge: projectBadge(activeRoot ?? undefined),
           closable: true,
           icon: testStore.running ? Play : testIcon(),
+          iconColor: 'var(--info)',
           iconSize: 11,
         }]
       : []),
-    ...bennuRunStore.tabs.map((t) => ({
-      id: t.id,
-      label: t.label,
-      title: [projectOf(t.spec.root), t.command || t.subject].filter(Boolean).join(' — '),
-      badge: projectBadge(t.spec.root),
-      closable: true,
-      icon: t.live ? Play : undefined,
-      iconSize: 11,
-    })),
+    ...bennuRunStore.tabs.map((t) => {
+      const look = STATE_LOOK[runStateOf(t)];
+      return {
+        id: t.id,
+        label: t.label,
+        title: [look.words, projectOf(t.spec.root), t.command || t.subject].filter(Boolean).join(' — '),
+        badge: projectBadge(t.spec.root),
+        closable: true,
+        icon: look.icon,
+        iconColor: look.color,
+        labelColor: look.label,
+        iconSize: 11,
+      };
+    }),
   ]);
+
+  /**
+   * Drag-to-reorder, as on the editor's tabs. The strip's positions include the Tests tab when there
+   * is one, which is not one of the run store's and stays first; only run tabs move among themselves.
+   */
+  function reorderTabs(from: number, to: number) {
+    const offset = hasTestRun ? 1 : 0;
+    if (from < offset || to < offset) return;
+    bennuRunStore.moveTab(from - offset, to - offset);
+  }
 
   /** Show a tab. A run tab also becomes the store's active run, so everything keyed off "the
    *  run you are looking at" — the transcript, ⟳, the debugger's columns — follows the strip. */
@@ -333,7 +377,9 @@
       };
     }
     if (isLive) {
-      return { kind: 'busy' as const, text: stopping ? 'Stopping…' : 'Running' };
+      if (stopping) return { kind: 'busy' as const, text: 'Stopping…' };
+      // A debugger is attached but the program is going: say so, or a debug launch reads as a plain run.
+      return debugging ? { kind: 'debug' as const, text: 'Debugging' } : { kind: 'run' as const, text: 'Running' };
     }
     if (bennuRunStore.building && bennuRunStore.activeTab && !bennuRunStore.runFinished) {
       return { kind: 'busy' as const, text: 'Building…' };
@@ -454,6 +500,8 @@
           size="sm"
           closable
           overflow
+          draggable
+          onReorder={reorderTabs}
           ariaLabel="Runs"
           onSelect={showTab}
           onClose={closeTab}
@@ -499,26 +547,26 @@
       <EmptyState message="Nothing running. Press ▷ (Shift+F10) to run the project, or Alt+5 for its tests." />
     </div>
   {:else}
-    <!-- The status row: what the moment offers on the left, what the moment IS on the right.
-         While a debugger is attached the left is its transport; otherwise there is nothing
-         there, because a row of disabled buttons is chrome pretending to be a feature. -->
+    <!-- One row for what is happening and what was launched: the state as a coloured pill (green running,
+         red debugging, amber paused, and the verdict once it is over), the debugger's transport beside it
+         while a session is attached, and the command that actually ran filling the rest — selectable and
+         copyable, because it is the line you paste into a terminal. It used to be two rows, one of them
+         to say "Running" and the other to say what. -->
     <div class="rp-status">
-      {#if debugging}<BennuDebugControls /><AssistantDebugLease />{/if}
-      <span class="rp-status-right">
+      <span class="rp-pill" data-kind={status.kind}>
         {#if status.kind === 'busy'}
-          <Spinner size={13} />
+          <Spinner size={11} />
         {:else}
-          <span class="rp-dot" class:ok={status.kind === 'ok'} class:bad={status.kind === 'bad'}
-                class:paused={status.kind === 'paused'}></span>
+          <span class="rp-dot"></span>
         {/if}
         <span class="rp-text">{status.text}</span>
       </span>
+      {#if debugging}<BennuDebugControls /><AssistantDebugLease />{/if}
+      {#if command}
+        <span class="rp-cmd" title={command}>{command}</span>
+        <CopyButton value={command} title="Copy the command" />
+      {/if}
     </div>
-
-    {#if command}
-      <!-- Selectable on purpose: this is the line you copy into a terminal. -->
-      <p class="rp-cmd">{command}</p>
-    {/if}
 
     <!-- Stopped: the stack on the left, what is in scope beside it, the transcript keeping the
          rest. Running: the transcript is all of it. -->
@@ -604,8 +652,7 @@
   .rp-run-icon.testing { color: var(--info); }
   .rp-run-icon.debugging { color: var(--error); }
 
-  /* One tab per run, in the header beside the title. Capped so a run with a long name cannot
-     push the header's actions off the end. */
+  /* One tab per run, in the header beside the title. */
   /* Stretched to the header's full height so the panel variant's active-tab underline lands on
      the header's own bottom border, the way a tool-window tab strip reads in IntelliJ. */
   /* It must GROW, not only be allowed to shrink. `Tabs` budgets its overflow on its parent's width,
@@ -615,8 +662,11 @@
      the budget something real to measure. */
   .rp-tabs {
     display: flex; align-self: stretch;
-    flex: 1 1 auto;
-    min-width: 0; max-width: 60%; margin-left: 2px;
+    /* Grows ahead of the header's spacer (a factor of 1) so the tabs keep every pixel up to the
+       actions before any of them collapses; `min-width: 0` is what stops a long run name from pushing
+       the actions off the end, which is all the old 60% cap was guarding against. */
+    flex: 1000 1 auto;
+    min-width: 0; margin-left: 2px;
   }
   .rp-tabs :global(.tabs) { flex: 1; min-width: 0; }
   .rp-empty {
@@ -633,6 +683,19 @@
     border-bottom: 1px solid var(--border-subtle);
   }
   .rp-status-right { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+  /* The state as a coloured pill. `--pill` is the one thing each state sets. */
+  .rp-pill {
+    --pill: var(--text-secondary);
+    display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+    padding: 1px 9px 1px 7px; border-radius: 999px;
+    color: var(--pill);
+    background: color-mix(in srgb, var(--pill) 14%, transparent);
+  }
+  .rp-pill .rp-dot { background: var(--pill); }
+  .rp-pill[data-kind="run"], .rp-pill[data-kind="ok"] { --pill: var(--success); }
+  .rp-pill[data-kind="debug"], .rp-pill[data-kind="bad"] { --pill: var(--error); }
+  .rp-pill[data-kind="paused"] { --pill: var(--warning); }
+  .rp-pill[data-kind="busy"] { --pill: var(--accent); }
   .rp-text { font-weight: 500; }
   .rp-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
   .rp-dot.ok { background: var(--success); }
@@ -654,11 +717,12 @@
   }
   .rp-strip:hover { background: var(--bg-hover); color: var(--text-primary); }
 
+  /* The command, on the status row: one line, cut with an ellipsis (the whole of it is the tooltip and
+     the copy button), still selectable. */
   .rp-cmd {
-    flex-shrink: 0; margin: 0; padding: 5px 12px;
+    flex: 1 1 0; min-width: 0; margin: 0;
     font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted);
-    border-bottom: 1px solid var(--border-subtle);
-    white-space: pre-wrap; word-break: break-all;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     user-select: text;
   }
 

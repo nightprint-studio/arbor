@@ -151,8 +151,11 @@
 
 <h3>The run itself</h3>
 <dl class="meta-grid">
+  <dt>Its state</dt>
+  <dd>A coloured pill at the left of the status row says what the run is doing: green <em>Running</em>, red <em>Debugging</em> while a debugger is attached, amber <em>Paused</em> at a breakpoint, and once it is over a green <em>Finished</em> or a red
+    <em>Exited with code …</em>, with its duration. The same state is the glyph on the run's tab, so a strip of several runs shows which is going, which is under the debugger and which failed without opening any of them.</dd>
   <dt>The command that ran</dt>
-  <dd>The first line: the resolved <code>java</code>, VM arguments and class, quoted to paste into a terminal, the classpath summarised as a count. A real classpath does not fit a command line (Windows caps one at 32 767 characters), so it goes in a JDK <strong>argument file</strong>, <code>@«module»/target/bennu-run.args</code> — still exactly what you can paste. A Java 8, with no argument files, gets it through <code>CLASSPATH</code>.</dd>
+  <dd>On the same row, after the state: one line, cut at the end of the panel, with the whole of it in the tooltip and a copy button — selectable too. the resolved <code>java</code>, VM arguments and class, quoted to paste into a terminal, the classpath summarised as a count. A real classpath does not fit a command line (Windows caps one at 32 767 characters), so it goes in a JDK <strong>argument file</strong>, <code>@«module»/target/bennu-run.args</code> — still exactly what you can paste. A Java 8, with no argument files, gets it through <code>CLASSPATH</code>.</dd>
   <dt>Typing back</dt>
   <dd>While a program runs, <code>&gt; Send input</code> opens a line writing to its standard input, so a prompt can be answered rather than look like a hang; what you send is echoed with <code>&gt;</code>, and <kbd>Esc</kbd> puts it away. It starts closed on every run — Bennu cannot tell from outside whether a program is waiting.</dd>
   <dt>Stop</dt>
@@ -210,6 +213,7 @@
   <li><strong>Each tab says which project it came from</strong> in a workspace with more than one — a chip after the label, since run
     configurations are named after what they launch and three projects with a <code>Main</code> produce three tabs called <code>Main</code>. The tab's
     tooltip names the project whatever the workspace holds.</li>
+  <li><strong>Tabs can be dragged</strong> to put them in the order you want, like the editor's; the Tests tab, when there is one, stays first. They keep their full width up to the buttons at the right of the header.</li>
   <li><strong>One tab per run</strong>, so this run can be compared with the last. The eight most recent are kept; ⟳ repeats <em>the tab you are looking at</em>, into a new tab; 🗑 closes
     the finished ones. Past the width of the strip the rest are in the <strong>⌄</strong> menu at its end. Closing a tab whose program is still going stops it —
     and says so first, naming what is about to stop.</li>

@@ -26,15 +26,21 @@ import {
   profileDumpRunning,
   profileFileMetrics,
   profileFinish,
+  profileAllocByCode,
   profileFlame,
   profileGet,
   profileImport,
   profileList,
   profileListJvms,
   profileLocate,
+  profilePrefsGet,
+  profilePrefsSet,
   profilePrepare,
+  profileRunCargo,
   profileRunCommand,
   type FileMetrics,
+  type AllocByCode,
+  type FlameKind,
   type FlameWire,
   type LocalJvm,
   type MethodDelta,
@@ -44,15 +50,26 @@ import {
   type ProfileMeta,
   type ProfileProgressEvent,
   type ProfilerDetect,
+  type ProfilerFilter,
+  type ProfilerPrefs,
+  type ProfilerThresholds,
   type ProfileView,
   type StartPlan,
 } from '$lib/ipc/bennu/profiler';
-import { cancelRun } from '$lib/ipc/bennu';
+import { cancelRun, classIndex } from '$lib/ipc/bennu';
+import {
+  DEFAULT_PREFS,
+  filterIsActive,
+  keepClass,
+  packageOf,
+  type FilterContext,
+} from '$lib/components/bennu/profiler/profiler-filter';
 import { openLibraryClass } from '$lib/components/bennu/log-link';
 import { projectStore } from './project.svelte';
 import { bennuUiStore } from './ui.svelte';
 import { bennuRunStore } from './run.svelte';
-import { bennuRunConfigStore, type RunConfig } from './run-config.svelte';
+import { bennuRunConfigStore, cargoInvocationOf, type RunConfig } from './run-config.svelte';
+import { profileTargetOf, type ProfileTarget } from '$lib/components/bennu/profiler/profiler-target';
 
 export type ProfilerPhase = 'idle' | 'preparing' | 'recording' | 'parsing';
 export type ProfilerTab = 'flame' | 'methods' | 'memory' | 'locks' | 'compare';
@@ -82,6 +99,10 @@ function createProfilerStore() {
   let view = $state<ProfileView | null>(null);
   let flame = $state<FlameWire | null>(null);
   let thread = $state<string | null>(null);
+  // What the flame graph weighs, and "who allocates" (loaded the first time the Memory tab asks for it).
+  let flameKind = $state<FlameKind>('cpu');
+  let allocByCode = $state<AllocByCode | null>(null);
+  let samplingMs = $state<number | null>(null);
   let tab = $state<ProfilerTab>('flame');
   let phase = $state<ProfilerPhase>('idle');
   let progress = $state(0);
@@ -91,6 +112,22 @@ function createProfilerStore() {
   let compareWith = $state<string | null>(null);
   let deltas = $state<MethodDelta[]>([]);
   let loadingView = $state(false);
+
+  // What the project remembers (`[profiler]` of its config), the search shared by every tab, and the
+  // project's own classes — the one thing the "project only" filter needs from the index.
+  let prefs = $state<ProfilerPrefs>(DEFAULT_PREFS);
+  let query = $state('');
+  let projectClasses = $state<ReadonlySet<string> | null>(null);
+  let classesFor: string | null = null;
+
+  // The "Profile…" dialog: opened from the title bar, the palette and the panel, so it is state here.
+  let startOpen = $state(false);
+  let startLang = $state<ProfileLang>('java');
+  let detectFor: string | null = null;
+  // The thresholds dialog, and a pending request to focus the search — both asked for from the palette and
+  // the panel, and the search box may not exist yet when the request is made (the panel is still opening).
+  let thresholdsOpen = $state(false);
+  let searchFocusRequested = $state(false);
 
   // Per-file numbers for the editor, keyed by path. Invalidated whenever a recording lands.
   let fileMetrics = $state<Record<string, FileMetrics>>({});
@@ -154,6 +191,7 @@ function createProfilerStore() {
   async function loadDetect(): Promise<void> {
     const r = root();
     if (!r) return;
+    detectFor = r;
     try {
       detect = await profileDetect(r);
       detectError = null;
@@ -180,9 +218,57 @@ function createProfilerStore() {
     if (!activeId && recordings[0]) await select(recordings[0].id);
   }
 
+  async function loadPrefs(): Promise<void> {
+    const r = root();
+    if (!r) { prefs = DEFAULT_PREFS; return; }
+    // Another project's classes must not filter this one while its own are on their way.
+    if (classesFor !== r) projectClasses = null;
+    try {
+      prefs = await profilePrefsGet(r);
+    } catch {
+      prefs = DEFAULT_PREFS;
+    }
+    if (prefs.filter.project_only) void ensureProjectClasses();
+  }
+
+  /** The project's classes, read once per project — only when the filter asks for them. */
+  async function ensureProjectClasses(): Promise<void> {
+    const r = root();
+    if (!r || classesFor === r) return;
+    classesFor = r;
+    try {
+      projectClasses = new Set((await classIndex(r)).map((c) => c.fqcn));
+    } catch {
+      classesFor = null;
+      projectClasses = null;
+    }
+  }
+
+  async function savePrefs(next: ProfilerPrefs): Promise<void> {
+    const r = root();
+    prefs = next;
+    if (!r) return;
+    try {
+      await profilePrefsSet(r, next);
+    } catch (e) {
+      toastStore.show(`Profiler: could not save the settings (${e instanceof Error ? e.message : String(e)})`, 'error');
+    }
+  }
+
+  function setFilter(filter: ProfilerFilter): void {
+    if (filter.project_only) void ensureProjectClasses();
+    void savePrefs({ ...prefs, filter });
+  }
+
+  function setThresholds(thresholds: ProfilerThresholds): void {
+    void savePrefs({ ...prefs, thresholds });
+  }
+
   async function select(id: string | null): Promise<void> {
     activeId = id;
     thread = null;
+    flameKind = 'cpu';
+    allocByCode = null;
     deltas = [];
     compareWith = null;
     const r = root();
@@ -203,7 +289,30 @@ function createProfilerStore() {
     if (!r || !activeId) return;
     thread = name;
     try {
-      flame = await profileFlame(r, activeId, name ?? undefined);
+      flame = await profileFlame(r, activeId, name ?? undefined, flameKind);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  /** Weigh the flame graph by CPU samples, by time blocked off the CPU, or by bytes allocated. */
+  async function setFlameKind(kind: FlameKind): Promise<void> {
+    const r = root();
+    if (!r || !activeId) return;
+    flameKind = kind;
+    try {
+      flame = await profileFlame(r, activeId, thread ?? undefined, kind);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  /** Which of the project's methods allocated what — read once per recording, when the Memory tab first asks. */
+  async function loadAllocByCode(): Promise<void> {
+    const r = root();
+    if (!r || !activeId || allocByCode) return;
+    try {
+      allocByCode = await profileAllocByCode(r, activeId);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -222,7 +331,7 @@ function createProfilerStore() {
     }
   }
 
-  async function begin(lang: ProfileLang, label: string, extra: { pid?: number; samplyPath?: string } = {}) {
+  async function begin(lang: ProfileLang, label: string, extra: { pid?: number; samplyPath?: string; samplingMs?: number } = {}) {
     const r = root();
     if (!r) throw new Error('Open a project first.');
     if (phase !== 'idle') throw new Error('A recording is already in progress.');
@@ -236,7 +345,7 @@ function createProfilerStore() {
   /** Record a Java run configuration under JFR. */
   async function recordConfig(cfg: RunConfig): Promise<void> {
     try {
-      const { r, session_id, plan } = await begin('java', cfg.name);
+      const { r, session_id, plan } = await begin('java', cfg.name, { samplingMs: samplingMs ?? undefined });
       const withPlan = applyPlan(cfg, plan);
       live = { sessionId: session_id, lang: 'java', mainClass: cfg.mainClass, runId: null, attached: false };
       phase = 'recording';
@@ -265,6 +374,54 @@ function createProfilerStore() {
       vmArgs: [cfg.vmArgs.trim(), extra].filter(Boolean).join(' '),
       env: [...cfg.env, ...plan.env.map(([key, value]) => ({ key, value }))],
     };
+  }
+
+  /** Record a Cargo configuration: build the target, then run its binary under samply. */
+  async function recordCargo(cfg: RunConfig): Promise<void> {
+    try {
+      const { r, session_id } = await begin('rust', cfg.name);
+      live = { sessionId: session_id, lang: 'rust', mainClass: null, runId: null, attached: false };
+      phase = 'recording';
+      bennuUiStore.showBottom('run');
+      const env = await bennuRunStore.launchEnv(r, cfg);
+      if (!env) throw new Error('The environment file of this configuration could not be read.');
+      const handle = await profileRunCargo(r, session_id, cargoInvocationOf(cfg), { workingDir: cfg.workingDir.trim(), env });
+      live = { ...live, runId: handle.run_id };
+    } catch (e) {
+      fail(e);
+      // The one failure with a place to fix it: no samply yet. Open the dialog on its tool.
+      if (String(e instanceof Error ? e.message : e).includes('samply was not found')) openStart('rust');
+    }
+  }
+
+  /** The selected run configuration, of whatever kind — the profiler button's subject. */
+  function activeConfig(): RunConfig | null {
+    const r = root();
+    return r ? bennuRunConfigStore.activeFor(r) : null;
+  }
+
+  /** Whether the selected configuration can be profiled, and the tooltip that says why or what happens. */
+  function profileTarget(): ProfileTarget {
+    return profileTargetOf(activeConfig(), { available: detect ? detect.java.available : null, reason: detect?.java.reason ?? '' });
+  }
+
+  /** Profile the selected run configuration: a JVM application under JFR, a Cargo binary under samply. */
+  async function recordActive(): Promise<void> {
+    const cfg = activeConfig();
+    const target = profileTarget();
+    if (!cfg || !target.ok) {
+      toastStore.show(target.note, 'info');
+      return;
+    }
+    if (target.how === 'jfr') await recordConfig(cfg);
+    else await recordCargo(cfg);
+  }
+
+  function openStart(lang?: ProfileLang): void {
+    if (lang) startLang = lang;
+    startOpen = true;
+    void loadDetect();
+    void listJvms();
   }
 
   /** Record a Node or native command (`argv[0]` is the program) in the Run console. */
@@ -296,7 +453,7 @@ function createProfilerStore() {
   /** Start recording inside an already-running JVM. */
   async function attach(pid: number, label: string): Promise<void> {
     try {
-      const { session_id } = await begin('java', label, { pid });
+      const { session_id } = await begin('java', label, { pid, samplingMs: samplingMs ?? undefined });
       live = { sessionId: session_id, lang: 'java', mainClass: null, runId: null, attached: true };
       await profileAttachStart(session_id);
       phase = 'recording';
@@ -397,6 +554,13 @@ function createProfilerStore() {
     get view() { return view; },
     get flame() { return flame; },
     get thread() { return thread; },
+    get flameKind() { return flameKind; },
+    setFlameKind,
+    get allocByCode() { return allocByCode; },
+    loadAllocByCode,
+    /** The execution sampler's interval for the next Java recording, in ms; `null` keeps JFR's own 10 ms. */
+    get samplingMs() { return samplingMs; },
+    setSamplingMs(ms: number | null) { samplingMs = ms; },
     get tab() { return tab; },
     setTab(t: ProfilerTab) { tab = t; },
     get phase() { return phase; },
@@ -407,6 +571,43 @@ function createProfilerStore() {
     get compareWith() { return compareWith; },
     get deltas() { return deltas; },
     get loadingView() { return loadingView; },
+    get thresholdsOpen() { return thresholdsOpen; },
+    openThresholds() { thresholdsOpen = true; },
+    closeThresholds() { thresholdsOpen = false; },
+    get searchFocusRequested() { return searchFocusRequested; },
+    /** Ask the visible tab's search box for focus; it takes the request when it exists. */
+    requestSearchFocus() { searchFocusRequested = true; },
+    consumeSearchFocus() { searchFocusRequested = false; },
+    get startOpen() { return startOpen; },
+    get startLang() { return startLang; },
+    setStartLang(l: ProfileLang) { startLang = l; },
+    openStart,
+    closeStart() { startOpen = false; },
+    profileTarget,
+    recordActive,
+    /** Check what this machine can profile with, once per project — what the title bar's button needs to know. */
+    ensureDetect(): void {
+      if (detectFor !== root()) void loadDetect();
+    },
+    get prefs() { return prefs; },
+    get filter() { return prefs.filter; },
+    get thresholds() { return prefs.thresholds; },
+    get filterActive() { return filterIsActive(prefs.filter); },
+    get query() { return query; },
+    setQuery(q: string) { query = q; },
+    /** The predicate every tab applies; reads the filter and the project's classes, so a `$derived` over it re-runs when either changes. */
+    keep(cls: string): boolean {
+      const ctx: FilterContext = { filter: prefs.filter, projectClasses };
+      return keepClass(ctx, cls);
+    },
+    /** The packages of the project's own classes, for suggesting what to filter on. Empty until they are loaded. */
+    get projectPackages(): string[] {
+      return projectClasses ? [...new Set([...projectClasses].map(packageOf).filter(Boolean))].sort() : [];
+    },
+    ensureProjectClasses,
+    loadPrefs,
+    setFilter,
+    setThresholds,
     /** Bumped whenever recordings change — what the editor's hint effect depends on. */
     get metricsEpoch() { return metricsEpoch; },
     get hasRecordings() { return recordings.length > 0; },
@@ -422,7 +623,7 @@ function createProfilerStore() {
     refresh,
     /** Load the recordings of the open project once (no-op when already loaded for it). */
     ensureLoaded(): void {
-      if (loadedFor !== root()) void refresh();
+      if (loadedFor !== root()) { void refresh(); void loadPrefs(); }
     },
     select,
     setThread,

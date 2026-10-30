@@ -1898,6 +1898,8 @@
     const revision = docRevision;
     const on = bennuSettingsStore.profilerHints;
     void bennuProfilerStore.metricsEpoch;
+    // The colours are the project's thresholds, so a change to them redraws the marks.
+    const thresholds = bennuProfilerStore.thresholds;
     if (on) bennuProfilerStore.ensureLoaded();
     if (!path || !on || !bennuProfilerStore.hasRecordings || !/\.(java|[cm]?[jt]sx?|vue|svelte|rs)$/i.test(path)) {
       profilerMarks = [];
@@ -1910,7 +1912,7 @@
       void bennuProfilerStore.metricsFor(path, src).then((fm) => {
         if (cancelled || activePath !== path) return;
         if (fm && projectStore.editedAt(path) > fm.created_ms) fm = { ...fm, stale: true };
-        profilerMarks = heatMarks(fm, true);
+        profilerMarks = heatMarks(fm, true, thresholds);
       });
     }, 700);
     return () => { cancelled = true; clearFocusedTimeout(t); };

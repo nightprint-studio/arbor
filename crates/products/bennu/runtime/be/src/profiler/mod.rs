@@ -16,6 +16,7 @@
 mod decls;
 mod detect;
 mod parse;
+mod prefs;
 mod samply;
 mod store;
 
@@ -133,6 +134,9 @@ pub struct PrepareArgs {
     pub samply_path: Option<String>,
     #[serde(default)]
     pub rate_hz: Option<u32>,
+    /// Java: the execution sampler's interval in milliseconds (default 10). Honoured on JDK 17 and newer.
+    #[serde(default)]
+    pub sampling_ms: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -170,9 +174,10 @@ fn bennu_profile_prepare(_ctx: &BennuState, args: PrepareArgs) -> Result<Prepare
                 let _ = std::fs::remove_dir_all(&dir);
                 return Err(unavailable_message(&jdk.availability));
             }
+            let tuning = JfrTuning { sampling_ms: args.sampling_ms, event_settings: jdk.major >= 17 };
             let plan = match args.pid {
-                Some(pid) => JfrAttach { pid, label: args.label.clone() }.plan(&paths)?,
-                None => JfrLaunch { label: args.label.clone() }.plan(&paths)?,
+                Some(pid) => JfrAttach { pid, label: args.label.clone(), tuning }.plan(&paths)?,
+                None => JfrLaunch { label: args.label.clone(), tuning }.plan(&paths)?,
             };
             (plan, jdk.availability.how_to_parse, jdk.jcmd)
         }
@@ -246,19 +251,32 @@ pub struct RunCommandArgs {
 /// Start `argv` under the session's plan (wrapper + environment), in the Run console.
 #[arbor_rpc::handler]
 fn bennu_profile_run_command(ctx: &BennuState, args: RunCommandArgs) -> Result<bennu_proto::prelude::RunHandle, String> {
+    spawn_under_plan(ctx, &args.root, &args.session_id, &args.argv, args.cwd.as_deref(), args.env.as_ref())
+}
+
+/// The plan's wrapper, then `argv`, run with the plan's environment and the caller's own on top.
+/// Shared by every way of starting a non-JVM recording, so they cannot disagree about it.
+fn spawn_under_plan(
+    ctx: &BennuState,
+    root: &str,
+    session_id: &str,
+    argv: &[String],
+    cwd: Option<&str>,
+    env: Option<&HashMap<String, String>>,
+) -> Result<bennu_proto::prelude::RunHandle, String> {
     let (plan, label) = {
         let s = lock(sessions());
-        let s = s.get(&args.session_id).ok_or("unknown profiling session")?;
+        let s = s.get(session_id).ok_or("unknown profiling session")?;
         (s.plan.clone(), s.label.clone())
     };
     let mut full: Vec<String> = plan.wrapper.clone();
-    full.extend(args.argv.iter().cloned());
+    full.extend(argv.iter().cloned());
     let (program, rest) = full.split_first().ok_or("nothing to run")?;
     let resolved =
         arbor_process_ext::prelude::locate_executable(program, None, &[], &[]).unwrap_or_else(|| program.clone());
     let mut cmd = std::process::Command::new(&resolved);
     cmd.args(rest);
-    let cwd = args.cwd.clone().filter(|c| !c.trim().is_empty()).unwrap_or_else(|| args.root.clone());
+    let cwd = cwd.filter(|c| !c.trim().is_empty()).unwrap_or(root).to_string();
     cmd.current_dir(&cwd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -266,7 +284,7 @@ fn bennu_profile_run_command(ctx: &BennuState, args: RunCommandArgs) -> Result<b
     for (k, v) in &plan.env {
         cmd.env(k, v);
     }
-    if let Some(env) = &args.env {
+    if let Some(env) = env {
         for (k, v) in env {
             cmd.env(k, v);
         }
@@ -277,8 +295,39 @@ fn bennu_profile_run_command(ctx: &BennuState, args: RunCommandArgs) -> Result<b
         cmd.no_window();
     }
     let display = full.join(" ");
-    crate::build::spawn_streamed(cmd, format!("profile: {label}"), display, cwd, &args.root, ctx.event_sink(), |_| {})
+    crate::build::spawn_streamed(cmd, format!("profile: {label}"), display, cwd, root, ctx.event_sink(), |_| {})
         .map_err(|e| format!("cannot start `{resolved}`: {e}"))
+}
+
+#[derive(Deserialize)]
+pub struct RunCargoArgs {
+    pub root: String,
+    pub session_id: String,
+    /// The same invocation the Run button uses, so profiling is the configuration you already have.
+    pub invocation: bennu_cargo::prelude::Invocation,
+    #[serde(default)]
+    pub working_dir: Option<String>,
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+}
+
+/// Build a Cargo target and run its **binary** under the session's profiler.
+///
+/// Not `cargo run` under the wrapper: that would profile cargo, which then execs the program, and
+/// what the recording should be about is the program. So the target is built and located the way
+/// Debug does it, and the executable itself is what the wrapper is given. Blocking, like Debug: the
+/// build is the wait, and the caller stays busy until there is a process or a reason there is not.
+#[arbor_rpc::handler]
+fn bennu_profile_run_cargo(ctx: &BennuState, args: RunCargoArgs) -> Result<bennu_proto::prelude::RunHandle, String> {
+    let cwd = args.working_dir.clone().filter(|d| !d.trim().is_empty()).unwrap_or_else(|| args.root.clone());
+    let wanted = crate::cargo_debug::Wanted::from_selector(&args.invocation.target);
+    let sink = ctx.event_sink();
+    let exe = crate::cargo_debug::build_and_locate(&args.root, &cwd, &args.invocation, &wanted, |line| {
+        sink.emit("arbor://bennu/build-output", json!({ "text": line }));
+    })?;
+    let mut argv = vec![exe];
+    argv.extend(args.invocation.args.iter().cloned());
+    spawn_under_plan(ctx, &args.root, &args.session_id, &argv, Some(cwd.as_str()), args.env.as_ref())
 }
 
 // ── attach ────────────────────────────────────────────────────────────────────
@@ -564,6 +613,12 @@ pub struct ProfileView {
     pub locks: Vec<LockStat>,
     pub gc: Vec<GcStat>,
     pub threads: Vec<ThreadStat>,
+    /// Where threads waited off the CPU — sockets, files, parks — longest first.
+    pub waits: Vec<WaitStat>,
+    /// Whether the recording kept allocation stacks, so "who allocates" can be answered. A recording made before
+    /// they were kept has only the allocating site.
+    pub has_alloc_stacks: bool,
+    pub has_waits: bool,
     pub notes: Vec<String>,
 }
 
@@ -582,6 +637,9 @@ fn bennu_profile_get(_ctx: &BennuState, args: IdArgs) -> Result<ProfileView, Str
         locks: p.locks.iter().take(VIEW_ROWS).cloned().collect(),
         gc: p.gc.clone(),
         threads: p.threads.iter().take(VIEW_ROWS).cloned().collect(),
+        waits: p.waits.iter().take(VIEW_ROWS).cloned().collect(),
+        has_alloc_stacks: p.alloc_tree.total > 0,
+        has_waits: p.wait_tree.total > 0,
         notes: p.notes.clone(),
     })
 }
@@ -593,12 +651,20 @@ pub struct FlameArgs {
     /// Restrict to one thread; absent = every thread merged.
     #[serde(default)]
     pub thread: Option<String>,
+    /// What the boxes weigh: `cpu` (the default), `wait` (milliseconds blocked off the CPU) or `alloc` (bytes).
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 #[arbor_rpc::handler]
 fn bennu_profile_flame(_ctx: &BennuState, args: FlameArgs) -> Result<FlameNode, String> {
     let p = store::load(&args.root, &args.id)?;
-    Ok(p.tree.flame(args.thread.as_deref(), FlameOptions::default()))
+    let tree = match args.kind.as_deref() {
+        Some("wait") => &p.wait_tree,
+        Some("alloc") => &p.alloc_tree,
+        _ => &p.tree,
+    };
+    Ok(tree.flame(args.thread.as_deref(), FlameOptions::default()))
 }
 
 #[derive(Deserialize)]
@@ -712,6 +778,37 @@ fn mtime_ms(file: &str) -> Option<u64> {
         .map(|d| d.as_millis() as u64)
 }
 
+/// Whether a class (a binary name) is the project's own: one of the classes its index declares when it has them,
+/// otherwise anything that is not the JDK — less exact, and better than crediting nothing while the index builds.
+fn project_predicate(root: &str) -> Box<dyn Fn(&str) -> bool> {
+    match crate::index_service::IndexService::global().class_index(root) {
+        Some(entries) => {
+            let own: std::collections::HashSet<String> = entries.into_iter().map(|c| c.fqcn).collect();
+            Box::new(move |class: &str| own.contains(class.split('$').next().unwrap_or(class)))
+        }
+        None => Box::new(|class: &str| !["java.", "javax.", "jdk.", "sun.", "com.sun."].iter().any(|p| class.starts_with(p))),
+    }
+}
+
+/// Who allocates: the recording's allocated bytes credited to the project's own methods (see `bennu_profile::alloc_code`).
+#[derive(Serialize)]
+pub struct AllocByCode {
+    /// False for a recording made before allocation stacks were kept: there is nothing to walk up.
+    pub available: bool,
+    pub total_bytes: u64,
+    pub rows: Vec<CodeAlloc>,
+}
+
+#[arbor_rpc::handler]
+fn bennu_profile_alloc_by_code(_ctx: &BennuState, args: IdArgs) -> Result<AllocByCode, String> {
+    let p = store::load(&args.root, &args.id)?;
+    if p.alloc_tree.total == 0 {
+        return Ok(AllocByCode { available: false, total_bytes: 0, rows: Vec::new() });
+    }
+    let is_project = project_predicate(&args.root);
+    Ok(AllocByCode { available: true, total_bytes: p.alloc_tree.total, rows: allocations_by_code(&p.alloc_tree, &*is_project, 300) })
+}
+
 /// Numbers for the methods and lines of one file, for the editor's inline hints and gutter.
 #[arbor_rpc::handler]
 fn bennu_profile_file_metrics(_ctx: &BennuState, args: FileMetricsArgs) -> Result<FileMetricsOut, String> {
@@ -738,7 +835,7 @@ fn bennu_profile_file_metrics(_ctx: &BennuState, args: FileMetricsArgs) -> Resul
                 Some(s) => s,
                 None => std::fs::read_to_string(&args.file).map_err(|e| e.to_string())?,
             };
-            java_file_metrics(&p, &decls::declared_methods(&source), 0.5)
+            java_file_metrics(&p, &decls::declared_methods(&source), 0.5, &*project_predicate(&args.root))
         }
         _ => path_file_metrics(&p, &args.file, 0.5),
     };

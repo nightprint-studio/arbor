@@ -20,7 +20,7 @@
     Play, Bug, Unplug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
     UserCog, Bot,
     ListChecks, ChevronDown, RotateCw, ListRestart, LayoutDashboard,
-    Store, Package, ScrollText,
+    Store, Package, ScrollText, Gauge, Activity,
   } from 'lucide-svelte';
   import type { BuildType } from '$lib/stores/bennu/run.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -47,6 +47,7 @@
   /** The runner for the open project — the toolbar's ▷ / ⟳ / ■ mean the same thing either way. */
   const testStore = $derived(activeTestStore());
   import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
+  import { bennuProfilerStore } from '$lib/stores/bennu/profiler.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
@@ -92,6 +93,18 @@
     void bennuRunStore.runActive(root, true).then((ran) => {
       if (!ran) bennuUiStore.openRunConfig();
     });
+  }
+  // The profiler button records the selected run configuration — a JVM application under Flight
+  // Recorder, a Cargo binary under samply — and turns into Stop while it does. It stays clickable when
+  // it cannot record: a greyed-out button cannot say why, and the tooltip and the toast do.
+  const profPhase = $derived(bennuProfilerStore.phase);
+  const profRecording = $derived(profPhase === 'recording');
+  const profTarget = $derived(bennuProfilerStore.profileTarget());
+  const profBlocked = $derived(!hasProject || (!profRecording && (busy || profPhase !== 'idle')));
+  $effect(() => { if (hasProject) bennuProfilerStore.ensureDetect(); });
+  function profileProject() {
+    if (profRecording) void bennuProfilerStore.stop();
+    else void bennuProfilerStore.recordActive();
   }
   /** Run every unit test in the project (the run menu + Ctrl+Shift+F5). Opens the Tests
    *  panel; everything after that streams into it. */
@@ -168,6 +181,10 @@
     // with nothing attached, which is not Stop.
     { kind: 'item', id: 'debug', label: 'Debug', icon: Bug, shortcut: 'Shift+F9',
       disabled: busy, onclick: debugProject },
+    { kind: 'item', id: 'profile', label: profRecording ? 'Stop profiling' : 'Profile', icon: Gauge, shortcut: 'Shift+F11',
+      disabled: profBlocked, onclick: profileProject },
+    { kind: 'item', id: 'profiledlg', label: 'Profile a command or running JVM…', icon: Activity,
+      disabled: !hasProject || profPhase !== 'idle', onclick: () => bennuProfilerStore.openStart() },
     { kind: 'item', id: 'detach', label: 'Detach the debugger', icon: Unplug,
       disabled: !bennuDebugStore.live,
       onclick: () => void bennuDebugStore.detachSession() },
@@ -386,6 +403,19 @@
       >
         <Bug size={16} />
       </button>
+      <!-- ⏱ the profiler: records the selected run configuration (JFR for a JVM application, samply for a
+           Cargo binary). Not `disabled` when it cannot, so the tooltip can say why. -->
+      <button
+        class="btb-run-btn"
+        class:btb-profiling={profRecording}
+        class:btb-muted={!profRecording && !profTarget.ok}
+        onclick={profileProject}
+        disabled={profBlocked}
+        use:tooltip={{ content: profRecording ? 'Stop and read the recording' : profTarget.note, shortcut: 'Shift+F11' }}
+        aria-label={profRecording ? 'Stop profiling' : 'Profile'}
+      >
+        {#if profRecording}<Square size={14} />{:else}<Gauge size={16} />{/if}
+      </button>
       <Dropdown items={runMenu} position="fixed" direction="down" width="220px">
         {#snippet trigger({ open, toggle })}
           <button class="btb-run-btn" class:open onclick={toggle} disabled={!hasProject} use:tooltip={'More run actions'} aria-label="More run actions" aria-haspopup="menu" aria-expanded={open}>
@@ -469,6 +499,10 @@
   .btb-run-primary:hover:not(:disabled) { background: var(--success-subtle); color: var(--success); }
   /* A session is attached — the button says so, the way ▶ says a program is running. */
   .btb-debugging:not(:disabled) { color: var(--error); }
+  /* Recording — the same signal, and the button is Stop. */
+  .btb-profiling:not(:disabled) { color: var(--error); }
+  /* Nothing profilable is selected: dimmed but live, so the tooltip can explain. */
+  .btb-muted:not(:disabled) { opacity: 0.45; }
   /* Split build control: the caret reads as attached to the Build button (tight pair, then a little
      breathing room before Run). */
   .btb-build-main { border-top-right-radius: 0; border-bottom-right-radius: 0; padding-right: 0; }
