@@ -2036,18 +2036,23 @@
   </div>
 
   {#if contextMenu}
-    {@const cm = contextMenu}
-    <GraphContextMenu
-      node={cm.node}
-      x={cm.x}
-      y={cm.y}
-      onClose={() => (contextMenu = null)}
-      onShowCreateBranch={openCreateBranch}
-      onShowCreateWorktree={openCreateWorktree}
-      onShowCreateTag={openCreateTag}
-      onShowLinkTicket={openLinkTicket}
-      onShowNotes={openNotes}
-    />
+    <!-- Snapshot, not a live read: closing the menu nulls `contextMenu` while the menu's own
+         derived items still re-evaluate once, and `cm.node` on null throws. `{#key}` rebuilds
+         the menu when a different one is opened while this one is up. -->
+    {#key contextMenu}
+      {@const cm = untrack(() => contextMenu)!}
+      <GraphContextMenu
+        node={cm.node}
+        x={cm.x}
+        y={cm.y}
+        onClose={() => (contextMenu = null)}
+        onShowCreateBranch={openCreateBranch}
+        onShowCreateWorktree={openCreateWorktree}
+        onShowCreateTag={openCreateTag}
+        onShowLinkTicket={openLinkTicket}
+        onShowNotes={openNotes}
+      />
+    {/key}
   {/if}
 
   {#if wipContextMenu}
