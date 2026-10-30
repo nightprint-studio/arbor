@@ -121,6 +121,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu's entity ⇄ repository jump is a clear coloured badge** (`R` on an entity, `E` on a repository) instead of a tiny glyph, and the JPA toolbar buttons have their own icons and colours.
 
 ### Fixed
+- **Corvus › Switching workspace no longer runs the tab swap twice** — the switch's own event started a second, concurrent close/open pass.
 - **Commit graph › Checkout and Copy SHA no longer fail with a `TypeError`** — closing the commit context menu could read the commit after it had been dismissed.
 - **Flame graph tooltips follow the pointer when the graph is scrolled** — they stayed where the scroll had left them, so boxes below the fold never showed one.
 - **Bennu › Opening a deep profile no longer kills the backend** — the flame graph of a recording with very deep stacks (a recursive parser) produced a reply the app refused to read, so Bennu showed "bennu-be disconnected" and lost its open projects; the graph is now cut at 50 levels, and a reply that cannot be read fails only that request, with a plain explanation, instead of dropping the backend.

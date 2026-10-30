@@ -150,7 +150,10 @@ function createWorkspacesStore() {
   function setupListeners(): () => void {
     const unsubs: Array<() => void> = [];
     listen<{ to_id: string; from_id?: string }>('arbor://workspace-switched', ev => {
-      // Backend-initiated switch (e.g. from a plugin).
+      // Backend-initiated switch (e.g. from a plugin). Our own switch emits this event too,
+      // while `activeId` still names the old workspace — applying it here would run the whole
+      // close/open pass a second time, concurrently with the one `setActive` is driving.
+      if (switching) return;
       if (ev.payload.to_id && ev.payload.to_id !== activeId) {
         void applyActiveWorkspace(ev.payload.to_id);
       }
@@ -190,6 +193,7 @@ function createWorkspacesStore() {
           bridge.currentTabMeta?.() ?? [],
         );
       }
+
 
       // 3) Announce the switch to the backend (fires hook, emits event).
       await ipcSetActive(newId);
