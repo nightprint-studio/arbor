@@ -1125,7 +1125,9 @@ function createProjectStore() {
     get workspaceProjects(): { root: string; name: string }[] {
       return workspaceRoots.map((r) => {
         const info = r === project?.root ? project : sessions.get(r)?.info;
-        return { root: r, name: info?.name ?? (r.split('/').pop() || r) };
+        // `||`, not `??`: a session whose info has not been named yet carries an empty string, which `??` keeps — and the
+        // switcher drew it as a nameless entry until the project was opened and the name arrived
+        return { root: r, name: info?.name || r.split(/[\\/]/).filter(Boolean).pop() || r };
       });
     },
     /** True when the workspace holds more than one project (drives showing the switcher UI). */

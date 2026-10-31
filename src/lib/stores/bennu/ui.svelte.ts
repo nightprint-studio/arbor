@@ -159,6 +159,8 @@ function createBennuUiStore() {
   let docsOpen = $state(false);
   /** The dialog that rearranges the two activity rails. */
   let customizeRailsOpen = $state(false);
+  /** The window that shows what Bennu has learned. */
+  let learnedOpen = $state(false);
   let paletteOpen = $state(false);
   // Find-in-project modal (Ctrl+Shift+F).
   let findOpen = $state(false);
@@ -292,6 +294,7 @@ function createBennuUiStore() {
     get settingsOpen() { return settingsOpen; },
     get docsOpen()     { return docsOpen; },
     get customizeRailsOpen() { return customizeRailsOpen; },
+    get learnedOpen() { return learnedOpen; },
     get paletteOpen()  { return paletteOpen; },
     get findOpen()     { return findOpen; },
     get projectConfigOpen() { return projectConfigOpen; },
@@ -398,6 +401,8 @@ function createBennuUiStore() {
     consumeSettingsSection() { settingsSection = null; },
     toggleDocs()    { docsOpen = !docsOpen; },
     closeDocs()     { docsOpen = false; },
+    openLearned()         { learnedOpen = true; },
+    closeLearned()        { learnedOpen = false; },
     openCustomizeRails()  { customizeRailsOpen = true; },
     closeCustomizeRails() { customizeRailsOpen = false; },
     togglePalette() { paletteOpen = !paletteOpen; },

@@ -28,7 +28,7 @@
 //! body, a method body, a field's type position — because the abbreviation only appears once its
 //! own prefix has been typed, and `psf` is not a word anyone types by accident.
 
-use bennu_java::prelude::matching_templates;
+use bennu_java::prelude::{caret_place, matching_templates, CaretPlace, Place};
 use bennu_templates::prelude::{render_code, unmet, LiveContext, TemplateFacts, TemplateKind};
 use bennu_lsp::prelude::parse_snippet;
 use bennu_proto::prelude::{CompletionItem, SnippetStop};
@@ -84,7 +84,10 @@ fn completions_with(
         }
     }
     // `psf` and its family are Java's own — offered in a Java file and nowhere else.
-    for template in matching_templates(prefix).into_iter().filter(|_| is_java(file)) {
+    // …and only where what they write is valid Java: `sout` is a statement, so not in a class body or an argument list
+    let place = if is_java(file) { caret_place(source, start) } else { CaretPlace::Elsewhere };
+    let fits = |p: Place| matches!((p, place), (Place::Member, CaretPlace::Member) | (Place::Statement, CaretPlace::Statement));
+    for template in matching_templates(prefix).into_iter().filter(|t| is_java(file) && fits(t.place())) {
         if mine.iter().any(|t| t.name.eq_ignore_ascii_case(template.abbrev)) {
             continue;
         }

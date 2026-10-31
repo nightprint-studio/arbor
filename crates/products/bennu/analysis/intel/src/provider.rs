@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use bennu_complete::prelude::MatchCase;
 use bennu_index::prelude::SymbolKind;
@@ -537,6 +537,9 @@ pub trait IntelProvider: Send + Sync {
     fn symbols(&self, file: &str) -> Result<Vec<DocumentSymbol>, IntelError>;
 }
 
+/// The types a `Class<?>` parameter is most often given: what a plain value is, in the order of how common it is.
+const PLAIN_VALUE_TYPES: [&str; 10] = ["String", "Integer", "Long", "Boolean", "Double", "Object", "Float", "Short", "Byte", "Character"];
+
 /// The MVP provider: native, index-backed Java intel.
 ///
 /// Phase 1 implements **member-access completion** end to end: it holds a
@@ -587,6 +590,32 @@ pub struct NativeJavaProvider {
     /// Filled by a background sweep started on the first question — see [`StaticMemberIndex`]. Not
     /// carried across a provider rebuild: a rebuild is exactly when the classes it describes changed.
     static_members: Arc<StaticMemberIndex>,
+    /// The binary names of the types the project itself declares, for the places that need to list them (the classes that
+    /// implement the bound of a `Class<T>` parameter).
+    project_types: Arc<Vec<String>>,
+}
+
+/// The JDK a project resolved to, opened once for the process: the decoded-class memo (`JdkMemberIndex`) and the list of the
+/// JDK's class names. Keyed by the memo's file on disk — which is already per resolved JDK — or by the requested version
+/// where there is none. Two projects on the same JDK held two memos and two name lists, which is what made a second open
+/// project cost as much as the first.
+fn shared_jdk(jdk_version: &str, path: Option<PathBuf>) -> Result<(Arc<JdkMemberIndex>, Arc<Vec<String>>), String> {
+    use bennu_classpath::prelude::resolve_jdk_classpath;
+    type Shared = (Arc<JdkMemberIndex>, Arc<Vec<String>>);
+    static OPEN: Mutex<Vec<(String, Shared)>> = Mutex::new(Vec::new());
+    let key = path.as_ref().map_or_else(|| format!("version:{jdk_version}"), |p| p.to_string_lossy().into_owned());
+    let mut open = OPEN.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some((_, shared)) = open.iter().find(|(k, _)| *k == key) {
+        return Ok((Arc::clone(&shared.0), Arc::clone(&shared.1)));
+    }
+    let source = resolve_jdk_classpath(jdk_version)?;
+    let names = Arc::new(source.class_names());
+    let index = Arc::new(match path {
+        Some(path) => JdkMemberIndex::persistent(source, path),
+        None => JdkMemberIndex::new(source),
+    });
+    open.push((key, (Arc::clone(&index), Arc::clone(&names))));
+    Ok((index, names))
 }
 
 impl NativeJavaProvider {
@@ -869,11 +898,17 @@ impl NativeJavaProvider {
         // What the position wants — `return Ra|` in a method returning `RawIdentity`. See
         // `expected_types`. Its names join the sweep for the same reason the imported ones do: a cap
         // applied shortest-name-first knows nothing about the `return`.
-        let wanted = self
+        let expected = self
             .resolver
             .as_deref()
-            .and_then(|r| bennu_java::prelude::expected_type(text, offset, r))
-            .and_then(|t| WantedTypes::of(&t));
+            // an argument slot says it too: `list(C|)` wants the parameter's class
+            .and_then(|r| {
+                bennu_java::prelude::expected_type(text, offset, r)
+                    .or_else(|| bennu_query::prelude::argument_expected_type(text, offset, r))
+            });
+        // A `Class<?>` parameter (`getForObject(url, |)`, `readValue(json, |)`) most often takes the type of a plain value
+        let wants_a_class = expected.as_ref().is_some_and(|t| t.binary_name == "java/lang/Class");
+        let wanted = expected.as_ref().and_then(WantedTypes::of);
         if let Some(w) = &wanted {
             for simple in w.names() {
                 let answers = bennu_complete::prelude::match_tier(simple, &prefix, case).is_some();
@@ -901,6 +936,8 @@ impl NativeJavaProvider {
             (
                 bennu_complete::prelude::match_tier(simple, &prefix, case),
                 closeness(simple.as_str()),
+                // the plain value types lead where a class is passed, ahead of what the file happens to import
+                wants_a_class.then(|| PLAIN_VALUE_TYPES.iter().position(|t| *t == simple.as_str()).unwrap_or(usize::MAX)),
                 here.rank(self.class_names.candidates(simple)),
             )
         });
@@ -914,6 +951,7 @@ impl NativeJavaProvider {
                     == Closeness::Exact
             })
         });
+        let creates = follows_new(text, ident_start) && !creation_is_written(text, offset);
         ranked
             .into_iter()
             .enumerate()
@@ -926,11 +964,30 @@ impl NativeJavaProvider {
                     [only] => self.nested_form(only, &symbols, site.as_deref()),
                     _ => None,
                 };
+                let mut insert_text = nested.as_ref().map(|(written, _)| written.clone());
+                let mut snippet_stops = Vec::new();
+                // After `new` the name is the start of a call, not a reference: `ArrayList<>()`, not `ArrayList`.
+                // A name with several candidates (`ByteArrayOutputStream` is the JDK's and commons-io's) gets the call when
+                // they all agree on how it is written; when they differ (one generic, one not) the picker is left alone.
+                if creates {
+                    if let Some(resolver) = self.resolver.as_deref() {
+                        let written = insert_text.clone().unwrap_or_else(|| simple.to_string());
+                        let syntax: Vec<_> = candidates
+                            .iter()
+                            .filter_map(|c| resolver.members_of(&c.replace('.', "/")).and_then(|m| creation_syntax(&written, &m)))
+                            .collect();
+                        if let Some(first) = syntax.first().filter(|f| syntax.len() == candidates.len() && syntax.iter().all(|s| s.0 == f.0)) {
+                            insert_text = Some(first.0.clone());
+                            snippet_stops = first.1.clone();
+                        }
+                    }
+                }
                 CompletionItem {
                     label: simple.to_string(),
                     kind: "class".to_string(),
                     detail: type_detail(candidates),
-                    insert_text: nested.as_ref().map(|(written, _)| written.clone()),
+                    insert_text,
+                    snippet_stops,
                     // Auto-import ONLY when unambiguous — a single candidate that isn't `java.lang`
                     // (which needs no import). Ambiguous names (several packages) are left to the
                     // Alt+Enter picker, so we never silently import the wrong `List`.
@@ -999,11 +1056,10 @@ impl NativeJavaProvider {
     ) -> Vec<CompletionItem> {
         const MAX: usize = 40;
         let Some(resolver) = self.resolver.as_deref() else { return Vec::new() };
-        if site.prefix.is_empty() && site.target == ElementTarget::Unknown {
-            // A bare `@` with nothing else written is every annotation in the world, in no order
-            // anyone would want. One letter is enough to make the list mean something.
-            return Vec::new();
-        }
+        // A bare `@` with nothing else written is every annotation in the world, in no order anyone would want: so
+        // the sweep of the whole classpath is skipped, and what is offered is what this file and the project import
+        // — ranked below like any other, which is the order the person would pick from. One letter widens it.
+        let bare = site.prefix.is_empty() && site.target == ElementTarget::Unknown;
         let here = Proximity::of(text, census.then_some(&*self.imports));
         // The cap counts annotations, not names looked at. Capping the sweep instead — three
         // hundred names, filtered afterwards — is what made this list start at the third letter:
@@ -1011,7 +1067,7 @@ impl NativeJavaProvider {
         // `@S` ended long before `SuppressWarnings`, and the popup fell through to the buffer's own
         // words. See [`ClassNameIndex::matches_for_prefix_where`].
         let mut kept: HashMap<String, Arc<Vec<String>>> = HashMap::new();
-        let matched = self.class_names.matches_for_prefix_where(&site.prefix, MAX, &mut |simple| {
+        let matched = if bare { Vec::new() } else { self.class_names.matches_for_prefix_where(&site.prefix, MAX, &mut |simple| {
             if bennu_complete::prelude::match_tier(simple, &site.prefix, case).is_none() {
                 return false;
             }
@@ -1021,14 +1077,14 @@ impl NativeJavaProvider {
             }
             kept.insert(simple.to_string(), annotations);
             true
-        });
+        }) };
         let mut names: Vec<String> = matched.into_iter().map(str::to_string).collect();
         // The sweep walks names shortest first and stops at the cap, so it is blind to how much the
         // project uses one: behind `@R` there are more than forty shorter annotations in the JDK and
         // Spring alone, and `RequiredArgsConstructor`, imported in hundreds of files, was cut before
         // the census that knows it could rank it. The names this file and the project import are
         // added before ranking — a few hundred at most, and exactly the ones a cap must not cut.
-        for simple in here.used_names(&site.prefix, case) {
+        for simple in here.used_names(&site.prefix, case).into_iter().take(if bare { 400 } else { usize::MAX }) {
             if kept.contains_key(&simple) {
                 continue;
             }
@@ -1164,13 +1220,11 @@ impl NativeJavaProvider {
         jdk_index_path: Option<PathBuf>,
         deps: Option<(Box<dyn ClassSource>, PathBuf)>,
     ) -> Result<Self, String> {
-        use bennu_classpath::prelude::resolve_jdk_classpath;
         use bennu_index::prelude::PersistedIndex;
 
         let blob = index_dir.join("symbols.blob");
         let fst = index_dir.join("names.fst");
         let project = PersistedIndex::open(&blob, &fst).map_err(|e| e.to_string())?;
-        let source = resolve_jdk_classpath(jdk_version)?;
         // The JDK's `.java` sources, when present (`src.zip`). Opened once per build; a bare-JRE /
         // no-sources install yields `None` and go-to-into-JDK falls back to the decompiled stub.
         let jdk_sources = bennu_classpath::prelude::resolve_jdk_sources(jdk_version);
@@ -1179,15 +1233,14 @@ impl NativeJavaProvider {
         // (and, below, the dependency) `.class` names BEFORE the sources are moved into the member
         // index; this runs once per build on the background index thread.
         let mut class_names = ClassNameIndex::new();
-        class_names.add_binaries(source.class_names());
+        // the JDK is read once per process and shared by every project that resolves to it: one decoded-class memo and one
+        // list of class names, not one of each per open project
+        let (jdk, jdk_names) = shared_jdk(jdk_version, jdk_index_path.clone())?;
+        class_names.add_binaries(jdk_names.iter().cloned());
         for (simple, binary) in project_simple_names {
             class_names.add_fqn(simple, &binary.replace('/', "."));
         }
 
-        let jdk = Arc::new(match jdk_index_path {
-            Some(path) => JdkMemberIndex::persistent(source, path),
-            None => JdkMemberIndex::new(source),
-        });
         let classpath = match deps {
             Some((dep_source, dep_memo_path)) => {
                 class_names.add_binaries(dep_source.class_names());
@@ -1232,6 +1285,7 @@ impl NativeJavaProvider {
             imports: Arc::default(),
             usage: Arc::default(),
             annotation_memo: RwLock::default(),
+            project_types: Arc::new(project_simple_names.iter().map(|(_, b)| b.replace('.', "/")).collect()),
             static_members: Arc::default(),
         })
     }
@@ -1315,6 +1369,7 @@ impl NativeJavaProvider {
                 // NOT carried either: the table describes the classpath it was swept from, and this
                 // provider's has a dependency tier the old one never read.
                 static_members: Arc::default(),
+                project_types: Arc::new(project_simple_names.iter().map(|(_, b)| b.replace('.', "/")).collect()),
             })
         })())
     }
@@ -2075,6 +2130,52 @@ fn in_import_statement(text: &str, pos: usize) -> bool {
     rest.starts_with(|c: char| c.is_whitespace())
 }
 
+/// Whether the identifier starting at `ident_start` is the type of a creation expression — the word before it is `new`
+/// (`new Arr|`, `return new\n    Arr|`), and `new` is a word of its own (`renew Foo` is not one).
+fn follows_new(text: &str, ident_start: usize) -> bool {
+    let head = text[..ident_start.min(text.len())].trim_end();
+    let Some(before) = head.strip_suffix("new") else { return false };
+    !before.ends_with(|c: char| c.is_alphanumeric() || c == '_' || c == '$' || c == '.')
+}
+
+/// Whether the type name being completed already has its arguments or its diamond written after it
+/// (`new Arr|()`, `new Arr|<>()`). Completion then replaces the name and leaves the rest alone.
+fn creation_is_written(text: &str, caret: usize) -> bool {
+    let rest = &text[caret.min(text.len())..];
+    let line = rest.split('\n').next().unwrap_or(rest);
+    let after = line.trim_start_matches(|c: char| c.is_alphanumeric() || c == '_' || c == '$');
+    after.trim_start().starts_with(['(', '<'])
+}
+
+/// What picking `name` writes after `new`: the diamond for a generic type, the parentheses, and for an abstract class
+/// or an interface the body of an anonymous class — with the caret where the next thing is typed.
+///
+/// `None` when the type cannot be created at all (an enum, an annotation), so the row keeps inserting its bare name.
+/// The caret goes between the parentheses when every constructor takes something, after the call when one takes
+/// nothing, and inside the braces of an anonymous class — unless the superclass can only be built with arguments, where
+/// the arguments come first.
+fn creation_syntax(name: &str, members: &bennu_java::prelude::ClassMembers) -> Option<(String, Vec<bennu_proto::prelude::SnippetStop>)> {
+    use bennu_java::prelude::Visibility;
+    let flags = &members.flags;
+    if flags.is_enum || flags.is_annotation {
+        return None;
+    }
+    let ctors: Vec<_> = members.methods.iter().filter(|m| m.name == "<init>" && m.visibility != Visibility::Private).collect();
+    // no constructor listed is the implicit one (an interface, or a class whose source declares none)
+    let needs_args = !ctors.is_empty() && ctors.iter().all(|m| !m.params.is_empty());
+    let diamond = if members.type_params.is_empty() { "" } else { "<>" };
+    let head = format!("{name}{diamond}(");
+    let stop = |at: usize| vec![bennu_proto::prelude::SnippetStop { start: at, end: at, group: 0 }];
+    if flags.is_interface || flags.is_abstract {
+        let text = format!("{head}) {{}}");
+        let stops = if needs_args && !flags.is_interface { stop(head.len()) } else { stop(text.len() - 1) };
+        return Some((text, stops));
+    }
+    let text = format!("{head})");
+    let stops = if needs_args { stop(head.len()) } else { Vec::new() };
+    Some((text, stops))
+}
+
 /// Whether the identifier starting at `ident_start` is a member access — the nearest non-whitespace
 /// text before it is a `.` (`recv.Foo`) or a `::` (`Type::foo`), so it names a member, never a bare
 /// variable or type.
@@ -2521,6 +2622,12 @@ impl NativeJavaProvider {
         // out-of-range offset would panic on the first `&text[..]` — but it kept the clamped value
         // to itself, so the two paths below were still indexing with the raw one.
         let offset = char_boundary_at_or_before(text, at.offset);
+        // Inside a string in an annotation's parentheses: what the project writes there, or its configuration keys.
+        // Nothing else belongs in a string, so this answers alone — even with an empty list.
+        let arg_site = crate::annotation_values::arg_site(text, offset);
+        if let Some(site) = arg_site.as_ref().filter(|s| s.in_string) {
+            return Ok(self.annotation_argument_items(&at.file, text, offset, site));
+        }
         // The templates that wrap the expression before the dot — `orders.for`. They ride beside
         // whichever list answers the dot: a `List` has members AND a `.for`, and an `int` has no
         // members at all and still has `.fori`.
@@ -2608,7 +2715,25 @@ impl NativeJavaProvider {
         // already said which type is about to be named, and nothing the name index or the scope
         // knows is as specific. With nothing typed they are the ONLY type names offered — which is
         // what makes Ctrl+Space in `opt.map(|)` open on `ResolvedIdentity`.
-        let mut functional = self.functional_argument_types(text, offset, resolver, case);
+        // An argument that takes an enum is about to name one of its constants: those lead, the one that fits
+        // the names around the caret first.
+        // a `Class<T>` parameter: the types it is passed lead everything, with `.class` already on them
+        let mut functional = self.class_slot_items(text, offset, resolver as &dyn TypeResolver, case);
+        functional.extend(self.enum_argument_constants(text, offset, resolver, case));
+        functional.extend(self.functional_argument_types(text, offset, resolver, case));
+        // the wanted class's own constants and factories follow what the slot says first (an enum's constants, the type
+        // a function receives): they are a way to build the value, not the first thing it is
+        functional.extend(self.expected_type_statics(text, offset, resolver, case));
+        // …and the names in scope that fit the slot, the one that resembles the parameter's name first. They are
+        // lifted out of the scope list so each appears once, up here.
+        let fitting = bennu_query::prelude::argument_locals(text, offset, resolver, case);
+        out.retain(|i| !fitting.iter().any(|l| l.label == i.label && l.kind == i.kind));
+        functional.extend(fitting);
+        // …and in an annotation's argument, the values the project writes there and the constants of an enum-typed element
+        if let Some(site) = &arg_site {
+            functional.splice(0..0, self.annotation_argument_items(&at.file, text, offset, site));
+            functional.splice(0..0, self.annotation_element_enum(site, text, offset, resolver, case));
+        }
         // `catch (|` is the same kind of place — the code above has already said which type is
         // about to be named (what its `try` throws), so those lead too. The two never co-occur: a
         // catch parameter is not a function slot.
@@ -2621,6 +2746,151 @@ impl NativeJavaProvider {
         }
         out.extend(types);
         Ok(with_one_preselect(led_by(functional, out)))
+    }
+
+    /// A `Class<T>` argument: the types it is most often passed, as `Type.class` rows that lead the list — so that nothing has to
+    /// be typed to reach them. Where the callee bounds `T` (`T extends ParserXml<X, Z>`) they are the project's classes that
+    /// implement the bound; otherwise the plain value types (`String`, `Integer`, …), which is what a rarely used method that takes
+    /// a class is given.
+    fn class_slot_items(&self, text: &str, offset: usize, resolver: &dyn TypeResolver, case: MatchCase) -> Vec<CompletionItem> {
+        use bennu_java::prelude::TypeResolver as _;
+        let Some(expected) = bennu_query::prelude::argument_expected_type(text, offset, resolver) else { return Vec::new() };
+        if expected.binary_name != "java/lang/Class" {
+            return Vec::new();
+        }
+        let (_, prefix) = bennu_query::prelude::split_completion_prefix(text, offset);
+        let fits = |simple: &str| bennu_complete::prelude::match_tier(simple, &prefix, case).is_some();
+        const MAX: usize = 12;
+        let simple_of = |binary: &str| binary.rsplit(['/', '$']).next().unwrap_or(binary).to_string();
+        let names: Vec<String> = match bennu_query::prelude::class_slot_bound(text, offset, resolver) {
+            Some(bound) => {
+                let mut found: Vec<String> = self
+                    .project_types
+                    .iter()
+                    .filter(|b| **b != bound.binary_name && fits(&simple_of(b)))
+                    .filter(|b| resolver.members_of(b).is_some_and(|m| !m.flags.is_interface && !m.flags.is_annotation))
+                    .filter(|b| self.is_subtype_of(b, &bound.binary_name))
+                    .map(|b| simple_of(b))
+                    .collect();
+                found.sort();
+                found.dedup();
+                found.truncate(MAX);
+                found
+            }
+            None => PLAIN_VALUE_TYPES.iter().filter(|t| fits(t)).map(|t| t.to_string()).collect(),
+        };
+        names
+            .into_iter()
+            .map(|simple| {
+                let candidates = self.class_names.candidates(&simple);
+                CompletionItem {
+                    label: format!("{simple}.class"),
+                    kind: "class".to_string(),
+                    detail: type_detail(candidates),
+                    auto_import: single_import_candidate(candidates),
+                    owner: (candidates.len() == 1).then(|| candidates[0].replace('.', "/")),
+                    ..Default::default()
+                }
+            })
+            .collect()
+    }
+
+    /// What the project writes inside the annotation's parentheses (or its configuration keys), from the tables the
+    /// background scan keeps. Empty until the first scan has finished.
+    fn annotation_argument_items(&self, file: &str, text: &str, offset: usize, site: &crate::annotation_values::ArgSite) -> Vec<CompletionItem> {
+        let Some(values) = crate::project_values::ProjectValues::for_file(Path::new(file)) else { return Vec::new() };
+        let import_for = |simple: &str| -> Option<String> {
+            let candidates = self.class_names.candidates(simple);
+            let already = text.lines().any(|l| l.trim_start().starts_with("import ") && l.trim_end().ends_with(&format!(".{simple};")));
+            (candidates.len() == 1 && !already).then(|| candidates[0].clone())
+        };
+        crate::project_values::argument_items(&values, Path::new(file), offset, site, &import_for)
+    }
+
+    /// An annotation element whose type is an enum offers that enum's constants, `Level.HIGH`, with their import.
+    fn annotation_element_enum<M: bennu_classpath::prelude::MemberIndex>(
+        &self,
+        site: &crate::annotation_values::ArgSite,
+        _text: &str,
+        _offset: usize,
+        resolver: &bennu_query::prelude::IndexResolver<M>,
+        case: MatchCase,
+    ) -> Vec<CompletionItem> {
+        use bennu_java::prelude::TypeResolver as _;
+        let Some(fqn) = self.annotations_named(&site.annotation, resolver).first().cloned() else { return Vec::new() };
+        let Some(annotation) = resolver.members_of(&fqn.replace('.', "/")) else { return Vec::new() };
+        let Some(element) = annotation.methods.iter().find(|m| m.name == site.element && m.params.is_empty()) else { return Vec::new() };
+        let ty = &element.return_type;
+        let Some(members) = resolver.members_of(&ty.binary_name) else { return Vec::new() };
+        if !members.flags.is_enum {
+            return Vec::new();
+        }
+        let enum_fqn = ty.binary_name.replace(['/', '$'], ".");
+        let simple = ty.binary_name.rsplit(['/', '$']).next().unwrap_or(&ty.binary_name).to_string();
+        let typed = bennu_complete::prelude::Typed::new(&site.typed, case);
+        let package = enum_fqn.rsplit_once('.').map(|(p, _)| p).unwrap_or("");
+        members
+            .fields
+            .iter()
+            .filter(|f| f.is_static && f.return_type.dims == 0 && f.return_type.binary_name == ty.binary_name && !f.name.starts_with('$'))
+            .filter(|f| site.typed.is_empty() || typed.matches(&f.name) || typed.matches(&simple))
+            .map(|f| CompletionItem {
+                label: format!("{simple}.{}", f.name),
+                kind: "field".into(),
+                detail: Some(enum_fqn.clone()),
+                auto_import: (package != "java.lang").then(|| enum_fqn.clone()),
+                owner: Some(ty.binary_name.clone()),
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    /// [`bennu_query::prelude::expected_type_statics`], with a nested class written through its outer type.
+    fn expected_type_statics<M: bennu_classpath::prelude::MemberIndex>(
+        &self,
+        text: &str,
+        offset: usize,
+        resolver: &bennu_query::prelude::IndexResolver<M>,
+        case: MatchCase,
+    ) -> Vec<CompletionItem> {
+        let mut items = bennu_query::prelude::expected_type_statics(text, offset, resolver, case);
+        if items.is_empty() {
+            return items;
+        }
+        let symbols = bennu_java::prelude::extract_symbols(text);
+        let site = bennu_java::prelude::enclosing_type_binary(text, offset);
+        for item in &mut items {
+            let (Some(fqn), Some((_, rest))) = (item.detail.clone(), item.label.split_once('.')) else { continue };
+            if let Some((written, outer)) = self.nested_form(&fqn, &symbols, site.as_deref()) {
+                item.insert_text = Some(format!("{written}.{rest}"));
+                item.auto_import = Some(outer);
+            }
+        }
+        items
+    }
+
+    /// [`bennu_query::prelude::enum_argument_constants`], with a nested enum written through its outer type.
+    fn enum_argument_constants<M: bennu_classpath::prelude::MemberIndex>(
+        &self,
+        text: &str,
+        offset: usize,
+        resolver: &bennu_query::prelude::IndexResolver<M>,
+        case: MatchCase,
+    ) -> Vec<CompletionItem> {
+        let mut items = bennu_query::prelude::enum_argument_constants(text, offset, resolver, case);
+        if items.is_empty() {
+            return items;
+        }
+        let symbols = bennu_java::prelude::extract_symbols(text);
+        let site = bennu_java::prelude::enclosing_type_binary(text, offset);
+        for item in &mut items {
+            let (Some(fqn), Some((_, constant))) = (item.detail.clone(), item.label.split_once('.')) else { continue };
+            if let Some((written, outer)) = self.nested_form(&fqn, &symbols, site.as_deref()) {
+                item.insert_text = Some(format!("{written}.{constant}"));
+                item.auto_import = Some(outer);
+            }
+        }
+        items
     }
 
     /// [`bennu_query::prelude::functional_argument_types`], written the way this file can name them —

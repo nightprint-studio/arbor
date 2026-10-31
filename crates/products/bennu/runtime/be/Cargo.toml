@@ -50,6 +50,10 @@ arbor-history = { path = "../../../../foundation/history" }
 bennu-intel = { path = "../../analysis/intel" }
 # The shared prefix/case/camel-hump rule the completion request carries.
 bennu-complete = { path = "../../editing/complete" }
+# Full-line completion: the small local model (ONNX Runtime, linked in), its prompt and the project's log profile.
+bennu-flc = { path = "../../editing/flc", features = ["onnx"] }
+# What is learned from how the ghost text is treated: counters behind a switch, wiped by one call.
+bennu-learn = { path = "../../editing/learn" }
 # The code-intel query engine: the resolver + completion + inherited-members domain types the
 # index service maps to the wire (`InheritedMember`).
 bennu-query = { path = "../../analysis/query" }

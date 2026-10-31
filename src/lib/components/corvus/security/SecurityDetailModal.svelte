@@ -108,7 +108,7 @@
     findings={all}
     {counts}
     {loading}
-    {error}
+    error={error ?? undefined}
     initialTab={initialSeverity}
   >
     {#snippet toolbar()}

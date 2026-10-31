@@ -117,6 +117,10 @@ members = [
     "crates/products/bennu/frameworks/spel",
     "crates/products/bennu/analysis/facts",
     "crates/products/bennu/editing/complete",
+    # Full-line completion: the small local model, its prompt, the decoding constraint and the project's log profile.
+    "crates/products/bennu/editing/flc",
+    # What Bennu learns from how its suggestions are treated: counters, switched off by default and wiped by one call.
+    "crates/products/bennu/editing/learn",
     "crates/products/bennu/build/npm",
     "crates/products/bennu/frameworks/ext",
     "crates/products/bennu/frameworks/spring",

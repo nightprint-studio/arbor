@@ -19,8 +19,9 @@
      * Pages that belong *under* this one — the tree an IDE's settings have.
      *
      * A parent is a page in its own right, not a folder: it is selected like any other entry, and
-     * its children are what it splits into. Nesting stops here on purpose, because a third level is
-     * where a settings tree stops being navigable and starts being a filesystem.
+     * its children are what it splits into. A child may split again (Editor › Completion › Ghost
+     * text); a fourth level is where a settings tree stops being navigable and starts being a
+     * filesystem.
      */
     children?: SettingsNavItem[];
   }
@@ -94,7 +95,10 @@
    *  child is the answer has to stay on screen, or the answer has nowhere to hang. */
   function visibleItem(item: SettingsNavItem): SettingsNavItem | null {
     if (hit(item.label)) return item;
-    const kept = (item.children ?? []).filter((c) => hit(c.label));
+    const kept = (item.children ?? []).flatMap((c) => {
+      const k = visibleItem(c);
+      return k ? [k] : [];
+    });
     return kept.length ? { ...item, children: kept } : null;
   }
   function visibleItems(g: SettingsNavGroup): SettingsNavItem[] {
@@ -152,17 +156,84 @@
     }
   }
 
-  /** A branch holding the active page is drawn as such while collapsed — otherwise selecting a
+  /** Every branch holding the active page, drawn as such while collapsed — otherwise selecting a
    *  child and collapsing its parent leaves nothing on screen saying where you are. */
-  const activeTrail = $derived.by(() => {
-    for (const { items } of visibleGroups) {
+  const trailIds = $derived.by(() => {
+    const out = new Set<string>();
+    const walk = (items: SettingsNavItem[]): boolean => {
+      let found = false;
       for (const item of items) {
-        if ((item.children ?? []).some((c) => c.id === active)) return item.id;
+        const below = walk(item.children ?? []);
+        if (below) out.add(item.id);
+        if (below || item.id === active) found = true;
       }
-    }
-    return null;
+      return found;
+    };
+    for (const { items } of visibleGroups) walk(items);
+    return out;
   });
+
+  /** Whether any top-level entry anywhere has children. The twisty column is then kept on every top-level
+   *  row of every group, so a page without a branch (Appearance, Imber) lines up with the ones that have
+   *  one instead of sitting a step to the left under another heading. */
+  const rootHasBranch = $derived(visibleGroups.some((g) => g.items.some((i) => (i.children ?? []).length > 0)));
+
+  /** Where a row's label starts, which is where its children's rows start: the row's own padding
+   *  plus the twisty column when the list it sits in has one. */
+  const ROW_PAD = 8;
+  const TWISTY_COLUMN = 17;
+  const labelX = (pad: number, anyBranch: boolean) => pad + (anyBranch ? TWISTY_COLUMN : 0);
 </script>
+
+{#snippet rows(items: SettingsNavItem[], pad: number, depth: number, gap?: boolean)}
+  <!-- A list with nothing to expand gets no twisty column: the column exists to line labels up with
+       the siblings that have one, and a list where none does would be indenting every label away
+       from the edge for nothing. -->
+  {@const anyBranch = gap ?? items.some((i) => (i.children ?? []).length > 0)}
+  {#each items as item (item.id)}
+    {@const Icon = item.icon}
+    {@const branch = (item.children ?? []).length > 0}
+    {@const open = isOpen(item)}
+    <!-- The row is a strip, not one control: the twisty is its own button, because a branch you can
+         only open is not a branch. Selecting the row still opens it — that is what picking a page
+         with children means — and the arrow is the way back. A button inside a button is invalid
+         HTML, which is why the row's label is a sibling of the arrow rather than its parent, and
+         the selected tint lives on the strip so it covers both. -->
+    <div class="nav-row" style:padding-left="{pad}px"
+         class:active={active === item.id} class:trail={trailIds.has(item.id) && !open}>
+      {#if branch}
+        <button
+          class="nav-twisty"
+          class:open
+          type="button"
+          tabindex="-1"
+          aria-label={`${open ? 'Collapse' : 'Expand'} ${item.label}`}
+          aria-expanded={open}
+          onclick={() => toggleBranch(item)}
+        >
+          {#if open}<ChevronDown size={11} />{:else}<ChevronRight size={11} />{/if}
+        </button>
+      {:else if anyBranch}
+        <span class="nav-twisty-gap" aria-hidden="true"></span>
+      {/if}
+      <button
+        class="nav-item"
+        onclick={() => select(item)}
+        onkeydown={(e) => onBranchKeydown(e, item)}
+        aria-expanded={branch ? open : undefined}
+      >
+        {#if Icon}<Icon size={depth === 0 ? 13 : 12} />{/if}
+        <span class="nav-label">{item.label}</span>
+        {#if active === item.id}<ChevronRight size={11} class="nav-arrow" />{/if}
+      </button>
+    </div>
+    {#if branch && open}
+      <!-- Under a top-level entry the children start at its label. Deeper, that is where the siblings'
+           labels already are (they share the twisty column), so one more step in tells them apart. -->
+      {@render rows(item.children ?? [], labelX(pad, anyBranch) + (depth > 0 ? TWISTY_COLUMN : 0), depth + 1)}
+    {/if}
+  {/each}
+{/snippet}
 
 <div class="settings-body">
   <nav class="nav" aria-label="Settings sections">
@@ -179,62 +250,8 @@
     {/if}
 
     {#each visibleGroups as { group, items } (group.label)}
-      <!-- A group with nothing to expand gets no twisty column: the column exists to line labels up
-           with the rows that have one, and a group where no row has one would be indenting every
-           label away from the edge for nothing. -->
-      {@const anyBranch = items.some((i) => (i.children ?? []).length > 0)}
       <div class="nav-group-label">{group.label}</div>
-      {#each items as item (item.id)}
-        {@const Icon = item.icon}
-        {@const branch = (item.children ?? []).length > 0}
-        {@const open = isOpen(item)}
-        <div class="nav-branch">
-          <!-- The row is a strip, not one control: the twisty is its own button, because a branch you
-               can only open is not a branch. Selecting the row still opens it — that is what picking
-               a page with children means — and the arrow is the way back. A button inside a button is
-               invalid HTML, which is why the row's label is a sibling of the arrow rather than its
-               parent, and the selected tint lives on the strip so it covers both. -->
-          <div class="nav-row" class:active={active === item.id} class:trail={activeTrail === item.id && !open}>
-            {#if branch}
-              <button
-                class="nav-twisty"
-                class:open
-                type="button"
-                tabindex="-1"
-                aria-label={`${open ? 'Collapse' : 'Expand'} ${item.label}`}
-                aria-expanded={open}
-                onclick={() => toggleBranch(item)}
-              >
-                {#if open}<ChevronDown size={11} />{:else}<ChevronRight size={11} />{/if}
-              </button>
-            {:else if anyBranch}
-              <span class="nav-twisty-gap" aria-hidden="true"></span>
-            {/if}
-            <button
-              class="nav-item"
-              onclick={() => select(item)}
-              onkeydown={(e) => onBranchKeydown(e, item)}
-              aria-expanded={branch ? open : undefined}
-            >
-              {#if Icon}<Icon size={13} />{/if}
-              <span class="nav-label">{item.label}</span>
-              {#if active === item.id}<ChevronRight size={11} class="nav-arrow" />{/if}
-            </button>
-          </div>
-          {#if branch && open}
-            {#each item.children ?? [] as child (child.id)}
-              {@const ChildIcon = child.icon}
-              <div class="nav-row nav-child" class:active={active === child.id}>
-                <button class="nav-item" onclick={() => (active = child.id)}>
-                  {#if ChildIcon}<ChildIcon size={12} />{/if}
-                  <span class="nav-label">{child.label}</span>
-                  {#if active === child.id}<ChevronRight size={11} class="nav-arrow" />{/if}
-                </button>
-              </div>
-            {/each}
-          {/if}
-        </div>
-      {/each}
+      {@render rows(items, ROW_PAD, 0, rootHasBranch)}
     {/each}
   </nav>
 
@@ -273,7 +290,6 @@
      controls, so the tint has to live on their parent or it would stop at the arrow. */
   .nav-row {
     display: flex; align-items: center;
-    padding-left: 8px;
     color: var(--text-secondary);
     transition: background var(--transition-fast), color var(--transition-fast);
   }
@@ -282,8 +298,6 @@
   /* The branch you are inside, while it is closed. */
   .nav-row.trail { color: var(--text-primary); }
   .nav-row.trail .nav-twisty { color: var(--accent); }
-  /* A child sits under its parent's label: the twisty column plus the row's own padding and gap. */
-  .nav-row.nav-child { padding-left: 25px; }
 
   .nav-item {
     flex: 1; min-width: 0;
@@ -293,7 +307,6 @@
     color: inherit; font-family: inherit; font-weight: inherit;
     font-size: var(--font-size-sm); text-align: left; position: relative;
   }
-  .nav-branch { display: contents; }
   .nav-twisty, .nav-twisty-gap {
     display: inline-flex; align-items: center; justify-content: center;
     /* Fixed, never flexible: it is an 11px glyph and a column to line the labels up in. */

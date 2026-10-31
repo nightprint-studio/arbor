@@ -67,6 +67,9 @@
   <FormRow label="Show line numbers" description="Gutter line numbers on the left margin.">
     <Toggle checked={s.showLineNumbers} onchange={(v) => s.setShowLineNumbers(v)} ariaLabel="Show line numbers" />
   </FormRow>
+  <FormRow label="Show problem markers in the gutter" description="A marker beside each line that has a problem. Off by default: the underline and the hover already say it, and the marker column makes the text shift as errors come and go.">
+    <Toggle checked={s.showProblemMarkers} onchange={(v) => s.setShowProblemMarkers(v)} ariaLabel="Show problem markers in the gutter" />
+  </FormRow>
   <FormRow label="Highlight current line" description="Tint the line the caret sits on.">
     <Toggle checked={s.highlightCurrentLine} onchange={(v) => s.setHighlightCurrentLine(v)} ariaLabel="Highlight current line" />
   </FormRow>

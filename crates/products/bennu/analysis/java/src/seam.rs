@@ -282,6 +282,37 @@ impl Member {
     /// class's `T` only when the method does not declare its own — substituting the receiver's type
     /// argument into a shadowed one is how `<T> void put(T t)` on a `Box<String>` would come to
     /// refuse an `Integer` that compiles.
+    /// What type parameter `name` of this method is bounded by, as written — `ParserXml<X, Z>` for `<T extends ParserXml<X, Z>, X, Z>`.
+    /// Only for the source spelling the index writes for project methods; a class file's signature gives `None`.
+    pub fn method_type_param_bound(&self, name: &str) -> Option<String> {
+        let rest = self.raw_signature.trim_start().strip_prefix('<')?;
+        let mut depth = 1usize;
+        let (mut start, mut end) = (0usize, None);
+        let mut parts: Vec<&str> = Vec::new();
+        for (i, c) in rest.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        parts.push(&rest[start..i]);
+                        end = Some(i);
+                        break;
+                    }
+                }
+                ',' if depth == 1 => {
+                    parts.push(&rest[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        end?;
+        let part = parts.into_iter().map(str::trim).find(|p| p.split_whitespace().next() == Some(name))?;
+        let bound = part.split_once(" extends ")?.1;
+        Some(bound.split('&').next()?.trim().to_string())
+    }
+
     pub fn method_type_params(&self) -> Vec<String> {
         let raw = self.raw_signature.trim_start();
         let Some(rest) = raw.strip_prefix('<') else { return Vec::new() };
@@ -520,6 +551,10 @@ mod tests {
     #[test]
     fn a_source_rendering_names_them_too() {
         assert_eq!(with_signature("<T> T[] toArray(T[] a)").method_type_params(), ["T"]);
+        let bounded = with_signature("<T extends ParserXml<X, Z>, X, Z> Z parse(Class<T> p, X in)");
+        assert_eq!(bounded.method_type_param_bound("T").as_deref(), Some("ParserXml<X, Z>"));
+        assert_eq!(bounded.method_type_param_bound("X"), None);
+        assert_eq!(with_signature("<T extends A & B> T pick()").method_type_param_bound("T").as_deref(), Some("A"));
         assert_eq!(
             with_signature("<R extends Comparable<R>, S> R pick(S s)").method_type_params(),
             ["R", "S"]

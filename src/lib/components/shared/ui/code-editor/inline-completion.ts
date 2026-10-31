@@ -56,8 +56,9 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view';
-import { Facet, StateEffect, StateField, type Extension } from '@codemirror/state';
-import { completionStatus, selectedCompletion } from '@codemirror/autocomplete';
+import { Annotation, Facet, StateEffect, StateField, type EditorState, type Extension, type Transaction } from '@codemirror/state';
+import { completionStatus, selectedCompletion, type Completion } from '@codemirror/autocomplete';
+import { acceptedTracking, trackAccepted, type SettledHandler } from './accepted-tracking';
 
 /**
  * A proposal that is more than a continuation.
@@ -78,7 +79,23 @@ export interface InlineCompletion {
   insert?: string;
   /** The range accepting overwrites. Defaults to an insertion at the caret. */
   replace?: { from: number; to: number };
+  /**
+   * Whatever the source wants handed back when it is told what became of this proposal (see
+   * {@link InlineCompletionOutcomeHandler}). Opaque here: it is never read, only returned.
+   */
+  meta?: unknown;
 }
+
+/** What became of a proposal drawn at the caret. */
+export type InlineCompletionOutcomeKind = 'shown' | 'accepted' | 'dismissed';
+
+/**
+ * Told, once per proposal, that it was drawn (`shown`), taken with Tab (`accepted`), or went away because Esc was
+ * pressed or the user did something other than type what it showed (`dismissed`). A proposal the user simply typed
+ * out letter by letter is neither: it was right, and it is gone because it was written. `meta` is what the source put
+ * on the proposal. Runs inside the editor update, so it must be cheap and must not dispatch.
+ */
+export type InlineCompletionOutcomeHandler = (kind: InlineCompletionOutcomeKind, meta: unknown) => void;
 
 /**
  * Produce what follows `pos` — or what should stand in place of the text around
@@ -124,6 +141,28 @@ interface Suggestion {
    * the popup rather than the preview.
    */
   preview?: boolean;
+  /** The source's own note, returned with the outcome. */
+  meta?: unknown;
+  /**
+   * Set when this is what is left of an earlier proposal after the user typed its first characters: the same proposal
+   * still on screen, not a new one. It is not reported as shown again and it is not asked for again.
+   */
+  continues?: boolean;
+}
+
+/**
+ * What the selected row would add to the word being typed — `ddPin(` for `addPin(` after `a` — so a popup with
+ * one obvious row still shows its outcome in grey. Only for a row that inserts its own text as is: a row whose
+ * `apply` is a function does something this module cannot render.
+ */
+function restOfRow(state: EditorState, row: Completion | null): string | null {
+  if (!row || typeof row.apply === 'function') return null;
+  const head = state.selection.main.head;
+  const typed = /[\w$]*$/.exec(state.sliceDoc(Math.max(0, head - 64), head))?.[0] ?? '';
+  const text = row.apply ?? row.label;
+  if (!typed || !text.startsWith(typed) || text.length === typed.length) return null;
+  const rest = text.slice(typed.length);
+  return rest.includes('\n') ? null : rest;
 }
 
 /** A source's answer, in the one shape the rest of the module handles. */
@@ -137,14 +176,48 @@ function normalise(answer: string | InlineCompletion, pos: number): Suggestion |
     from,
     to,
     insert: proposal.insert ?? proposal.text,
+    meta: proposal.meta,
   };
 }
 
 const setSuggestion = StateEffect.define<Suggestion | null>();
 
+/**
+ * What is left of `value` when the transaction only typed its first characters at the caret — `undefined` when it did
+ * something else. The ghost text then shrinks as the user types it instead of vanishing and coming back after a new
+ * request, which is the difference between typing along with a suggestion and fighting it. `null` when the whole
+ * proposal has been typed.
+ */
+function consumeTyped(value: Suggestion | null, tr: Transaction): Suggestion | null | undefined {
+  if (!value || value.preview || value.insert !== value.text || value.from !== value.pos || value.to !== value.pos) return undefined;
+  const seen: { typed: string | null; single: boolean } = { typed: null, single: true };
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    if (seen.typed !== null || fromA !== value.pos || toA !== value.pos) seen.single = false;
+    seen.typed = inserted.toString();
+  });
+  const typed = seen.typed;
+  if (!seen.single || !typed || !value.text.startsWith(typed)) return undefined;
+  const rest = value.text.slice(typed.length);
+  if (!rest) return null;
+  const pos = value.pos + typed.length;
+  return { ...value, text: rest, insert: rest, pos, from: pos, to: pos, continues: true };
+}
+
+/** Marks the transaction of a Tab or an Esc, so the outcome is read off what the user did and not guessed. */
+const outcomeNote = Annotation.define<'accepted' | 'dismissed'>();
+
+/** The effect that draws `answer` at `pos` without asking the source — for a host that already holds the answer, and
+ *  for tests. `null` clears whatever is drawn. */
+export function setInlineSuggestion(answer: string | InlineCompletion | null, pos: number): StateEffect<unknown> {
+  return setSuggestion.of(answer ? normalise(answer, pos) : null);
+}
+
 /** The rendered ghost text. `side: 1` keeps it after the caret. */
 class GhostWidget extends WidgetType {
-  constructor(readonly text: string) {
+  /** `fresh`: a proposal that just appeared, as opposed to what is left of one being typed along or a popup
+   *  row being previewed. Only a fresh one may play the reveal; it is not part of `eq`, so a redraw of the same
+   *  text keeps its DOM (and does not replay it). */
+  constructor(readonly text: string, readonly fresh = false) {
     super();
   }
 
@@ -154,7 +227,7 @@ class GhostWidget extends WidgetType {
 
   toDOM(): HTMLElement {
     const span = document.createElement('span');
-    span.className = 'cm-ghost-text';
+    span.className = this.fresh ? 'cm-ghost-text cm-ghost-fresh' : 'cm-ghost-text';
     // `textContent` rather than markup: the text comes from a product's source
     // and lands in the DOM, so it must never be interpreted as HTML. Line breaks
     // still render because the class sets `white-space: pre`.
@@ -177,7 +250,12 @@ const suggestionField = StateField.define<Suggestion | null>({
     for (const effect of tr.effects) {
       if (effect.is(setSuggestion)) return effect.value;
     }
-    // Any edit or cursor move makes the proposal stale. Cleared here rather than
+    // Typing the start of the proposal keeps what is left of it.
+    if (tr.docChanged) {
+      const rest = consumeTyped(value, tr);
+      if (rest !== undefined) return rest;
+    }
+    // Any other edit or cursor move makes the proposal stale. Cleared here rather than
     // in the plugin so it is impossible for a decoration to outlive the position
     // it was computed for.
     if (tr.docChanged || tr.selection) return null;
@@ -187,10 +265,13 @@ const suggestionField = StateField.define<Suggestion | null>({
     EditorView.decorations.from(field, (value): DecorationSet => {
       if (!value) return Decoration.none;
       return Decoration.set([
-        Decoration.widget({ widget: new GhostWidget(value.text), side: 1 }).range(value.pos),
+        Decoration.widget({ widget: new GhostWidget(value.text, !value.continues && !value.preview), side: 1 }).range(value.pos),
       ]);
     }),
 });
+
+/** The field holding what is drawn — exported for tests. */
+export const inlineSuggestionField = suggestionField;
 
 /** Apply the visible suggestion. `false` when there is nothing to accept, so Tab
  *  falls through to indentation as usual.
@@ -206,7 +287,11 @@ export const acceptInlineCompletion: Command = (view) => {
   view.dispatch({
     changes: { from: current.from, to: current.to, insert: current.insert },
     selection: { anchor: current.from + current.insert.length },
-    effects: setSuggestion.of(null),
+    effects: [
+      setSuggestion.of(null),
+      trackAccepted.of({ from: current.from, to: current.from + current.insert.length, ghost: current.insert, meta: current.meta }),
+    ],
+    annotations: outcomeNote.of('accepted'),
     userEvent: 'input.complete',
   });
   return true;
@@ -219,7 +304,7 @@ export const dismissInlineCompletion: Command = (view) => {
   const current = view.state.field(suggestionField, false);
   // Esc over a preview means "close the popup", which is what the preview belongs to.
   if (!current || current.preview) return false;
-  view.dispatch({ effects: setSuggestion.of(null) });
+  view.dispatch({ effects: setSuggestion.of(null), annotations: outcomeNote.of('dismissed') });
   view.plugin(inlineCompletionPlugin)?.dismiss(current.pos);
   return true;
 };
@@ -229,14 +314,56 @@ export function inlineCompletionActive(view: EditorView): boolean {
   return view.state.field(suggestionField, false) != null;
 }
 
+/** Did the transactions only type out what `prev` was showing, from the caret it was drawn at? */
+function typedOut(prev: Suggestion, trs: readonly Transaction[]): boolean {
+  const inserted: string[] = [];
+  let other = false;
+  for (const tr of trs) {
+    tr.changes.iterChanges((fromA, toA, _fromB, _toB, text) => {
+      if (fromA === toA && fromA === prev.pos && text.length > 0) inserted.push(text.toString());
+      else other = true;
+    });
+  }
+  return !other && inserted.length === 1 && prev.text.startsWith(inserted[0]);
+}
+
+/**
+ * What the transactions that just ran did to the proposal on screen, as the handler is to be told.
+ *
+ * Pure — states in, outcomes out — so the rules (a Tab accepts, an Esc or an unrelated edit or move dismisses,
+ * typing the proposal out ends it without a verdict, a popup preview is not a proposal) can be tested without a view.
+ */
+export function inlineOutcomes(
+  before: EditorState,
+  trs: readonly Transaction[],
+  after: EditorState,
+): { kind: InlineCompletionOutcomeKind; meta: unknown }[] {
+  const prev = before.field(suggestionField, false) ?? null;
+  const next = after.field(suggestionField, false) ?? null;
+  if (prev === next) return [];
+  const out: { kind: InlineCompletionOutcomeKind; meta: unknown }[] = [];
+  // what is left of the same proposal after typing its start is neither a verdict nor a new proposal
+  if (next?.continues && prev) return [];
+  if (prev && !prev.preview) {
+    const noted = trs.map((t) => t.annotation(outcomeNote)).find((n) => n !== undefined);
+    const edited = trs.some((t) => t.docChanged);
+    const moved = trs.some((t) => t.selection);
+    const kind: InlineCompletionOutcomeKind | null =
+      noted ?? (edited ? (typedOut(prev, trs) ? null : 'dismissed') : moved ? 'dismissed' : null);
+    if (kind) out.push({ kind, meta: prev.meta });
+  }
+  if (next && !next.preview) out.push({ kind: 'shown', meta: next.meta });
+  return out;
+}
+
 /** Per-editor configuration.
  *
  * A facet rather than module state: two editors can be alive at once — Bennu and
  * Picus in a tabbed window, or two query tabs — and each needs its own source.
  * Module-level configuration would give whichever mounted last to all of them. */
 const inlineCompletionConfig = Facet.define<
-  { source: InlineCompletionSource; delay: number },
-  { source: InlineCompletionSource | null; delay: number }
+  { source: InlineCompletionSource; delay: number; onOutcome?: InlineCompletionOutcomeHandler },
+  { source: InlineCompletionSource | null; delay: number; onOutcome?: InlineCompletionOutcomeHandler }
 >({
   combine: (values) => values[0] ?? { source: null, delay: 120 },
 });
@@ -279,6 +406,16 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
     constructor(private readonly view: EditorView) {}
 
     update(update: ViewUpdate) {
+      const { onOutcome } = update.state.facet(inlineCompletionConfig);
+      if (onOutcome) {
+        for (const { kind, meta } of inlineOutcomes(update.startState, update.transactions, update.state)) {
+          try {
+            onOutcome(kind, meta);
+          } catch {
+            // A reporting hook that throws must not take the editor with it.
+          }
+        }
+      }
       // A transaction that only opened or closed the popup changes neither, and it
       // is exactly the moment the answer to "may I show something?" flips.
       const popupOpen = completionStatus(update.state) !== null;
@@ -293,6 +430,11 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
       // Typing means the situation changed, so a previous dismissal no longer
       // applies. Moving the caret elsewhere is handled by the position check.
       if (update.docChanged) this.dismissedAt = -1;
+      // while the user types along with a proposal there is nothing to ask for: it is still the answer
+      if (update.docChanged && update.state.field(suggestionField, false)?.continues) {
+        this.cancel();
+        return;
+      }
       this.schedule();
     }
 
@@ -340,7 +482,8 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
       // What DOES appear there is the selected row's own preview: not a proposal of ours, so it
       // competes for nothing — see `PreviewingCompletion`.
       if (completionStatus(state) !== null) {
-        const ghost = (selectedCompletion(state) as PreviewingCompletion | null)?.ghost ?? null;
+        const selected = selectedCompletion(state);
+        const ghost = (selected as PreviewingCompletion | null)?.ghost ?? restOfRow(state, selected);
         const shown = state.field(suggestionField, false);
         const next: Suggestion | null = ghost
           ? { text: ghost, pos: cursor.head, from: cursor.head, to: cursor.head, insert: '', preview: true }
@@ -378,6 +521,15 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
 );
 
 const ghostTheme = EditorView.baseTheme({
+  // The reveal: the line is uncovered from the left over the app's fast animation duration (0 when animations are
+  // off). Opt-in through `data-motion` on the editor, set by the `animate` completion preference.
+  '@keyframes cm-ghost-reveal': {
+    '0%': { clipPath: 'inset(0 100% 0 0)' },
+    '100%': { clipPath: 'inset(0 0 0 0)' },
+  },
+  '&[data-motion~="completion"] .cm-ghost-fresh': {
+    animation: 'cm-ghost-reveal var(--anim-dur-fast, 0ms) ease-out',
+  },
   '.cm-ghost-text': {
     color: 'var(--text-disabled, #5c5f66)',
     fontStyle: 'italic',
@@ -402,9 +554,14 @@ export function inlineCompletion(options: {
   source: InlineCompletionSource;
   /** Pause after the caret settles before asking. Default 120 ms. */
   delay?: number;
+  /** Told what became of each proposal; see {@link InlineCompletionOutcomeHandler}. */
+  onOutcome?: InlineCompletionOutcomeHandler;
+  /** Told, once the user is done with an accepted proposal, what stands in its place; see {@link acceptedTracking}. */
+  onSettled?: SettledHandler;
 }): Extension {
   return [
-    inlineCompletionConfig.of({ source: options.source, delay: options.delay ?? 120 }),
+    ...(options.onSettled ? [acceptedTracking(options.onSettled)] : []),
+    inlineCompletionConfig.of({ source: options.source, delay: options.delay ?? 120, onOutcome: options.onOutcome }),
     suggestionField,
     inlineCompletionPlugin,
     ghostTheme,

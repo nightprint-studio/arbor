@@ -39,9 +39,11 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   assistant_expand:       { key: 'u',     ctrl: true, shift: true, description: 'Imber: expand the panel over the editor, or restore it (Bennu)', group: 'Navigation' },
   // Voice dictation (Bennu), one chord for both habits: HOLD it to talk (records while it is down and sends on
   // release), TAP it to leave the microphone open and tap again to stop - the mic button does the same.
-  // Space, not a letter: every Ctrl+Shift+letter is taken in Bennu (Ctrl+Shift+E is Recent locations), and
-  // Alt+Shift is Windows' input-language switch.
-  voice_push_to_talk:     { key: ' ',     ctrl: true, shift: true, description: 'Voice: hold to talk to Imber, or tap to start / stop (Bennu)', group: 'Navigation' },
+  // A digit, not a letter: every Ctrl+Shift+letter is taken in Bennu (Ctrl+Shift+E is Recent locations, Ctrl+Shift+V
+  // is the browser's paste-as-plain-text), Alt+Shift is Windows' input-language switch and Option composes on a Mac.
+  // Not Space: this listens in the capture phase, so Ctrl+Shift+Space (Cmd+Shift+Space on a Mac) is the editor's
+  // "suggest completions" and the voice chord would swallow it. Not 3 / 4 / 5: macOS screenshots.
+  voice_push_to_talk:     { key: '9',     ctrl: true, shift: true, description: 'Voice: hold to talk to Imber, or tap to start / stop (Bennu)', group: 'Navigation' },
   // The searchable counterpart of switch_project: every project of every workspace plus recents,
   // found by typing. Ctrl+Shift+D — free in Bennu and in the global map, and not a Chromium
   // DevTools chord (unlike Ctrl+Shift+J / C / I).

@@ -1108,6 +1108,7 @@ impl IndexService {
         // is immediate; this is the other way it can have changed.
         refresh_import_census_setting();
         crate::completion_tuning::refresh_completion_tuning_setting();
+        crate::flc::refresh_flc_settings();
         // Keep the background-work sink current: the classpath watcher has no request of its
         // own to take one from.
         *self.sink.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&sink));
@@ -1640,13 +1641,31 @@ impl IndexService {
         let level = level_of_file(&slot, file);
         let naming = crate::naming::declared_convention(file, bennu_naming::prelude::Target::Local);
         let at = Position { file: file.to_string(), offset };
-        provider
+        let mut items = provider
             .complete_at(
                 &at,
                 source,
                 CompletionOptions { census: import_census_enabled(), case, level, naming },
             )
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // the arguments this project always passes at this place (`.filter(Boolean.FALSE::equals)`) lead the list
+        if let Some(src) = source {
+            crate::flc_habits::popup_rows(file, src, offset, case, &mut items);
+            // the type this project creates under the name being declared heads the list after `new`
+            crate::flc_created::lift(src, offset, &mut items, &|widened, at_offset| {
+                let naming = crate::naming::declared_convention(file, bennu_naming::prelude::Target::Local);
+                provider
+                    .complete_at(
+                        &Position { file: file.to_string(), offset: at_offset },
+                        Some(widened),
+                        CompletionOptions { census: import_census_enabled(), case, level, naming },
+                    )
+                    .unwrap_or_default()
+            });
+            // what you picked most often in this place comes next, below a habit that leads
+            crate::flc_choices::lift(file, src, offset, &mut items);
+        }
+        items
     }
 
     /// The postfix site at `offset` in a Java buffer — the expression before the dot, typed on the resolver
@@ -3351,6 +3370,67 @@ impl IndexService {
         let binary = provider.type_named(&source, &element)?;
         let members = provider.members_of(&binary)?;
         Some(ResolvedType { binary, members })
+    }
+
+    /// The member tables of the type `name` means in `file` — the type's own first, then its supertypes' in the
+    /// order the full-line completion's header lists them — with the binary name it resolved to. `imports_source`
+    /// only needs the `import` lines: the name is resolved against those, and a whole buffer would be parsed again
+    /// for every name asked. At most [`HEADER_SUPERTYPES`] tables are read; `None` when nothing resolves.
+    pub fn header_type(
+        &self,
+        file: &str,
+        imports_source: &str,
+        name: &str,
+    ) -> Option<(String, Vec<Arc<bennu_java::prelude::ClassMembers>>)> {
+        const HEADER_SUPERTYPES: usize = 8;
+        let slot = self.slot_for_file(file).or_else(|| self.sole_slot())?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        let binary = provider.type_named(imports_source, name)?;
+        let mut tables = Vec::new();
+        let (mut seen, mut todo) = (Vec::<String>::new(), vec![binary.clone()]);
+        while let Some(next) = todo.pop() {
+            if seen.contains(&next) || next == "java/lang/Object" || tables.len() >= HEADER_SUPERTYPES {
+                continue;
+            }
+            seen.push(next.clone());
+            let Some(members) = provider.members_of(&next) else {
+                if next == binary {
+                    return None;
+                }
+                continue;
+            };
+            todo.extend(members.superclass.iter().chain(members.interfaces.iter()).map(|t| t.binary_name.clone()));
+            tables.push(members);
+        }
+        Some((binary, tables))
+    }
+
+    /// The binary name of the type of the expression left of the `.` just before `offset`, typed on `file`'s own
+    /// provider — the receiver a completion at `offset` is a member list of. `None` when no index covers the file or the
+    /// receiver does not type.
+    pub fn receiver_type_for(&self, file: &str, source: &str, offset: usize) -> Option<String> {
+        let slot = self.slot_for_file(file).or_else(|| self.sole_slot())?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.receiver_type_at(source, offset)
+    }
+
+    /// Whether a bare type name resolves from `file`'s own imports, package and `java.lang` — the buffer's text is
+    /// what is asked about, so an import not yet saved still counts. `false` when no index covers the file.
+    pub fn type_resolves(&self, file: &str, source: &str, name: &str) -> bool {
+        let Some(slot) = self.slot_for_file(file).or_else(|| self.sole_slot()) else {
+            return false;
+        };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.type_named(source, name).is_some()
     }
 
     /// Whether `candidate` is `wanted` or a subtype of it — the `+` in a type constraint.

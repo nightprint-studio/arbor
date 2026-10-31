@@ -66,3 +66,20 @@ describe('shouldAskForCompletion', () => {
     expect(shouldAskForCompletion('    ', false)).toBe(false);
   });
 });
+
+describe('inside an annotation', () => {
+  it('asks at the opening quote of a string argument and after `${`, not at every parenthesis', () => {
+    expect(shouldAskForCompletion('  @GetMapping("', false)).toBe(true);
+    expect(shouldAskForCompletion('  @PostMapping(produces = "', false)).toBe(true);
+    expect(shouldAskForCompletion('  @Value("${', false)).toBe(true);
+    expect(shouldAskForCompletion('  @GetMapping(', false)).toBe(false);
+    expect(shouldAskForCompletion('  call("', false)).toBe(false);
+  });
+
+  it('adds no words from the buffer inside the string of an annotation, and keeps them elsewhere', () => {
+    expect(offersFallbackWords('  @GetMapping("/or')).toBe(false);
+    expect(offersFallbackWords('  @Value("${spring.da')).toBe(false);
+    expect(offersFallbackWords('  @GetMapping("/a") void f() { fo')).toBe(true);
+    expect(offersFallbackWords('  String s = "ab')).toBe(true);
+  });
+});

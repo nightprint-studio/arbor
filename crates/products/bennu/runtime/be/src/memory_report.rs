@@ -24,5 +24,6 @@ pub(crate) fn report() -> MemoryReport {
     items.extend(LspRegistry::global().memory_items());
     items.extend(crate::wgsl_library::memory_items());
     items.extend(crate::cargo_intel::memory_items());
+    items.extend(crate::flc::memory_items());
     MemoryReport { items }
 }

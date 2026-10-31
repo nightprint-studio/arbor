@@ -27,6 +27,14 @@ pub mod classpath_index;
 pub mod completion;
 pub mod dep_record;
 // The types a function slot receives — `opt.map(Re|)` names the Optional's element first.
+mod chain_called;
+pub mod argument_list;
+pub mod array_constructor;
+pub mod expected_creation;
+pub mod slot_inference;
+pub mod argument_locals;
+pub mod enum_arguments;
+pub mod expected_statics;
 pub mod functional_types;
 pub mod hints;
 // The name of the thing a caret is filling.

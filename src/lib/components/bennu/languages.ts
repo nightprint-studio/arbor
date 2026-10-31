@@ -72,6 +72,7 @@ import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { html } from '@codemirror/lang-html';
 import { javascript } from '@codemirror/lang-javascript';
 import { javaLanguage } from './java-lang';
+import { javaFlcOutcome, javaFlcSettled, javaFlcSource } from './java-flc';
 import { mapperCompletion, nativeQueryCompletion, sqlAbbreviationPreview, sqlFileCompletion } from './picus/sql-completion';
 import { angularTemplateHighlight } from './angular-template-highlight';
 import {
@@ -416,7 +417,14 @@ function sqlLangFor(dialect: SqlDialect): LanguageDescriptor {
  */
 const javaWithSql: LanguageDescriptor = {
   ...javaLanguage,
-  intel: { ...javaLanguage.intel, completion: nativeQueryCompletion(javaLanguage.intel!.completion!) },
+  intel: {
+    ...javaLanguage.intel,
+    completion: nativeQueryCompletion(javaLanguage.intel!.completion!),
+    // The rest of the line, from the project's log profile or the local model; silent unless switched on.
+    inlineCompletion: javaFlcSource,
+    inlineCompletionOutcome: javaFlcOutcome,
+    inlineCompletionSettled: javaFlcSettled,
+  },
 };
 
 /** Resolve the editor language for a file path. Falls back to a plain (no-highlight,

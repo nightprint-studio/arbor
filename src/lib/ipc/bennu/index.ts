@@ -187,13 +187,28 @@ export function completionDoc(
  *  remembered under, and `owner` for a type name is the type ITSELF — a context nothing ever asks
  *  about again. The backend files those under the kind of hole they came out of instead.
  *
- *  Wire: `bennu_completion_accepted` — `{ owner, label, kind }`. */
+ *  `signature` is the parameter list of an accepted method row: the overload the user chose, which the argument list
+ *  drawn right after it follows.
+ *
+ *  Wire: `bennu_completion_accepted` — `{ owner, label, kind, file?, source?, offset?, signature? }`. */
 export function completionAccepted(
   owner: string | null,
   label: string,
   kind: string | null = null,
+  where?: AcceptedWhere,
+  signature?: string,
 ): Promise<void> {
-  return bennu('bennu_completion_accepted', { args: { owner, label, kind } });
+  return bennu('bennu_completion_accepted', {
+    args: { owner, label, kind, file: where?.file ?? null, source: where?.source ?? null, offset: where?.offset ?? null, signature: signature ?? null },
+  });
+}
+
+/** Where a list was asked, so the pick is also counted per receiver type or argument slot (`flc_choices`).
+ *  `source` is the buffer the list was built from; `offset` is the UTF-8 byte offset where the replaced word starts. */
+export interface AcceptedWhere {
+  file: string;
+  source: string;
+  offset: number;
 }
 
 /** The member the caret is certainly writing — the ghost text drawn ahead of it. */

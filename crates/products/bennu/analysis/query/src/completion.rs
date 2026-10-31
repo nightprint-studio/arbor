@@ -165,18 +165,35 @@ pub fn completion_in<M: CpMemberIndex>(
         .expecting(expected)
         .at_caret(source, dot_offset)
         .with_usage(resolver.project_usage());
-    collect_members(resolver, &recv, typed, site.as_deref(), false, &ctx, &mut out, &mut seen);
+    // An array is an `Object` with a `length`: walking its ELEMENT type would offer `String`'s methods on a `String[]`.
+    let walked = match !receiver_is_type && recv.dims > 0 {
+        true => TypeRef::simple("java/lang/Object"),
+        false => recv.clone(),
+    };
+    collect_members(resolver, &walked, typed, site.as_deref(), false, &ctx, &mut out, &mut seen);
+    if !receiver_is_type && recv.dims > 0 {
+        collect_array_members(&recv, typed, &ctx, resolver, &mut out, &mut seen);
+    }
     // A nested type is a member of its outer, named `Outer.Inner` with no import — so `Outer.`
     // offers it alongside the statics. Only when the receiver IS a type: `instance.Inner` is not
     // Java. The resolver answers for PROJECT types (the index keys them by binary name); a library
     // type reports none, which the seam reads as "not read" rather than "declares none".
     if receiver_is_type {
         collect_nested_types(resolver, catalog, &recv.binary_name, typed, &ctx, &mut out, &mut seen);
+        collect_class_literal(resolver, &recv, typed, &ctx, &mut out, &mut seen);
+        collect_qualified_this_and_super(resolver, &recv, site.as_deref(), typed, &ctx, &mut out, &mut seen);
     }
     // Overloads stay separate rows here: each shows its own parameters, and accepting `wait()` or
     // `wait(long)` leaves the caret in different places. Only a method reference folds them — see
     // `collapse_overloads`.
+    if receiver_is_type {
+        boost_enum_constants(&mut out, &recv, resolver, source, dot_offset);
+    }
     sort_members(&mut out);
+    // `.name("a").` — the setters the chain just called go to the end, as many as the receiver's own type
+    if prefix.is_empty() && !receiver_is_type {
+        demote_called_setters(&mut out, &crate::chain_called::called_in_chain(source, dot_offset), &recv);
+    }
     preselect_the_only_exact_fit(&mut out);
     if prefix.is_empty() {
         preselect_the_first_own_member(&mut out);
@@ -294,6 +311,146 @@ fn collect_nested_types<M: CpMemberIndex>(
     }
 }
 
+/// Offer what the language gives every array and no class file declares: the field `length`, and a public
+/// `clone()` that returns the array's own type (`Object.clone` is protected, so the walk hides it).
+///
+/// A member walk of the element type cannot find either — `overrides.` offered `Object`'s methods but never
+/// `length`. `length` is typed `int`, so a position that wants a number ranks it as the exact fit it is.
+fn collect_array_members<M: CpMemberIndex>(
+    receiver: &TypeRef,
+    typed: Typed<'_>,
+    ctx: &rank::Context,
+    resolver: &IndexResolver<M>,
+    out: &mut Vec<Ranked>,
+    seen: &mut HashSet<String>,
+) {
+    if receiver.dims == 0 {
+        return;
+    }
+    const LENGTH: &str = "length";
+    if typed.matches(LENGTH) && seen.insert(format!("array:{LENGTH}")) {
+        let item = CompletionItem {
+            label: LENGTH.to_string(),
+            kind: "field".to_string(),
+            detail: Some("int".to_string()),
+            ..Default::default()
+        };
+        out.push(Ranked {
+            score: ctx.score_nested_type(LENGTH),
+            fit: ctx.fit(&TypeRef::simple("int"), resolver),
+            tier: typed.tier(LENGTH).unwrap_or(0),
+            item,
+        });
+    }
+    const CLONE: &str = "clone";
+    if typed.matches(CLONE) && seen.insert(format!("array:{CLONE}")) {
+        let clone = Member::method(CLONE, receiver.clone(), Vec::new());
+        let (insert, stops) = call_syntax(&clone);
+        let item = CompletionItem {
+            label: CLONE.to_string(),
+            kind: kind_tag(clone.kind).to_string(),
+            detail: Some(render_detail(&clone)),
+            signature: parameter_list(&clone),
+            insert_text: insert,
+            snippet_stops: stops,
+            modifiers: modifiers_of(&clone),
+            ..Default::default()
+        };
+        out.push(Ranked {
+            score: ctx.score_nested_type(CLONE),
+            fit: ctx.fit(&clone.return_type, resolver),
+            tier: typed.tier(CLONE).unwrap_or(0),
+            item,
+        });
+    }
+}
+
+/// Offer `Outer.this` and `Outer.super` after a TYPE name that the caret sits inside of, or inherits from.
+///
+/// `Outer.this` reaches the enclosing instance from an inner class; `Outer.super` calls the enclosing class's
+/// superclass method, and `Iface.super.m()` calls a default method of a DIRECT superinterface that the class
+/// overrides. Neither is a member of anything, so the walk of `Outer`'s members never lists them. Offered only
+/// where the language allows them: a class that does not enclose the caret has no `this` to give.
+fn collect_qualified_this_and_super<M: CpMemberIndex>(
+    resolver: &IndexResolver<M>,
+    receiver: &TypeRef,
+    site: Option<&str>,
+    typed: Typed<'_>,
+    ctx: &rank::Context,
+    out: &mut Vec<Ranked>,
+    seen: &mut HashSet<String>,
+) {
+    let Some(site) = site else { return };
+    let outer = receiver.binary_name.as_str();
+    let encloses = site == outer || site.strip_prefix(outer).is_some_and(|rest| rest.starts_with('$'));
+    let implements = || {
+        resolver
+            .members_of(site)
+            .is_some_and(|cm| cm.interfaces.iter().any(|i| i.binary_name == outer))
+    };
+    let mut offer = |word: &str| {
+        if !typed.matches(word) || !seen.insert(format!("qualified:{word}")) {
+            return;
+        }
+        out.push(Ranked {
+            score: ctx.score_nested_type(word),
+            fit: rank::Fit::None,
+            tier: typed.tier(word).unwrap_or(0),
+            item: CompletionItem {
+                label: word.to_string(),
+                kind: "keyword".to_string(),
+                detail: Some(simple_of(outer).to_string()),
+                ..Default::default()
+            },
+        });
+    };
+    if encloses {
+        offer("this");
+    }
+    if encloses || implements() {
+        offer("super");
+    }
+}
+
+/// Offer `Type.class` — the class literal, which every type has and no class file declares.
+///
+/// It is not a member: `members_of` never lists it, because there is nothing to list — the language
+/// gives every type the literal, the way it gives an array its `length`. So a member walk, however
+/// complete the index, cannot find it, and `Foo.` offered everything but the one thing written after
+/// it most often (`Foo.class` for a logger, a mapper, a `getBean`).
+///
+/// Typed `Class<Foo>`, which is what the literal is, so a position that wants a `Class<?>` ranks it
+/// as the exact fit it is. Kind `field`: it is read like one, and the popup shows a field icon.
+fn collect_class_literal<M: CpMemberIndex>(
+    resolver: &IndexResolver<M>,
+    receiver: &TypeRef,
+    typed: Typed<'_>,
+    ctx: &rank::Context,
+    out: &mut Vec<Ranked>,
+    seen: &mut HashSet<String>,
+) {
+    const LITERAL: &str = "class";
+    if !typed.matches(LITERAL) || !seen.insert(format!("literal:{LITERAL}")) {
+        return;
+    }
+    let produced = TypeRef {
+        type_args: vec![TypeRef::simple(receiver.binary_name.clone())],
+        ..TypeRef::simple("java/lang/Class")
+    };
+    let item = CompletionItem {
+        label: LITERAL.to_string(),
+        kind: "field".to_string(),
+        detail: Some(format!("Class<{}>", simple_of(&receiver.binary_name))),
+        ..Default::default()
+    };
+    out.push(Ranked {
+        score: ctx.score_nested_type(LITERAL),
+        fit: ctx.fit(&produced, resolver),
+        tier: typed.tier(LITERAL).unwrap_or(0),
+        item,
+    });
+}
+
 /// Fold a method's overloads into ONE row, counted in its detail.
 ///
 /// **Method references only.** After `::` accepting a row writes the bare name, so three overloads
@@ -382,6 +539,44 @@ pub(crate) fn sort_ranked(out: &mut [Ranked]) {
             .then(a.item.kind.cmp(&b.item.kind))
             .then(a.item.label.cmp(&b.item.label))
     });
+}
+
+/// After `ECommunicationType.TI|` the constants that share a word with the names around the caret — a local called
+/// `pin`, a method `connectPin` — rise above the others of the same typed match (see `enum_arguments::fit_scores`).
+fn boost_enum_constants<M: CpMemberIndex>(out: &mut [Ranked], recv: &TypeRef, resolver: &IndexResolver<M>, source: &str, caret: usize) {
+    let Some(members) = resolver.members_of(&recv.binary_name) else { return };
+    if !members.flags.is_enum {
+        return;
+    }
+    let constants: Vec<String> = members
+        .fields
+        .iter()
+        .filter(|f| f.is_static && f.return_type.dims == 0 && f.return_type.binary_name == recv.binary_name && !f.name.starts_with('$'))
+        .map(|f| f.name.clone())
+        .collect();
+    let scores = crate::enum_arguments::fit_scores(&constants, simple_of(&recv.binary_name), source, caret);
+    for row in out.iter_mut() {
+        if let Some(i) = constants.iter().position(|c| *c == row.item.label) {
+            row.score += 50 * scores[i] as i32;
+        }
+    }
+}
+
+/// Moves the methods `called` already made in this chain, and that return the receiver's own type (a fluent
+/// setter), behind everything else, keeping the order inside both groups.
+pub(crate) fn demote_called_setters(out: &mut Vec<Ranked>, called: &HashSet<String>, receiver: &TypeRef) {
+    if called.is_empty() {
+        return;
+    }
+    let own = simple_of(&receiver.binary_name);
+    let setter = |r: &Ranked| {
+        r.item.kind == "method"
+            && called.contains(&r.item.label)
+            && r.item.detail.as_deref().is_some_and(|d| d.split('<').next().unwrap_or(d).trim() == own)
+    };
+    let (mut kept, tail): (Vec<Ranked>, Vec<Ranked>) = std::mem::take(out).into_iter().partition(|r| !setter(r));
+    kept.extend(tail);
+    *out = kept;
 }
 
 /// Mark the row `preselect` when it is the ONLY one producing exactly the expected type.

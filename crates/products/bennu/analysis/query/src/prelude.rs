@@ -13,6 +13,14 @@ pub use crate::method_reference::{
 };
 
 // The types a function slot receives — offered first when a type is named in `opt.map(Re|)`.
+pub use crate::array_constructor::array_constructor_argument;
+pub use crate::expected_creation::expected_creation;
+pub use crate::slot_inference::{fits_type, generic_slot, inferred_slot_type, written_type, GenericSlot};
+pub use crate::argument_list::{argument_list, argument_list_for, argument_list_with, argument_rest, ArgumentList};
+pub use crate::hints::{argument_expected_type, call_site_name_and_index, class_slot_bound};
+pub use crate::argument_locals::argument_locals;
+pub use crate::enum_arguments::enum_argument_constants;
+pub use crate::expected_statics::expected_type_statics;
 pub use crate::functional_types::functional_argument_types;
 
 // The ranking's reading of a method reference's slot, and the fit test behind it — and how well a

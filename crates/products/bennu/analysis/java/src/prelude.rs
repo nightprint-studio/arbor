@@ -17,7 +17,7 @@ pub use crate::infer::{
 pub use crate::infer::{single_abstract_method, written_type_ref};
 pub use crate::infer::{
     call_overload_at, enclosing_type_fqn, functional_descriptor, infer_expression_type, infer_expression_type_at,
-    infer_expression_type_cached, infer_node_type_cached, infer_receiver_type, FunctionalDescriptor,
+    infer_expression_type_cached, infer_node_type_cached, infer_receiver_type, type_receiver_cached, FunctionalDescriptor,
     infer_receiver_type_at, infer_receiver_type_cached, method_admits_argc, type_decl_at,
     InferCache,
     MethodResolution,
@@ -111,7 +111,7 @@ pub use crate::decl::{
 };
 
 // The abbreviations a Java file expands, as a table the caller shapes for the wire.
-pub use crate::templates::{matching as matching_templates, Template, TEMPLATES};
+pub use crate::templates::{caret_place, inside_a_body, matching as matching_templates, CaretPlace, Place, Template, TEMPLATES};
 
 // Variable names: the one a written type reads as, and the one a declaration at a caret is about to
 // be given (the ghost text after `private final OrderRepository `).

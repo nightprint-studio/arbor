@@ -1,0 +1,12 @@
+[package]
+name         = "bennu-learn"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "What Bennu learns from how the user treats its suggestions: whether a ghost text was kept, cut, rewritten or undone, as decayed counters per origin and context. Off unless asked, local, and wiped by one call. Knows no editor, no index and no model."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }

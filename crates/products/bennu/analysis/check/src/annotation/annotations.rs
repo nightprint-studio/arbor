@@ -242,6 +242,25 @@ mod duplicate_value_tests {
         assert!(codes(src).is_empty());
     }
 
+    /// The reported shapes: an endpoint's annotations on a method, the repeated element on one line and spread on
+    /// several with the commas leading.
+    #[test]
+    fn a_method_annotation_with_a_repeated_element_is_flagged() {
+        let one_line = "class A {\n    @PostMapping(value = \"/x\", produces = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)\n    public String go() { return null; }\n}";
+        assert_eq!(codes(one_line), ["duplicate-annotation-value"]);
+        let spread = "class A {\n    @Operation(\n        summary = \"x\"\n        , summary = \"y\"\n        , description = \"d\"\n    )\n    public String go() { return null; }\n}";
+        assert_eq!(codes(spread), ["duplicate-annotation-value"]);
+        let on_class = "@RequestMapping(value = \"/a\", value = \"/b\")\nclass A { }";
+        assert_eq!(codes(on_class), ["duplicate-annotation-value"]);
+    }
+
+    /// Two annotations of the same type are repeatable-annotation territory, not a repeated element.
+    #[test]
+    fn a_repeatable_annotation_written_twice_is_fine() {
+        let src = r#"class A { @Schedule(cron = "a") @Schedule(cron = "b") void run() { } }"#;
+        assert!(codes(src).is_empty());
+    }
+
     #[test]
     fn a_nested_annotation_keeps_its_own_argument_list() {
         let src = r#"class A { @Table(indexes = @Index(name = "i"), name = "t") String f; }"#;

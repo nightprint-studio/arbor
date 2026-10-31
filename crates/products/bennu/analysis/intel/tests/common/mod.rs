@@ -400,6 +400,58 @@ impl Project {
         .collect()
     }
 
+    /// The whole argument list proposed after the `(` at `offset`.
+    pub fn argument_list(&self, file: &str, offset: usize) -> Option<bennu_query::prelude::ArgumentList> {
+        bennu_query::prelude::argument_list(self.source(file), offset, &self.completion_resolver)
+    }
+
+    /// [`Self::argument_list`] with what the project usually passes: `habit(callee, index)` names the variable.
+    pub fn expected_creation(&self, file: &str, offset: usize) -> Option<String> {
+        bennu_query::prelude::expected_creation(self.source(file), offset, &self.completion_resolver)
+    }
+
+    pub fn array_constructor(&self, file: &str, offset: usize) -> Option<String> {
+        bennu_query::prelude::array_constructor_argument(self.source(file), offset, &self.completion_resolver)
+    }
+
+    pub fn argument_rest(&self, file: &str, offset: usize) -> Option<bennu_query::prelude::ArgumentList> {
+        bennu_query::prelude::argument_rest(self.source(file), offset, &self.completion_resolver, &|_, _| None)
+    }
+
+    pub fn argument_list_picked(&self, file: &str, offset: usize, picked: &[String]) -> Option<bennu_query::prelude::ArgumentList> {
+        bennu_query::prelude::argument_list_for(self.source(file), offset, &self.completion_resolver, &|_, _| None, Some(picked))
+    }
+
+    pub fn argument_list_with(&self, file: &str, offset: usize, habit: &dyn Fn(&str, usize) -> Option<String>) -> Option<bennu_query::prelude::ArgumentList> {
+        bennu_query::prelude::argument_list_with(self.source(file), offset, &self.completion_resolver, habit)
+    }
+
+    /// The constants of the enum the argument at `offset` takes, as the rows are served.
+    pub fn enum_argument_items(&self, file: &str, offset: usize) -> Vec<CompletionItem> {
+        bennu_query::prelude::enum_argument_constants(self.source(file), offset, &self.completion_resolver, Default::default())
+    }
+
+    /// What the declared parameter at `offset` is, when it is a type variable (see `bennu_query::prelude::generic_slot`).
+    pub fn generic_slot(&self, file: &str, offset: usize) -> bennu_query::prelude::GenericSlot {
+        bennu_query::prelude::generic_slot(self.source(file), offset, &self.completion_resolver)
+    }
+
+    /// The type of `text` written as the argument from `start` to the caret at `offset`, and whether it fits `wanted`.
+    pub fn text_fits(&self, file: &str, start: usize, offset: usize, text: &str, wanted: &bennu_java::prelude::TypeRef) -> Option<bool> {
+        let t = bennu_query::prelude::written_type(self.source(file), start, offset, text, &self.completion_resolver)?;
+        Some(bennu_query::prelude::fits_type(&t, wanted, &self.completion_resolver))
+    }
+
+    /// The names in scope that fit the argument slot at `offset`, as the rows are served.
+    pub fn argument_locals_items(&self, file: &str, offset: usize) -> Vec<CompletionItem> {
+        bennu_query::prelude::argument_locals(self.source(file), offset, &self.completion_resolver, Default::default())
+    }
+
+    /// The static constants and factories of the class a position wants, as the rows are served.
+    pub fn expected_statics_items(&self, file: &str, offset: usize) -> Vec<CompletionItem> {
+        bennu_query::prelude::expected_type_statics(self.source(file), offset, &self.completion_resolver, Default::default())
+    }
+
     /// The exceptions the `try` above a `catch (` caret throws — what leads the type-name answer
     /// there, as the simple names offered.
     pub fn caught_types(&self, file: &str, offset: usize) -> Vec<String> {

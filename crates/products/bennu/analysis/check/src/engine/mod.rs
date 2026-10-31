@@ -6,3 +6,4 @@ pub mod incremental;
 pub mod inspections;
 pub mod javac;
 pub mod quarantine;
+pub(crate) mod resolved;

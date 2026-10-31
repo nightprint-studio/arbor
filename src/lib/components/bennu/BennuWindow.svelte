@@ -170,6 +170,7 @@
   import BennuRecentLocationsModal from './BennuRecentLocationsModal.svelte';
   import BennuProjectSwitcher from './BennuProjectSwitcher.svelte';
   import BennuProjectGotoModal from './BennuProjectGotoModal.svelte';
+  import BennuLearnedModal from './BennuLearnedModal.svelte';
   import { afterPaint } from '$lib/utils/after-paint';
   import { loadedProjects } from '$lib/ipc/bennu';
   import BennuVulnerabilitiesModal from './vulnerabilities/BennuVulnerabilitiesModal.svelte';
@@ -1612,6 +1613,17 @@
     }
   }
 
+  /** Palette: flip the local model's ghost text. Needs a model folder, which it says rather than silently doing nothing. */
+  function toggleModelSuggestions() {
+    const on = !bennuSettingsStore.flc.enabled;
+    if (on && !bennuSettingsStore.flc.modelDir.trim()) {
+      toastStore.show('Model suggestions: choose a model folder in Settings › Completion first.', 'info');
+      return;
+    }
+    bennuSettingsStore.setFlc('enabled', on);
+    toastStore.show(on ? 'Model suggestions are on.' : 'Model suggestions are off.', 'info');
+  }
+
   const paletteSections = $derived.by<PaletteSection[]>(() => {
     const q = paletteQuery.trim().toLowerCase();
     // File-kind gates — hide actions that don't apply to the open file (no Generate /
@@ -1666,6 +1678,9 @@
         action: () => run(() => editor?.navForward()), when: !!projectStore.activeFilePath },
       { id: 'navlastedit', title: 'Last edit location', icon: 'History', shortcut: 'Ctrl+Shift+Backspace',
         action: () => run(() => editor?.navLastEdit()), when: bennuNavStore.hasEdits },
+      // What the completion has learned from the project, to read and to take back; the settings only hold a button to it.
+      { id: 'learned', title: 'What Bennu has learned…', icon: 'Brain',
+        action: () => run(() => bennuUiStore.openLearned()), when: true },
       { id: 'gotoproject', title: 'Go to project…', icon: 'FolderOpen', shortcut: 'Ctrl+Shift+D',
         action: () => run(() => (gotoProjectOpen = true)), when: true },
       { id: 'switchproject', title: 'Switch project…', icon: 'FolderOpen', shortcut: 'Ctrl+Tab',
@@ -1739,6 +1754,11 @@
         when: !!projectStore.activeFilePath && namingOn },
       { id: 'namingfixproject', title: 'Fix naming in project', icon: 'Wand2',
         action: () => run(() => void planNamingFix('project')), when: namingOn },
+      // No keybinding on purpose: it is a switch you flip when you want to compare, and a free
+      // Ctrl+Shift+<letter> is worth more to an action you reach for while typing.
+      { id: 'flc-toggle',
+        title: bennuSettingsStore.flc.enabled ? 'Model suggestions: turn off' : 'Model suggestions: turn on',
+        icon: 'Wand2', action: () => run(toggleModelSuggestions), when: isJava },
       { id: 'save', title: 'Save file', icon: 'FileCode2', shortcut: 'Ctrl+S',
         action: () => run(saveActive), when: !!projectStore.activeFilePath },
       { id: 'find', title: 'Find in file', icon: 'Search', shortcut: 'Ctrl+F',
@@ -3019,6 +3039,10 @@
 
 {#if gotoProjectOpen}
   <BennuProjectGotoModal onClose={() => (gotoProjectOpen = false)} />
+{/if}
+
+{#if bennuUiStore.learnedOpen}
+  <BennuLearnedModal onClose={() => bennuUiStore.closeLearned()} />
 {/if}
 
 {#if recentLocationsOpen}

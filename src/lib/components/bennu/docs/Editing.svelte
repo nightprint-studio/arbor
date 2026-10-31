@@ -461,6 +461,12 @@ import static org.junit.Assert.assertEquals;`, 'java')}</code></pre>
   All three read the <em>committed</em> file. Lines typed since the last commit have no author yet, and a selection is read by line number, so save and
   commit first if you have been editing. After committing, close and reopen the annotations to refresh them.
 </p>
+<h3>Problem markers</h3>
+<p>
+  A line with a problem is underlined, and hovering the underline says what is wrong. A marker in the gutter beside the line is optional
+  (Settings › Editor › <strong>Show problem markers in the gutter</strong>, off by default): without it the gutter keeps the same width while errors come and
+  go, and the line numbers reserve room for four digits so the text does not shift when a file crosses 100 or 1,000 lines.
+</p>
 <h3>Change markers</h3>
 <p>
   A thin bar beside the line numbers marks what differs from the last commit: green for lines you added, blue for lines you changed, a red

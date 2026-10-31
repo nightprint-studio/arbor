@@ -1,7 +1,7 @@
 <script lang="ts">
   import { computePosition, flip, shift, offset } from '@floating-ui/dom';
   import { onMount, tick } from 'svelte';
-  import { fly, fade } from 'svelte/transition';
+  import { fade, type TransitionConfig } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -86,10 +86,24 @@
   } = $props();
 
   let menuEl = $state<HTMLElement | null>(null);
+
+  /** The menu grows out of the point that was clicked: a little taller than wide, fading in. Which edge it grows
+   *  from follows `transform-origin`, so a menu that opened upward (no room below) grows upward. */
+  function grow(_node: Element, { duration }: { duration: number }): TransitionConfig {
+    return {
+      duration,
+      easing: cubicOut,
+      css: (t) => `opacity: ${t}; transform: scale(${0.97 + 0.03 * t}, ${0.9 + 0.1 * t})`,
+    };
+  }
   // svelte-ignore state_referenced_locally
   let adjustedX = $state(x);
   // svelte-ignore state_referenced_locally
   let adjustedY = $state(y);
+
+  /** The clicked point, relative to the menu's own corner and kept inside it. */
+  const originX = $derived(Math.max(0, Math.min(x - adjustedX, menuEl?.offsetWidth ?? 0)));
+  const originY = $derived(Math.max(0, Math.min(y - adjustedY, menuEl?.offsetHeight ?? 0)));
 
   $effect(() => {
     if (!menuEl) return;
@@ -271,11 +285,11 @@
 <div
   bind:this={menuEl}
   class="context-menu"
-  style="left: {adjustedX}px; top: {adjustedY}px"
+  style="left: {adjustedX}px; top: {adjustedY}px; transform-origin: {originX}px {originY}px"
   role="menu"
   tabindex="-1"
   onkeydown={menuKeydown}
-  in:fly={{ y: -6, duration: animStore.dFast, easing: cubicOut }}
+  in:grow={{ duration: animStore.dFast }}
   out:fade={{ duration: animStore.dFast }}
 >
   {#if actions && actions.length}

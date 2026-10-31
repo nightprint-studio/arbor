@@ -73,12 +73,16 @@ export function yamlPath(lines: string[], line: number): PathSegment[] {
   const own = entries[i]!;
   if (own.key !== null) rev.push({ label: own.key, line: i + 1 });
   let ref = own.keyIndent;
+  // After a list item the owning key may sit at the item's own indent (`hosts:` over `- a`), which is
+  // how YAML lets a sequence be written; so the next key found at `ref` still owns it, not only a shallower one.
+  let fromDash = false;
   if (own.dash !== null) {
     rev.push({ label: `[${itemIndex(entries, i, own.dash)}]`, line: i + 1 });
     ref = own.dash;
+    fromDash = true;
   }
 
-  for (let j = i - 1; j >= 0 && ref > 0; j--) {
+  for (let j = i - 1; j >= 0 && (ref > 0 || fromDash); j--) {
     if (/^(---|\.\.\.)/.test(lines[j])) break; // another document
     const f = entries[j];
     if (!f) continue;
@@ -88,9 +92,11 @@ export function yamlPath(lines: string[], line: number): PathSegment[] {
       if (f.key !== null && f.keyIndent < ref) rev.push({ label: f.key, line: j + 1 });
       rev.push({ label: `[${itemIndex(entries, j, f.dash)}]`, line: j + 1 });
       ref = f.dash;
-    } else if (f.key !== null && f.indent < ref) {
+      fromDash = true;
+    } else if (f.key !== null && (f.indent < ref || (fromDash && f.indent === ref))) {
       rev.push({ label: f.key, line: j + 1 });
       ref = f.indent;
+      fromDash = false;
     }
   }
   return rev.reverse();

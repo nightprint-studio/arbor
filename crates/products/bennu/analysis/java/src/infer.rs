@@ -28,6 +28,7 @@ use crate::seam::{Member, MemberKind, TypeRef, TypeResolver};
 use crate::symbols::{node_text, FileSymbols};
 use crate::typeparse::{parse_type_text, SimpleTypeRef};
 
+mod expected_positions;
 mod overload;
 pub use overload::{
     bound_overload, call_overload_at, lambda_refused, overload_fit, primitive_widens, subtype_verdict,
@@ -85,6 +86,13 @@ pub struct InferCache {
     /// text through the resolver (imports + `resolve_simple_name`'s project/star-import probing) each
     /// time was pure repeat work.
     type_text: RefCell<HashMap<String, Option<TypeRef>>>,
+    /// Every sub-expression the walk has typed, by span and node kind. A local is typed by re-walking its initialiser,
+    /// and an overload is chosen by typing its arguments once per phase: without this, `var b = g(a, a); var c = h(b, b);`
+    /// repeated down a method doubles the work at every line (a real file kept a core busy for hours).
+    inner: RefCell<HashMap<(usize, usize, u16), Option<TypeRef>>>,
+    /// How many times the depth limit cut a walk short. An answer reached after a cut is only as good as the cut, so it is
+    /// not kept in `inner`.
+    cutoffs: Cell<u32>,
 }
 
 
@@ -270,6 +278,27 @@ pub(crate) fn expected_at(
                 }
                 return None;
             }
+            // `a == |`: whatever the other operand is.
+            // The logical operators pass the question on to whatever contains them (a condition); any other operator
+            // makes its operands something this does not model, and the condition around them is not their type.
+            "binary_expression" => {
+                if !matches!(ctx.binary_operator(&n).as_deref(), Some("&&" | "||")) {
+                    return ctx.expected_from_comparison(&n, &child);
+                }
+            }
+            // `case |` in a `switch` over `status`.
+            "switch_label" => return ctx.expected_from_case(&n),
+            // `c ? a : |` — the other branch; when it does not type, the walk goes on to the whole ternary.
+            "ternary_expression" => {
+                if let Some(t) = ctx.expected_from_ternary(&n, &child) {
+                    return Some(t);
+                }
+            }
+            // `Foo[] xs = { | }`.
+            "array_initializer" => return ctx.expected_from_array_initializer(&n),
+            // An argument slot is not the declaration around the call: the walk ends here, after the few slots that
+            // need no overload resolution (`a.equals(|)`, `List.of(|)`).
+            "argument_list" => return ctx.expected_from_argument(&n),
             // A condition is a `boolean`, which is the one expected type that needs no resolving —
             // and the one that turns a list of forty members into the four predicates on it.
             "if_statement" | "while_statement" | "do_statement" => {
@@ -701,6 +730,20 @@ pub fn infer_node_type_cached(
     result
 }
 
+/// The type a class-name receiver (`Collections`, `java.util.List`) names — what a static call such as
+/// `Collections.addAll(…)` is made on. `None` for anything that is not a capitalised name this file can resolve.
+pub fn type_receiver_cached(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    node: &Node,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Option<TypeRef> {
+    let ctx = Ctx { root: *root, bytes: source.as_bytes(), resolver, symbols, cache, depth: Cell::new(0) };
+    ctx.type_receiver(node)
+}
+
 /// The shape a lambda or a method reference has to have where it is written: the parameter types
 /// and the return type of the functional interface's single abstract method.
 ///
@@ -896,8 +939,23 @@ impl Ctx<'_> {
     /// place the depth has to be counted (see [`MAX_INFER_DEPTH`]).
     fn infer_expr(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
         if self.depth.get() >= MAX_INFER_DEPTH {
+            self.cache.cutoffs.set(self.cache.cutoffs.get() + 1);
             return None;
         }
+        let key = (node.start_byte(), node.end_byte(), node.kind_id());
+        if let Some(hit) = self.cache.inner.borrow().get(&key) {
+            return hit.clone();
+        }
+        let cuts = self.cache.cutoffs.get();
+        let result = self.infer_expr_walk(node, enclosing);
+        if self.cache.cutoffs.get() == cuts {
+            self.cache.inner.borrow_mut().insert(key, result.clone());
+        }
+        result
+    }
+
+    /// [`Self::infer_expr`] without the memo: the walk itself.
+    fn infer_expr_walk(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
         self.depth.set(self.depth.get() + 1);
         let _depth = DepthGuard(&self.depth);
 
@@ -1373,13 +1431,52 @@ impl Ctx<'_> {
                             .collect::<Vec<Member>>()
                     })
                     .filter(|chosen| !chosen.is_empty());
-                self.param_at(&recv, &name, idx, chosen.as_deref())
+                let fi = self.param_at(&recv, &name, idx, chosen.as_deref())?;
+                Some(self.bind_from_call_target(fi, &call, &recv, chosen.as_deref(), enclosing))
             }
             "object_creation_expression" => {
                 let recv = self.creation_type(&call, enclosing)?;
                 self.param_at(&recv, "<init>", idx, None)
             }
             _ => None,
+        }
+    }
+
+    /// A functional parameter still written in the callee's OWN type variables — `Comparator.comparing(Function<?
+    /// super T, ? extends U>)`, `Collectors.toMap(Function<? super T, …>, …)` — gets those variables from the slot
+    /// the call itself fills: `sorted(Comparator<? super Person>)` makes the expected type of `comparing(…)`
+    /// `Comparator<? super Person>`, and matching it against the declared return `Comparator<T>` gives `T =
+    /// Person`, so the lambda inside is typed.
+    ///
+    /// Conservative: it changes nothing when there is not exactly one return type among the overloads the
+    /// call can bind to, when the slot's type is unknown, or when the two do not line up; and it never binds
+    /// a variable the receiver put there.
+    fn bind_from_call_target(
+        &self,
+        fi: TypeRef,
+        call: &Node,
+        recv: &TypeRef,
+        chosen: Option<&[Member]>,
+        enclosing: Option<&str>,
+    ) -> TypeRef {
+        if !self.mentions_type_variable(&fi) {
+            return fi;
+        }
+        let Some(candidates) = chosen else { return fi };
+        let refs: Vec<&Member> = candidates.iter().collect();
+        let Some(declared) = unique_return(&refs) else { return fi };
+        if declared.type_args.is_empty() {
+            return fi;
+        }
+        let Some(expected) = self.lambda_target_type(call, enclosing) else { return fi };
+        let expected = strip_wildcards(&expected);
+        let from_receiver: Vec<String> = recv.type_args.iter().flat_map(collect_type_variable_names).collect();
+        let mut bindings: Vec<(String, TypeRef)> = Vec::new();
+        self.unify_type_args(&declared, &expected, &from_receiver, &mut bindings);
+        if bindings.is_empty() {
+            fi
+        } else {
+            apply_bindings(&fi, &bindings)
         }
     }
 
@@ -1897,7 +1994,7 @@ impl Ctx<'_> {
                 // what the lambda or method reference passed there produces.
                 let functional = args
                     .get(i)
-                    .map(|arg| self.functional_return_bindings(p, arg, enclosing))
+                    .map(|arg| self.functional_return_bindings(p, arg, enclosing, recv))
                     .unwrap_or_default();
                 if !functional.is_empty() {
                     for (var, bound) in functional {
@@ -2081,6 +2178,50 @@ impl Ctx<'_> {
         param: &TypeRef,
         arg: &Node,
         enclosing: Option<&str>,
+        receiver: &TypeRef,
+    ) -> Vec<(String, TypeRef)> {
+        let mut bindings = self.functional_return_only(param, arg, enclosing, receiver);
+        // `Comparator.comparing(Person::getName)`: the type the reference is written on is the first
+        // parameter of the function, so it fixes the variable that parameter is (`T`).
+        if let Some((var, ty)) = self.unbound_reference_binding(param, arg, enclosing) {
+            if !bindings.iter().any(|(v, _)| *v == var) {
+                bindings.push((var, ty));
+            }
+        }
+        bindings
+    }
+
+    /// The variable the first parameter of the function stands for, bound to the type an UNBOUND method
+    /// reference (`Person::getName`, an instance method named through its type) is written on.
+    fn unbound_reference_binding(&self, param: &TypeRef, arg: &Node, enclosing: Option<&str>) -> Option<(String, TypeRef)> {
+        if arg.kind() != "method_reference" {
+            return None;
+        }
+        let first = self.sam_param_type(param, 0)?;
+        if !(first.type_args.is_empty() && first.dims == 0 && self.is_type_variable(&first.binary_name)) {
+            return None;
+        }
+        let mut cursor = arg.walk();
+        let children: Vec<Node> = arg.named_children(&mut cursor).collect();
+        let (qualifier, name) = (children.first()?, children.last()?);
+        if qualifier.id() == name.id() || self.infer_expr(qualifier, enclosing).is_some() {
+            return None;
+        }
+        let owner = self.type_receiver(qualifier)?;
+        let method = node_text(name, self.bytes)?;
+        let found = self.cache.resolve_methods(self.resolver, &owner.binary_name, &method);
+        if found.candidates.is_empty() || !found.candidates.iter().all(|m| !m.is_static && m.params.is_empty()) {
+            return None;
+        }
+        Some((first.binary_name, owner))
+    }
+
+    fn functional_return_only(
+        &self,
+        param: &TypeRef,
+        arg: &Node,
+        enclosing: Option<&str>,
+        receiver: &TypeRef,
     ) -> Vec<(String, TypeRef)> {
         if !matches!(arg.kind(), "method_reference" | "lambda_expression") {
             return Vec::new();
@@ -2092,7 +2233,7 @@ impl Ctx<'_> {
             return Vec::new();
         }
         let produced = if arg.kind() == "method_reference" {
-            self.method_reference_return(arg, enclosing)
+            self.method_reference_return(arg, enclosing, self.sam_param_type(&self.substitute_generics(param, receiver), 0).as_ref())
         } else {
             arg.child_by_field_name("body")
                 .filter(|body| body.kind() != "block")
@@ -2120,7 +2261,11 @@ impl Ctx<'_> {
     /// index may not be; anything else from the classpath. Several same-named methods have to agree
     /// on the return type — which one a reference binds to depends on the interface's parameters,
     /// and choosing between them here would be a guess.
-    fn method_reference_return(&self, reference: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+    ///
+    /// `target` is the type the interface's first parameter has, when the reference is the unbound kind
+    /// (`List::stream` passed where a `Function<List<Person>, …>` is wanted): the instance the method is
+    /// called on is that parameter, so the method is read against `List<Person>` and its `E` is `Person`.
+    fn method_reference_return(&self, reference: &Node, enclosing: Option<&str>, target: Option<&TypeRef>) -> Option<TypeRef> {
         let mut cursor = reference.walk();
         let children: Vec<Node> = reference.named_children(&mut cursor).collect();
         let (qualifier, name) = (children.first()?, children.last()?);
@@ -2157,6 +2302,14 @@ impl Ctx<'_> {
         if !returns.all(|r| r == first) {
             return None;
         }
+        // An unbound reference to an instance method of a TYPE: the receiver is the interface's first
+        // parameter, which carries the type arguments the bare type name does not.
+        let unbound = self.infer_expr(qualifier, enclosing).is_none()
+            && found.candidates.iter().all(|m| !m.is_static && m.params.is_empty());
+        let owner = match target.filter(|_| unbound) {
+            Some(t) => crate::hierarchy::seen_as(self.resolver, &strip_wildcards(t), &owner.binary_name).unwrap_or(owner),
+            None => owner,
+        };
         Some(self.substitute_generics(first, &owner))
     }
 
@@ -3353,6 +3506,17 @@ fn collect_yields<'t>(node: &Node<'t>, out: &mut Vec<Node<'t>>) {
 }
 
 /// Substitute every `(variable, type)` binding into `ty`, at any depth.
+/// `ty` with every wildcard written as the type it bounds: `? super Person` is read as `Person`.
+fn strip_wildcards(ty: &TypeRef) -> TypeRef {
+    TypeRef {
+        binary_name: ty.binary_name.clone(),
+        type_args: ty.type_args.iter().map(strip_wildcards).collect(),
+        dims: ty.dims,
+        wildcard: false,
+        super_bound: false,
+    }
+}
+
 fn apply_bindings(ty: &TypeRef, bindings: &[(String, TypeRef)]) -> TypeRef {
     if let Some((_, bound)) = bindings.iter().find(|(v, _)| *v == ty.binary_name) {
         // The array depth of the POSITION survives the substitution and adds to whatever the

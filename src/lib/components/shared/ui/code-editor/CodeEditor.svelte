@@ -80,6 +80,8 @@
     placeholder,
     wrap = false,
     lineNumbers = true,
+    problemMarkers = true,
+    stableGutter = false,
     highlightActiveLine = true,
     showWhitespace = false,
     folding = true,
@@ -188,6 +190,12 @@
      * gutter numbering them is a column of noise beside a field. Applied live.
      */
     lineNumbers?: boolean;
+    /** A marker in the gutter beside each line with a diagnostic. `true` by default; the underline and the hover are
+     *  always there. Off keeps the gutter from growing a column when the first problem appears. Applied live. */
+    problemMarkers?: boolean;
+    /** Reserve room for four digits in the line-number gutter, so it does not widen when the file crosses 99 or 999
+     *  lines. Off by default (a small field wants the narrow gutter). Applied live. */
+    stableGutter?: boolean;
     /** Tint the line the caret is on (and its gutter number). `true` by default. Applied live. */
     highlightActiveLine?: boolean;
     /** Render spaces and tabs as visible glyphs. Off by default. Applied live. */
@@ -364,7 +372,7 @@
   /** The user-facing preferences as one object — read in both places that need them (the mount
    *  and the live reconfigure) so the two can never drift. */
   function currentPreferences(): CodeEditorPreferences {
-    return { lineNumbers, highlightActiveLine, showWhitespace, wrap, folding, foldBlockComments, completion };
+    return { lineNumbers, problemMarkers, stableGutter, highlightActiveLine, showWhitespace, wrap, folding, foldBlockComments, completion };
   }
 
   let lastEmitted: string | null = null;
@@ -741,6 +749,36 @@
     return moves;
   }
 
+  const isUserCaretMove = (tr: Transaction) =>
+    ['select', 'input', 'delete', 'move', 'undo', 'redo'].some((ev) => tr.isUserEvent(ev));
+
+  /** The mouse button is down inside the editor: a selection is being dragged. */
+  let dragging = false;
+  /** A caret report was held back during the drag and is owed on release. */
+  let caretHeld = false;
+
+  function reportCaret(state: EditorState, user: boolean) {
+    if (oncaret) {
+      const head = state.selection.main.head;
+      const line = state.doc.lineAt(head);
+      oncaret(line.number, head - line.from + 1, { key: heldKey, user });
+    }
+    emitViewState();
+  }
+
+  function onPointerDown(e: MouseEvent) {
+    if (e.button === 0) dragging = true;
+  }
+
+  function onPointerUp() {
+    if (!dragging) return;
+    dragging = false;
+    if (caretHeld && view) {
+      caretHeld = false;
+      reportCaret(view.state, true);
+    }
+  }
+
   function mount(target: HTMLDivElement) {
     const { extensions, preferences } = createCodeEditorExtensions(language, {
       readOnly, onGoto, onFindInFiles, onLensPress, rulerColumn, emmet, indentGuides, stickyScroll,
@@ -767,15 +805,11 @@
       }
       if (u.focusChanged && u.view.hasFocus) onfocus?.();
       if (u.selectionSet || u.docChanged) {
-        if (oncaret) {
-          const head = u.state.selection.main.head;
-          const line = u.state.doc.lineAt(head);
-          const user = u.transactions.some((tr) =>
-            ['select', 'input', 'delete', 'move', 'undo', 'redo'].some((ev) => tr.isUserEvent(ev)),
-          );
-          oncaret(line.number, head - line.from + 1, { key: heldKey, user });
-        }
-        emitViewState();
+        // While the button is down a drag moves the selection on every mouse move, and the host's
+        // caret handler is heavy (status bar, occurrence highlight, navigation history). Hold the
+        // report back and send the final one on release, so the drag itself only pays for drawing.
+        if (dragging && !u.docChanged) caretHeld = true;
+        else reportCaret(u.state, u.transactions.some(isUserCaretMove));
       }
     });
 
@@ -822,6 +856,9 @@
       state = EditorState.create(stateConfig);
     }
     view = new EditorView({ state, parent: target });
+    view.dom.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('mouseup', onPointerUp);
+    window.addEventListener('blur', onPointerUp);
     // The document this view holds, fixed for its lifetime. Read once here so the teardown
     // snapshot cannot be filed under whatever the host switched to.
     heldKey = stateKey;
@@ -944,6 +981,8 @@
     if (scrollRaf) cancelAnimationFrame(scrollRaf);
     detachScroll?.();
     detachRestore?.();
+    window.removeEventListener('mouseup', onPointerUp);
+    window.removeEventListener('blur', onPointerUp);
     // Last chance to hand the host this tab's undo history — the view is about to go.
     emitViewState(true);
     view?.destroy();

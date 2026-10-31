@@ -90,6 +90,8 @@ export interface BennuConfig {
   show_whitespace: boolean;
   /** Show the line-number gutter. */
   show_line_numbers: boolean;
+  /** Draw a marker in the gutter beside each line with a problem; the underline is always drawn. */
+  show_problem_markers: boolean;
   /** Tint the line the caret sits on. */
   highlight_current_line: boolean;
   /** Install code folding — the gutter arrows and the fold commands. */
@@ -122,8 +124,36 @@ export interface BennuConfig {
   completion_smart_statements: boolean;
   /** Ghost text for the continuations that are certain. */
   completion_smart_ghost_text: boolean;
+  /** Fade the completion popup in and uncover ghost text as it appears. Off by default. */
+  completion_motion: boolean;
   /** How strongly the learned signals count, in percent (0..250; 100 as designed). */
   completion_smart_strength: number;
+  /** Model suggestions: a small local model finishes the line as ghost text. A guess, so off by default. */
+  flc_enabled: boolean;
+  /** The folder with the model files; empty = none. */
+  flc_model_dir: string;
+  /** How sure the model has to be, in percent, before its line is drawn. */
+  flc_min_confidence: number;
+  /** Complete a log call from the pattern the project uses most in that place. Needs no model. */
+  flc_logs: boolean;
+  /** Ask the model for three candidates and show the first that passes the checks. Several times slower. */
+  flc_alternatives: boolean;
+  /** Drop the model's line when Bennu's code checks say it invents a method, an argument or a variable. */
+  flc_check: boolean;
+  /** Count how often ghost text is shown, taken and dismissed (numbers only, never leaves the machine). */
+  flc_feedback: boolean;
+  /** Remember what became of each ghost text (kept, cut, rewritten, re-laid out, undone) as counters in the profile. */
+  flc_learn: boolean;
+  /** Leave commented-out code out of what the model reads. */
+  flc_ignore_commented_code: boolean;
+  /** Also keep the ghost text and what it became, as written, in a capped local log. */
+  flc_learn_keep_text: boolean;
+  /** Debugging: a notification each time a correction is counted. */
+  flc_learn_notify: boolean;
+  /** Keep what Bennu learned about each project (argument habits, annotation shapes, variable names) in the data folder. */
+  flc_profile_project: boolean;
+  /** Let one project's profile help another where that one has seen too little. */
+  flc_profile_global: boolean;
   /** Directory names the Java indexer never walks into, on top of its own skips. */
   excluded_dirs: string[];
   /** Absolute paths of the project roots spell-check is turned on for. A list rather than a

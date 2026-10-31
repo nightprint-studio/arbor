@@ -21,11 +21,10 @@
 use bennu_complete::prelude::{match_tier, MatchCase};
 use bennu_java::prelude::{
     declared_variable_names, extract_symbols, parse_java, postfix_expansions, postfix_indent_unit, postfix_shape,
-    visible_bindings, PostfixContext, PostfixSubject, TypeResolver,
+    inside_a_body, visible_bindings, PostfixContext, PostfixSubject, TypeResolver,
 };
 use bennu_naming::prelude::Convention;
 use bennu_proto::prelude::{CompletionItem, SnippetStop};
-use tree_sitter::Node;
 
 use crate::postfix::{import_edits, package_of, POSTFIX_LEGACY_LEVEL};
 
@@ -134,22 +133,6 @@ fn statement_word(source: &str, offset: usize) -> Option<(usize, String)> {
     let (start, typed) = bennu_query::prelude::split_completion_prefix(source, offset);
     let before = source[..start].trim_end();
     before.ends_with([';', '{', '}']).then_some((start, typed))
-}
-
-/// Whether `node` is inside code that runs — a block, a switch body, an initializer — rather than
-/// directly in a type's body, where a statement cannot start.
-fn inside_a_body(node: Node<'_>) -> bool {
-    let mut current = Some(node);
-    while let Some(n) = current {
-        match n.kind() {
-            "block" | "switch_block" | "constructor_body" | "static_initializer" => return true,
-            "class_body" | "interface_body" | "enum_body" | "enum_body_declarations" | "annotation_type_body"
-            | "program" => return false,
-            _ => {}
-        }
-        current = n.parent();
-    }
-    false
 }
 
 #[cfg(test)]

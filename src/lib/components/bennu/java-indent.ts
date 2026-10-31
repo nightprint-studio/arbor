@@ -11,7 +11,10 @@
  *
  * - inside `{ … }` a statement sits one level in from the line its construct starts on;
  * - a statement still being written — no `;` yet — continues two levels in from its start;
- * - inside `( … )` / `[ … ]` a line continues two levels in from the line of the opener;
+ * - inside `( … )` / `[ … ]` a line continues two levels in from the line of the opener — or lines up with
+ *   the argument line above it when that one is already indented deeper than the opener's line;
+ * - Enter between `(` and `)` (`foo(|)`, what auto-closing leaves) opens the pair, as it does between braces: the caret
+ *   line continues, the closer goes to a line of its own at the opener's level;
  * - a braceless `if (…)` / `for (…)` / `while (…)` / `else` / `do` indents its body one level, and
  *   once that body's `;` is typed the next line is back at the outer level;
  * - after `case X:` statements sit one level in from the label (Settings → Java → Code Style decides
@@ -42,6 +45,8 @@ export const CONTINUATION_LEVELS = 2;
 /** An open bracket, or the file itself. */
 interface Frame {
   open: '{' | '(' | '[' | 'root';
+  /** Offset of the bracket itself, -1 for the file. */
+  openAt: number;
   /** Indentation of the line that owns the bracket: where its construct starts for `{`, the
    *  opener's own line for `(` / `[`. */
   owner: number;
@@ -75,7 +80,7 @@ export function javaIndentFor(before: string, after: string, style: JavaIndentSt
 
   if (top.open === '(' || top.open === '[') {
     if (CLOSER_OF[head[0]] === top.open) return top.owner;
-    return top.owner + CONTINUATION_LEVELS * unit;
+    return argumentIndent(before, code, top, indentAt, unit);
   }
 
   const blockBase = top.open === 'root' ? 0 : top.owner + unit;
@@ -100,6 +105,22 @@ export function javaIndentFor(before: string, after: string, style: JavaIndentSt
   return start + headers * unit + (rest ? CONTINUATION_LEVELS * unit : 0);
 }
 
+/**
+ * Where the next argument (or array item) of an open `(` / `[` starts: under the argument line above
+ * when that line is already indented deeper than the opener's, otherwise a continuation in from the
+ * opener. The line above is no model when it is the opener's own line or begins with a closer — a
+ * lambda body's `})` says where the lambda ended, not where arguments go.
+ */
+function argumentIndent(before: string, code: string, frame: Frame, indentAt: (offset: number) => number, unit: number): number {
+  const base = frame.owner + CONTINUATION_LEVELS * unit;
+  const lastAt = code.trimEnd().length - 1;
+  const lineFrom = code.lastIndexOf('\n', lastAt) + 1;
+  if (lastAt < 0 || lineFrom <= before.lastIndexOf('\n', frame.openAt - 1) + 1) return base;
+  if (/^\s*[)\]}]/.test(code.slice(lineFrom))) return base;
+  const column = indentAt(lineFrom);
+  return column >= frame.owner + unit ? column : base;
+}
+
 /** What Enter does at the end of `before`, when `lineAfter` is the rest of the caret's line. */
 export interface JavaLineBreak {
   /** Trailing whitespace to remove before the caret. */
@@ -119,7 +140,7 @@ export function javaLineBreak(before: string, lineAfter: string, style: JavaInde
 
   const trimmed = before.replace(/[ \t]+$/, '');
   const head = lineAfter.replace(/^[ \t]+/, '');
-  const explode = ctx.kind === 'code' && trimmed.endsWith('{') && head.startsWith('}');
+  const explode = ctx.kind === 'code' && /(?:\{\}|\(\))$/.test(`${trimmed.slice(-1)}${head.slice(0, 1)}`);
   const caretIndent = javaIndentFor(trimmed, explode ? '' : head, style);
   if (caretIndent === null) return null;
   return {
@@ -135,7 +156,7 @@ export function javaLineBreak(before: string, lineAfter: string, style: JavaInde
 
 /** Walk the masked text, keeping the stack of brackets still open at its end. */
 function scanFrames(code: string, indentAt: (offset: number) => number): Frame[] {
-  const stack: Frame[] = [{ open: 'root', owner: 0, segStart: -1, label: null, list: false }];
+  const stack: Frame[] = [{ open: 'root', openAt: -1, owner: 0, segStart: -1, label: null, list: false }];
   for (let i = 0; i < code.length; i++) {
     const c = code[i];
     if (c === ' ' || c === '\t' || c === '\n' || c === '\r') continue;
@@ -146,6 +167,7 @@ function scanFrames(code: string, indentAt: (offset: number) => number): Frame[]
       endArrowLabel(top, segText);
       stack.push({
         open: '{',
+        openAt: i,
         owner: indentAt(top.segStart >= 0 ? top.segStart : i),
         segStart: -1,
         label: null,
@@ -153,7 +175,7 @@ function scanFrames(code: string, indentAt: (offset: number) => number): Frame[]
       });
     } else if (c === '(' || c === '[') {
       if (top.segStart < 0) top.segStart = i;
-      stack.push({ open: c, owner: indentAt(i), segStart: -1, label: null, list: false });
+      stack.push({ open: c, openAt: i, owner: indentAt(i), segStart: -1, label: null, list: false });
     } else if (c in CLOSER_OF) {
       closeFrame(stack, CLOSER_OF[c]);
       const parent = stack[stack.length - 1];

@@ -57,7 +57,13 @@ const kindRules: Record<string, StyleRule> = Object.fromEntries(
 );
 
 /** Spread into the editor theme (`EditorView.theme`). */
-export const completionThemeSpec: Record<string, StyleRule> = {
+export const completionThemeSpec: Record<string, StyleRule | Record<string, StyleRule>> = {
+  // ── Opening ── a fade when the popup appears (opt-in, see `CompletionPreferences.animate`). The tooltip element
+  // lives from open to close and is updated in place while typing, so this plays once per opening, not per key.
+  '@keyframes cm-completion-in': { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+  [`&[data-motion~="completion"] ${POPUP}`]: {
+    animation: 'cm-completion-in var(--anim-dur-fast, 0ms) ease-out',
+  },
   // ── Container ──
   [POPUP]: {
     backgroundColor: 'var(--bg-elevated)',

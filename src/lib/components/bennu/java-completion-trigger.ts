@@ -47,7 +47,21 @@ export function completionSite(textBefore: string): CompletionSite {
  */
 export function shouldAskForCompletion(textBefore: string, explicit: boolean): boolean {
   if (explicit || wordBefore(textBefore).length > 0) return true;
-  return /(\.|::|@)$/.test(textBefore);
+  return /(\.|::|@)$/.test(textBefore) || ANNOTATION_STRING_START.test(textBefore) || /\$\{$/.test(textBefore);
+}
+
+/** The opening quote of a string argument of an annotation — `@GetMapping("`, `@PostMapping(produces = "` — where the
+ *  project's own values for that element are worth offering before a letter is typed. */
+const ANNOTATION_STRING_START = /@[\w.]+\(\s*(?:\w+\s*=\s*)?\{?\s*"$/;
+
+/** Whether the caret is inside an unfinished string in an annotation's parentheses — where the project's values and
+ *  configuration keys are the answer, and words from elsewhere in the file are not. */
+export function insideAnnotationString(textBefore: string): boolean {
+  const open = textBefore.lastIndexOf('@');
+  if (open < 0) return false;
+  const tail = textBefore.slice(open);
+  if (!/^@[\w.]+\s*\(/.test(tail) || tail.includes(')\n')) return false;
+  return (tail.match(/(?<!\\)"/g)?.length ?? 0) % 2 === 1;
 }
 
 /**
@@ -56,5 +70,5 @@ export function shouldAskForCompletion(textBefore: string, explicit: boolean): b
  * and a word from elsewhere in the file is not a member of anything.
  */
 export function offersFallbackWords(textBefore: string): boolean {
-  return completionSite(textBefore) !== 'member';
+  return completionSite(textBefore) !== 'member' && !insideAnnotationString(textBefore);
 }

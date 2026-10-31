@@ -19,11 +19,11 @@ function payload(over: Partial<TreeChanged> = {}): TreeChanged {
 }
 
 function dir(path: string, children: TreeNode[] = []): TreeNode {
-  return { name: path.split('/').pop() ?? path, path, is_dir: true, children };
+  return { name: path.split(/[\\/]/).pop() ?? path, path, is_dir: true, children };
 }
 
 function file(path: string): TreeNode {
-  return { name: path.split('/').pop() ?? path, path, is_dir: false, children: [] };
+  return { name: path.split(/[\\/]/).pop() ?? path, path, is_dir: false, children: [] };
 }
 
 describe('needsTreeReload', () => {

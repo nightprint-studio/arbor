@@ -40,6 +40,34 @@ mod jobs;
 // The typed product config (`get/set_bennu_config`): the editor's per-project JDK /
 // encoding overrides + defaults, owned out-of-process here.
 mod completion_tuning;
+// Full-line completion: the project's log profile and the small local model (`bennu_flc_complete` and friends).
+mod flc;
+mod flc_annotations;
+mod flc_arglist;
+mod flc_chain;
+mod flc_echo;
+mod flc_choices;
+mod flc_check;
+mod flc_mapper;
+mod flc_names;
+mod flc_generic_slot;
+mod flc_habits;
+#[cfg(test)]
+mod flc_quality;
+// How often the ghost text is taken (`bennu_flc_feedback` / `bennu_flc_stats`): counters only, in the profile.
+mod flc_created;
+mod flc_format;
+mod flc_memory;
+mod learned;
+mod learned_rules;
+mod flc_member_args;
+mod flc_sequence;
+mod flc_stats;
+// What became of each ghost text once the user was done with it (`bennu_learn_settled` / `bennu_learn_reset`), behind *Learn from corrections*.
+mod learn;
+mod flc_persist;
+mod flc_profile;
+mod flc_similar;
 mod config_cmds;
 // Project model: `bennu_open_project` / `bennu_project_tree` / `bennu_read_file` —
 // pom parse + capability detection + JDK/encoding detection + file tree + decoded

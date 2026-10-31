@@ -25,6 +25,7 @@ export type {
   CompletionSource,
   InlineCompletionSource,
   InlineCompletion,
+  InlineCompletionOutcomeHandler,
 } from './types';
 export {
   inlineCompletion,
@@ -32,7 +33,9 @@ export {
   acceptInlineCompletion,
   dismissInlineCompletion,
   inlineCompletionActive,
+  type InlineCompletionOutcomeKind,
 } from './inline-completion';
+export { type SettledProposal, type SettledHandler } from './accepted-tracking';
 // Semantic highlighting — the token layer only something that knows the types can supply
 // (a language server). Painted OVER the base highlight, never instead of it.
 export {

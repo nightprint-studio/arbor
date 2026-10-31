@@ -41,6 +41,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { processMonitorStore, type WatchedRow } from '$lib/stores/process-monitor.svelte';
   import { lspRestart, lspStatus } from '$lib/ipc/bennu/lsp';
+  import { groupByCategory } from '$lib/utils/memory-categories';
   import { processMemory, type MemoryItem, type MemoryReport } from '$lib/ipc/processes';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
@@ -162,6 +163,7 @@
 
   /** A project by its folder name; what the backend holds once, by what it is. */
   function scopeLabel(scope: string): string {
+    if (scope === 'model') return 'Local model';
     return scope === 'process' ? 'Whole backend' : (scope.split('/').filter(Boolean).pop() ?? scope);
   }
 
@@ -395,10 +397,15 @@
                             <span class="bd-scope-name">{scopeLabel(scope.scope)}</span>
                             {#if scope.bytes}<span class="bd-scope-sum">≈ {mb(scope.bytes)}</span>{/if}
                           </div>
-                          {#each scope.items as item, i (i)}
+                          {#each groupByCategory(scope.items) as cat (cat.heading)}
+                            <div class="bd-cat">
+                              <span class="bd-cat-name">{cat.heading}</span>
+                              {#if cat.bytes}<span class="bd-cat-sum">≈ {mb(cat.bytes)}</span>{/if}
+                            </div>
+                          {#each cat.items as item, i (i)}
                             <div class="bd-item">
                               <span class="bd-label">
-                                {item.label}
+                                {item.text}
                                 {#if item.mapped}
                                   <span class="bd-tag" use:tooltip={'Memory-mapped file: in the measured total, but the system can take the pages back whenever it needs them.'}>mapped</span>
                                 {/if}
@@ -408,6 +415,7 @@
                                 {item.bytes === null ? 'counted' : `${item.exact ? '' : '≈ '}${mb(item.bytes)}`}
                               </span>
                             </div>
+                          {/each}
                           {/each}
                         </div>
                       {/each}
@@ -544,9 +552,14 @@
     margin-left: auto; font-size: var(--font-size-xs); color: var(--accent);
     font-variant-numeric: tabular-nums;
   }
+  .bd-cat {
+    display: flex; align-items: baseline; gap: 8px; padding: 7px 0 1px;
+    font-size: var(--font-size-2xs); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px;
+  }
+  .bd-cat-sum { margin-left: auto; font-variant-numeric: tabular-nums; }
   .bd-item {
     display: grid; grid-template-columns: 1fr 90px 90px; gap: 8px; align-items: baseline;
-    padding: 3px 0; font-size: var(--font-size-xs);
+    padding: 3px 0 3px 10px; font-size: var(--font-size-xs);
   }
   .bd-label { color: var(--text-secondary); min-width: 0; }
   .bd-tag {

@@ -22,6 +22,10 @@
 //! written type, an assignment to something already typed, a `return`, and a condition (which is
 //! a `boolean` and needs no resolving at all).
 //!
+//! Then the positions read off a neighbour rather than a declaration — the other side of `==`/`!=`, a
+//! `case` label, a ternary branch, an array initializer, `a.equals(|)` and the elements of `List.of(|)`
+//! and its kin — in `infer/expected_positions.rs`.
+//!
 //! **Not an argument slot.** `f(order.|)` looks like the same question and is not: which parameter
 //! type is expected depends on which overload of `f` binds, and that depends on the argument being
 //! completed. Answering it needs overload resolution over a half-written call, and a wrong answer
@@ -196,6 +200,8 @@ mod tests {
         Names(HashMap::from([
             ("String", "java/lang/String"),
             ("Order", "shop/Order"),
+            ("List", "java/util/List"),
+            ("Arrays", "java/util/Arrays"),
         ]))
     }
 
@@ -324,5 +330,69 @@ mod tests {
     fn an_argument_slot_is_deliberately_unanswered() {
         let src = "class A { void m(java.util.List<String> xs) { xs.add(ZZZ); } }";
         assert_eq!(expected(src, "ZZZ"), None);
+    }
+
+    // ── the positions read off a neighbour ──────────────────────────────────────────────────────
+
+    #[test]
+    fn a_comparison_wants_the_other_operands_type() {
+        for src in [
+            "class A { void m(Order o) { if (o == ZZZ) {} } }",
+            "class A { void m(Order o) { if (o != ZZZ) {} } }",
+            "class A { void m(Order o) { if (ZZZ == o) {} } }",
+            "class A { boolean m(Order o) { return o == ZZZ; } }",
+        ] {
+            assert_eq!(expected(src, "ZZZ").as_deref(), Some("shop/Order"), "{src}");
+        }
+        // an ordering says nothing about the type of the other side
+        assert_eq!(expected("class A { void m(int n) { if (n < ZZZ) {} } }", "ZZZ"), None);
+    }
+
+    #[test]
+    fn a_case_label_wants_the_selectors_type() {
+        for src in [
+            "class A { void m(Order o) { switch (o) { case ZZZ: break; } } }",
+            "class A { void m(Order o) { switch (o) { case ZZZ -> go(); } } }",
+            "class A { int m(Order o) { return switch (o) { case ZZZ -> 1; default -> 2; }; } }",
+        ] {
+            assert_eq!(expected(src, "ZZZ").as_deref(), Some("shop/Order"), "{src}");
+        }
+        // a label typed at the end of its line, as it is when the user is still writing it
+        let src = "class A {\n  void m(Order o) {\n    switch (o) {\n      case ZZZ\n    }\n  }\n}\n";
+        assert_eq!(expected(src, "ZZZ").as_deref(), Some("shop/Order"));
+    }
+
+    #[test]
+    fn a_ternary_branch_wants_the_other_branch_or_else_the_whole() {
+        assert_eq!(expected("class A { void m(Order o, boolean c) { Object x = c ? o : ZZZ; } }", "ZZZ").as_deref(), Some("shop/Order"));
+        // the other branch does not type: the declaration around the ternary answers
+        assert_eq!(expected("class A { void m(boolean c) { String s = c ? foo : ZZZ; } }", "ZZZ").as_deref(), Some("java/lang/String"));
+        assert_eq!(expected("class A { void m(boolean c) { String s = ZZZ ? 1 : 2; } }", "ZZZ").as_deref(), Some("boolean"));
+    }
+
+    #[test]
+    fn an_array_initializer_wants_the_element_type() {
+        let src = "class A { void m(Order o) { Order[] xs = { o, ZZZ }; } }";
+        let t = expected_type(src, src.find("ZZZ").unwrap(), &resolver()).expect("element");
+        assert_eq!((t.binary_name.as_str(), t.dims), ("shop/Order", 0));
+        let src = "class A { void m(Order o) { Order[][] xs = { { o }, { ZZZ } }; } }";
+        assert_eq!(expected(src, "ZZZ"), None, "a nested initializer is not modelled");
+    }
+
+    #[test]
+    fn equals_and_collection_factories_are_the_slots_that_can_be_answered() {
+        assert_eq!(expected("class A { void m(Order o) { o.equals(ZZZ); } }", "ZZZ").as_deref(), Some("shop/Order"));
+        let src = "class A { void m(Order o) { List<Order> l = List.of(o, ZZZ); } }";
+        assert_eq!(expected(src, "ZZZ").as_deref(), Some("shop/Order"));
+        let src = "class A { void m(Order o) { List<Order> l = Arrays.asList(ZZZ); } }";
+        assert_eq!(expected(src, "ZZZ").as_deref(), Some("shop/Order"));
+    }
+
+    #[test]
+    fn an_argument_is_not_the_declaration_around_the_call() {
+        assert_eq!(expected("class A { void m() { String s = foo(ZZZ); } }", "ZZZ"), None);
+        assert_eq!(expected("class A { void m() { String s = new Foo(ZZZ).name(); } }", "ZZZ"), None);
+        // the receiver of a chain still is answered by the declaration, which is what completion after a dot reads
+        assert_eq!(expected("class A { void m() { String s = ZZZ.foo(1); } }", "ZZZ").as_deref(), Some("java/lang/String"));
     }
 }

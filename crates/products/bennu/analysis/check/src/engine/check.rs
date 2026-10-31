@@ -190,7 +190,7 @@ pub fn check_file_resolved(
     // so the slowest files reveal WHERE the time goes on real project types — zero cost when unset.
     let prof = profiling_enabled();
     let t_total = prof.then(std::time::Instant::now);
-    let mut times: Vec<(&str, std::time::Duration)> = Vec::new();
+    let mut times: Vec<(&'static str, std::time::Duration)> = Vec::new();
 
     // ONE parse for BOTH tiers. The pure-AST checks and the resolver-backed checks run over the same
     // tree; a second parse (and a third from `extract_symbols`) per file was pure waste — costly on a
@@ -263,65 +263,14 @@ pub fn check_file_resolved(
             times.push(("extract_symbols", t.elapsed()));
         }
         let cache = bennu_java::prelude::InferCache::new();
-        // Run a resolver-backed check, timing it only when profiling is on. A macro (not a fn/closure)
-        // so the `Instant` is captured BEFORE the check call — with a closure the call is an argument,
-        // evaluated first, and every check mis-measured as ~0.
-        macro_rules! timed {
-            ($label:expr, $call:expr) => {{
-                let __t = prof.then(std::time::Instant::now);
-                let __r = $call;
-                if let Some(__t) = __t {
-                    times.push(($label, __t.elapsed()));
-                }
-                out.extend(__r);
-            }};
-        }
-        timed!("unresolved_imports", crate::source::imports::unresolved_imports(root, source, resolver, ctx.classpath_complete));
-        timed!("import_ambiguity", crate::source::import_ambiguity::import_ambiguity_errors_in(root, &nodes, source, &symbols, resolver, &cache, ctx.classpath_complete));
-        timed!("unresolved_static_imports", crate::source::imports::unresolved_static_imports(root, source, resolver, ctx.classpath_complete));
-        timed!("unknown_members", crate::calls::members::unknown_members_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("unknown_fields", crate::calls::fields::unknown_fields_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("arity", crate::calls::arity::arity_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("argument_type", crate::calls::arguments::argument_type_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("generic_args", crate::calls::generic_args::generic_argument_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("unresolved_types", crate::typing::types::unresolved_types_in(&nodes, source, &symbols, resolver, ctx.classpath_complete));
-        timed!("type_arg_arity", crate::typing::type_arg_arity::type_arg_arity_errors_in(&nodes, source, &symbols, resolver));
-        timed!("type_bounds", crate::typing::bounds::bound_errors_in(&nodes, source, &symbols, resolver));
-        timed!("undefined_var", crate::calls::undefined_var::undefined_var_errors_in(root, &nodes, source, &symbols, resolver, ctx.classpath_complete));
-        timed!("unresolved_call", crate::calls::unresolved_call::unresolved_call_errors_in(root, &nodes, source, &symbols, resolver));
-        timed!("inheritance", crate::hierarchy::inheritance::inheritance_errors_in(&nodes, source, &symbols, resolver));
-        timed!("missing_abstract", crate::hierarchy::inheritance::missing_abstract_impls_in(&nodes, source, &symbols, resolver));
-        timed!("type_compat", crate::typing::casts::type_compat_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("functional", crate::calls::functional::functional_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("super_constructor", crate::decls::constructors::super_constructor_errors_in(&nodes, source, &symbols, resolver));
-        timed!("qualified_finals", crate::flow::qualified_finals::qualified_final_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("final_override", crate::flow::finals::final_override_errors_in(&nodes, source, &symbols, resolver));
-        timed!("override_access", crate::hierarchy::override_access::override_access_errors_in(&nodes, source, &symbols, resolver));
-        timed!("override_return", crate::hierarchy::override_return::override_return_errors_in(&nodes, source, &symbols, resolver));
-        timed!("inherit_cycle", crate::hierarchy::inherit_cycle::inherit_cycle_errors_in(&nodes, source, &symbols, resolver));
-        timed!("exceptions", crate::throwing::exceptions::exception_errors_in(&nodes, source, &symbols, resolver));
-        timed!("enum_switch", crate::switching::enum_switch::enum_switch_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("pattern_dominance", crate::switching::pattern_labels::pattern_dominance_in(&nodes, source, &symbols, resolver));
-        timed!("switch_label_type", crate::switching::switch_label_type::switch_label_type_errors_in(root, &nodes, source, &symbols, resolver, &cache, ctx.java_major));
-        timed!("super_method", crate::hierarchy::super_method::super_method_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("condition_type", crate::typing::condition_type::condition_type_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("operand_type", crate::typing::operand_type::operand_type_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("type_access", crate::typing::type_access::type_access_errors_in(&nodes, source, &symbols, resolver));
-        timed!("instanceof_unconditional", crate::typing::instanceof_unconditional::instanceof_unconditional_errors_in(root, &nodes, source, &symbols, resolver, &cache, ctx.java_major));
-        timed!("type_use", crate::typing::type_use::type_use_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("narrowing", crate::typing::narrowing::narrowing_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("checked_throw", crate::throwing::checked_throw::checked_throw_errors_in(&nodes, source, &symbols, resolver));
-        timed!("mref_throws", crate::throwing::mref_throws::mref_throws_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("implicit_super", crate::throwing::implicit_super::implicit_super_errors_in(&nodes, source, &symbols, resolver));
-        timed!("checked_call", crate::throwing::checked_call::checked_call_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("throws_widen", crate::hierarchy::throws_widen::throws_widen_errors_in(&nodes, source, &symbols, resolver));
-        timed!("static_access", crate::hierarchy::static_access::static_access_errors_in(root, &nodes, source, &symbols, resolver));
-        timed!("dead_catch", crate::throwing::dead_catch::dead_catch_errors_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("annotation_elements", crate::annotation::annotation_elements::annotation_element_errors_in(&nodes, source, &symbols, resolver));
-        timed!("annotation_target", crate::annotation::annotation_target::annotation_target_errors_in(&nodes, source, &symbols, resolver));
-        timed!("annotation_decl", crate::annotation::annotation_decl::annotation_decl_errors_in(&nodes, source, &symbols, resolver));
-        timed!("static_via_instance", crate::hierarchy::static_via_instance::static_via_instance_warnings_in(root, &nodes, source, &symbols, resolver, &cache));
-        timed!("visibility", crate::hierarchy::visibility::visibility_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        // The resolver-backed checks live in `crate::engine::resolved`, shared with the incremental
+        // pass: one list, so a check cannot be registered in one driver and forgotten in the other.
+        let subject = crate::engine::resolved::Subject { root, source, symbols: &symbols, resolver, ctx };
+        let mut run = crate::engine::resolved::Run::new(std::mem::take(&mut out), std::mem::take(&mut times), prof);
+        crate::engine::resolved::whole_file(&mut run, &subject, &nodes, &cache);
+        crate::engine::resolved::per_body(&mut run, &subject, &nodes, &cache);
+        out = run.out;
+        times = run.times;
     }
     if let Some(t) = t_total {
         log_profile(ctx, t.elapsed(), &times);

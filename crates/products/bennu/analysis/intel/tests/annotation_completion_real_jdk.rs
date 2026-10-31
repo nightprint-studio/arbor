@@ -47,8 +47,12 @@ const SRC: &str = "package p;\npublic class Use {\n    @\n    void go() { }\n}\n
 
 /// The labels offered with `typed` written after the `@`. `None` when no JDK 21 resolves here.
 fn offered(typed: &str) -> Option<Vec<String>> {
+    offered_in(SRC, typed)
+}
+
+fn offered_in(src: &str, typed: &str) -> Option<Vec<String>> {
     let temp = TempDir::new();
-    let files = vec![(PathBuf::from("Use.java"), SRC.to_string())];
+    let files = vec![(PathBuf::from("Use.java"), src.to_string())];
     let built = build_project_index_from_sources(&files, &temp.0);
     built.builder.persist().expect("persist");
     PersistedIndex::open(built.builder.blob_path(), built.builder.fst_path()).expect("open");
@@ -61,8 +65,8 @@ fn offered(typed: &str) -> Option<Vec<String>> {
             return None;
         }
     };
-    let at = SRC.find('@').expect("the fixture has an `@`") + 1;
-    let source = format!("{}{typed}{}", &SRC[..at], &SRC[at..]);
+    let at = src.find('@').expect("the fixture has an `@`") + 1;
+    let source = format!("{}{typed}{}", &src[..at], &src[at..]);
     let items = provider
         .complete_at(
             &Position { file: "Use.java".to_string(), offset: at + typed.len() },
@@ -122,4 +126,14 @@ fn a_class_that_is_not_an_annotation_is_not_offered() {
 fn a_bare_at_with_a_known_target_offers_a_bounded_list() {
     let Some(labels) = offered("") else { return };
     assert!(labels.len() <= 40, "unbounded list of {} items", labels.len());
+}
+
+/// A bare `@` with no declaration after it has no target to rank by, and used to offer nothing — so the editor filled the
+/// popup with keywords. What the file imports is still worth offering: it is what the person would pick from.
+#[test]
+fn a_bare_at_with_no_target_offers_the_annotations_the_file_imports() {
+    let src = "package p;\nimport java.lang.annotation.Documented;\nimport java.util.List;\npublic class Use {\n    @\n}\n";
+    let Some(labels) = offered_in(src, "") else { return };
+    assert!(labels.iter().any(|l| l == "Documented"), "{labels:?}");
+    assert!(!labels.iter().any(|l| l == "List"), "an import that is not an annotation: {labels:?}");
 }

@@ -116,6 +116,19 @@ describe('toCompletion', () => {
     expect(c.apply).toBeTypeOf('function');
   });
 
+  /// A class picked after `new` writes the call: the row says `ArrayList`, the buffer gets `ArrayList<>()`. If
+  /// this lost its `apply`, accepting would write the bare name again and every constructor would be typed by hand.
+  it('takes over the insertion for a class that is created, with or without a stop', () => {
+    const noArgs = toCompletion(item({ label: 'ArrayList', kind: 'class', insert_text: 'ArrayList<>()' }), 10);
+    expect(noArgs.label).toBe('ArrayList');
+    expect(noArgs.apply).toBeTypeOf('function');
+    const anonymous = toCompletion(
+      item({ label: 'Runnable', kind: 'interface', insert_text: 'Runnable() {}', snippet_stops: [{ start: 12, end: 12 }] }),
+      10,
+    );
+    expect(anonymous.apply).toBeTypeOf('function');
+  });
+
   /// A template with no tab stops at all is still a body that has to line up with the code it lands
   /// in — left to CodeMirror it arrives with every line after the first at column 0.
   it('takes over the insertion for a multi-line snippet with no stops', () => {
@@ -154,5 +167,15 @@ describe('the popup preview', () => {
   /// An ordinary completion inserts what its label says; a preview would be the same word twice.
   it('is absent for a row that inserts its own name', () => {
     expect(toCompletion(item({ insert_text: 'size()' }), 10).ghost).toBeUndefined();
+  });
+});
+
+describe('a row that names its own range', () => {
+  it('gets its own apply, because the word under the caret is not what it replaces', () => {
+    // a value inside a string, a dotted configuration key: `from` (the identifier before the caret) would be too short
+    const plain = toCompletion(item({ label: 'spring.datasource.url', insert_text: 'spring.datasource.url' }), 0);
+    const ranged = toCompletion(item({ label: 'spring.datasource.url', insert_text: 'spring.datasource.url', replace_start: 10, replace_end: 20 }), 0);
+    expect(plain.apply).toBeUndefined();
+    expect(typeof ranged.apply).toBe('function');
   });
 });

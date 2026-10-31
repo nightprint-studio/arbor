@@ -51,6 +51,7 @@ describe('smartToConfig', () => {
     context: false,
     statements: true,
     ghostText: false,
+    motion: true,
     strength: 175,
   };
 
@@ -67,6 +68,7 @@ describe('smartToConfig', () => {
       completion_smart_context: false,
       completion_smart_statements: true,
       completion_smart_ghost_text: false,
+      completion_motion: true,
       completion_smart_strength: 175,
     });
   });

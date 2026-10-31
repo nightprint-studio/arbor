@@ -25,6 +25,8 @@ export interface SmartCompletionSettings {
   statements: boolean;
   /** Draw the continuations that are certain as ghost text. */
   ghostText: boolean;
+  /** Fade the popup in and uncover ghost text as it appears. */
+  motion: boolean;
   /** How strongly the learned signals count, in percent of their designed weight. */
   strength: number;
 }
@@ -41,6 +43,7 @@ export const SMART_DEFAULTS: Readonly<SmartCompletionSettings> = {
   context: true,
   statements: true,
   ghostText: true,
+  motion: false,
   strength: 100,
 };
 
@@ -54,6 +57,7 @@ export type SmartConfigFields = Pick<
   | 'completion_smart_context'
   | 'completion_smart_statements'
   | 'completion_smart_ghost_text'
+  | 'completion_motion'
   | 'completion_smart_strength'
 >;
 
@@ -74,6 +78,7 @@ export function smartFromConfig(cfg: Partial<SmartConfigFields>): SmartCompletio
     context: cfg.completion_smart_context ?? SMART_DEFAULTS.context,
     statements: cfg.completion_smart_statements ?? SMART_DEFAULTS.statements,
     ghostText: cfg.completion_smart_ghost_text ?? SMART_DEFAULTS.ghostText,
+    motion: cfg.completion_motion ?? SMART_DEFAULTS.motion,
     strength: clampStrength(cfg.completion_smart_strength ?? SMART_DEFAULTS.strength),
   };
 }
@@ -88,6 +93,7 @@ export function smartToConfig(settings: SmartCompletionSettings): SmartConfigFie
     completion_smart_context: settings.context,
     completion_smart_statements: settings.statements,
     completion_smart_ghost_text: settings.ghostText,
+    completion_motion: settings.motion,
     completion_smart_strength: clampStrength(settings.strength),
   };
 }

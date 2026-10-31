@@ -26,7 +26,7 @@
 
 use bennu_java::prelude::{
     bound_overload, infer_node_type_cached, extract_symbols, method_admits_argc, parse_java,
-    FileSymbols, InferCache, Member, MemberKind, TypeResolver,
+    ClassMembers, FileSymbols, InferCache, Member, MemberKind, TypeRef, TypeResolver,
 };
 use tree_sitter::Node;
 
@@ -147,6 +147,193 @@ pub fn signature_at(
     })
 }
 
+/// What the argument at `offset` is passed as: its type, and the parameter's name when the callee carries one.
+#[derive(Debug, Clone)]
+pub(crate) struct ArgumentSlot {
+    pub(crate) ty: TypeRef,
+    pub(crate) name: Option<String>,
+}
+
+/// Whether the call the caret is in is surely closed right here: its `)` follows the caret on the same line.
+///
+/// A `)` further down is as likely the closer of the call AROUND this one — `Collections.addAll(a,⏎ Pair.of(|⏎ )` —
+/// and then the arguments written so far are only a start.
+pub(crate) fn closes_at_caret(source: &str, offset: usize) -> bool {
+    source.get(offset..).is_some_and(|rest| rest.trim_start_matches([' ', '\t']).starts_with(')'))
+}
+
+/// Whether `m` can still be the overload of a call with `wanted` arguments written so far. When more may follow (the
+/// caret is in the last argument and the call is not surely closed) an overload with MORE parameters is still in the
+/// running: `Pair.of(|` is `of(L, R)` as much as `of(Entry<L, R>)`.
+pub(crate) fn admits_so_far(m: &Member, wanted: usize, may_grow: bool) -> bool {
+    method_admits_argc(m, wanted) || (may_grow && m.params.len() >= wanted)
+}
+
+/// Every overload that admits the position of the argument at `offset`, as the slot it gives that argument. `closed` is
+/// whether the call is surely closed at the caret: see [`closes_at_caret`].
+fn slot_candidates(source: &str, offset: usize, resolver: &dyn TypeResolver, closed: bool) -> Vec<ArgumentSlot> {
+    // `f(a, |)` does not parse as an argument list, and the error recovery counts the arguments wrongly: a
+    // placeholder at the caret makes it one. The buffer as written is the fallback.
+    if source.is_char_boundary(offset) {
+        let repaired = format!("{}x{}", &source[..offset], &source[offset..]);
+        let slots = slot_candidates_in(&repaired, offset, resolver, closed);
+        if !slots.is_empty() {
+            return slots;
+        }
+    }
+    slot_candidates_in(source, offset, resolver, closed)
+}
+
+fn slot_candidates_in(source: &str, offset: usize, resolver: &dyn TypeResolver, closed: bool) -> Vec<ArgumentSlot> {
+    let Some(tree) = parse_java(source) else { return Vec::new() };
+    let root = tree.root_node();
+    let symbols = extract_symbols(source);
+    let cache = InferCache::new();
+    let Some(call) = enclosing_call(root, offset) else { return Vec::new() };
+    let Some(args) = call.child_by_field_name("arguments") else { return Vec::new() };
+    let Some((_, candidates)) = call_candidates(&call, &root, source, &symbols, resolver, &cache) else { return Vec::new() };
+    let active = active_argument(args, source, offset);
+    let count = argument_count(args);
+    let wanted = count.max(active + 1);
+    let may_grow = !closed && active + 1 >= count;
+    // The overloads whose arity admits the call as written so far; with the call half-written (`transfer(|`) none
+    // does, and every overload that has a parameter at this position is still in the running.
+    let admitting: Vec<&Member> = candidates.iter().filter(|m| admits_so_far(m, wanted, may_grow)).collect();
+    let pool: Vec<&Member> = if admitting.is_empty() { candidates.iter().filter(|m| m.params.len() > active).collect() } else { admitting };
+    pool.into_iter()
+        .filter_map(|m| {
+            let ty = m.params.get(active)?.clone();
+            let name = named_parameters(m).into_iter().nth(active).and_then(|(_, n)| n);
+            Some(ArgumentSlot { ty, name })
+        })
+        .collect()
+}
+
+/// The class a `Class<T>` argument must be a subtype of, when the callee bounds its type parameter (`<T extends ParserXml<X, Z>>
+/// … Class<T> parse_xml`): what is passed there is `Something.class` for a `Something` that implements the bound. `None` when the slot
+/// is not a `Class<T>` of every overload that admits it, or the type parameter has no bound the index can read.
+pub fn class_slot_bound(source: &str, offset: usize, resolver: &dyn TypeResolver) -> Option<TypeRef> {
+    if !source.is_char_boundary(offset) {
+        return None;
+    }
+    let repaired = format!("{}x{}", &source[..offset], &source[offset..]);
+    let tree = parse_java(&repaired)?;
+    let root = tree.root_node();
+    let symbols = extract_symbols(&repaired);
+    let cache = InferCache::new();
+    let call = enclosing_call(root, offset)?;
+    let args = call.child_by_field_name("arguments")?;
+    let (_, candidates) = call_candidates(&call, &root, &repaired, &symbols, resolver, &cache)?;
+    let active = active_argument(args, &repaired, offset);
+    let mut bound: Option<String> = None;
+    for m in candidates.iter().filter(|m| m.params.len() > active) {
+        let slot = &m.params[active];
+        if slot.binary_name != "java/lang/Class" {
+            return None;
+        }
+        let text = m.method_type_param_bound(&slot.type_args.first()?.binary_name)?;
+        let simple = text.split('<').next()?.trim().to_string();
+        if bound.as_ref().is_some_and(|b| *b != simple) {
+            return None;
+        }
+        bound = Some(simple);
+    }
+    let simple = bound?;
+    let binary = resolver.resolve_simple_name(&simple, &symbols.imports)?;
+    Some(TypeRef::simple(binary))
+}
+
+/// One overload of the callee, as an argument list: the type of each parameter and its name when the callee carries it.
+#[derive(Debug, Clone)]
+pub(crate) struct Overload {
+    pub(crate) params: Vec<(TypeRef, Option<String>)>,
+}
+
+/// The call whose parentheses the caret has just opened (`transfer(|`): every overload it could bind to, and whether
+/// the call is the whole of a statement (so that `);` closes it) or sits inside a bigger expression (`)` only).
+#[derive(Debug, Clone)]
+pub(crate) struct CallSite {
+    pub(crate) overloads: Vec<Overload>,
+    pub(crate) closes_statement: bool,
+}
+
+/// The call at `offset`, read off the buffer with its argument list made well-formed (`x);` after the caret).
+pub(crate) fn call_site(source: &str, offset: usize, resolver: &dyn TypeResolver) -> Option<CallSite> {
+    if !source.is_char_boundary(offset) {
+        return None;
+    }
+    let repaired = format!("{}x);{}", &source[..offset], &source[offset..]);
+    let tree = parse_java(&repaired)?;
+    let root = tree.root_node();
+    let symbols = extract_symbols(&repaired);
+    let cache = InferCache::new();
+    let call = enclosing_call(root, offset)?;
+    let (_, candidates) = call_candidates(&call, &root, &repaired, &symbols, resolver, &cache)?;
+    let overloads = candidates
+        .iter()
+        .map(|m| Overload {
+            params: m.params.iter().cloned().zip(named_parameters(m).into_iter().map(|(_, n)| n)).collect(),
+        })
+        .collect();
+    Some(CallSite { overloads, closes_statement: closes_a_statement(&call) })
+}
+
+/// Whether `call` is the entire expression of a statement: an expression statement, a declaration's initialiser, a
+/// `return`, or the right side of an assignment that is itself a statement. In any other place — an argument of another
+/// call, an operand, a condition — the line goes on after it and a `;` would be wrong.
+fn closes_a_statement(call: &Node) -> bool {
+    let Some(parent) = call.parent() else { return false };
+    match parent.kind() {
+        "expression_statement" | "return_statement" => true,
+        "variable_declarator" => parent.child_by_field_name("value").is_some_and(|v| v.id() == call.id()),
+        "assignment_expression" => {
+            parent.child_by_field_name("right").is_some_and(|v| v.id() == call.id())
+                && parent.parent().is_some_and(|p| p.kind() == "expression_statement")
+        }
+        _ => false,
+    }
+}
+
+/// The distinct types the argument at `offset` can take, among the overloads that admit its position — one type when
+/// the callee is not overloaded there (a builder's `type(…)`), several when overloads disagree. Empty outside a call
+/// or when the callee does not resolve.
+pub(crate) fn argument_slot_types(source: &str, offset: usize, resolver: &dyn TypeResolver) -> Vec<TypeRef> {
+    argument_slot_types_with(source, offset, resolver, closes_at_caret(source, offset))
+}
+
+/// [`argument_slot_types`] for a buffer whose closing parenthesis was added by the caller, which says whether the
+/// user's own text closes the call.
+pub(crate) fn argument_slot_types_with(source: &str, offset: usize, resolver: &dyn TypeResolver, closed: bool) -> Vec<TypeRef> {
+    let mut out: Vec<TypeRef> = Vec::new();
+    for slot in slot_candidates(source, offset, resolver, closed) {
+        if !out.iter().any(|o| o.binary_name == slot.ty.binary_name && o.dims == slot.ty.dims) {
+            out.push(slot.ty);
+        }
+    }
+    out
+}
+
+/// The one class the argument at `offset` takes when every overload that admits its position agrees — what ranks the
+/// type names in `list(C|)`: the parameter's own class leads, ahead of a name that merely starts alike. `None` for a
+/// primitive, an array, `Object` (which says nothing) and a slot the overloads disagree on.
+pub fn argument_expected_type(source: &str, offset: usize, resolver: &dyn TypeResolver) -> Option<TypeRef> {
+    match argument_slot_types(source, offset, resolver).as_slice() {
+        [t] if t.dims == 0 && t.binary_name != "java/lang/Object" && t.binary_name.contains('/') => Some(t.clone()),
+        _ => None,
+    }
+}
+
+/// The slot the argument at `offset` fills, when every overload that admits the position agrees on its type —
+/// with the first parameter name any of them carries. `None` when they disagree, or outside a resolvable call.
+pub(crate) fn argument_slot(source: &str, offset: usize, resolver: &dyn TypeResolver) -> Option<ArgumentSlot> {
+    let slots = slot_candidates(source, offset, resolver, closes_at_caret(source, offset));
+    let first = slots.first()?;
+    if slots.iter().any(|s| s.ty.binary_name != first.ty.binary_name || s.ty.dims != first.ty.dims) {
+        return None;
+    }
+    Some(ArgumentSlot { ty: first.ty.clone(), name: slots.iter().find_map(|s| s.name.clone()) })
+}
+
 /// The `[start, end)` span of each rendered parameter inside `label`.
 ///
 /// Found by scanning rather than recomputed, so the spans cannot drift from the text they index —
@@ -175,7 +362,7 @@ fn parameter_spans(label: &str, params: &[(String, String)]) -> Vec<(usize, usiz
 ///
 /// The argument list, not the call: with the caret on the receiver of `a.b(x)` you are not inside
 /// any argument list, and a strip about `b` would be about a call you have not started typing.
-fn enclosing_call<'t>(root: Node<'t>, offset: usize) -> Option<Node<'t>> {
+pub(crate) fn enclosing_call<'t>(root: Node<'t>, offset: usize) -> Option<Node<'t>> {
     let mut node = root.descendant_for_byte_range(offset, offset)?;
     loop {
         if matches!(node.kind(), "method_invocation" | "object_creation_expression") {
@@ -192,7 +379,7 @@ fn enclosing_call<'t>(root: Node<'t>, offset: usize) -> Option<Node<'t>> {
 }
 
 /// Every method the call could bind to, by name on the resolved receiver.
-fn call_candidates(
+pub(crate) fn call_candidates(
     call: &Node,
     root: &Node,
     source: &str,
@@ -203,17 +390,21 @@ fn call_candidates(
     let bytes = source.as_bytes();
     // `new Foo(…)` binds to a constructor, which the member model keeps under `<init>`.
     if call.kind() == "object_creation_expression" {
-        let ty = call.child_by_field_name("type")?;
-        let resolved = infer_node_type_cached(root, source, symbols, &ty, resolver, cache)?;
+        // The creation expression itself: it is typed (generic arguments included), where the bare type node is not an
+        // expression and used to come back unresolved, which left every constructor argument slot unanswered.
+        let resolved = infer_node_type_cached(root, source, symbols, call, resolver, cache)?;
         let cm = resolver.members_of(&resolved.binary_name)?;
         // `new Box<Order>(…)` takes an `Order`, not a `T` — the arguments are written right there.
-        let ctors = non_empty(
-            cm.methods
-                .iter()
-                .filter(|m| m.name == "<init>")
-                .map(|m| substituted(m, &cm.type_params, &resolved.type_args))
-                .collect(),
-        )?;
+        let mut ctors: Vec<Member> = cm
+            .methods
+            .iter()
+            .filter(|m| m.name == "<init>")
+            .map(|m| substituted(m, &cm.type_params, &resolved.type_args))
+            .collect();
+        if ctors.is_empty() && has_implicit_constructor(&cm) {
+            ctors.push(Member::method("<init>", TypeRef::simple("void"), Vec::new()));
+        }
+        let ctors = non_empty(ctors)?;
         return Some((resolved.binary_name, ctors));
     }
     let name_node = call.child_by_field_name("name")?;
@@ -221,7 +412,9 @@ fn call_candidates(
 
     // An unqualified call is on the enclosing type; a qualified one on whatever the receiver is.
     let owner = match call.child_by_field_name("object") {
-        Some(recv) => infer_node_type_cached(root, source, symbols, &recv, resolver, cache)?,
+        // a value, or else a class name: `Collections.addAll(…)` is a static call on the type
+        Some(recv) => infer_node_type_cached(root, source, symbols, &recv, resolver, cache)
+            .or_else(|| bennu_java::prelude::type_receiver_cached(root, source, symbols, &recv, resolver, cache))?,
         None => {
             let binary = bennu_java::prelude::enclosing_type_binary(source, call.start_byte())?;
             bennu_java::prelude::TypeRef::simple(binary)
@@ -235,6 +428,14 @@ fn call_candidates(
         .map(|t| t.binary_name)
         .unwrap_or(owner.binary_name);
     non_empty(out).map(|ms| (declared_on, ms))
+}
+
+/// Whether `new Foo(` has a constructor nobody wrote: the no-argument one the compiler adds to a concrete class that
+/// declares none. Not for an interface, an abstract class, an enum or a record (its canonical one is modelled), and
+/// not for a type with members the index cannot see — a generated constructor may be among them.
+fn has_implicit_constructor(cm: &ClassMembers) -> bool {
+    let f = &cm.flags;
+    !(f.is_interface || f.is_abstract || f.is_enum || f.is_annotation || f.is_record || f.has_hidden_members)
 }
 
 fn non_empty(v: Vec<Member>) -> Option<Vec<Member>> {
@@ -292,7 +493,7 @@ fn substituted(m: &Member, params: &[String], args: &[bennu_java::prelude::TypeR
 }
 
 /// How many arguments the list holds — 0 for an empty one.
-fn argument_count(args: Node) -> usize {
+pub(crate) fn argument_count(args: Node) -> usize {
     let mut c = args.walk();
     args.named_children(&mut c).filter(|n| !is_trivia(*n)).count()
 }
@@ -302,7 +503,7 @@ fn argument_count(args: Node) -> usize {
 /// Counted over the source text rather than the tree because a list being typed is a broken tree —
 /// `f(a, ` has no second argument node for the caret to be inside of, and that is exactly the
 /// moment the strip has to move the mark along.
-fn active_argument(args: Node, source: &str, offset: usize) -> usize {
+pub(crate) fn active_argument(args: Node, source: &str, offset: usize) -> usize {
     let start = args.start_byte() + 1;
     let end = offset.min(args.end_byte());
     if end <= start {
@@ -634,6 +835,56 @@ fn first_use<'t>(body: &Node<'t>, source: &str, name: &str) -> Option<Node<'t>> 
         }
     }
     best
+}
+
+/// Where the caret is in a call's argument list: the callee's simple name (`filter`; `new Foo` for a constructor), the
+/// index of the argument the caret is in, and the byte offset where that argument starts. The call may be unfinished
+/// (`list.filter(Boo|`): the buffer is repaired the ways an editor leaves it — a missing `)`, a missing `);`.
+/// `None` outside a call's parentheses. Built for the argument habits, which need nothing of the callee but its name.
+pub fn call_site_name_and_index(source: &str, offset: usize) -> Option<(String, usize, usize)> {
+    let mut offset = offset.min(source.len());
+    while offset > 0 && !source.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    let (head, tail) = source.split_at(offset);
+    // as written, then with the closers an unfinished call lacks; the placeholder keeps `f(a, |)` an argument list
+    for repaired in [source.to_string(), format!("{head}x){tail}"), format!("{head}x);{tail}"), format!("{head}x));{tail}")] {
+        let Some(tree) = parse_java(&repaired) else { continue };
+        let root = tree.root_node();
+        let Some(call) = enclosing_call(root, offset) else { continue };
+        let Some(args) = call.child_by_field_name("arguments") else { continue };
+        let name = match call.kind() {
+            "method_invocation" => call.child_by_field_name("name").and_then(|n| n.utf8_text(repaired.as_bytes()).ok()).map(str::to_string),
+            _ => call.child_by_field_name("type").and_then(|t| t.utf8_text(repaired.as_bytes()).ok()).map(|t| format!("new {}", t.split('<').next().unwrap_or(t).trim())),
+        };
+        let Some(name) = name else { continue };
+        // the argument starts after the last top-level comma (or the `(`) before the caret
+        let from = args.start_byte() + 1;
+        let (mut depth, mut start) = (0i32, from);
+        let mut chars = repaired[from..offset.max(from)].char_indices();
+        while let Some((i, ch)) = chars.next() {
+            match ch {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                '"' | '\'' => {
+                    let mut escaped = false;
+                    for (_, c) in chars.by_ref() {
+                        if escaped {
+                            escaped = false;
+                        } else if c == '\\' {
+                            escaped = true;
+                        } else if c == ch {
+                            break;
+                        }
+                    }
+                }
+                ',' if depth == 0 => start = from + i + 1,
+                _ => {}
+            }
+        }
+        return Some((name, active_argument(args, &repaired, offset), start));
+    }
+    None
 }
 
 #[cfg(test)]

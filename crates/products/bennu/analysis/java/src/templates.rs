@@ -92,6 +92,85 @@ pub const TEMPLATES: &[Template] = &[
     Template { abbrev: "thr", body: "throw new $0", detail: "throw new" },
 ];
 
+/// What an abbreviation expands to, which decides where it can be written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// A modifier run or a method of a type's body: `psf`, `psvm`.
+    Member,
+    /// One or more statements of a method body: `sout`, `fori`.
+    Statement,
+}
+
+impl Template {
+    /// Where the expansion is valid Java.
+    pub fn place(&self) -> Place {
+        match self.abbrev {
+            "sout" | "souf" | "serr" | "fori" | "ifn" | "inn" | "thr" => Place::Statement,
+            _ => Place::Member,
+        }
+    }
+}
+
+/// Where the word being typed stands, as far as an abbreviation is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaretPlace {
+    /// The first word of a member of a type's body.
+    Member,
+    /// The first word of a statement.
+    Statement,
+    /// Anywhere else: inside an expression, after a type, after a `.` — where no abbreviation can be written.
+    Elsewhere,
+}
+
+/// Where the word that starts at `word_start` stands.
+///
+/// A word opens a member or a statement after `;`, `{`, `}`, a closing `)` (the header of an `if`, an annotation's
+/// arguments), `else`, or an annotation line of its own — and only there. After an operator, an opening parenthesis, a
+/// comma, a `.`, `return`, `new` or a type name it is part of an expression or a declaration, and `sout` offered there
+/// is a row that cannot be accepted.
+pub fn caret_place(source: &str, word_start: usize) -> CaretPlace {
+    let before = source.get(..word_start).unwrap_or("").trim_end();
+    let after_annotation_line = || {
+        let line = before.rsplit('\n').next().unwrap_or("").trim_start();
+        line.starts_with('@') && !line.contains(' ')
+    };
+    let opens = before.is_empty()
+        || before.ends_with([';', '{', '}', ')'])
+        || before.ends_with("else")
+        || after_annotation_line();
+    if !opens {
+        return CaretPlace::Elsewhere;
+    }
+    // Only what stands before the word says which scope it is in. Read it as a complete file: a word typed in an
+    // unfinished buffer would otherwise land in whatever the parser's error recovery made of the open braces.
+    let head = source.get(..word_start).unwrap_or("");
+    let open = head.matches('{').count().saturating_sub(head.matches('}').count());
+    let closed = format!("{head}x;{}", "}".repeat(open));
+    let Some(tree) = crate::prelude::parse_java(&closed) else { return CaretPlace::Elsewhere };
+    let node = tree.root_node().descendant_for_byte_range(word_start, word_start);
+    match node.map(inside_a_body) {
+        Some(true) => CaretPlace::Statement,
+        _ => CaretPlace::Member,
+    }
+}
+
+/// Whether `node` is inside code that runs — a block, a switch body, an initializer — rather than directly in a type's
+/// body, where a statement cannot start.
+pub fn inside_a_body(node: tree_sitter::Node<'_>) -> bool {
+    let mut current = Some(node);
+    while let Some(n) = current {
+        match n.kind() {
+            "block" | "switch_block" | "constructor_body" | "static_initializer" => return true,
+            "class_body" | "interface_body" | "enum_body" | "enum_body_declarations" | "annotation_type_body" | "program" => {
+                return false
+            }
+            _ => {}
+        }
+        current = n.parent();
+    }
+    false
+}
+
 /// The templates whose abbreviation starts with `prefix`, in table order.
 ///
 /// An **empty prefix yields nothing**, and that is the rule that keeps this from being noise: the
@@ -109,6 +188,39 @@ pub fn matching(prefix: &str) -> Vec<&'static Template> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn place(marked: &str) -> CaretPlace {
+        let at = marked.find('|').expect("a caret");
+        caret_place(&marked.replace('|', ""), at)
+    }
+
+    #[test]
+    fn a_statement_opens_in_a_body_and_a_member_in_a_type() {
+        assert_eq!(place("class A {\n    void f() {\n        |\n    }\n}"), CaretPlace::Statement);
+        assert_eq!(place("class A {\n    void f() {\n        int x = 1;\n        |\n    }\n}"), CaretPlace::Statement);
+        assert_eq!(place("class A {\n    void f() {\n        if (x) |\n    }\n}"), CaretPlace::Statement);
+        assert_eq!(place("class A {\n    |\n}"), CaretPlace::Member);
+        assert_eq!(place("class A {\n    int x;\n    |\n}"), CaretPlace::Member);
+        assert_eq!(place("class A {\n    @Autowired\n    |\n}"), CaretPlace::Member);
+    }
+
+    #[test]
+    fn inside_an_expression_or_after_a_type_there_is_no_place() {
+        assert_eq!(place("class A {\n    void f() {\n        foo(|\n    }\n}"), CaretPlace::Elsewhere);
+        assert_eq!(place("class A {\n    void f() {\n        int x = |\n    }\n}"), CaretPlace::Elsewhere);
+        assert_eq!(place("class A {\n    void f() {\n        return |\n    }\n}"), CaretPlace::Elsewhere);
+        assert_eq!(place("class A {\n    void f() {\n        String |\n    }\n}"), CaretPlace::Elsewhere);
+        assert_eq!(place("class A {\n    void f() {\n        a.|\n    }\n}"), CaretPlace::Elsewhere);
+    }
+
+    #[test]
+    fn each_template_belongs_to_one_place() {
+        let place_of = |a: &str| TEMPLATES.iter().find(|t| t.abbrev == a).map(Template::place);
+        assert_eq!(place_of("sout"), Some(Place::Statement));
+        assert_eq!(place_of("fori"), Some(Place::Statement));
+        assert_eq!(place_of("psvm"), Some(Place::Member));
+        assert_eq!(place_of("psf"), Some(Place::Member));
+    }
 
     #[test]
     fn a_prefix_offers_its_family_with_the_bare_one_first() {

@@ -24,6 +24,8 @@
 
   import { bennuOnboardingStore } from '$lib/stores/bennu/onboarding.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { keybindingsStore } from '$lib/stores/keybindings.svelte';
+  import { formatBinding } from '$lib/utils/keybindings';
 
   const STEPS: OnboardingStep[] = [
     { id: 'welcome',  label: 'Welcome'   },
@@ -232,7 +234,7 @@
             </IconCard>
           </li>
           <li>
-            <IconCard size="sm" title="Talk to it" description="Hold Ctrl+Shift+Space and speak, or say “Ehi Imber” if you turn the wake word on. Speech is recognised on this computer.">
+            <IconCard size="sm" title="Talk to it" description="Hold {formatBinding(keybindingsStore.getBinding('voice_push_to_talk'))} and speak, or say “Ehi Imber” if you turn the wake word on. Speech is recognised on this computer.">
               {#snippet icon()}<Mic size={16} />{/snippet}
             </IconCard>
           </li>

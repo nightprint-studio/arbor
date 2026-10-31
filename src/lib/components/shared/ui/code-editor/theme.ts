@@ -61,6 +61,22 @@ export const lezerHighlightStyle = HighlightStyle.define([
 /** The Lezer syntax-highlighting extension (add once to the base editor set). */
 export const codeEditorHighlightStyle = syntaxHighlighting(lezerHighlightStyle);
 
+/** The side padding of a line-number cell (`padding: 0 8px 0 14px` in the theme below), which the width reserved for the
+ *  digits has to sit on top of. */
+const LINE_NUMBER_PADDING_PX = 8 + 14;
+
+/** The least width a line-number cell takes so that `digits` digits always fit: the gutter is then as wide for a
+ *  9-line file as for a 9,999-line one, and never moves when the count crosses a power of ten. */
+export function stableLineNumberWidth(digits = 4): string {
+  return `calc(${Math.max(2, Math.floor(digits))}ch + ${LINE_NUMBER_PADDING_PX}px)`;
+}
+
+/** The line-number gutter at a width that does not depend on the file — see {@link stableLineNumberWidth}. Cells are
+ *  border-box, so the padding is part of the figure. */
+export function stableGutterTheme() {
+  return EditorView.theme({ '.cm-lineNumbers .cm-gutterElement': { minWidth: stableLineNumberWidth(4) } });
+}
+
 export const codeEditorTheme = EditorView.theme(
   {
     '&': {

@@ -40,6 +40,8 @@ fn set_bennu_config(_state: &BennuState, mut config: BennuConfig) -> Result<(), 
     crate::index_service::refresh_import_census_setting();
     // Same reasoning for the smart-ranking switches and their strength.
     crate::completion_tuning::apply_completion_tuning(&config);
+    // The model suggestions' switches live in the same hot copy for the same reason.
+    crate::flc::apply_flc_settings(&config);
     Ok(())
 }
 

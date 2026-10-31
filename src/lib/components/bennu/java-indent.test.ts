@@ -172,3 +172,36 @@ describe('outside code', () => {
     expect(javaLineBreak('    /** doc', '', STYLE)).toBeNull();
   });
 });
+
+describe('parentheses', () => {
+  it('opens an auto-closed pair: the caret line continues, the closer gets a line of its own', () => {
+    expect(enter('    service.call(|)')).toBe('    service.call(\n            |\n    )');
+    expect(enter('    service.call(|);')).toBe('    service.call(\n            |\n    );');
+    expect(enter('    void m(|) {')).toBe('    void m(\n            |\n    ) {');
+  });
+
+  it('continues two levels in after an opening paren with the closer elsewhere', () => {
+    expect(enter('    service.call(|')).toBe('    service.call(\n            |');
+  });
+
+  it('keeps square brackets as they were', () => {
+    expect(enter('    int[] a = new int[|]')).toBe('    int[] a = new int[\n    |]');
+  });
+
+  it('lines up under the argument line above when it is indented deeper than the opener', () => {
+    expect(enter('    foo(a,\n        b,|')).toBe('    foo(a,\n        b,\n        |');
+    expect(enter('    foo(\n            a,\n            b,|')).toBe('    foo(\n            a,\n            b,\n            |');
+  });
+
+  it('falls back to the continuation when the line above is the opener\'s own', () => {
+    expect(enter('    foo(a,|')).toBe('    foo(a,\n            |');
+  });
+
+  it('does not take a lambda\'s closing line as the place for the next argument', () => {
+    expect(enter('    foo(x -> {\n        body();\n    },|')).toBe('    foo(x -> {\n        body();\n    },\n            |');
+  });
+
+  it('does not line up under a line that is not deeper than the opener', () => {
+    expect(enter('    foo(a,\nb,|')).toBe('    foo(a,\nb,\n            |');
+  });
+});

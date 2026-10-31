@@ -49,7 +49,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bennu_java::prelude::{ClassMembers, Member, MemberKind, TypeRef, TypeResolver, Visibility};
+use bennu_java::prelude::{is_primitive, ClassMembers, Member, MemberKind, TypeRef, TypeResolver, Visibility};
 use bennu_proto::prelude::MemberOrigin;
 
 use crate::affinity::name_affinity;
@@ -350,6 +350,15 @@ impl Context {
             && arguments_agree(&expected.type_args, &produced.type_args)
     }
 
+    /// Whether `expected` is an array of `Object` or of a bare type variable (`T...` of
+    /// `Collections.addAll`) and `produced` is an array of references: arrays are covariant, so any
+    /// reference array fits — which `wants`, comparing names, would never say.
+    fn is_open_array_of(&self, expected: &TypeRef, produced: &TypeRef) -> bool {
+        let open = expected.binary_name == OBJECT || is_type_variable_name(&expected.binary_name);
+        open && expected.dims > 0
+            && (produced.dims > expected.dims || (produced.dims == expected.dims && !is_primitive(&produced.binary_name)))
+    }
+
     /// How well a candidate producing `produced` fits the position — see [`Fit`].
     ///
     /// A subtype is found by walking UP from what is produced, through `resolver`, and remembered
@@ -362,6 +371,9 @@ impl Context {
         };
         if self.wants(produced) {
             return Fit::Exact;
+        }
+        if self.is_open_array_of(expected, produced) {
+            return Fit::Subtype;
         }
         let walkable = expected.dims == produced.dims
             && expected.binary_name != OBJECT

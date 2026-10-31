@@ -13,7 +13,7 @@
  */
 
 import { EditorView, Decoration, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
-import { RangeSetBuilder, type Extension, type Line } from '@codemirror/state';
+import { RangeSetBuilder, type EditorState, type Extension, type Line } from '@codemirror/state';
 import { RAINBOW_COLORS } from './rainbow-brackets';
 
 /** Left padding of `.cm-line` in the shared theme (the gap before the first glyph). Guides are
@@ -117,6 +117,7 @@ const guideTheme = EditorView.baseTheme({
 const MAX_LINES = 20_000;
 
 export function indentGuides(): Extension {
+  const lineOfCaret = (state: EditorState) => state.doc.lineAt(state.selection.main.head).number;
   const plugin = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
@@ -129,7 +130,10 @@ export function indentGuides(): Extension {
       }
       update(u: ViewUpdate) {
         if (u.docChanged) this.depths = documentDepths(u.view, u.view.state.tabSize);
-        if (u.docChanged || u.viewportChanged || u.geometryChanged || u.selectionSet) {
+        // A caret move only matters when it changes the line: the guides highlight the caret's block,
+        // so dragging a selection along one line must not rebuild them on every mouse move.
+        const caretLineMoved = u.selectionSet && lineOfCaret(u.startState) !== lineOfCaret(u.state);
+        if (u.docChanged || u.viewportChanged || u.geometryChanged || caretLineMoved) {
           this.decorations = this.build(u.view);
         }
       }

@@ -1204,6 +1204,9 @@
     'unresolved-symbol', 'unresolved-call', 'unresolved-type', 'unresolved-import',
     'unresolved-super-method', 'unknown-member', 'unknown-field', 'unknown-enum-case-label',
   ]);
+  // Declared here, ahead of `allDiags` that reads it; the effect that fills it is further down, beside the
+  // native-SQL comment that explains it.
+  let nativeSqlDiags = $state<EditorDiagnostic[]>([]);
   const allDiags = $derived(
     [...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags, ...advisoryDiags, ...nativeSqlDiags]
       .map((d) => (d.code && UNDEFINED_NAME_CODES.has(d.code) ? { ...d, emphasis: 'text' as const } : d)),
@@ -3082,7 +3085,6 @@
   // rejection of a string (a column that is not there, a join on nothing) lands as a red squiggle at the
   // place it names, in the string. Only with a connection open; it asks again only about the string an
   // edit touched, and stays silent when it cannot ask.
-  let nativeSqlDiags = $state<EditorDiagnostic[]>([]);
   $effect(() => {
     const path = activePath;
     const lower = path?.toLowerCase() ?? '';
@@ -5488,6 +5490,8 @@
           wrap={bennuSettingsStore.wordWrap}
           showWhitespace={bennuSettingsStore.showWhitespace}
           lineNumbers={bennuSettingsStore.showLineNumbers}
+          problemMarkers={bennuSettingsStore.showProblemMarkers}
+          stableGutter
           highlightActiveLine={bennuSettingsStore.highlightCurrentLine}
           folding={bennuSettingsStore.foldingEnabled}
           foldBlockComments={bennuSettingsStore.foldBlockComments}
@@ -5495,6 +5499,7 @@
             autoPopup: bennuSettingsStore.autoPopup,
             delayMs: bennuSettingsStore.popupDelayMs,
             caseSensitive: bennuSettingsStore.caseSensitive,
+            animate: bennuSettingsStore.smart.motion,
           }}
           tabSize={bennuSettingsStore.tabSize}
           indentUnit={bennuSettingsStore.indentStyle === 'tabs' ? '\t' : ' '.repeat(bennuSettingsStore.tabSize)}

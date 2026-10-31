@@ -30,13 +30,13 @@
   import {
     Settings, Coffee, TextCursorInput, ListTree, Bug, FoldVertical, Braces, RotateCcw, Wand2,
     ServerCog, Monitor, Sparkles, Command, Terminal, Beaker, FileCode2, Save, Boxes, Workflow,
-    FileStack, CaseSensitive, SpellCheck, Mic,
+    FileStack, CaseSensitive, SpellCheck, Mic, Brain, Ghost,
   } from 'lucide-svelte';
   import VoiceSettings from '$lib/components/shared/internal/VoiceSettings.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
-  import SettingsShell, { type SettingsNavGroup } from '$lib/components/shared/ui/SettingsShell.svelte';
+  import SettingsShell, { type SettingsNavGroup, type SettingsNavItem } from '$lib/components/shared/ui/SettingsShell.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
   import AppearanceSettings from '$lib/components/shared/internal/AppearanceSettings.svelte';
@@ -49,6 +49,9 @@
   import BennuEditorSettings from './settings/BennuEditorSettings.svelte';
   import BennuFilesSettings from './settings/BennuFilesSettings.svelte';
   import BennuCompletionSettings from './settings/BennuCompletionSettings.svelte';
+  import BennuCompletionSmartSettings from './settings/BennuCompletionSmartSettings.svelte';
+  import BennuCompletionGhostSettings from './settings/BennuCompletionGhostSettings.svelte';
+  import BennuCompletionLearningSettings from './settings/BennuCompletionLearningSettings.svelte';
   import BennuAssistantSettings from './settings/BennuAssistantSettings.svelte';
   import BennuFoldingSettings from './settings/BennuFoldingSettings.svelte';
   import BennuJavaSettings from './settings/BennuJavaSettings.svelte';
@@ -143,7 +146,12 @@
     ] },
     { label: 'Editor', items: [
       { id: 'editor', label: 'Editor', icon: TextCursorInput, children: [
-        { id: 'completion', label: 'Completion', icon: ListTree },
+        // A parent that is a page of its own (the popup) and splits into what orders it, the grey line, and what is learned
+        { id: 'completion', label: 'Completion', icon: ListTree, children: [
+          { id: 'completion-smart', label: 'Smart suggestions', icon: Sparkles },
+          { id: 'completion-ghost', label: 'Ghost text', icon: Ghost },
+          { id: 'completion-learning', label: 'Learning', icon: Brain },
+        ] },
         { id: 'folding',    label: 'Folding',    icon: FoldVertical },
         { id: 'files',      label: 'Files',      icon: Save },
         // Both have a per-project counterpart, and both are here because the answer is yours
@@ -209,7 +217,8 @@
   // A page that just disappeared (the project switched to Cargo while it was open) would leave the
   // shell on something with no nav entry. Fall back to the Editor.
   $effect(() => {
-    const ids = groups.flatMap((g) => g.items.flatMap((i) => [i.id, ...(i.children ?? []).map((c) => c.id)]));
+    const idsOf = (items: SettingsNavItem[]): string[] => items.flatMap((i) => [i.id, ...idsOf(i.children ?? [])]);
+    const ids = groups.flatMap((g) => idsOf(g.items));
     if (!ids.includes(active)) active = 'editor';
   });
 </script>
@@ -241,6 +250,12 @@
         <BennuFilesSettings />
       {:else if active === 'completion'}
         <BennuCompletionSettings />
+      {:else if active === 'completion-smart'}
+        <BennuCompletionSmartSettings />
+      {:else if active === 'completion-ghost'}
+        <BennuCompletionGhostSettings />
+      {:else if active === 'completion-learning'}
+        <BennuCompletionLearningSettings />
       {:else if active === 'assistant'}
         <BennuAssistantSettings />
       {:else if active === 'voice'}

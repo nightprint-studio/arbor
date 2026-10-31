@@ -63,7 +63,14 @@
     name you use constantly. It lives for the session and is never written to disk — a persisted ranking that drifted would be invisible.</li>
   <li><strong>What the receiver is.</strong> After a <em>type</em> — <code>Color.</code> — the statics are the answer and a constant goes to
     the very top, instance members to the bottom. Through a <em>value</em> — <code>color.</code> — the other way round, more gently: a
-    static through an instance compiles, it is just rarely meant.</li>
+    static through an instance compiles, it is just rarely meant. After a type the popup also offers <code>class</code> — <code>Order.class</code>
+    — which no class declares but every type has; where a <code>Class&lt;…&gt;</code> is wanted it ranks first. The same goes for what the
+    language gives without declaring it: an array offers <code>length</code> and <code>clone()</code> (and the methods of <code>Object</code>,
+    not those of its element type); a class name you are inside of offers <code>this</code> and <code>super</code>
+    (<code>Outer.this</code>), and a direct superinterface offers <code>super</code> (<code>Iface.super.run()</code>); and
+    <code>new Foo(</code> on a class with no constructors shows the empty one. Inside a lambda, an argument that nothing of a known
+    type fits is drawn as the lambda's own parameter (<code>x -&gt; tag(</code> → <code>x</code>); a parameter starting with
+    <code>_</code> is never used.</li>
   <li><strong>Deprecated.</strong> Still offered, since you may be reading old code, but last — on your own source, since library members
     carry no annotations in compiled form.</li>
   <li><strong>What this file already uses.</strong> A name already in the buffer is likely wanted again. It decides between otherwise-equal
@@ -101,6 +108,63 @@
   Keywords come below anything the index resolved. Words <em>scraped from the buffer</em> are offered only when the index answered nothing —
   before it finished building, or in a file no project owns: they are a regular expression over the text, and beside resolved names they bury
   them under look-alikes. How well what you typed matches still decides between neighbours.
+</p>
+
+<h3>Finishing the line</h3>
+<p>
+  Beside the popup, Bennu can draw the <strong>rest of the line</strong> in grey after the caret: <kbd>Tab</kbd> writes it, <kbd>Esc</kbd> dismisses it.
+  It has several sources, and all but the last need no model.
+</p>
+<dl class="meta-grid">
+  <dt>Log statements</dt>
+  <dd>The project's log calls are counted once, in the background, as a counter per <em>pattern</em> — never a list of the calls. A pattern is the level
+    plus a template in which the logger, the method's name and parameters, and the caught exception are slots, and a counter is kept for the three
+    places a log goes: the first statement of a method, inside a <code>catch</code>, anywhere else. Start a log call and, when one pattern clearly leads
+    its place, the rest of the statement is drawn with the slots filled from your method: <code>log.debug("START - rename(&#123;&#125;, &#123;&#125;)", from, to);</code>.
+    A project with no house style gets nothing. A saved file replaces its own contribution, so counters follow the code. The counters are saved in your Arbor data folder (templates and logger names only, never source) and updated when <code>.java</code> files change on disk while the project tree is open.</dd>
+  <dt>Lines the project repeats</dt>
+  <dd>Lines that at least two files write alike are remembered (the text of those only, in memory, never on disk). When the start of your line is
+    one that other files all finish the same way — at least two files, and four in five of the continuations agree — the rest is drawn from them,
+    ahead of the model: <code>return repository.findOr</code> ends the way the project always ends it. Your own file does not count in its own favour,
+    and a saved file replaces what it contributed. It is part of the same switches as the log statements and the model.</dd>
+  <dt>The body of a sibling method</dt>
+  <dd>After the <code>&#123;</code> of a method (or on the empty line below it), if another method has a similar name and the same parameters, its body is drawn with the words that differ replaced
+    (<code>findByCodiceCliente</code> → <code>findByCodiceFornitore</code>, in names, parameters and types). It is held in memory only and never saved. If the new body would use a name that
+    exists nowhere in the project, it is not drawn.</dd>
+  <dt>Annotations the project always writes</dt>
+  <dd>At the start of a member, after <code>@PostMapping(</code>, the arguments the project writes for that annotation are drawn (the text of the strings left empty), without the elements you already typed; on the empty line under an annotation, the annotation that usually comes next is drawn in the layout the project uses. Held in memory only, never saved, and only when at least three uses agree to the tune of 60%.</dd>
+  <dt>The usual argument</dt>
+  <dd>In a call's parentheses, when other files always pass the same argument at that place (at least three, and most of them), its text is drawn after the caret, or completes what you have typed
+    (<code>filter(Boo</code> → <code>Boolean.FALSE::equals</code>), and the completion list puts it first. A local variable or parameter inside the argument is not part of the habit: <code>new Factory().create(v1)</code> and <code>new Factory().create(v2)</code> are counted as one, <code>new Factory().create($0:Order)</code> (the slot is the variable's declared type), and drawn with the nearest variable in scope of that type; with none, nothing is drawn. The <em>What Bennu has learned</em> window shows the template, and hiding a row hides the template. Held in memory only, never saved. Where the parameter is a type variable (<code>.field(helper(</code> with <code>&lt;T&gt; Matcher&lt;T&gt; helper(T value)</code>), the call around it decides what <code>T</code> is: a usual argument of another type (a constant of the wrong enum) is not offered, and when nothing settles <code>T</code> it is drawn fainter and listed after the other rows.</dd>
+  <dt>What you pick</dt>
+  <dd>After a type (<code>list.</code>) or in an argument of a call, the entries you chose at least twice there are put first in the list, the one you chose most often preselected when it was at least three picks and half of them.
+    Only the names and the counts are kept, in your Arbor data folder; the switch is <em>Count how often suggestions are taken</em>, and <em>Forget</em> deletes them.</dd>
+  <dt>What Bennu remembers</dt>
+  <dd>Argument habits, annotation shapes and variable names are saved per project in your Arbor data folder (short pieces of code, never in a repository, never sent anywhere), and where a project has seen too little they
+    can be borrowed from your other projects. Two switches in Settings → Completion turn the two parts off, and <em>Forget</em> deletes everything. Where two variables fit an argument equally, the one your project usually passes
+    at that place is drawn.</dd>
+  <dt>Argument lists</dt>
+  <dd>Right after the <code>(</code> of a call, the arguments are drawn all at once when each parameter has a clear match among the names in scope (same type, a name like the
+    parameter's, or the only name of that type) or a clear constant of its enum. A parameter nothing in scope fits gets a value that merely compiles (<code>null</code>, <code>0</code>, <code>false</code>, <code>""</code>) as long as at least one other parameter has a real match. When several names fit a parameter equally (two variables of the same type, a parameter that resembles neither), the one declared first is drawn as a guess. With the editor's own <code>)</code> already
+    there, only the arguments are drawn.</dd>
+  <dt>The local model</dt>
+  <dd>A small model that runs on your machine, in the background, and answers nothing while it is busy or still loading. After a <code>.</code> it is
+    constrained to the member names the index offers there, so it cannot invent one. It is a guess, so it is <strong>off until you turn it on</strong>.
+    It stays silent after a finished annotation, statement or block, and a line that is only a type (<code>Order</code>, <code>final List&lt;Item&gt;</code>)
+    gets a variable name (<code>order</code>, <code>items</code>) instead of a call. A line that names a type, method or variable the file and
+    project do not have, a ternary, or a continuation that is not a real word is thrown away, and a missing space after <code>=</code>, <code>return</code> or <code>if</code> is added.
+    The word you are typing is not shown to the model but forced as the start of its answer, so a half-typed word does not confuse it,
+    and a new line under an unfinished call chain (a builder) gets the next step without typing anything.
+    A declaration is never offered where an argument goes, and a member the receiver does not have (a builder method after
+    <code>.build()</code>, a method an <code>&amp;&amp;</code> operand does not have) is checked against the index: the suggestion is cut before it, or dropped.
+    While the model writes a chain, the name after each dot is limited to what the receiver written so far has, so a method that does not exist is not written in the first place.
+    While the completion list is open, the selected row shows what it adds in grey, so a list with one obvious row still shows its outcome.</dd>
+</dl>
+<p>
+  Settings → Completion → <strong>Model suggestions</strong> has the switch, the folder with the model files (a personal copy there gives you a model
+  adapted to your own code), how sure the model has to be before it is drawn, a switch for the log statements, <strong>Count how often suggestions are taken</strong> (only how many suggestions of each kind were shown, taken with Tab and dismissed, per confidence level, in your profile; no code is stored and nothing is sent: when the model's suggestions are taken at least half the time above some confidence, the page offers that value and changes it only when you press the button), <em>What Bennu has learned…</em> (command palette, or the <strong>Open…</strong> button in Settings › Completion › Learning) lists what the completion counted and lets you stop offering a row or forget a counter of your own. Where a parameter is a <code>Class&lt;T&gt;</code> the list opens on the usual classes already written as <code>String.class</code>, and on the project's implementors where <code>T</code> is bounded; after a comma, the remaining arguments are drawn by their types. Where a call always takes a call on some variable (<code>new ByteArrayInputStream(bao.toByteArray())</code>), the ghost text draws it with the nearest variable in scope that has that method. On an empty line, after a statement the project always follows the same way, the start of the usual next call is drawn (<code>jaxb_processor.marshal(</code>); only the start, since the arguments are filled by the other layers. <strong>Remember what Bennu learned in each project</strong> also lets suggestions follow how the project is laid out: the space after <code>if</code>/<code>for</code>, before a brace and after a comma are measured from its files and used where the project is consistent, never inside string literals. <strong>Ignore commented-out code</strong> (off by default: blocks of code in <code>//</code> lines are left out of what the model reads, so it does not copy a version you commented out; explanations in comments are still read), Where a project creates the same type under a name nearly every time (<code>bao</code> is always a <code>ByteArrayOutputStream</code>), writing <code>val bao</code> draws the rest of the statement, and the popup after <code>new</code> lists that type first; it is listed under <em>Types by variable name</em> in <em>What Bennu has learned…</em>. <strong>Learn from corrections</strong> (off by default: after you take a suggestion it notes whether you left it, cut its tail, wrote on, changed a part, only re-lay it out — spaces, line breaks, indentation, which is not a change of content — or took it back, once you have moved on; a part you change and put back as it was counts as left alone; counters per kind of suggestion, in your profile, nothing sent; a kind you rarely keep is drawn with up to a third less confidence, so it shows less often; <em>Keep the text too</em> adds a log of the texts capped at 1 MB; <em>Notify when it learns</em> shows each counted correction as a notification, with the kind of suggestion, where, what happened and how many of that kind were seen — for checking what is learned; <em>Forget</em> deletes both), <strong>Check with Bennu</strong> (the model's line is run through the code checks of the method you are in and dropped when it calls a method the receiver does not have, passes the wrong arguments or uses a variable that does not exist; a class you have not imported yet does not count against it, nor does a statement that is not finished), and <strong>Try three candidates</strong>: the model
+  gives three answers and the first that passes the checks is drawn, instead of nothing when its only answer fails. It is several times slower (about 280 ms against 60 in the lab), so it is off by default. The palette has
+  <em>Model suggestions: turn on / off</em>.
 </p>
 
 <h3>Type names</h3>
@@ -188,6 +252,11 @@
     and a class file carries no names anyway.</li>
   <li>When the call is <strong>already written</strong> — <code>t.si()</code> with the caret after <code>si</code>, correcting a name — the
     parentheses are left alone, not doubled.</li>
+  <li>A class picked <strong>after <code>new</code></strong> writes the call too: <code>ArrayList</code> becomes <code>ArrayList&lt;&gt;()</code> (the
+    diamond only for a generic class), with the caret after it when a constructor takes nothing and between the parentheses when every one
+    takes something. An <strong>interface or an abstract class</strong> writes <code>Runnable() &#123;&#125;</code> with the caret inside the braces — an anonymous class —
+    except an abstract class that can only be built with arguments, where the caret waits between the parentheses. A name that stands for
+    several classes (<code>Shape</code>, in <code>java.awt</code> and elsewhere) keeps just the name until you choose its import, and an enum is not a thing you create.</li>
   <li>An <strong>overloaded</strong> method is <em>one row per overload</em>, fewest parameters first — <code>wait()</code>,
     <code>wait(long timeoutMillis)</code>, <code>wait(long timeoutMillis, int nanos)</code> — since each leaves the caret in a different place.
     After <code>::</code> they are one row, because a method reference writes only the name. A method that merely <strong>overrides</strong> an
@@ -380,6 +449,63 @@ ConfigurazioneCors.MyProva prova;    // accepting "MyProva" writes this`, 'java'
   preselected, with its import.
 </p>
 
+<h2>A builder does not repeat itself</h2>
+<p>
+  After <code>Device.builder().name("a").</code> the methods the chain has already called, and that return the same type (the fluent setters), move to the end of
+  the list: <code>id</code>, <code>type</code> and <code>build</code> come first. Nothing is removed, and with a prefix typed the order is the usual one.
+</p>
+
+<h2>Annotation values and configuration keys</h2>
+<p>
+  Inside an annotation's parentheses the list opens on the values the other files write for that element (<code>produces = MediaType.APPLICATION_JSON_VALUE</code>,
+  <code>"/orders"</code>), most used first. Inside <code>@Value("&#36;&#123;…")</code>, <code>@ConfigurationProperties(prefix = "…")</code> and
+  <code>@ConditionalOnProperty(name = "…")</code> it offers the keys of <code>application*.properties|yml|yaml</code> and <code>bootstrap*</code>, nested YAML
+  flattened with dots, the nearest module's first. The first request in a session may find nothing while the project is read once in the background.
+</p>
+
+<h2>Mapping two classes</h2>
+<p>
+  In a method that copies one object into another, the empty line after the construction or after a mapping line offers the next property of the target that no line
+  assigned yet, taken from the source by name and type (equal, equal ignoring case, <code>_</code> and plurals, or <code>id</code> against <code>customerId</code>) and written in the
+  style the lines above use (<code>d.setX(e.getX());</code> or <code>.x(e.getX())</code>). A type that would need a conversion, or two sources that fit equally, are left to you.
+</p>
+
+<h2>The class an argument takes</h2>
+<p>
+  In <code>service.list(C|)</code> the type names open on the class the parameter takes, preselected, with its import, ahead of names that merely start alike. When overloads
+  disagree about the slot, the usual order stands. After <code>EnumType.TI|</code> the constants that share a word with the names around the caret rise above the others.
+</p>
+
+<h2>The constants of the class a position wants</h2>
+<p>
+  Where the code wants a class — <code>Money m = |</code>, a parameter of that class — its constants and no-argument static factories (<code>Money.ZERO</code>, <code>Money.zero()</code>,
+  <code>Optional.empty()</code>) are offered first, with their import. Only members that return exactly that class; <code>String</code>, the boxed types and <code>Object</code> are left out, and an enum has its own list below.
+</p>
+
+<h2>An argument that takes an enum</h2>
+<p>
+  When the call has one overload at that position (a builder's <code>type(|)</code>), its parameter is the enum and the list opens on that enum's
+  constants, written <code>DeviceType.PIN</code> with their import. Each constant is split into words (<code>TIPO_PIN</code> → <em>tipo</em>,
+  <em>pin</em>, the enum's own name left out) and compared with the words around the caret: a field called <code>pin</code> in the file or
+  a method <code>connectPin</code> puts <code>PIN</code> first, preselected when it is the only best fit. Overloads that disagree offer no constants.
+  The same holds wherever the surrounding code fixes the enum: the other side of <code>==</code> / <code>!=</code>, a ternary branch, an array element, <code>equals(…)</code>,
+  <code>List.of(…)</code>, a declared variable's initializer and a constructor argument. In a <code>case</code> label the constants appear bare, without those an earlier label already names.
+</p>
+
+<h2>Keywords by position</h2>
+<p>
+  The language's keywords are offered by position: at the start of a statement the statement words (<code>return</code> first in a method that returns a value, after <code>if</code>/<code>for</code>/<code>while</code>
+  in one that does not), in a class body the member modifiers, at the top of the file <code>package</code>, <code>import</code> and the type declarations, and after <code>=</code> or <code>(</code> only the words an
+  expression can start with. <code>else</code>, <code>catch</code> and <code>finally</code> appear only right after the block they continue.
+</p>
+
+<h2>Arguments by type and by name</h2>
+<p>
+  In <code>transfer(|)</code> the parameters, locals and fields of the class whose type fits the slot come first, those whose name looks like the
+  parameter's own name before the others (<code>from</code> leads the slot called <code>from</code>), and a clear winner is preselected. When
+  overloads disagree about the slot, or after a <code>.</code>, the list is the usual one.
+</p>
+
 <h2>A declaration's name</h2>
 <p>
   After the type of a declaration — a field after its modifiers, a local variable, a method or constructor parameter, a <code>for</code> or
@@ -458,6 +584,33 @@ ConfigurazioneCors.MyProva prova;    // accepting "MyProva" writes this`, 'java'
   place for the whole set, with the style options — fluent accessors, snake_case names, <code>final</code> parameters. A completion takes the
   conventional form.
 </Callout>
+
+<h2>Arguments and the editor's closing parenthesis</h2>
+<p>
+  The closing <code>)</code> the editor adds when you type <code>(</code> does not silence the ghost text: <code>@PostMapping(value = |)</code>
+  and <code>foo(a, |)</code> are completed and the parenthesis stays where it is. Inside an annotation, <code>value = </code> is completed with the
+  value the project writes for that element. After you pick a method from the list, its arguments follow the overload you picked. <code>list.toArray(</code>
+  draws <code>Item[]::new</code> when the list's element type is known, and where the project passes several different lambdas or constants to
+  a method, the start they share (<code>it -&gt; </code>, <code>Boolean.</code>) is drawn.
+</p>
+<p>
+  Where an argument or a declaration fixes a class, the ghost text writes how the code makes one: a method of the same file that returns it
+  (<code>tabellato(</code>), otherwise a static factory (<code>Pair.of(</code>, <code>List.of(</code>), otherwise <code>new Foo(</code>.
+  A generic parameter is settled from the arguments already written and from what the call around it wants: after
+  <code>Collections.addAll(items, </code> the ghost text draws the element type of <code>items</code> (<code>Pair.of(</code>), and inside that call
+  the type its second argument must have (<code>List.of(</code>).
+</p>
+<p>
+  After a comma, if the element before it is a call, the same call is drawn again with its string literals emptied and a number held in a
+  string counted up: <code>tabellato("1", "ITALIA"), </code> → <code>tabellato("2", "")</code>.
+</p>
+
+<h2>Animated popup and ghost text</h2>
+<p>
+  Settings → Completion → <em>Animate the popup and ghost text</em> (off by default) fades the list in when it opens and uncovers ghost text
+  from left to right as it appears. The text is whole from the first instant, so <kbd>Tab</kbd> takes the entire line even halfway through.
+  Typing along a proposal shortens it without replaying the effect. It follows the app's animation setting and does nothing when animations are off.
+</p>
 
 <h2>Ghost text for certain continuations</h2>
 <p>

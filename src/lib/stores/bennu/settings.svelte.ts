@@ -23,6 +23,7 @@ import {
   smartToConfig,
   type SmartCompletionSettings,
 } from './smart-completion';
+import { FLC_DEFAULTS, flcFromConfig, flcToConfig, type FlcSettings } from './flc-settings';
 
 /** How the editor turns a Tab press into whitespace. */
 export type IndentStyle = 'spaces' | 'tabs';
@@ -54,6 +55,7 @@ export interface BennuSettingsSnapshot {
   showWhitespace: boolean;
   highlightCurrentLine: boolean;
   showLineNumbers: boolean;
+  showProblemMarkers: boolean;
   /** Show the right-gutter overview strip (diagnostic marks + hover preview) in place of the
    *  native scrollbar — the IntelliJ error stripe that replaces the old minimap. */
   minimap: boolean;
@@ -166,6 +168,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   showWhitespace: false,
   highlightCurrentLine: true,
   showLineNumbers: true,
+  showProblemMarkers: false,
   minimap: true,
   indentGuides: true,
   stickyScroll: true,
@@ -227,6 +230,7 @@ function createSettingsStore() {
   let showWhitespace = $state(DEFAULTS.showWhitespace);
   let highlightCurrentLine = $state(DEFAULTS.highlightCurrentLine);
   let showLineNumbers = $state(DEFAULTS.showLineNumbers);
+  let showProblemMarkers = $state(DEFAULTS.showProblemMarkers);
   let minimap = $state(DEFAULTS.minimap);
   let indentGuides = $state(DEFAULTS.indentGuides);
   let stickyScroll = $state(DEFAULTS.stickyScroll);
@@ -247,6 +251,7 @@ function createSettingsStore() {
   let caseSensitive = $state(DEFAULTS.caseSensitive);
   let importCensus = $state(DEFAULTS.importCensus);
   let smart = $state<SmartCompletionSettings>({ ...SMART_DEFAULTS });
+  let flc = $state<FlcSettings>({ ...FLC_DEFAULTS });
   let autoImport = $state(DEFAULTS.autoImport);
   // Folding
   let foldingEnabled = $state(DEFAULTS.foldingEnabled);
@@ -303,7 +308,7 @@ function createSettingsStore() {
   function snapshot(): BennuSettingsSnapshot {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
-      highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, inlayHints,
+      highlightCurrentLine, showLineNumbers, showProblemMarkers, minimap, indentGuides, stickyScroll, inlayHints,
       usageCounts, rightMargin,
       sqlDialect, htmlScriptsAllowed, mavenAutoDownload, markdownLivePreview, historyDiffSplit, blameShowMessage, profilerHints, showChangeMarkers, dtoLabIdleMinutes, autosave,
       collapseLibraryFrames, searchDependencies,
@@ -341,6 +346,7 @@ function createSettingsStore() {
         word_wrap: wordWrap,
         show_whitespace: showWhitespace,
         show_line_numbers: showLineNumbers,
+        show_problem_markers: showProblemMarkers,
         highlight_current_line: highlightCurrentLine,
         folding_enabled: foldingEnabled,
         fold_block_comments: foldBlockComments,
@@ -349,6 +355,7 @@ function createSettingsStore() {
         completion_case_sensitive: caseSensitive,
         completion_import_census: importCensus,
         ...smartToConfig(smart),
+        ...flcToConfig(flc),
         default_encoding: defaultEncoding,
         excluded_dirs: excludedDirList(),
         html_scripts_allowed: htmlScriptsAllowed,
@@ -432,6 +439,8 @@ function createSettingsStore() {
     setHighlightCurrentLine(v: boolean) { highlightCurrentLine = v; void persistConfigBacked(); },
     get showLineNumbers() { return showLineNumbers; },
     setShowLineNumbers(v: boolean) { showLineNumbers = v; void persistConfigBacked(); },
+    get showProblemMarkers() { return showProblemMarkers; },
+    setShowProblemMarkers(v: boolean) { showProblemMarkers = v; void persistConfigBacked(); },
     get minimap() { return minimap; },
     setMinimap(v: boolean) { minimap = v; persist(); },
     get indentGuides() { return indentGuides; },
@@ -480,6 +489,12 @@ function createSettingsStore() {
     setImportCensus(v: boolean) { importCensus = v; void persistConfigBacked(); },
     /** The smart-suggestions group (name affinity, project usage, chains, ghost text, strength). */
     get smart(): Readonly<SmartCompletionSettings> { return smart; },
+    /** The model-suggestions group (the small local model, its folder and threshold, the log completion). */
+    get flc(): Readonly<FlcSettings> { return flc; },
+    setFlc<K extends keyof FlcSettings>(key: K, value: FlcSettings[K]) {
+      flc = { ...flc, [key]: value };
+      void persistConfigBacked();
+    },
     setSmart<K extends keyof SmartCompletionSettings>(key: K, value: SmartCompletionSettings[K]) {
       smart = { ...smart, [key]: value };
       void persistConfigBacked();
@@ -631,6 +646,7 @@ function createSettingsStore() {
         wordWrap = cfg.word_wrap ?? DEFAULTS.wordWrap;
         showWhitespace = cfg.show_whitespace ?? DEFAULTS.showWhitespace;
         showLineNumbers = cfg.show_line_numbers ?? DEFAULTS.showLineNumbers;
+        showProblemMarkers = cfg.show_problem_markers ?? DEFAULTS.showProblemMarkers;
         highlightCurrentLine = cfg.highlight_current_line ?? DEFAULTS.highlightCurrentLine;
         foldingEnabled = cfg.folding_enabled ?? DEFAULTS.foldingEnabled;
         foldBlockComments = cfg.fold_block_comments ?? DEFAULTS.foldBlockComments;
@@ -639,6 +655,7 @@ function createSettingsStore() {
         caseSensitive = cfg.completion_case_sensitive ?? DEFAULTS.caseSensitive;
         importCensus = cfg.completion_import_census ?? DEFAULTS.importCensus;
         smart = smartFromConfig(cfg);
+        flc = flcFromConfig(cfg);
         // An unknown label from a hand-edited config would reach the BE as an encoding nothing
         // can decode with; the Select offers exactly these three.
         defaultEncoding = (SOURCE_ENCODINGS as readonly string[]).includes(cfg.default_encoding)
@@ -711,6 +728,7 @@ function createSettingsStore() {
       showWhitespace = DEFAULTS.showWhitespace;
       highlightCurrentLine = DEFAULTS.highlightCurrentLine;
       showLineNumbers = DEFAULTS.showLineNumbers;
+      showProblemMarkers = DEFAULTS.showProblemMarkers;
       minimap = DEFAULTS.minimap;
       indentGuides = DEFAULTS.indentGuides;
       stickyScroll = DEFAULTS.stickyScroll;
@@ -736,6 +754,7 @@ function createSettingsStore() {
       caseSensitive = DEFAULTS.caseSensitive;
       importCensus = DEFAULTS.importCensus;
       smart = { ...SMART_DEFAULTS };
+      flc = { ...FLC_DEFAULTS };
       autoImport = DEFAULTS.autoImport;
       foldingEnabled = DEFAULTS.foldingEnabled;
       foldBlockComments = DEFAULTS.foldBlockComments;

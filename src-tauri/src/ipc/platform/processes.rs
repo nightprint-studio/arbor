@@ -274,12 +274,15 @@ fn process_report(_state: &AppState) -> Result<ProcessReport, AppError> {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| proc.name().to_string());
 
-        let mine = backend_product(&name).map(str::to_string);
+        // A backend re-run with `--arbor-watchdog` is not a second backend: it is the small process that outlives it to clean up
+        // its children, and listing it under the same name with a few megabytes beside the real one's hundreds misleads.
+        let is_watchdog = proc.cmd().iter().any(|a| a == "--arbor-watchdog");
+        let mine = backend_product(&name).filter(|_| !is_watchdog).map(str::to_string);
         let product = mine.clone().or(product);
         let is_backend = mine.is_some();
 
         let hosted_server = runtime_hosted_server(&name, proc.cmd());
-        let label = hosted_server.clone().or_else(|| {
+        let label = is_watchdog.then(|| "Watchdog — ends this backend's children if Arbor exits".to_string()).or(hosted_server.clone()).or_else(|| {
             let server = parent_server.as_deref()?;
             name.eq_ignore_ascii_case("conhost").then(|| format!("Console host · {server}"))
         });
@@ -288,9 +291,9 @@ fn process_report(_state: &AppState) -> Result<ProcessReport, AppError> {
             "shell"
         } else if is_backend {
             "backend"
-        } else if LANGUAGE_SERVERS.contains(&name.as_str()) || label.is_some() {
+        } else if !is_watchdog && (LANGUAGE_SERVERS.contains(&name.as_str()) || label.is_some()) {
             "language-server"
-        } else if WEBVIEW_PROCESSES.contains(&name.as_str()) {
+        } else if is_watchdog || WEBVIEW_PROCESSES.contains(&name.as_str()) {
             "helper"
         } else {
             // Everything else Arbor started, directly or through a backend: a run, a build, a

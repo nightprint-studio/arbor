@@ -988,6 +988,7 @@ dependencies = [
  "bennu-deps",
  "bennu-dtolab",
  "bennu-ext",
+ "bennu-flc",
  "bennu-fulcrum-i18n",
  "bennu-i18n",
  "bennu-index",
@@ -1002,6 +1003,7 @@ dependencies = [
  "bennu-jpa",
  "bennu-jsp",
  "bennu-jsp-grammar",
+ "bennu-learn",
  "bennu-live",
  "bennu-lsp",
  "bennu-mapstruct",
@@ -1152,6 +1154,13 @@ version = "0.3.0"
 dependencies = [
  "bennu-java",
  "tree-sitter",
+]
+
+[[package]]
+name = "bennu-flc"
+version = "0.3.0"
+dependencies = [
+ "ort",
 ]
 
 [[package]]
@@ -1306,6 +1315,14 @@ version = "0.3.0"
 dependencies = [
  "cc",
  "tree-sitter",
+]
+
+[[package]]
+name = "bennu-learn"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

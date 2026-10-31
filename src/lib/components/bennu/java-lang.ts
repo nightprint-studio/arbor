@@ -33,6 +33,7 @@ import {
 } from '$lib/components/shared/ui/code-editor';
 import { toCompletion } from './completion-item';
 import { offersFallbackWords, shouldAskForCompletion } from './java-completion-trigger';
+import { javaKeywordsAt } from './java-keywords';
 import {
   boostForRank, FALLBACK, RESOLVED, TEMPLATE,
 } from '$lib/components/shared/ui/code-editor/completion-rank';
@@ -44,6 +45,7 @@ import {
   completion as ipcCompletion,
   generateHint,
   completionAccepted as ipcCompletionAccepted,
+  type AcceptedWhere,
   completionDoc as ipcCompletionDoc,
   importEdit as ipcImportEdit,
 } from '$lib/ipc/bennu';
@@ -252,8 +254,8 @@ function foldNode(node: Node): { from: number; to: number } | null {
  *  ORDER of a future list, so a failure here is a list in a slightly worse order — nothing about
  *  accepting a completion should be able to fail visibly because of it. See `bennu-query`'s
  *  `picked` module for what is remembered and why it is not persisted. */
-function reportAccepted(item: CompletionItem): void {
-  void ipcCompletionAccepted(item.owner ?? null, item.label, item.kind ?? null).catch(() => {});
+function reportAccepted(item: CompletionItem, where?: AcceptedWhere): void {
+  void ipcCompletionAccepted(item.owner ?? null, item.label, item.kind ?? null, where, item.signature).catch(() => {});
 }
 
 /** The documentation panel for the highlighted row — the same card the hover tooltip draws, from
@@ -356,7 +358,18 @@ function appendFallbackCompletions(
   // matches what was typed, so it is boosted within its own band (see `completion-rank`).
   const pl = prefix.toLowerCase();
   let rank = 0;
-  for (const k of KEYWORD_COMPLETION_LABELS) {
+  // The position decides which keywords make sense and in what order (`re` in a method that returns a value opens
+  // on `return`, not on `record`/`requires`); a position it cannot read keeps the flat alphabetical list.
+  const upTo = ctx.pos - prefix.length;
+  // After an `@` the word is an annotation's name: the only keyword it can be is `@interface`, and a look-alike word
+  // from the buffer is not an annotation either. What the backend resolved is the whole answer.
+  if (upTo > 0 && ctx.state.sliceDoc(upTo - 1, upTo) === '@') {
+    if (!seen.has('interface') && 'interface'.startsWith(pl)) out.push({ label: 'interface', type: 'keyword', boost: boostForRank(rank++, FALLBACK) });
+    return;
+  }
+  const inModuleInfo = (projectStore.activeFilePath ?? '').endsWith('module-info.java');
+  const contextual = javaKeywordsAt(ctx.state.sliceDoc(Math.max(0, upTo - 200_000), upTo), prefix, { moduleInfo: inModuleInfo });
+  for (const k of contextual ?? KEYWORD_COMPLETION_LABELS) {
     if (seen.has(k) || (pl && !k.startsWith(pl))) continue;
     seen.add(k);
     out.push({ label: k, type: 'keyword', boost: boostForRank(rank++, FALLBACK) });
@@ -487,7 +500,8 @@ const javaCompletionSource: CompletionSource = async (
       toCompletion(it, boostForRank(rank, RESOLVED, it.preselect), {
         info: completionInfo,
         after: (view, item) => {
-          reportAccepted(item);
+          // where the list was asked rides along: the pick is also counted per receiver type or argument slot
+          reportAccepted(item, { file: path, source: src, offset: u2b(from) });
           // A type-name completion with a single importable class carries its FQN — accepting it
           // inserts the name AND (when auto-import is on) adds its import in the same gesture.
           if (item.auto_import) void applyAutoImport(view, item.auto_import);

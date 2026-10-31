@@ -54,6 +54,9 @@ pub struct BennuConfig {
     pub show_whitespace: bool,
     /// Show the line-number gutter. `true` by default (a buffer is navigated by line).
     pub show_line_numbers: bool,
+    /// Draw a marker in the gutter beside every line that has a problem. `false` by default: the squiggle and the
+    /// hover say the same, and a gutter that grows a column with the first error moves the text with every keystroke.
+    pub show_problem_markers: bool,
     /// Tint the line the caret sits on, and its gutter number. `true` by default.
     pub highlight_current_line: bool,
     /// Install code folding at all — the gutter arrows and the fold commands. `true` by default.
@@ -114,11 +117,72 @@ pub struct BennuConfig {
     /// next uncovered `case`) ahead of the caret. `true` by default.
     #[serde(default = "yes")]
     pub completion_smart_ghost_text: bool,
+    /// **Motion**: fade the completion popup in and uncover ghost text from the left as it appears. The durations
+    /// come from the app's animation setting. `false` by default.
+    #[serde(default)]
+    pub completion_motion: bool,
     /// How strongly the learned signals (name affinity, project usage, call sequences) count, in
     /// percent of their designed weight: `0` ignores them, `100` is as designed, `250` is the
     /// ceiling. `100` by default.
     #[serde(default = "full_strength")]
     pub completion_smart_strength: u32,
+    /// **Model suggestions** (experimental): a small local model finishes the line you are typing and the
+    /// editor draws it as ghost text, to be taken with Tab. Off by default: unlike the other ghost text, which
+    /// is derived from facts, this one is a guess, and a guess should be something the user asked for.
+    #[serde(default)]
+    pub flc_enabled: bool,
+    /// The folder with the model files (`flc_prefill.onnx`, `flc.onnx`, `vocab.txt`, `flc.meta`). Empty = none,
+    /// and then only the log-statement suggestions work. Point it at a personal copy to use an adapted model.
+    #[serde(default)]
+    pub flc_model_dir: String,
+    /// How sure the model has to be, in percent, before its line is drawn. `70` by default.
+    #[serde(default = "flc_default_confidence")]
+    pub flc_min_confidence: u32,
+    /// **Log statements**: complete a log call from the pattern the project uses most in that place (the entry
+    /// line of a method, a `catch`). Counted once in the background, kept current as files change. `true` by
+    /// default; it needs no model.
+    #[serde(default = "yes")]
+    pub flc_logs: bool,
+    /// **Alternatives**: ask the model for three candidates and show the first one that passes the checks, instead
+    /// of dropping the line when its only candidate does not. Several times the latency per suggestion (about 280 ms against 60). Off by default.
+    #[serde(default)]
+    pub flc_alternatives: bool,
+    /// **Check**: run the model's line through Bennu's code checks and drop it when it names a method the receiver
+    /// does not have, passes the wrong arguments, or otherwise invents something. A class that only needs an import
+    /// is not an invention. Costs one file validation per suggestion. `true` by default.
+    #[serde(default = "yes")]
+    pub flc_check: bool,
+    /// **Profile per project**: keep what Bennu learned about how this project is written (the arguments it always
+    /// passes, the annotation shapes, the variable names) in the user's data folder, so the next start has it at once.
+    /// Short pieces of source, never in a repository, never sent anywhere. `true` by default.
+    #[serde(default = "yes")]
+    pub flc_profile_project: bool,
+    /// **Profile across projects**: let one project's profile help another where that one has seen too little. Can
+    /// bring names from one project into another. `true` by default.
+    #[serde(default = "yes")]
+    pub flc_profile_global: bool,
+    /// **Feedback**: count, as numbers only, how often each kind of ghost text is shown, taken with Tab and
+    /// dismissed, per confidence bucket. Stored beside this file, never sent anywhere, and the only use is the
+    /// summary and the threshold *offered* in Settings. `true` by default.
+    #[serde(default = "yes")]
+    pub flc_feedback: bool,
+    /// **Learn from corrections**: remember what became of each ghost text once the user was done with it — kept,
+    /// cut short, written on, rewritten, re-laid out or undone — as counters in the profile (see `bennu-learn`).
+    /// Local, never sent anywhere. `false` by default: it is asked for, not assumed.
+    #[serde(default)]
+    pub flc_learn: bool,
+    /// **Ignore commented-out code**: leave blocks of `//` lines that are code out of what the model reads, so it does
+    /// not copy a version that was commented out. Prose comments stay. `false` by default.
+    #[serde(default)]
+    pub flc_ignore_commented_code: bool,
+    /// Also keep the ghost text and what it became, as written, in a capped log beside the counters, for the day a
+    /// model is trained on corrections. Needs `flc_learn`. `false` by default.
+    #[serde(default)]
+    pub flc_learn_keep_text: bool,
+    /// A debugging aid: show a notification each time a correction is counted, with what became of the suggestion
+    /// and how often that has happened. Needs `flc_learn`. `false` by default.
+    #[serde(default)]
+    pub flc_learn_notify: bool,
     /// Absolute paths of the project roots the user has turned **spell-check** on for.
     ///
     /// A list of roots and not a switch, because that is the shape of the decision: spell-checking
@@ -711,6 +775,11 @@ fn full_strength() -> u32 {
     100
 }
 
+/// The model's confidence threshold, in percent, for a config written before the setting existed.
+fn flc_default_confidence() -> u32 {
+    70
+}
+
 /// The default Rust visibility for generated items. `pub(crate)` rather than `pub`: a generator
 /// that makes everything public writes a crate's API by accident.
 fn pub_crate() -> String {
@@ -879,6 +948,7 @@ impl Default for BennuConfig {
             word_wrap: false,
             show_whitespace: false,
             show_line_numbers: true,
+            show_problem_markers: false,
             highlight_current_line: true,
             folding_enabled: true,
             assistant: AssistantConfig::default(),
@@ -894,7 +964,21 @@ impl Default for BennuConfig {
             completion_smart_context: true,
             completion_smart_statements: true,
             completion_smart_ghost_text: true,
+            completion_motion: false,
             completion_smart_strength: 100,
+            flc_enabled: false,
+            flc_model_dir: String::new(),
+            flc_min_confidence: 70,
+            flc_logs: true,
+            flc_alternatives: false,
+            flc_check: true,
+            flc_profile_project: true,
+            flc_profile_global: true,
+            flc_feedback: true,
+            flc_learn: false,
+            flc_ignore_commented_code: false,
+            flc_learn_keep_text: false,
+            flc_learn_notify: false,
             spell_check_roots: Vec::new(),
             html_scripts_allowed: Vec::new(),
             maven_auto_download: true,

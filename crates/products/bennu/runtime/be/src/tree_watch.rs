@@ -203,8 +203,18 @@ impl TreeWatch {
                 if content_followed(&rel) {
                     self.pending[idx].record_content(rel);
                     touched = true;
+                } else if rel.ends_with(".java") {
+                    // not the tree's business, but the completion's log profile counts these files
+                    crate::flc::java_files_changed(&self.roots[idx], vec![rel]);
                 }
                 continue;
+            }
+            // a `.java` file that came, went or moved is counted again; anything else without an extension is taken
+            // for a directory, whose files the watcher may not list one by one
+            if rel.ends_with(".java") {
+                crate::flc::java_files_changed(&self.roots[idx], vec![rel.clone()]);
+            } else if !rel.rsplit('/').next().unwrap_or("").contains('.') {
+                crate::flc::project_changed(&self.roots[idx]);
             }
             let top_level = !rel.contains('/');
             let is_dir = match raw {
@@ -243,8 +253,9 @@ impl TreeWatch {
 
     /// Every root may have lost events.
     fn rescan_all(&mut self) {
-        for burst in &mut self.pending {
+        for (burst, root) in self.pending.iter_mut().zip(&self.roots) {
             burst.mark_rescan();
+            crate::flc::project_changed(root);
         }
     }
 

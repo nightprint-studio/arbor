@@ -14,6 +14,7 @@
  */
 
 import type { WorkspaceProject } from './workspaces.svelte';
+import { normRoot, oneEntryPerProject } from './project-switcher';
 
 export type SwitcherEntry = WorkspaceProject;
 
@@ -22,10 +23,6 @@ export function entryKey(e: { workspaceId: string; root: string }): string {
   return `${e.workspaceId}|${e.root}`;
 }
 
-/** Roots compare the same however they were written: slashes, trailing slash, case. */
-function normRoot(p: string): string {
-  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-}
 
 function createProjectSwitcherStore() {
   let loaded = new Set<string>();
@@ -75,6 +72,7 @@ function createProjectSwitcherStore() {
     /** Open the overlay over `projects` (dir: +1 forward, -1 backward). False when there is nothing
      *  to switch to. */
     begin(projects: SwitcherEntry[], dir: 1 | -1): boolean {
+      projects = oneEntryPerProject(projects);
       if (projects.length < 2) return false;
       const rank = (e: SwitcherEntry) => {
         const i = mru.indexOf(entryKey(e));

@@ -1,0 +1,314 @@
+CASE	mentions
+OUTSIDE	
+CODE	package demo;\nclass Use { void f(Order o, Item i) { o.pay(
+FOCUS	-
+PARTIAL	
+RESOLVE	Item	demo.Item
+RESOLVE	Order	demo.Order
+TYPE	demo.Item
+MEM	sku	0	
+MEM	qty	0	
+MEM	getSku	1	
+MEM	getQty	1	
+TYPE	demo.Order
+MEM	id	0	
+MEM	status	0	
+MEM	getId	1	
+MEM	getStatus	1	
+MEM	setStatus	1	String
+MEM	withId	1	Long
+MEM	items	1	
+MEM	first	1	
+MEM	isPaid	1	
+MEM	pay	1	Payment,int
+MEM	pay	1	Payment
+MEM	cancel	1	
+MEM	total	1	
+MEM	archive	1	String...
+MEM	tag	1	Map,String[]
+EXPECT	//@ Item: sku qty getSku() getQty()\n//@ Order: id pay(Payment,int) pay(Payment) status getId() getStatus() setStatus(String) withId(Long) items() first()\n
+END
+CASE	focus_and_partial
+OUTSIDE	
+CODE	package demo;\nclass Use { void f(Order o, Item i) {\n  i.getQty();\n  o.get
+FOCUS	demo.Order
+PARTIAL	get
+RESOLVE	Item	demo.Item
+RESOLVE	Order	demo.Order
+TYPE	demo.Order
+MEM	id	0	
+MEM	status	0	
+MEM	getId	1	
+MEM	getStatus	1	
+MEM	setStatus	1	String
+MEM	withId	1	Long
+MEM	items	1	
+MEM	first	1	
+MEM	isPaid	1	
+MEM	pay	1	Payment,int
+MEM	pay	1	Payment
+MEM	cancel	1	
+MEM	total	1	
+MEM	archive	1	String...
+MEM	tag	1	Map,String[]
+TYPE	demo.Item
+MEM	sku	0	
+MEM	qty	0	
+MEM	getSku	1	
+MEM	getQty	1	
+EXPECT	//@ Order: getId() getStatus() id status setStatus(String) withId(Long) items() first() isPaid() pay(Payment,int) pay(Payment) cancel() total() archive(String...) tag(Map,String[])\n//@ Item: getSku() getQty() sku qty\n
+END
+CASE	budget
+OUTSIDE	
+CODE	package demo;\nclass Use { Order a; Item b; Payment c; Child d; Big e; Base f; void g() {
+FOCUS	-
+PARTIAL	
+RESOLVE	Base	demo.Base
+RESOLVE	Big	demo.Big
+RESOLVE	Child	demo.Child
+RESOLVE	Payment	demo.Payment
+RESOLVE	Item	demo.Item
+RESOLVE	Order	demo.Order
+TYPE	demo.Base
+MEM	baseOne	1	
+MEM	baseTwo	1	Order
+TYPE	demo.Big
+MEM	veryLongMemberName01	1	
+MEM	veryLongMemberName02	1	
+MEM	veryLongMemberName03	1	
+MEM	veryLongMemberName04	1	
+MEM	veryLongMemberName05	1	
+MEM	veryLongMemberName06	1	
+MEM	veryLongMemberName07	1	
+MEM	veryLongMemberName08	1	
+MEM	veryLongMemberName09	1	
+MEM	veryLongMemberName10	1	
+MEM	veryLongMemberName11	1	
+MEM	veryLongMemberName12	1	
+MEM	veryLongMemberName13	1	
+MEM	veryLongMemberName14	1	
+MEM	veryLongMemberName15	1	
+MEM	veryLongMemberName16	1	
+TYPE	demo.Child
+MEM	childOne	1	
+MEM	toString	1	
+MEM	equals	1	Object
+MEM	hashCode	1	
+MEM	baseOne	1	
+MEM	baseTwo	1	Order
+TYPE	demo.Payment
+MEM	authorize	1	
+MEM	capture	1	Order
+TYPE	demo.Item
+MEM	sku	0	
+MEM	qty	0	
+MEM	getSku	1	
+MEM	getQty	1	
+TYPE	demo.Order
+MEM	id	0	
+MEM	status	0	
+MEM	getId	1	
+MEM	getStatus	1	
+MEM	setStatus	1	String
+MEM	withId	1	Long
+MEM	items	1	
+MEM	first	1	
+MEM	isPaid	1	
+MEM	pay	1	Payment,int
+MEM	pay	1	Payment
+MEM	cancel	1	
+MEM	total	1	
+MEM	archive	1	String...
+MEM	tag	1	Map,String[]
+EXPECT	//@ Base: baseOne() baseTwo(Order)\n
+END
+CASE	single_member_type_skipped
+OUTSIDE	
+CODE	package demo;\nclass Use { Lonely l; Item i; void g() {
+FOCUS	-
+PARTIAL	
+RESOLVE	Item	demo.Item
+RESOLVE	Lonely	demo.Lonely
+TYPE	demo.Item
+MEM	sku	0	
+MEM	qty	0	
+MEM	getSku	1	
+MEM	getQty	1	
+TYPE	demo.Lonely
+MEM	only	1	
+EXPECT	//@ Item: sku qty getSku() getQty()\n
+END
+CASE	object_methods_and_overloads
+OUTSIDE	
+CODE	package demo;\nclass Use { Child c; Order o; void g() {
+FOCUS	-
+PARTIAL	
+RESOLVE	Order	demo.Order
+RESOLVE	Child	demo.Child
+TYPE	demo.Order
+MEM	id	0	
+MEM	status	0	
+MEM	getId	1	
+MEM	getStatus	1	
+MEM	setStatus	1	String
+MEM	withId	1	Long
+MEM	items	1	
+MEM	first	1	
+MEM	isPaid	1	
+MEM	pay	1	Payment,int
+MEM	pay	1	Payment
+MEM	cancel	1	
+MEM	total	1	
+MEM	archive	1	String...
+MEM	tag	1	Map,String[]
+TYPE	demo.Child
+MEM	childOne	1	
+MEM	toString	1	
+MEM	equals	1	Object
+MEM	hashCode	1	
+MEM	baseOne	1	
+MEM	baseTwo	1	Order
+EXPECT	//@ Order: id status getId() getStatus() setStatus(String) withId(Long) items() first() isPaid() pay(Payment,int)\n//@ Child: childOne() baseOne() baseTwo(Order)\n
+END
+CASE	comments_and_strings
+OUTSIDE	
+CODE	package demo;\n// Payment is not used here\nclass Use { String s = "Item"; /* Child */ Order o; void g() {
+FOCUS	-
+PARTIAL	
+RESOLVE	Order	demo.Order
+TYPE	demo.Order
+MEM	id	0	
+MEM	status	0	
+MEM	getId	1	
+MEM	getStatus	1	
+MEM	setStatus	1	String
+MEM	withId	1	Long
+MEM	items	1	
+MEM	first	1	
+MEM	isPaid	1	
+MEM	pay	1	Payment,int
+MEM	pay	1	Payment
+MEM	cancel	1	
+MEM	total	1	
+MEM	archive	1	String...
+MEM	tag	1	Map,String[]
+EXPECT	//@ Order: id status getId() getStatus() setStatus(String) withId(Long) items() first() isPaid() pay(Payment,int)\n
+END
+CASE	short_names_and_recency
+OUTSIDE	
+CODE	package demo;\nclass Use<T, ID> { Item item; Order o; Item again; void g() {
+FOCUS	-
+PARTIAL	
+RESOLVE	Item	demo.Item
+RESOLVE	Order	demo.Order
+TYPE	demo.Item
+MEM	sku	0	
+MEM	qty	0	
+MEM	getSku	1	
+MEM	getQty	1	
+TYPE	demo.Order
+MEM	id	0	
+MEM	status	0	
+MEM	getId	1	
+MEM	getStatus	1	
+MEM	setStatus	1	String
+MEM	withId	1	Long
+MEM	items	1	
+MEM	first	1	
+MEM	isPaid	1	
+MEM	pay	1	Payment,int
+MEM	pay	1	Payment
+MEM	cancel	1	
+MEM	total	1	
+MEM	archive	1	String...
+MEM	tag	1	Map,String[]
+EXPECT	//@ Item: sku qty getSku() getQty()\n//@ Order: id status getId() getStatus() setStatus(String) withId(Long) items() first() isPaid() pay(Payment,int)\n
+END
+CASE	inherited_members
+OUTSIDE	
+CODE	package demo;\nclass Use { Child c; void g() { c.
+FOCUS	demo.Child
+PARTIAL	
+RESOLVE	Child	demo.Child
+TYPE	demo.Child
+MEM	childOne	1	
+MEM	toString	1	
+MEM	equals	1	Object
+MEM	hashCode	1	
+MEM	baseOne	1	
+MEM	baseTwo	1	Order
+EXPECT	//@ Child: childOne() baseOne() baseTwo(Order)\n
+END
+CASE	oversized_focus
+OUTSIDE	
+CODE	package demo;\nclass Use { Big b; void g() { b.
+FOCUS	demo.Big
+PARTIAL	
+RESOLVE	Big	demo.Big
+TYPE	demo.Big
+MEM	veryLongMemberName01	1	
+MEM	veryLongMemberName02	1	
+MEM	veryLongMemberName03	1	
+MEM	veryLongMemberName04	1	
+MEM	veryLongMemberName05	1	
+MEM	veryLongMemberName06	1	
+MEM	veryLongMemberName07	1	
+MEM	veryLongMemberName08	1	
+MEM	veryLongMemberName09	1	
+MEM	veryLongMemberName10	1	
+MEM	veryLongMemberName11	1	
+MEM	veryLongMemberName12	1	
+MEM	veryLongMemberName13	1	
+MEM	veryLongMemberName14	1	
+MEM	veryLongMemberName15	1	
+MEM	veryLongMemberName16	1	
+EXPECT	//@ Big: veryLongMemberName01() veryLongMemberName02() veryLongMemberName03() veryLongMemberName04() veryLongMemberName05() veryLongMemberName06() veryLongMemberName07() veryLongMemberName08() veryLongMemberName09() veryLongMemberName10()\n
+END
+CASE	vars_above_the_window
+OUTSIDE	package demo;\nclass Use {\n    private final Order order;\n    private List<Item> items;\n    void other(Payment pay) {}\n
+CODE	    void g(String id) {\n        var x = order.getId();\n        this.items.size();\n
+FOCUS	-
+PARTIAL	
+RESOLVE	Order	demo.Order
+TYPE	demo.Order
+MEM	id	0	
+MEM	status	0	
+MEM	getId	1	
+MEM	getStatus	1	
+MEM	setStatus	1	String
+MEM	withId	1	Long
+MEM	items	1	
+MEM	first	1	
+MEM	isPaid	1	
+MEM	pay	1	Payment,int
+MEM	pay	1	Payment
+MEM	cancel	1	
+MEM	total	1	
+MEM	archive	1	String...
+MEM	tag	1	Map,String[]
+EXPECT	//@ vars: items:List<Item> order:Order\n//@ Order: id getId() items() status getStatus() setStatus(String) withId(Long) first() isPaid() pay(Payment,int)\n
+END
+CASE	vars_declared_in_the_window_or_members
+OUTSIDE	package demo;\nclass Use {\n    private final Order order;\n
+CODE	    void g(Order order) {\n        order.pay(x.items);\n
+FOCUS	-
+PARTIAL	
+RESOLVE	Order	demo.Order
+TYPE	demo.Order
+MEM	id	0	
+MEM	status	0	
+MEM	getId	1	
+MEM	getStatus	1	
+MEM	setStatus	1	String
+MEM	withId	1	Long
+MEM	items	1	
+MEM	first	1	
+MEM	isPaid	1	
+MEM	pay	1	Payment,int
+MEM	pay	1	Payment
+MEM	cancel	1	
+MEM	total	1	
+MEM	archive	1	String...
+MEM	tag	1	Map,String[]
+EXPECT	//@ Order: id items() pay(Payment,int) pay(Payment) status getId() getStatus() setStatus(String) withId(Long) first()\n
+END

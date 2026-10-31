@@ -283,6 +283,33 @@ fn a_nested_type_name_is_offered_after_its_outer() {
     assert_offers(&labels, &["SIZE", "Inner"], "a nested type is a member of its outer");
 }
 
+/// `Type.class` is a literal the language gives every type, not a member any class file lists — so a
+/// member walk never finds it, and `Foo.` offered everything but the thing written after it most.
+#[test]
+fn the_class_literal_is_offered_after_a_type() {
+    let p = project_or_skip!(&[
+        ("p/Outer.java", "package p;\npublic class Outer {\n  public static int SIZE = 1;\n}\n"),
+        (
+            "p/Use.java",
+            "package p;\nimport java.util.List;\npublic class Use {\n  void run() { Object a = Outer.SIZE; Object b = List.of(); Object c = Outer.cl; }\n}\n",
+        ),
+    ]);
+    assert_offers(&p.labels_after("p/Use.java", "= Outer."), &["SIZE", "class"], "a project type");
+    assert_offers(&p.labels_after("p/Use.java", "= List."), &["of", "class"], "a JDK type");
+    assert_offers(&p.labels_after("p/Use.java", "= Outer.cl"), &["class"], "the literal, by its prefix");
+}
+
+/// `instance.class` is not Java — the literal belongs to a type, never a value.
+#[test]
+fn the_class_literal_is_not_offered_after_a_value() {
+    let p = project_or_skip!(&[(
+        "p/Use.java",
+        "package p;\npublic class Use {\n  void run(String s) { s.length(); }\n}\n",
+    )]);
+    let labels = p.labels_after("p/Use.java", "{ s.");
+    assert!(!labels.iter().any(|l| l == "class"), "{labels:?}");
+}
+
 /// `Map.Entry` — a JDK nested type, which bytecode spells `java/util/Map$Entry` and source spells
 /// `java.util.Map.Entry`. Getting the two spellings confused is why this one is here.
 #[test]

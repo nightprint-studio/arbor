@@ -203,7 +203,9 @@ export function toCompletion(item: CompletionItem, boost: number, hooks: ItemHoo
   // vanish. Its own `apply` keeps it a row of its own.
   const needsCustomApply =
     insert !== item.label || extras.length > 0 || stops.length > 0 || reindents || !!hooks.after ||
-    !!item.signature;
+    !!item.signature ||
+    // a row that names its own range (a value inside a string, a dotted key) cannot use the word under the caret
+    item.replace_start != null;
 
   if (needsCustomApply) {
     completion.apply = (view, _c, from, to) => {

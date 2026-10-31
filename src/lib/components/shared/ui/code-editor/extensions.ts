@@ -51,7 +51,8 @@ import { indentGuides } from './indent-guides';
 import { stickyScroll } from './sticky-scroll';
 import { scrollbarOverview } from './scrollbar-overview';
 import { semanticHighlight } from './semantic-tokens';
-import { codeEditorTheme, codeEditorHighlightStyle } from './theme';
+import { codeEditorTheme, codeEditorHighlightStyle, stableGutterTheme } from './theme';
+import { stableGutters } from './stable-gutters';
 import {
   inlineCompletion, acceptInlineCompletion, dismissInlineCompletion,
 } from './inline-completion';
@@ -139,6 +140,12 @@ export interface CodeEditorPreferences {
    * "line 2" is not how anyone refers to a part of a query they can see all of.
    */
   lineNumbers?: boolean;
+  /** A marker in the gutter beside each line with a diagnostic. `true` by default. The underline and the hover are
+   *  independent of it: off, the gutter never grows a column when the first problem appears. */
+  problemMarkers?: boolean;
+  /** Reserve room for four digits in the line-number gutter, so it does not widen when the file crosses 99 or 999
+   *  lines. Off by default: a small field wants the narrow gutter. */
+  stableGutter?: boolean;
   /** Tint the line the caret is on (and its gutter number). `true` by default. */
   highlightActiveLine?: boolean;
   /** Render spaces and tabs as visible glyphs. Off by default — it is a mode you turn on to
@@ -169,6 +176,9 @@ export interface CompletionPreferences {
   /** Require the candidate to start with the typed prefix, matching case. Off by default,
    *  which is CodeMirror's fuzzy, case-insensitive matching. */
   caseSensitive?: boolean;
+  /** Fade the popup in when it opens and uncover ghost text from the left when it appears. Off by default; the
+   *  durations follow the app's animation setting, so turning animations off there turns this off too. */
+  animate?: boolean;
 }
 
 /**
@@ -364,6 +374,8 @@ export function createCodeEditorExtensions(
   // compartment with the same extension value keeps the state field / view plugin behind it
   // alive, so flipping word wrap doesn't re-run the one-shot comment fold or rebuild the gutter.
   const lineNumberGutter = lineNumbers();
+  const diagnosticGutter = lintGutter();
+  const stableLineNumbers = stableGutterTheme();
   const activeLineHighlight = [highlightActiveLine(), highlightActiveLineGutter()];
   const whitespaceGlyphs = highlightWhitespace();
   const commentFoldOnLoad = foldBlockCommentsOnLoad(lang, getTree);
@@ -376,7 +388,9 @@ export function createCodeEditorExtensions(
    */
   const buildPreferences = (prefs: CodeEditorPreferences): Extension => [
     // Absent, not empty: an unwanted gutter still costs its horizontal column.
-    prefs.lineNumbers === false ? [] : lineNumberGutter,
+    prefs.lineNumbers === false ? [] : [lineNumberGutter, prefs.stableGutter ? stableLineNumbers : []],
+    // the other columns keep the width their marks needed, so a mark that comes and goes while typing does not shift the text
+    prefs.stableGutter ? stableGutters : [],
     prefs.highlightActiveLine === false ? [] : activeLineHighlight,
     prefs.showWhitespace ? whitespaceGlyphs : [],
     prefs.wrap ? EditorView.lineWrapping : [],
@@ -387,6 +401,10 @@ export function createCodeEditorExtensions(
     completionSource && !opts.readOnly
       ? completionExtension(completionSource, prefs.completion)
       : [],
+    // After the numbers and the fold arrows, where the unconditional one used to sit.
+    prefs.problemMarkers === false ? [] : diagnosticGutter,
+    // A marker on the editor root that the popup and ghost-text themes key their animations on.
+    prefs.completion?.animate ? EditorView.editorAttributes.of({ 'data-motion': 'completion' }) : [],
   ];
 
   const exts: Extension[] = [
@@ -429,7 +447,6 @@ export function createCodeEditorExtensions(
     // what keeps a file coloured instantly on open and coloured while it is edited — the
     // server's refinement arrives a round-trip later and lands on top.
     semanticHighlight(),
-    lintGutter(),
   ];
 
   // Comment syntax for `Ctrl+/` (`toggleComment`, already in the default keymap). A
@@ -524,7 +541,7 @@ export function createCodeEditorExtensions(
   // never actually contend — the ordering is belt and braces.)
   const inlineSource = lang.intel?.inlineCompletion;
   if (inlineSource && !opts.readOnly) {
-    exts.push(inlineCompletion({ source: inlineSource }));
+    exts.push(inlineCompletion({ source: inlineSource, onOutcome: lang.intel?.inlineCompletionOutcome, onSettled: lang.intel?.inlineCompletionSettled }));
     exts.push(
       Prec.highest(
         keymap.of([

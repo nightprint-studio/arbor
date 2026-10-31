@@ -38,11 +38,12 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 
-use bennu_java::prelude::{extract_symbols_from_root, FileSymbols, InferCache, TypeResolver};
+use bennu_java::prelude::{extract_symbols_from_root, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
 use crate::engine::check::{check_file, check_file_in, collect_nodes, finish, FileContext};
+use crate::engine::resolved::{self, Subject};
 
 /// Per-file state threaded across successive validations of the same buffer. Opaque to callers — hand
 /// the same `&mut` back each time; a `Default` (empty) cache just means "first run, recompute all".
@@ -107,15 +108,16 @@ pub fn check_file_resolved_incremental(
     }
 
     let symbols = extract_symbols_from_root(&root, source);
+    let subject = Subject { root, source, symbols: &symbols, resolver, ctx };
+    let infer = InferCache::new();
 
     // Whole-file resolver checks: declaration-oriented / file-gated → always fresh.
-    out.extend(run_wholefile_checks(root, &nodes, source, &symbols, resolver, ctx));
+    out.extend(resolved::whole_file_diagnostics(&subject, &nodes, &infer));
 
     // Partition by top method / constructor body and (re)compute the expensive per-expression checks.
     let bytes = source.as_bytes();
     let top_bodies = top_body_ranges(&nodes);
     let structural = structural_hash(bytes, &top_bodies);
-    let infer = InferCache::new();
 
     // The cache is reusable only when the structure, the resolver and the body count all match; a
     // count mismatch alone would desync the by-ordinal mapping, so it forces a full rebuild.
@@ -142,7 +144,7 @@ pub fn check_file_resolved_incremental(
             // New / changed body → run the per-expression checks over just its nodes; cache them
             // relative to the body start so a later shift replays them at the right place.
             let body_nodes = nodes_in_range(&nodes, bs, be);
-            let diags = run_body_checks(root, &body_nodes, source, &symbols, resolver, &infer, ctx.java_major);
+            let diags = resolved::per_body_diagnostics(&subject, &body_nodes, &infer);
             let rel_diags = diags
                 .iter()
                 .map(|d| Diagnostic {
@@ -161,73 +163,11 @@ pub fn check_file_resolved_incremental(
     // The structural remainder (field initializers, initializer blocks, anything outside a top body)
     // is always recomputed fresh — small, and it keeps those expressions covered.
     let outside = nodes_outside_ranges(&nodes, &top_bodies);
-    out.extend(run_body_checks(root, &outside, source, &symbols, resolver, &infer, ctx.java_major));
+    out.extend(resolved::per_body_diagnostics(&subject, &outside, &infer));
 
     *cache = IncrementalCache { structural_hash: structural, resolver_rev, bodies: new_bodies };
 
     finish(out)
-}
-
-/// The expensive, per-expression resolver checks — run over a node bucket (a body, or the structural
-/// remainder). These are exactly the checks [`check_file_resolved`](crate::engine::check::check_file_resolved)
-/// runs with the shared [`InferCache`]; keep the two lists in lock-step.
-fn run_body_checks<'a>(
-    root: Node<'a>,
-    nodes: &[Node<'a>],
-    source: &str,
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    infer: &InferCache,
-    java_major: Option<u32>,
-) -> Vec<Diagnostic> {
-    let mut out = Vec::new();
-    out.extend(crate::calls::members::unknown_members_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::calls::fields::unknown_fields_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::calls::arity::arity_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::calls::arguments::argument_type_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::typing::casts::type_compat_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::calls::functional::functional_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::switching::enum_switch::enum_switch_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::switching::switch_label_type::switch_label_type_errors_in(root, nodes, source, symbols, resolver, infer, java_major));
-    out.extend(crate::hierarchy::super_method::super_method_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::typing::condition_type::condition_type_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::typing::type_use::type_use_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::typing::narrowing::narrowing_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::throwing::checked_call::checked_call_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::flow::qualified_finals::qualified_final_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::hierarchy::visibility::visibility_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::throwing::checked_throw::checked_throw_errors_in(nodes, source, symbols, resolver));
-    out.extend(crate::throwing::exceptions::exception_errors_in(nodes, source, symbols, resolver));
-    out
-}
-
-/// The whole-file resolver checks — declaration-oriented or file-gated, always recomputed. These are
-/// the resolver checks [`check_file_resolved`](crate::engine::check::check_file_resolved) runs WITHOUT the
-/// shared [`InferCache`]; keep the two lists in lock-step.
-fn run_wholefile_checks<'a>(
-    root: Node<'a>,
-    nodes: &[Node<'a>],
-    source: &str,
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    ctx: &FileContext,
-) -> Vec<Diagnostic> {
-    let mut out = Vec::new();
-    out.extend(crate::source::imports::unresolved_imports(root, source, resolver, ctx.classpath_complete));
-    out.extend(crate::source::imports::unresolved_static_imports(root, source, resolver, ctx.classpath_complete));
-    out.extend(crate::typing::types::unresolved_types_in(nodes, source, symbols, resolver, ctx.classpath_complete));
-    out.extend(crate::typing::type_arg_arity::type_arg_arity_errors_in(nodes, source, symbols, resolver));
-    out.extend(crate::calls::undefined_var::undefined_var_errors_in(root, nodes, source, symbols, resolver, ctx.classpath_complete));
-    out.extend(crate::calls::unresolved_call::unresolved_call_errors_in(root, nodes, source, symbols, resolver));
-    out.extend(crate::hierarchy::inheritance::inheritance_errors_in(nodes, source, symbols, resolver));
-    out.extend(crate::hierarchy::inheritance::missing_abstract_impls_in(nodes, source, symbols, resolver));
-    out.extend(crate::decls::constructors::super_constructor_errors_in(nodes, source, symbols, resolver));
-    out.extend(crate::flow::finals::final_override_errors_in(nodes, source, symbols, resolver));
-    out.extend(crate::hierarchy::override_return::override_return_errors_in(nodes, source, symbols, resolver));
-    out.extend(crate::hierarchy::inherit_cycle::inherit_cycle_errors_in(nodes, source, symbols, resolver));
-    out.extend(crate::hierarchy::throws_widen::throws_widen_errors_in(nodes, source, symbols, resolver));
-    out.extend(crate::hierarchy::static_access::static_access_errors_in(root, nodes, source, symbols, resolver));
-    out
 }
 
 /// The byte ranges of the *top* method / constructor bodies — a body block not contained in another
@@ -352,7 +292,16 @@ mod tests {
             "com/acme/Foo".to_string(),
             cm(Some("java/lang/Object"), vec![method("bar", "java/lang/String")]),
         );
+        // An annotation type with one optional element — what the annotation-element checks resolve.
+        members.insert(
+            "com/acme/Tag".to_string(),
+            ClassMembers {
+                flags: bennu_java::prelude::ClassFlags { is_annotation: true, is_interface: true, ..Default::default() },
+                ..cm(None, vec![Member { is_default: true, ..method("v", "java/lang/String") }])
+            },
+        );
         let mut simple = HashMap::new();
+        simple.insert("Tag".to_string(), "com/acme/Tag".to_string());
         simple.insert("String".to_string(), "java/lang/String".to_string());
         simple.insert("Foo".to_string(), "com/acme/Foo".to_string());
         simple.insert("Object".to_string(), "java/lang/Object".to_string());
@@ -397,6 +346,8 @@ mod tests {
             "package com.acme;\nclass A {\n  Runnable r = () -> { \"y\".gone(); };\n  void m() {}\n}\n",
             // try / switch / throw so the try/switch/throw body checks fire too
             "package com.acme;\nclass A {\n  void m(String s) { try { s.nope(); } catch (Exception e) {} }\n}\n",
+            // an unknown annotation element, on a method and on the class — declaration-level checks
+            "package com.acme;\n@Tag(nope = \"x\")\nclass A {\n  @Tag(v = \"ok\", gone = \"y\")\n  void m(String s) { s.length(); }\n}\n",
             // no methods at all (all structural)
             "package com.acme;\nclass A {\n  String f = \"z\".missing();\n}\n",
         ];
@@ -404,6 +355,32 @@ mod tests {
             let mut cache = IncrementalCache::default();
             assert_eq!(incr(src, &r, &mut cache, 1), full(src, &r), "fresh incremental != full for:\n{src}");
         }
+    }
+
+    /// The incremental pass runs the SAME resolver checks as the full one. It kept a list of its own,
+    /// and an unknown annotation element was reported by the full run and never by the editor — the
+    /// two lists had drifted and nothing said so. Both drivers now take the list from
+    /// `engine::resolved`, and this pins the symptom that exposed it.
+    #[test]
+    fn unknown_annotation_element_is_reported_by_the_incremental_pass_too() {
+        let r = resolver();
+        let src = "package com.acme;\nclass A {\n  @Tag(nope = \"x\")\n  void m() {}\n}\n";
+        let mut cache = IncrementalCache::default();
+        let got = incr(src, &r, &mut cache, 1);
+        assert!(got.iter().any(|d| d.3.contains("declares no element `nope`")), "{got:?}");
+        assert_eq!(got, full(src, &r));
+    }
+
+    /// An element given twice in one annotation — `@PostMapping(produces = A, produces = A)` — is an error in the
+    /// editor's incremental pass as it is in the full one (javac: "duplicate element in annotation").
+    #[test]
+    fn a_repeated_annotation_element_is_reported_by_the_incremental_pass_too() {
+        let r = resolver();
+        let src = "package com.acme;\nclass A {\n  @Tag(v = \"a\", v = \"b\")\n  void m() {}\n}\n";
+        let mut cache = IncrementalCache::default();
+        let got = incr(src, &r, &mut cache, 1);
+        assert!(got.iter().any(|d| d.2 == "error" && d.3.contains("given a value twice")), "{got:?}");
+        assert_eq!(got, full(src, &r));
     }
 
     /// After a BODY-ONLY edit (signature unchanged), the reused-plus-recomputed result still equals a

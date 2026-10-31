@@ -20,7 +20,8 @@ import type { CompletionSource } from '@codemirror/autocomplete';
 import type { Extension } from '@codemirror/state';
 import type { StreamParser } from '@codemirror/language';
 import type { EditorView, Tooltip } from '@codemirror/view';
-import type { InlineCompletion, InlineCompletionSource } from './inline-completion';
+import type { InlineCompletion, InlineCompletionOutcomeHandler, InlineCompletionSource } from './inline-completion';
+import type { SettledHandler } from './accepted-tracking';
 
 /** The generic highlight-class vocabulary. A language's {@link LanguageDescriptor.classify}
  *  maps its concrete CST node types onto one of these; the highlighter then emits a
@@ -296,8 +297,12 @@ export interface CodeEditorIntel {
    * that stands for something longer needs.
    */
   inlineCompletion?: InlineCompletionSource;
+  /** Told what became of each proposal `inlineCompletion` drew: shown, accepted with Tab, dismissed. */
+  inlineCompletionOutcome?: InlineCompletionOutcomeHandler;
+  /** Told what stands where an accepted ghost text was written once the user is done with it. */
+  inlineCompletionSettled?: SettledHandler;
 }
 
 export type { Parser, Tree, Node };
 export type { CompletionSource };
-export type { InlineCompletion, InlineCompletionSource };
+export type { InlineCompletion, InlineCompletionOutcomeHandler, InlineCompletionSource };

@@ -1,0 +1,19 @@
+[package]
+name         = "bennu-flc"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Full-line completion for Bennu: a small local code model (byte-level BPE + a GPT run through ONNX Runtime), the prompt it reads, the decoding constrained by what the index knows, and the project's log-statement profile. Knows no editor and no index — the host brings the code context and the allowed names."
+
+[features]
+default = []
+# The model itself. Pulls `ort`, whose default `download-binaries` feature links a prebuilt onnxruntime INTO
+# the binary (the same arrangement as merula-transcribe's `onnx`). Off by default so the crate builds, and its
+# tests run, with no native ONNX dependency; the backend turns it on.
+onnx = ["dep:ort"]
+
+[dependencies]
+# Same pin as merula-transcribe: ort 2.x is pre-1.0 and its API shifts between release candidates.
+ort = { version = "=2.0.0-rc.12", optional = true }

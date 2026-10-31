@@ -21,6 +21,8 @@
 
 // Completions for members that do not exist yet — the accessors a field is missing.
 pub mod accessor_completion;
+pub mod annotation_values;
+pub mod project_values;
 // The types a Create method signature is written with, read from the resolver.
 pub mod call_types;
 pub mod class_names;

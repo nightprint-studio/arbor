@@ -25,7 +25,11 @@ export function jsonKind(v: unknown): JsonKind {
 /** `my_game::combat::Health` → `Health`; `State<my_game::Phase>` → `State<Phase>`. Mirrors the
  *  backend's `short_type_name`, which cannot be asked for here without a round-trip per row. */
 export function shortTypeName(path: string): string {
-  const tail = (s: string) => s.slice(s.lastIndexOf('::') + 2);
+  // No `::` at all (`f32`, `Vec3`) means the name is already short; `lastIndexOf` would answer -1 and cut a letter.
+  const tail = (s: string) => {
+    const at = s.lastIndexOf('::');
+    return at < 0 ? s : s.slice(at + 2);
+  };
   const lt = path.indexOf('<');
   if (lt >= 0 && path.endsWith('>')) return `${tail(path.slice(0, lt))}<${tail(path.slice(lt + 1, -1))}>`;
   return tail(path);
