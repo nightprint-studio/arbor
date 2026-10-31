@@ -59,8 +59,11 @@ import { bennuDiagnosticsStore } from './diagnostics.svelte';
 // One-way edge (the debugger knows nothing about console tabs): a run and its debug session share
 // an id, so the console is what says which session the Debug panel is looking at.
 import { bennuDebugStore } from './debug.svelte';
+import { debugAttach } from '$lib/ipc/bennu/debug';
+import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import {
-  bennuRunConfigStore, splitArgs, envRecord, isRunKind, cargoInvocationOf, type RunConfig,
+  bennuRunConfigStore, splitArgs, envRecord, isRunKind, cargoInvocationOf, attachPortOf,
+  type RunConfig,
 } from './run-config.svelte';
 import {
   cargoDebug as ipcCargoDebug, cargoRun as ipcCargoRun, cargoWorkspace, type CargoInvocation,
@@ -68,6 +71,7 @@ import {
 // The Maven tool window's press. It lands in this console for the same reason a cargo command
 // does: what a build prints is the whole of what it produced, and there is one place to read it.
 import { mavenGoal as ipcMavenGoal } from '$lib/ipc/bennu/maven-build';
+import { gradleTask as ipcGradleTask } from '$lib/ipc/bennu/gradle';
 // A `junit` configuration is launched by the TEST runner, not by this one — see `runConfig`.
 // (`tests` imports only a TYPE from here, so the edge is erased at build and there is no
 // runtime cycle.)
@@ -158,7 +162,32 @@ interface MavenRunSpec {
   label: string;
 }
 
-type RunSpec = JvmRunSpec | CargoRunSpec | ScriptRunSpec | MavenRunSpec;
+/** A `gradle <tasks>` launch, from the Gradle tool window. */
+interface GradleRunSpec {
+  kind: 'gradle';
+  root: string;
+  /** The project it runs in, as a Gradle path (`:api`). Empty = the root, i.e. the whole build. */
+  module: string;
+  /** Task names, in order, exactly as they go on the command line. */
+  tasks: string[];
+  /** Held on the spec rather than re-read from the panel, so ⟳ repeats the build that ran. */
+  skipTests: boolean;
+  offline: boolean;
+  /** The console tab's label. */
+  label: string;
+}
+
+type RunSpec = JvmRunSpec | CargoRunSpec | ScriptRunSpec | MavenRunSpec | GradleRunSpec | AttachRunSpec;
+
+/** A debugger attached to a JVM that is already running. Not a launch: there is no process of
+ *  ours, so the tab's "run" is the debug session and its Stop is a detach. */
+interface AttachRunSpec {
+  kind: 'attach';
+  root: string;
+  /** The JDWP port on this machine's loopback. */
+  port: number;
+  label: string;
+}
 
 /** A `java` launch. */
 interface JvmRunSpec {
@@ -454,6 +483,24 @@ function createBennuRunStore() {
     );
   }
 
+  /** The debug session of an Attach tab ended. Said differently from a process exit, because the
+   *  difference is the point: after Stop the program is still there. */
+  function detached(tabId: string) {
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.live) return;
+    const durationMs = tab.startedAt ? Date.now() - tab.startedAt : null;
+    const port = tab.spec.kind === 'attach' ? tab.spec.port : 0;
+    patchTab(tabId, { live: false, runId: null, finished: true, durationMs, stopping: false });
+    pushTo(
+      tabId,
+      tab.stopping
+        ? `Detached from 127.0.0.1:${port} — the program keeps running.`
+        : `The connection to 127.0.0.1:${port} ended (the program exited, or the debugger was detached).`,
+      'meta',
+    );
+    if (tab.id === activeTabId) bennuDebugStore.view(null);
+  }
+
   // ── Coalesced output ──────────────────────────────────────────────────────────────────────────
   //
   // A build or a running program emits one event per line — a Spring Boot startup is thousands in a
@@ -568,6 +615,15 @@ function createBennuRunStore() {
       await listen<{ session_id: string }>('arbor://bennu/debug-paused', (e) => {
         const tab = tabForRun(e.payload.session_id);
         if (tab && tab.id !== activeTabId) focusTab(tab.id);
+      }),
+    );
+    add(
+      // An Attach tab has no process whose exit would end it: its run is the debug session, so the
+      // session ending — a detach, or the JVM going away — is what finishes the tab.
+      await listen<{ session_id: string; status: string }>('arbor://bennu/debug-status', (e) => {
+        if (e.payload.status !== 'terminated') return;
+        const tab = tabForRun(e.payload.session_id);
+        if (tab?.spec.kind === 'attach' && tab.live) detached(tab.id);
       }),
     );
     add(
@@ -838,6 +894,30 @@ function createBennuRunStore() {
   }
 
   /**
+   * Attach the debugger to a JVM that is already running, narrating into a console tab.
+   *
+   * A refusal — nothing listening, a port that is not a debug port — is a toast with the backend's
+   * own words (they name the port and what was missing) and is kept in the tab as well, so the
+   * transcript says why this one never attached.
+   */
+  async function launchAttach(spec: AttachRunSpec): Promise<void> {
+    const where = `127.0.0.1:${spec.port}`;
+    const id = openTab(spec, spec.label || `JVM on ${spec.port}`, where);
+    patchTab(id, { live: true, startedAt: Date.now(), command: `attach ${where}` });
+    pushTo(id, `Attaching to ${where}…`, 'meta');
+    try {
+      const handle = await debugAttach(spec.root, spec.port);
+      claimRun(id, handle.session_id);
+      pushTo(id, 'Attached. The program keeps running; Stop detaches and leaves it running.', 'meta');
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      patchTab(id, { live: false, finished: true });
+      pushTo(id, message, 'err');
+      toastStore.show(message, 'error');
+    }
+  }
+
+  /**
    * Launch a script, streaming into the Run console.
    *
    * No compile step and no build guard: a script is not built, and it is not what serializes on
@@ -927,6 +1007,25 @@ function createBennuRunStore() {
     }
   }
 
+  /** Start a Gradle task run in its own console tab — `launchMaven`'s twin. */
+  async function launchGradle(spec: GradleRunSpec): Promise<void> {
+    const id = openTab(spec, spec.label, spec.tasks.join(' '));
+    patchTab(id, { live: true, startedAt: Date.now() });
+    try {
+      const handle = await ipcGradleTask(spec.root, spec.tasks, {
+        module: spec.module,
+        skipTests: spec.skipTests,
+        offline: spec.offline,
+      });
+      claimRun(id, handle.run_id, { command: handle.command, workingDir: handle.working_dir });
+    } catch (e) {
+      patchTab(id, { live: false, finished: true });
+      // Printed into the tab rather than swallowed into a toast, for the same reason as Maven's:
+      // "no Gradle launcher was found" is the sentence that says what to install.
+      pushTo(id, `Could not start: ${e instanceof Error ? e.message : String(e)}`, 'err');
+    }
+  }
+
   /**
    * Launch a named run configuration — every field of it, which is the difference between a
    * run configuration and a main class.
@@ -941,6 +1040,24 @@ function createBennuRunStore() {
       // Written by a newer Bennu. Say so rather than launching some approximation of it.
       bennuUiStore.showBottom('run');
       pushRun(`“${cfg.name}” is a ${cfg.kind} configuration, which this version cannot run.`, 'err');
+      return;
+    }
+    if (cfg.kind === 'attach') {
+      // Nothing to run: an Attach configuration only ever debugs. ▶ says so instead of doing
+      // something else under the Run button's name.
+      if (!debug) {
+        toastStore.show(
+          `“${cfg.name}” attaches to a running JVM, so it only debugs — use Debug (Shift+F9).`,
+          'info',
+        );
+        return;
+      }
+      const port = attachPortOf(cfg);
+      if (port === null) {
+        toastStore.show(`“${cfg.name}” has no valid port: use a number from 1 to 65535.`, 'error');
+        return;
+      }
+      await launchAttach({ kind: 'attach', root, port, label: cfg.name });
       return;
     }
     const env = await launchEnv(root, cfg);
@@ -1135,6 +1252,26 @@ function createBennuRunStore() {
   }
 
   /**
+   * "Attach to JVM…": attach with the active Attach configuration, else with the first one the
+   * project has. With none, one is created (port 5005) and the editor opens on it, because the
+   * port is the one thing the user has to confirm before anything can happen.
+   */
+  async function attachToJvm(root: string): Promise<void> {
+    const active = bennuRunConfigStore.activeFor(root);
+    const cfg = active?.kind === 'attach'
+      ? active
+      : bennuRunConfigStore.configsFor(root).find((c) => c.kind === 'attach');
+    if (!cfg) {
+      const id = bennuRunConfigStore.create(root, 'attach');
+      bennuRunConfigStore.setActive(root, id);
+      bennuUiStore.openRunConfig();
+      return;
+    }
+    bennuRunConfigStore.setActive(root, cfg.id);
+    await runConfig(root, cfg, true);
+  }
+
+  /**
    * Create and run a Cargo configuration for the workspace's ONLY binary, if there is one.
    *
    * The Cargo counterpart of the single-`main` shortcut above, and it exists for the same reason: a
@@ -1185,6 +1322,14 @@ function createBennuRunStore() {
       await launchMaven(from.spec);
       return;
     }
+    if (from.spec.kind === 'gradle') {
+      await launchGradle(from.spec);
+      return;
+    }
+    if (from.spec.kind === 'attach') {
+      await launchAttach(from.spec);
+      return;
+    }
     await launch(from.spec);
   }
 
@@ -1226,6 +1371,12 @@ function createBennuRunStore() {
     const tab = targetTab();
     if (!tab?.runId) return;
     patchTab(tab.id, { stopping: true });
+    if (tab.spec.kind === 'attach') {
+      // Nothing of ours to kill: Stop is a detach, and the program carries on without a debugger.
+      await bennuDebugStore.detachSession(tab.runId);
+      detached(tab.id);
+      return;
+    }
     try {
       await ipcCancelRun(tab.runId);
     } catch {
@@ -1239,7 +1390,11 @@ function createBennuRunStore() {
   async function closeTab(id: string): Promise<void> {
     const tab = tabs.find((t) => t.id === id);
     if (!tab) return;
-    if (tab.live && tab.runId) {
+    if (tab.live && tab.runId && tab.spec.kind === 'attach') {
+      // Closing the window onto a program we only attached to must not kill it.
+      patchTab(tab.id, { stopping: true });
+      await bennuDebugStore.detachSession(tab.runId);
+    } else if (tab.live && tab.runId) {
       try {
         await ipcCancelRun(tab.runId);
       } catch {
@@ -1315,6 +1470,7 @@ function createBennuRunStore() {
     runPreferred,
     setPreferredBuildType,
     runConfig,
+    attachToJvm,
     moveTab,
     /** The environment a configuration launches with — its own rows over its env file — or `null` when the file could not be read (already reported in the console). */
     launchEnv,
@@ -1408,6 +1564,28 @@ function createBennuRunStore() {
         skipTests: !!opts.skipTests,
         offline: !!opts.offline,
         label: opts.label ?? (leaf ? `${goals.join(' ')} · ${leaf}` : goals.join(' ')),
+      });
+    },
+
+    /**
+     * Run Gradle tasks in a project of the build, in a console tab of their own. The counterpart of
+     * {@link runMavenGoals}: the options travel WITH the run, so ⟳ repeats the build that happened.
+     */
+    async runGradleTasks(
+      root: string,
+      tasks: string[],
+      opts: { module?: string; skipTests?: boolean; offline?: boolean; label?: string } = {},
+    ): Promise<void> {
+      const module = opts.module ?? '';
+      const leaf = module ? module.split(':').filter(Boolean).pop() ?? module : '';
+      await launchGradle({
+        kind: 'gradle',
+        root,
+        module,
+        tasks,
+        skipTests: !!opts.skipTests,
+        offline: !!opts.offline,
+        label: opts.label ?? (leaf ? `${tasks.join(' ')} · ${leaf}` : tasks.join(' ')),
       });
     },
 

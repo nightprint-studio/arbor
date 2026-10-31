@@ -149,6 +149,32 @@ env = []
         assert_eq!(set.configs[0].test_scope, "");
     }
 
+    /// An Attach configuration keeps its kind and port through the repo file, and one written
+    /// without the port reads back with none (the editor and the launch both treat that as 5005).
+    #[test]
+    fn an_attach_configuration_round_trips() {
+        let set = RunConfigSet {
+            configs: vec![RunConfig {
+                id: "rc-att".to_string(),
+                name: "Remote JVM".to_string(),
+                kind: "attach".to_string(),
+                attach_port: "5005".to_string(),
+                ..RunConfig::default()
+            }],
+            active_id: Some("rc-att".to_string()),
+        };
+        let text = toml::to_string_pretty(&toml::Value::try_from(&set).unwrap()).unwrap();
+        let back: RunConfigSet = toml::from_str(&text).unwrap();
+        assert_eq!(back, set);
+        assert_eq!(back.configs[0].kind, "attach");
+        assert_eq!(back.configs[0].attach_port, "5005");
+
+        let bare = "[[configs]]\nid = \"a\"\nname = \"Remote\"\nkind = \"attach\"\n";
+        let bare: RunConfigSet = toml::from_str(bare).unwrap();
+        assert_eq!(bare.configs[0].kind, "attach");
+        assert_eq!(bare.configs[0].attach_port, "");
+    }
+
     /// A scratch project root, cleaned on the way in.
     fn scratch(tag: &str) -> String {
         let dir = std::env::temp_dir().join(format!("bennu-runcfg-{tag}-{}", std::process::id()));

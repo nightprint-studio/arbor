@@ -78,6 +78,7 @@ describe('modulesFromKind', () => {
   it('mirrors the primary kind so the rail is steady before the backend answers', () => {
     expect(modulesFromKind('cargo')).toEqual([{ kind: 'Cargo', dir: '.' }]);
     expect(modulesFromKind('maven')).toEqual([{ kind: 'Maven', dir: '.' }]);
+    expect(modulesFromKind('gradle')).toEqual([{ kind: 'Gradle', dir: '.' }]);
     expect(modulesFromKind('plain')).toEqual([]);
   });
 });

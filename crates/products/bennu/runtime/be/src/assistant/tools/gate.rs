@@ -34,6 +34,8 @@ impl ToolHost {
             n if brp::is_brp_tool(n) || screenshot::is_screenshot_tool(n) => {}
             "local_history" => out.extend(self.history_touched(input).into_iter().map(|(p, write)| (p, if write { Op::Write } else { Op::Read }))),
             "ask_user" | "bennu_help" | "update_plan" | "open_ui" | "load_skill" | "show_diagram" => {}
+            // Showing a picture from a file is a read of that file; one the model wrote itself touches nothing.
+            "show_image" => out.extend(str_of("path").map(|p| (p, Op::Read))),
             // A sub-agent's own calls cross this gate under its own, narrower policy; starting one touches nothing here.
             n if spawn::is_agent_tool(n) => {}
             n if reads::is_read_tool(n) => out.extend(self.read_touched(call).into_iter().map(|p| (p, Op::Read))),
@@ -135,7 +137,7 @@ impl ToolHost {
             return Gate::Refuse("the step plan is switched off".into());
         }
         if self.chat && !CHAT_TOOLS.contains(&call.name.as_str()) {
-            return Gate::Refuse("this is a chat: its only tools are the help about Bennu, opening a panel and showing a diagram".into());
+            return Gate::Refuse("this is a chat: its only tools are the help about Bennu, opening a panel and showing a diagram or a picture".into());
         }
         if call.name == "load_skill" && self.skills.is_empty() {
             return Gate::Refuse("the user has not enabled any skill".into());
@@ -147,7 +149,7 @@ impl ToolHost {
             || matches!(
                 call.name.as_str(),
                 "search_text" | "find_files" | "edit_file" | "edit_files" | "replace_in_files" | "create_file" | "delete_file" | "ask_user" | "rename_symbol"
-                    | "add_parameter" | "bennu_help" | "update_plan" | "local_history" | "structural_replace" | "open_ui" | "load_skill" | "show_diagram"
+                    | "add_parameter" | "bennu_help" | "update_plan" | "local_history" | "structural_replace" | "open_ui" | "load_skill" | "show_diagram" | "show_image"
             )
             || reads::is_read_tool(&call.name)
             || spawn::is_agent_tool(&call.name)

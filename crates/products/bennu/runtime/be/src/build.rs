@@ -183,6 +183,10 @@ fn compile_project_now(
         );
         let (ok, raw) = run_cargo_check(&root, root_path, module)?;
         finish_compile("cargo", ok, raw, &sink, &root)
+    } else if is_gradle_root(&root) {
+        sink.progress(&format!("gradle {}", module.map(|m| format!("{m}:classes")).unwrap_or_else(|| "classes".to_string())), None, None);
+        let (ok, raw) = run_gradle_compile(&root, module)?;
+        finish_compile("gradle", ok, raw, &sink, &root)
     } else {
         compile_java(&root, root_path, module, &sink)?
     };
@@ -204,7 +208,7 @@ fn compile_project_now(
     // A REFRESH, never the manual rebuild: that one drops the dependency jar list and makes
     // Maven resolve the whole tree again, which a compile — no pom touched — has no reason to
     // ask for. See `IndexService::refresh_after_compile`.
-    if outcome.ok && outcome.tool != "cargo" && outcome.tool != "up-to-date" {
+    if outcome.ok && outcome.tool != "cargo" && outcome.tool != "gradle" && outcome.tool != "up-to-date" {
         IndexService::global().refresh_after_compile(root_path, ctx.event_sink());
     }
 
@@ -267,6 +271,11 @@ fn compile_java(
         build_freshness::record_success(&assessment, true);
     }
     Ok(outcome)
+}
+
+/// Whether `root` is a Gradle build — a Maven root is never one, whatever else it holds.
+pub(crate) fn is_gradle_root(root: &Path) -> bool {
+    !root.join("pom.xml").is_file() && bennu_gradle::prelude::is_gradle_root(root)
 }
 
 /// Whether `root` is governed by Cargo — the same precedence `bennu-project`'s
@@ -344,6 +353,14 @@ pub struct RunArgs {
 #[arbor_rpc::handler]
 fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
     let root = PathBuf::from(&args.root);
+    // The launch classpath is assembled from a Maven reactor (module outputs + `dependency:build-classpath`).
+    // A Gradle build has its own tasks for this, and starting a JVM on a guessed classpath would die on a
+    // `NoClassDefFoundError` far from the reason.
+    if is_gradle_root(&root) {
+        return Err("Launching a main class directly is not available for Gradle projects yet. \
+                    Run the `run` or `bootRun` task from the Gradle window instead."
+            .to_string());
+    }
     let java_home = resolve_java_home(&args.root);
     let java = java_program(java_home.as_deref());
     // The module the class lives in, if any — an empty string is "the root", not a directory
@@ -728,6 +745,31 @@ fn run_cargo_check(root: &Path, root_path: &str, package: Option<&str>) -> Resul
     let out = cmd
         .output()
         .map_err(|e| format!("spawn cargo ({}): {e}", launcher.to_string_lossy()))?;
+    Ok((out.status.success(), merge_output(&out.stdout, &out.stderr)))
+}
+
+/// `gradle classes` in `root`, over `module` (a directory relative to the root) or the whole build.
+///
+/// Compiles the main sources only, like `mvn compile`: what the Build button is for is the diagnostics,
+/// and the test sources are `gradle testClasses` away. Offline unless downloads are allowed, the same
+/// switch the Maven compile obeys.
+fn run_gradle_compile(root: &Path, module: Option<&str>) -> Result<(bool, String), String> {
+    let launcher = crate::gradle::find_gradle_launcher(root);
+    let task = match module {
+        Some(rel) => {
+            let prefix = crate::gradle::module_prefix(&format!(":{}", rel.trim_matches('/').replace('/', ":")))?;
+            format!("{prefix}:classes")
+        }
+        None => "classes".to_string(),
+    };
+    let mut cmd = Command::new(&launcher);
+    cmd.current_dir(root).arg("--console=plain");
+    if !crate::dep_classpath::auto_download() {
+        cmd.arg("--offline");
+    }
+    cmd.arg(task);
+    cmd.no_window();
+    let out = cmd.output().map_err(|e| format!("spawn gradle ({launcher}): {e}"))?;
     Ok((out.status.success(), merge_output(&out.stdout, &out.stderr)))
 }
 

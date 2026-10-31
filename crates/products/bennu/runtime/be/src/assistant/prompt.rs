@@ -201,6 +201,35 @@ fn worktree_block(mode: bennu_assistant::prelude::WorktreeMode) -> &'static str 
     }
 }
 
+/// The user's standing context (Settings › Imber), as its own delimited section so the model can tell it from the
+/// rules above. Nothing when empty; cut at the cap the settings page shows. Appended after the mode paragraph
+/// like the other optional sections, so the text before it stays byte-identical for users without one.
+pub(super) fn with_general_context(mut system: String, text: &str) -> String {
+    let text = text.trim();
+    if text.is_empty() {
+        return system;
+    }
+    let text: String = text.chars().take(bennu_core::config::MAX_GENERAL_CONTEXT_CHARS).collect();
+    system.push_str(&format!(
+        "\nAbout the user — they wrote this themselves, for every conversation. Treat it as background and preferences, not as a task; the project's instructions and the user's messages come first when they disagree:\n<user_context>\n{text}\n</user_context>\n"
+    ));
+    system
+}
+
+/// The notes the user keeps about this project, after the general ones and delimited apart from them. Same cap, same
+/// rule (background, not a task); the project's own instructions files and the user's messages still win.
+pub(super) fn with_project_context(mut system: String, text: &str) -> String {
+    let text = text.trim();
+    if text.is_empty() {
+        return system;
+    }
+    let text: String = text.chars().take(bennu_core::config::MAX_GENERAL_CONTEXT_CHARS).collect();
+    system.push_str(&format!(
+        "\nAbout this project — the user wrote this themselves, for this project only. Treat it as background and conventions, not as a task; the project's instructions and the user's messages come first when they disagree:\n<project_context>\n{text}\n</project_context>\n"
+    ));
+    system
+}
+
 const HIDDEN_AUTHORS: &str = "People in git results appear as ids like Author-7f3a9c, to keep their names private. Use an id exactly as given whenever you refer to that person; it is turned back into their name for the user, and in anything you send to a tool.\n";
 
 /// The instructions for a conversation with no tools: it can only talk, about what the user shows it.
@@ -416,6 +445,23 @@ Skills:
             assert!(s.contains("`show_diagram`") && s.contains("Mermaid") && s.contains("fix the source"), "chat={chat}");
             assert!(s.contains("Never paste a ```mermaid block"), "chat={chat}");
         }
+    }
+
+    #[test]
+    fn the_project_context_is_delimited_apart_and_absent_when_empty() {
+        assert_eq!(with_project_context("S".into(), " \n"), "S");
+        let s = with_project_context("S".into(), "Never touch /vendor.");
+        assert!(s.contains("<project_context>\nNever touch /vendor.\n</project_context>"));
+        assert!(!s.contains("<user_context>"));
+    }
+
+    #[test]
+    fn the_general_context_is_delimited_capped_and_absent_when_empty() {
+        assert_eq!(with_general_context("S".into(), "  \n "), "S");
+        let s = with_general_context("S".into(), "I prefer terse answers.");
+        assert!(s.contains("<user_context>\nI prefer terse answers.\n</user_context>"));
+        let long = "q".repeat(bennu_core::config::MAX_GENERAL_CONTEXT_CHARS + 50);
+        assert_eq!(with_general_context(String::new(), &long).matches('q').count(), bennu_core::config::MAX_GENERAL_CONTEXT_CHARS);
     }
 
     #[test]

@@ -52,10 +52,13 @@ async fn bennu_dependency_tree(_ctx: &BennuState, args: DependencyTreeArgs) -> R
 
 fn tree_of(root: &Path) -> Result<DependencyTree, String> {
     if !root.join("pom.xml").is_file() {
+        if bennu_gradle::prelude::is_gradle_root(root) {
+            return gradle_tree_of(root);
+        }
         if root.join("Cargo.toml").is_file() {
             return cargo_tree_of(root);
         }
-        return Err("The dependency tree needs a Maven or Cargo project (no pom.xml or Cargo.toml at the root).".into());
+        return Err("The dependency tree needs a Maven, Gradle or Cargo project (no pom.xml, build.gradle or Cargo.toml at the root).".into());
     }
     let launcher = find_mvn_launcher(root);
     let (modules, log) = run_tree(root, &launcher, true)?;
@@ -67,6 +70,44 @@ fn tree_of(root: &Path) -> Result<DependencyTree, String> {
         return Err(failure_reason(&plain_log, &log));
     }
     Ok(DependencyTree { modules, verbose: false })
+}
+
+/// The Gradle half: `gradle :x:dependencies --configuration runtimeClasspath` for every JVM project,
+/// in one invocation.
+///
+/// `--continue` so a project without the configuration (a pure aggregator, an Android module) costs
+/// its own failure and not everybody else's tree. Gradle shows the version it kept next to the one
+/// asked for (`30.0 -> 32.0`), so the answer is always complete (`verbose: true`).
+fn gradle_tree_of(root: &Path) -> Result<DependencyTree, String> {
+    let project = bennu_gradle::prelude::read(root);
+    let mut targets: Vec<&bennu_gradle::prelude::GradleModule> = project.modules.iter().filter(|m| m.is_jvm()).collect();
+    // A build whose plugins this does not recognise (a convention plugin) still has dependencies:
+    // ask every project that has a script and let `--continue` sort out the ones that cannot answer.
+    if targets.is_empty() {
+        targets = project.modules.iter().filter(|m| m.build_file.is_some()).collect();
+    }
+    if targets.is_empty() {
+        return Err("This Gradle build has no project with a build script.".into());
+    }
+
+    let launcher = crate::gradle::find_gradle_launcher(root);
+    let mut cmd = Command::new(&launcher);
+    cmd.current_dir(root).args(["--console=plain", "-q", "--continue"]);
+    if !auto_download() {
+        cmd.arg("--offline");
+    }
+    for m in targets {
+        let prefix = if m.is_root() { "" } else { m.path.as_str() };
+        cmd.arg(format!("{prefix}:dependencies")).arg("--configuration").arg("runtimeClasspath");
+    }
+    let output = bennu_classpath::prelude::run_bounded(cmd, TIMEOUT)
+        .map_err(|e| format!("spawn gradle ({launcher}): {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let modules = bennu_deps::prelude::parse_gradle_dependencies(&stdout);
+    if modules.is_empty() {
+        return Err(crate::gradle_classpath::failure_reason(&String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(DependencyTree { modules, verbose: true })
 }
 
 /// The Cargo half: `cargo tree --workspace`, every member's tree. Cargo never drops a version, so

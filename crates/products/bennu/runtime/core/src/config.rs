@@ -865,7 +865,15 @@ pub struct AssistantConfig {
     pub side_model: String,
     /// Code pasted into the composer becomes a fenced block with its language (Ctrl+Shift+V pastes plain). On by default.
     pub wrap_pasted_code: bool,
+    /// The user's standing context for every conversation — who they are, how they like to work, what Imber
+    /// should always know — in the manner of a chat assistant's custom instructions. Empty: nothing is added.
+    /// Cut at [`MAX_GENERAL_CONTEXT_CHARS`] when it is put in the instructions.
+    pub general_context: String,
 }
+
+/// The most characters of [`AssistantConfig::general_context`] that reach the instructions. The text is sent
+/// (and cached) with every request, so the cap is what a runaway paste costs on every turn.
+pub const MAX_GENERAL_CONTEXT_CHARS: usize = 4000;
 
 /// The saved assistant mode, with the word the two-way switch used (`auto`) read as the mode it became.
 /// The file is rewritten with the new word the next time the choice is saved.
@@ -929,6 +937,7 @@ impl Default for AssistantConfig {
             long_cache: true,
             side_model: String::new(),
             wrap_pasted_code: true,
+            general_context: String::new(),
         }
     }
 }

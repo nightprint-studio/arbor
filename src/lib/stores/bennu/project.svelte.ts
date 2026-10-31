@@ -1133,7 +1133,7 @@ function createProjectStore() {
     /** True when the Java model applies — the only kind that builds a symbol index, resolves a JDK
      *  and detects capabilities. Gate that chrome on this rather than on `!isCargo`, which would
      *  claim it for a plain folder too. `true` with nothing open, like {@link kind}. */
-    get isJava()         { return (project?.kind ?? 'maven') === 'maven'; },
+    get isJava()         { const k = project?.kind ?? 'maven'; return k === 'maven' || k === 'gradle'; },
     get activeFilePath() { return activeFilePath; },
 
     // ── Editor panes ──────────────────────────────────────────────────────────────

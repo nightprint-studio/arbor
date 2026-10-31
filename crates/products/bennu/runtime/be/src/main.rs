@@ -426,6 +426,12 @@ mod dependency_tree;
 // coordinates it does NOT have — and the one verb that changes that. The reporting half runs no
 // process; the download is a job, because it is the only thing here that needs the network.
 mod maven;
+// The Gradle BUILD (`bennu_gradle_*`): the projects `settings.gradle` includes, their plugins and tasks,
+// read out of the build scripts, plus the verbs that start Gradle — a task streamed into the Run
+// console, and the classpath resolve that is Gradle's `go-offline`. `gradle_classpath` is the dependency
+// tier for the symbol index.
+mod gradle;
+mod gradle_classpath;
 // The Maven BUILD, as the tool window offers it (`bennu_maven_model` / `bennu_maven_goal`): the
 // reactor and the plugins each pom configures, read out of the poms, plus the one verb that starts
 // Maven — streaming into the same Run console a JVM launch and a cargo command use.

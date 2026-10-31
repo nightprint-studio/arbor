@@ -5,6 +5,8 @@
 //!
 //! * `pom.xml` → [`ProjectKind::Maven`]: pom parse, capability detection, JDK
 //!   detection, declared encoding — the full Java model.
+//! * `settings.gradle[.kts]` / `build.gradle[.kts]` → [`ProjectKind::Gradle`]: the same Java model,
+//!   read from the build scripts.
 //! * `Cargo.toml` → [`ProjectKind::Cargo`]: name, workspace members, UTF-8. No
 //!   capabilities and no JDK, because every one of those rules is a claim about a
 //!   Java stack and a false one is worse than an absent one (docs §7).
@@ -47,6 +49,9 @@ pub fn open_project(root: &Path, opts: &OpenOptions) -> Result<ProjectInfo, Proj
     if root.join("pom.xml").is_file() {
         return open_maven(root, opts);
     }
+    if bennu_gradle::prelude::is_gradle_root(root) {
+        return Ok(open_gradle(root, opts));
+    }
     if root.join("Cargo.toml").is_file() {
         return open_cargo(root);
     }
@@ -88,6 +93,36 @@ fn open_maven(root: &Path, opts: &OpenOptions) -> Result<ProjectInfo, ProjectErr
         // The project label the status bar shows: pom `sourceEncoding` → config default.
         source_encoding: encoding::project_encoding_label(&pom, opts.default_encoding),
     })
+}
+
+/// The Gradle half: settings → subprojects → build scripts, then the same capability detection and
+/// JDK resolution a pom gets.
+///
+/// Never fails — the scripts are read tolerantly, and a build that cannot be understood still opens as
+/// a project with its root and no more, which is more useful than a refusal.
+fn open_gradle(root: &Path, opts: &OpenOptions) -> ProjectInfo {
+    let build = bennu_gradle::prelude::read(root);
+
+    let capabilities = capability::detect_with(&capability::BuildEvidence::from_gradle(&build));
+
+    let jdk = match opts.jdk_override.filter(|s| !s.is_empty()) {
+        Some(v) => Some(bennu_proto::prelude::JdkInfo { version: v.to_string(), source: "override".to_string() }),
+        None => build.java_level().map(|level| bennu_proto::prelude::JdkInfo {
+            version: level.version,
+            source: format!("gradle {}", level.source),
+        }),
+    };
+
+    ProjectInfo {
+        root: root.display().to_string(),
+        name: non_empty_or_dir_name(&build.name, root),
+        modules: build.modules.iter().filter(|m| !m.is_root()).map(|m| m.rel_dir.clone()).collect(),
+        kind: ProjectKind::Gradle,
+        jdk,
+        capabilities,
+        // `options.encoding` is Gradle's `sourceEncoding`; without it the config default applies.
+        source_encoding: build.encoding().unwrap_or(opts.default_encoding).to_string(),
+    }
 }
 
 /// The Cargo half: `[package] name` → the header, the workspace `members` → the

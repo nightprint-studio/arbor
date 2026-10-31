@@ -27,12 +27,14 @@
   import AssistantErrorNotice from './AssistantErrorNotice.svelte';
   import AssistantPlan from './AssistantPlan.svelte';
   import AssistantLiveSummary from './AssistantLiveSummary.svelte';
-  import AssistantScreenshot from './AssistantScreenshot.svelte';
+  import AssistantImage from './AssistantImage.svelte';
+  import AssistantAttachments from './AssistantAttachments.svelte';
   import AssistantAgentCard from './AssistantAgentCard.svelte';
   import AssistantText from './AssistantText.svelte';
   import AssistantWho from './AssistantWho.svelte';
   import AssistantUserText from './AssistantUserText.svelte';
   import { hasFence, inlineSpans as inline } from './assistant-fences';
+  import type { Picture } from './assistant-images';
   import AssistantDocModal from './AssistantDocModal.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
@@ -90,11 +92,25 @@
   );
   const time = $derived(new Date(message.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }));
 
+  /** Every kept picture of the message, in order: what the lightbox walks with the arrow keys. */
+  const gallery = $derived<Picture[]>(
+    message.blocks.flatMap((b): Picture[] =>
+      b.type === 'screenshot' ? [{ path: b.shot.path, caption: b.shot.caption }]
+      : b.type === 'image' ? [{ path: b.image.path, caption: b.image.caption }]
+      : [],
+    ),
+  );
+
   const plainText = $derived(message.blocks.flatMap((b) => (b.type === 'text' ? [b.text] : b.type === 'code' ? [b.code] : b.type === 'diagram' ? ['```mermaid\n' + b.diagram.source + '\n```'] : [])).join('\n\n'));
 </script>
 
 <div class="msg" in:fly={{ y: 8, duration: animStore.dFast, easing: cubicOut }}>
   {#if message.role === 'user'}
+    {#each message.blocks as b}
+      {#if b.type === 'attachments'}
+        <div class="attached"><AssistantAttachments items={b.items} /></div>
+      {/if}
+    {/each}
     <div class="user">
       <div class="user-actions">
         <IconButton tooltip="Copy" size={22} onclick={() => copyToClipboard(plainText, { successToast: 'Copied' })}><Copy size={12} /></IconButton>
@@ -158,7 +174,9 @@
           {:else if b.type === 'live_summary'}
             <AssistantLiveSummary summary={b.summary} />
           {:else if b.type === 'screenshot'}
-            <AssistantScreenshot shot={b.shot} />
+            <AssistantImage path={b.shot.path} caption={b.shot.caption} {gallery} />
+          {:else if b.type === 'image'}
+            <AssistantImage path={b.image.path} caption={b.image.caption} {gallery} />
           {:else if b.type === 'agent'}
             <AssistantAgentCard agent={b.agent} />
           {/if}
@@ -179,6 +197,8 @@
 
 <style>
   .user { display: flex; justify-content: flex-end; align-items: flex-start; gap: 4px; }
+  /* The files sit on a line of their own above the bubble, right-aligned like it. */
+  .attached { display: flex; justify-content: flex-end; margin-bottom: 4px; }
   .user-actions { order: -1; opacity: 0; transition: opacity var(--transition-fast); align-self: center; }
   .user:hover .user-actions, .user:focus-within .user-actions { opacity: 1; }
   /* A message with code in it takes the width of the column: code is read wide. */

@@ -29,6 +29,18 @@
   import type { DecisionLevel } from '../assistant/assistant-decision';
   import type { AccessScope, AssistantEffort, AssistantMode } from '../assistant/assistant-types';
 
+  /** The page of the Imber branch of Settings this renders: each is a few of the cards below. */
+  type Page = 'connection' | 'conversations' | 'access' | 'tools' | 'cost';
+  let { page = 'connection' }: { page?: Page } = $props();
+
+  const HEADINGS: Record<Page, { title: string; lead: string }> = {
+    connection: { title: 'Imber', lead: 'The key it uses to reach the model. Its other settings are in the pages below.' },
+    conversations: { title: 'Conversations', lead: 'How a new conversation starts: mode, effort, context and helpers.' },
+    access: { title: 'Access', lead: 'What Imber may reach — folders, projects, git — and when it asks.' },
+    tools: { title: 'Tools and skills', lead: 'Which groups of tools it may use, and the skills it can load.' },
+    cost: { title: 'Models and cost', lead: 'The models on offer with their prices, and the limits on what it may spend.' },
+  };
+
   const s = bennuAssistantStore;
 
   let key = $state('');
@@ -127,10 +139,11 @@
 </script>
 
 <div class="section-header">
-  <h2>Imber</h2>
-  <p>The key it uses, how it starts a conversation, and what it may reach.</p>
+  <h2>{HEADINGS[page].title}</h2>
+  <p>{HEADINGS[page].lead}</p>
 </div>
 
+{#if page === 'connection'}
 <div class="card">
   <div class="card-section-title"><KeyRound size={12} /> Connection</div>
   <Callout variant="info" title="Your key stays on this machine">
@@ -150,7 +163,9 @@
     </div>
   </FormRow>
 </div>
+{/if}
 
+{#if page === 'cost'}
 <div class="card">
   <div class="card-section-title"><Sliders size={12} /> Models and prices</div>
   {#if s.modelsError}
@@ -166,7 +181,9 @@
   </FormRow>
   {#if s.modelsFile}<p class="file-note">{s.modelsFile}</p>{/if}
 </div>
+{/if}
 
+{#if page === 'access'}
 <div class="card">
   <div class="card-section-title"><GitBranch size={12} /> Git</div>
   <Callout variant="warning" title="Off unless you turn it on">
@@ -181,7 +198,9 @@
     <Toggle checked={s.hideAuthors} disabled={!s.gitEnabled} onchange={(v) => s.setHideAuthors(v)} ariaLabel="Hide authors from the model" />
   </FormRow>
 </div>
+{/if}
 
+{#if page === 'cost'}
 <div class="card">
   <div class="card-section-title"><Wallet size={12} /> Spending limits</div>
   <Callout variant="info" title="Brakes, not a budget">
@@ -204,7 +223,9 @@
                    ariaLabel="Warning percentage" onchange={(v) => s.setLimits({ warn_percent: Math.min(99, Math.max(10, Number(v) || 80)) })} />
   </FormRow>
 </div>
+{/if}
 
+{#if page === 'conversations'}
 <div class="card">
   <div class="card-section-title"><Sliders size={12} /> New conversations</div>
   <FormRow label="Model" description="What a new conversation starts with. You can change it from the composer at any time.">
@@ -235,6 +256,9 @@
   <FormRow label="Project instructions"description="Read the project's CLAUDE.md, .claude/CLAUDE.md and AGENTS.md — and your own assistant-instructions.md in Bennu's config folder — into Imber's instructions, as other coding assistants do. Long files are cut; a copy of the same text is sent once.">
     <Toggle checked={s.useInstructions} onchange={(v) => s.setUseInstructions(v)} ariaLabel="Read project instruction files" />
   </FormRow>
+  <FormRow label="General context" description="Standing notes sent to Imber in every conversation, like a chat assistant's custom instructions: who you are, how you like to work, what it should always know. Also in the panel's ⋯ menu.">
+    <Button size="sm" onclick={() => s.openContext()}>{s.generalContext.trim() ? 'Edit…' : 'Write…'}</Button>
+  </FormRow>
   <FormRow label="Chat only" description="A conversation with no tools: it cannot read, search or change anything, and sees only what you type or select. Also switchable from the settings menu of the composer.">
     <Toggle checked={s.chatOnly} onchange={(v) => s.setChatOnly(v)} ariaLabel="Chat only" />
   </FormRow>
@@ -259,7 +283,9 @@
     </Callout>
   {/if}
 </div>
+{/if}
 
+{#if page === 'access'}
 <div class="card">
   <div class="card-section-title"><ShieldCheck size={12} /> What it may reach</div>
   <Callout variant="info" title="Narrow by default, never a shell">
@@ -297,7 +323,9 @@
     {/each}
   </div>
 </div>
+{/if}
 
+{#if page === 'tools'}
 <div class="card">
   <div class="card-section-title"><Wrench size={12} /> Tools it may use</div>
   {#each TOOL_FAMILIES as f (f.id)}
@@ -315,7 +343,9 @@
     <Toggle checked={s.autoContinueOnStop} onchange={(v) => s.setAutoContinueOnStop(v)} ariaLabel="Start an Imber run when the debugged program stops" />
   </FormRow>
 </div>
+{/if}
 
+{#if page === 'tools'}
 <div class="card">
   <div class="card-section-title"><WandSparkles size={12} /> Skills</div>
   <FormRow label="Skills" description="Folders with a SKILL.md — in the project's .bennu/skills or .claude/skills, or in your own — that teach Imber how you want a kind of task done. None is known to it until you enable it; it sees only a one-line index and loads a skill when a task calls for it. Type / in the composer to use one.">
@@ -325,7 +355,9 @@
     </div>
   </FormRow>
 </div>
+{/if}
 
+{#if page === 'access'}
 {#if picking}
   <FileExplorerModal
     mode="folder"
@@ -333,6 +365,7 @@
     onConfirm={(path) => { s.addFolder(path); picking = false; }}
     onCancel={() => (picking = false)}
   />
+{/if}
 {/if}
 
 <style>

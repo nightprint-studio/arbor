@@ -27,8 +27,19 @@ pub struct Module {
 
 /// The manifest files and what each one makes its folder. Listed in the order a folder's own manifests are
 /// reported, which is also the order of precedence at the root: Java first, as `open_project` decides.
-const MANIFESTS: [(&str, &str); 5] =
-    [("pom.xml", "Maven"), ("build.gradle", "Gradle"), ("build.gradle.kts", "Gradle"), ("Cargo.toml", "Cargo"), ("package.json", "Node")];
+///
+/// A Gradle build's root is where its **settings** are, and a multi-project build very often has no
+/// build script there at all — so the settings scripts count as the manifest, or the root would not
+/// be a module and its first subproject would be listed in its place.
+const MANIFESTS: [(&str, &str); 7] = [
+    ("pom.xml", "Maven"),
+    ("settings.gradle", "Gradle"),
+    ("settings.gradle.kts", "Gradle"),
+    ("build.gradle", "Gradle"),
+    ("build.gradle.kts", "Gradle"),
+    ("Cargo.toml", "Cargo"),
+    ("package.json", "Node"),
+];
 
 /// How deep below the root a manifest is looked for, and how many are kept: a monorepo has a handful of
 /// projects, and a deeper or longer list is mostly vendored or generated.
@@ -90,6 +101,12 @@ mod tests {
     fn a_web_front_end_with_a_rust_back_end_beside_it_lists_both() {
         let dir = tree("tauri", &["package.json", "src-tauri/Cargo.toml", "src/main.ts"]);
         assert_eq!(found(&dir), [("Node", ".".to_string()), ("Cargo", "src-tauri".to_string())]);
+    }
+
+    #[test]
+    fn a_gradle_build_with_only_settings_at_its_root_is_one_module_at_the_root() {
+        let dir = tree("gradle-settings", &["settings.gradle", "api/build.gradle", "web/build.gradle.kts"]);
+        assert_eq!(found(&dir), [("Gradle", ".".to_string())]);
     }
 
     #[test]

@@ -26,9 +26,10 @@
 
 import type { TreeNode } from '$lib/types/bennu';
 import type { MavenModel, MavenModule, MavenPlugin } from '$lib/ipc/bennu/maven-build';
+import type { GradleModel, GradleModule } from '$lib/ipc/bennu/gradle';
 
 /** The trees whose expansion is remembered. One word each: it is the prefix of every key. */
-export type ExpansionScope = 'project' | 'maven';
+export type ExpansionScope = 'project' | 'maven' | 'gradle';
 
 /** The persisted form — the two lists on a `ProjectSession`. */
 export interface PersistedExpansion {
@@ -153,6 +154,33 @@ export function mavenLiveKeys(model: Pick<MavenModel, 'modules' | 'profiles'>): 
     for (const plugin of module.plugins) {
       if (plugin.goals.length > 0) out.add(mavenKeys.plugin(module, plugin));
     }
+  }
+  return out;
+}
+
+type GradleIdentity = Pick<GradleModule, 'path'>;
+
+/** A project by its Gradle path — what the build calls it, unchanged by a re-read or a script edit. */
+function gradleModuleKey(module: GradleIdentity): string {
+  return `module/${module.path}`;
+}
+
+/** The Gradle tool window's keys, one builder per kind of row. */
+export const gradleKeys = {
+  catalogs: 'catalogs',
+  module: gradleModuleKey,
+  tasks: (module: GradleIdentity) => `${gradleModuleKey(module)}/tasks`,
+  plugins: (module: GradleIdentity) => `${gradleModuleKey(module)}/plugins`,
+};
+
+/** Every key a Gradle model draws a collapsible row for — what pruning keeps. */
+export function gradleLiveKeys(model: Pick<GradleModel, 'modules' | 'catalogs'>): Set<string> {
+  const out = new Set<string>();
+  if (model.catalogs.length > 0) out.add(gradleKeys.catalogs);
+  for (const module of model.modules) {
+    out.add(gradleKeys.module(module));
+    out.add(gradleKeys.tasks(module));
+    out.add(gradleKeys.plugins(module));
   }
   return out;
 }

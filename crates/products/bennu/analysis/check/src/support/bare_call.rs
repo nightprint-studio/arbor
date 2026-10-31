@@ -159,7 +159,10 @@ pub(crate) fn bare_call_scope<'t>(
         .is_some_and(|cm| cm.methods.iter().any(|m| m.name == "toString"));
 
     let mut file_sigs: HashMap<String, Vec<FileSig>> = HashMap::new();
-    for td in &symbols.types {
+    // Only the top type's own: a bare call that reached `MemberOwner::Top` has no nested type between it
+    // and the top, so a method a NESTED type declares is not one it can call — and counting it would
+    // make the name "declared here" and hide the static import that really supplies it.
+    for td in symbols.types.iter().filter(|t| same_binary_type(&t.fqn.replace('.', "/"), &top_binary)) {
         for m in &td.methods {
             let param_texts: Vec<String> = m.params.iter().map(|p| p.type_text.clone()).collect();
             let varargs = param_texts

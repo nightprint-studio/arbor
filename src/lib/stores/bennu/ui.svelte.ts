@@ -41,8 +41,8 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies' | `plugin:${str
  * `ast` is the syntax tree of the buffer in front of you — what the grammar actually built,
  * which is the only thing that answers "why did it parse that way".
  */
-// `maven` and `cargo` share the rail slot and the Alt+8 keybinding: they are the same tool window
-// for two ecosystems, and a project is only ever one of them.
+// `maven`, `gradle` and `cargo` share the rail slot and the Alt+8 keybinding: they are the same tool
+// window for three ecosystems, and a project is only ever one of them.
 /** Right tool windows — a split beside the editor.
  *
  *  `i18n` is the one with no rail button, for the same reason `hierarchy` has none in the bottom dock:
@@ -50,7 +50,7 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies' | `plugin:${str
  *  say "not here". It is reached from the editor's own toolbar — which appears on a bundle and nowhere
  *  else — from the palette, and from its shortcut. */
 export type RightPanel =
-  | 'maven' | 'cargo' | 'tests' | 'ast' | 'i18n'
+  | 'maven' | 'gradle' | 'cargo' | 'tests' | 'ast' | 'i18n'
   /** The assistant — chat and agent. A design preview for now; offered on every project, since it
    *  needs nothing from one. */
   | 'assistant'

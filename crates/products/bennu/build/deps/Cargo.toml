@@ -17,5 +17,8 @@ serde     = { workspace = true }
 # report shape is shared, so the second producer belongs beside the first rather than in the
 # backend — `cargo.rs` is to `pom.rs`/`graph.rs` what Cargo is to Maven.
 bennu-cargo = { path = "../cargo" }
+# The Gradle half, for the same reason: the build-script reader and the version catalog are the
+# Gradle counterpart of `bennu-cargo`, and the report shape is shared.
+bennu-gradle = { path = "../gradle" }
 # `user_home()` — the resolved sources live under `$CARGO_HOME`, which defaults to `~/.cargo`.
 arbor-core  = { path = "../../../../foundation/core" }

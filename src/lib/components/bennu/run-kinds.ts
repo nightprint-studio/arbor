@@ -17,7 +17,7 @@
 
 import {
   AppWindow, BadgeCheck, FileCode2, FlaskConical, Gauge, Hammer, Leaf, Package, Play, Rocket,
-  Server, Sparkles, Wrench, CircleHelp, Terminal, SquareTerminal, Zap,
+  Server, Sparkles, Wrench, CircleHelp, Terminal, SquareTerminal, Zap, Plug,
 } from 'lucide-svelte';
 import type { IconComponent } from '$lib/types/icon';
 import type { RunConfig } from '$lib/stores/bennu/run-config.svelte';
@@ -32,6 +32,8 @@ const KIND_ICONS: Record<string, unknown> = {
   cargo: Package,
   tomcat: Server,
   script: SquareTerminal,
+  // A socket going into a socket: the debugger plugging into a JVM that is already there.
+  attach: Plug,
 };
 
 /** Per **script extension** — what interprets the file, so a list of deploy scripts separates the

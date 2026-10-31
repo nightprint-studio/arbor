@@ -13,6 +13,9 @@ use crate::message::{Block, Message};
 
 /// How many pictures the model is shown at once; older ones are replaced by a stub.
 pub const KEEP_LATEST_IMAGES: usize = 2;
+/// How many pictures the *user* attached stay visible. More than a tool's screenshots, because the user put
+/// them there on purpose and a message with three attached images must not lose the first the moment it is sent.
+pub const KEEP_LATEST_ATTACHED: usize = 4;
 
 /// The most tokens one picture can cost: the provider shrinks anything larger before reading it.
 const MAX_IMAGE_TOKENS: u32 = 1_600;
@@ -88,18 +91,29 @@ pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     png_dimensions(bytes).or_else(|| jpeg_dimensions(bytes))
 }
 
-/// The one line that stands where a picture was.
-fn stub(path: &str, why: &str) -> String {
+/// The one line that stands where a picture was. A picture the user attached has no tool call (`tool_use_id`
+/// empty), so it is not called a screenshot.
+fn stub(path: &str, why: &str, attached: bool) -> String {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
-    format!("[screenshot {name} {why}]")
+    format!("[{} {name} {why}]", if attached { "attached image" } else { "screenshot" })
 }
 
-/// Keep the latest `keep` pictures and replace every older one with a line in its tool result. Each
-/// result stays where it is, so every `tool_use` still has its answer.
+/// Keep the latest `keep` pictures a tool returned and the latest [`KEEP_LATEST_ATTACHED`] the user attached;
+/// replace every older one with a line in its tool result (or, for an attached one, in the text of its message).
+/// Each result stays where it is, so every `tool_use` still has its answer.
 pub fn keep_latest_images(messages: &[Message], keep: usize) -> Vec<Message> {
-    let total = messages.iter().flat_map(|m| m.blocks.iter()).filter(|b| matches!(b, Block::ToolImage { .. })).count();
-    let drop_first = total.saturating_sub(keep);
-    replace_images(messages, |seen, _| seen < drop_first, "was cleared to save room")
+    let (mut tool, mut attached): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
+    for b in messages.iter().flat_map(|m| m.blocks.iter()) {
+        if let Block::ToolImage { tool_use_id, path, .. } = b {
+            if tool_use_id.is_empty() { attached.push(path) } else { tool.push(path) }
+        }
+    }
+    let cleared: Vec<String> = tool[..tool.len().saturating_sub(keep)]
+        .iter()
+        .chain(&attached[..attached.len().saturating_sub(KEEP_LATEST_ATTACHED)])
+        .map(|p| p.to_string())
+        .collect();
+    replace_images(messages, |_, p| cleared.iter().any(|c| c == p), "was cleared to save room")
 }
 
 /// Replace *every* picture with a line, for a model that cannot read them.
@@ -143,7 +157,7 @@ fn replace_images(messages: &[Message], replace: impl Fn(usize, &str) -> bool, w
         for b in &m.blocks {
             match b {
                 Block::ToolImage { tool_use_id, path, .. } if replace(seen, path) => {
-                    stubs.push((tool_use_id.clone(), stub(path, why)));
+                    stubs.push((tool_use_id.clone(), stub(path, why, tool_use_id.is_empty())));
                     seen += 1;
                 }
                 Block::ToolImage { .. } => {
@@ -161,8 +175,8 @@ fn replace_images(messages: &[Message], replace: impl Fn(usize, &str) -> bool, w
     out
 }
 
-/// Append `line` to the result of `tool_use_id`; a picture whose result is missing keeps its line as text,
-/// so nothing is lost silently.
+/// Append `line` to the result of `tool_use_id`; a picture whose result is missing (an attached one, always)
+/// keeps its line as text, so nothing is lost silently.
 fn note_in_result(blocks: &mut Vec<Block>, tool_use_id: &str, line: &str) {
     for b in blocks.iter_mut() {
         if let Block::ToolResult { tool_use_id: id, content, .. } = b {
@@ -213,6 +227,18 @@ mod tests {
         let Block::ToolResult { content, .. } = &out[2].blocks[0] else { panic!("a result") };
         assert!(content.starts_with("shot taken") && content.contains("[screenshot a.png was cleared"), "{content}");
         assert_eq!(out[2].blocks.len(), 1, "the picture left, the result stayed");
+    }
+
+    #[test]
+    fn attached_pictures_have_their_own_larger_allowance() {
+        let attached = |name: &str| Block::ToolImage { tool_use_id: String::new(), media_type: "image/png".into(), path: format!("c-1/{name}.png"), tokens: 100, data: Some("AAAA".into()) };
+        let mut conv = vec![Message { role: crate::message::Role::User, blocks: (0..6).map(|i| attached(&format!("a{i}"))).collect() }];
+        conv.extend(conversation(&["x", "y", "z"]));
+        let out = keep_latest_images(&conv, 2);
+        let kept: Vec<String> = out.iter().flat_map(|m| m.blocks.iter()).filter_map(|b| if let Block::ToolImage { path, .. } = b { Some(path.clone()) } else { None }).collect();
+        assert_eq!(kept.len(), KEEP_LATEST_ATTACHED + 2);
+        assert!(kept[0].ends_with("a2.png") && !kept.iter().any(|p| p.ends_with("a1.png") || p.ends_with("x.png")));
+        assert!(matches!(&out[0].blocks.last(), Some(Block::Text { text }) if text.contains("attached image")));
     }
 
     #[test]

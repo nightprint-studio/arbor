@@ -43,6 +43,8 @@
 pub mod pom;
 // The Cargo producer of the same report — see [`model`] for how the two ecosystems share a shape.
 pub mod cargo;
+// The Gradle producer of the same report: projects, configurations, version catalog, the Gradle cache.
+pub mod gradle;
 // The reactor, assembled: inheritance, properties, management, and the jar match.
 pub mod graph;
 // A local-repository jar path, read back as a coordinate.
@@ -53,4 +55,6 @@ pub mod model;
 pub mod module_graph;
 // The resolved tree (who brought what in, which versions lost), parsed from Maven's own output.
 pub mod tree;
+// The resolved tree as `gradle dependencies` prints it.
+pub mod gradle_tree;
 pub mod prelude;

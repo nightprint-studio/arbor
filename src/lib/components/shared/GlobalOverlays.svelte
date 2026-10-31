@@ -9,6 +9,8 @@
    *
    *  • the window switcher — leaving the window you are in can't depend on
    *    which product you happen to be in;
+   *  • the image lightbox — a picture opened from an issue body (Corvus) or from the Imber
+   *    thread (Bennu) opens in the window it was clicked in, through one store;
    *  • the credentials dialog — the broker is process-wide, so re-authenticating
    *    must be reachable from any window that touches a remote;
    *  • the AI consent prompt — same shape of problem. The endpoint is
@@ -38,6 +40,7 @@
   import { listen } from '@tauri-apps/api/event';
   import WindowSwitcher from '$lib/components/shared/WindowSwitcher.svelte';
   import McpConsentModal from '$lib/components/shared/McpConsentModal.svelte';
+  import ImageLightbox from '$lib/components/shared/ImageLightbox.svelte';
   import { credentialsStore } from '$lib/stores/credentials.svelte';
   import { mcpStore } from '$lib/stores/mcp.svelte';
   import type { McpAuditEntry, McpConsentRequest } from '$lib/types/mcp';
@@ -127,6 +130,9 @@
 <WindowSwitcher />
 
 <McpConsentModal />
+
+<!-- Singleton image preview host: `imageLightbox.show()` from any window opens here. -->
+<ImageLightbox />
 
 {#if Credentials}
   <Credentials />

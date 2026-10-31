@@ -95,7 +95,7 @@ pub(super) fn render_for_summary(messages: &[Message]) -> String {
                     let more = if content.chars().count() > RESULT_CHARS { " …" } else { "" };
                     out.push_str(&format!("[{} {head}{more}]", if *is_error { "error" } else { "result" }));
                 }
-                Block::ToolImage { .. } => out.push_str("[a screenshot]"),
+                Block::ToolImage { tool_use_id, .. } => out.push_str(if tool_use_id.is_empty() { "[an attached image]" } else { "[a screenshot]" }),
             }
             out.push_str("\n\n");
         }

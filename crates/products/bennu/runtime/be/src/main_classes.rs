@@ -193,8 +193,8 @@ fn normalize_type(type_text: &str) -> String {
     type_text.split_whitespace().collect::<Vec<_>>().join("")
 }
 
-/// The Maven module `file` belongs to: the nearest ancestor dir (between `file` and
-/// `root`, inclusive of intermediate dirs) that holds a `pom.xml`, expressed relative to
+/// The module `file` belongs to: the nearest ancestor dir (between `file` and
+/// `root`, inclusive of intermediate dirs) that holds a `pom.xml` or a Gradle build script, expressed relative to
 /// `root` with forward slashes. `None` when that dir is `root` itself (the root module)
 /// or nothing matches.
 pub(crate) fn module_of(root: &Path, file: &Path) -> Option<String> {
@@ -204,7 +204,7 @@ pub(crate) fn module_of(root: &Path, file: &Path) -> Option<String> {
         if !dir.starts_with(root) {
             return None;
         }
-        if dir.join("pom.xml").is_file() {
+        if dir.join("pom.xml").is_file() || dir.join("build.gradle").is_file() || dir.join("build.gradle.kts").is_file() {
             let rel = dir.strip_prefix(root).ok()?;
             let rel = rel.to_string_lossy().replace('\\', "/");
             return if rel.is_empty() { None } else { Some(rel) };

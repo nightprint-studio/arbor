@@ -32,10 +32,10 @@ pub struct ProjectSummaryArgs {
 pub struct ProjectSummary {
     pub root: String,
     pub name: String,
-    /// `maven`, `cargo` or `plain` — which manifest governs the root (`plain` is a folder with
+    /// `maven`, `gradle`, `cargo` or `plain` — which manifest governs the root (`plain` is a folder with
     /// neither), and therefore how much of the Java model applies.
     pub kind: String,
-    /// Sub-projects: Maven modules or Cargo workspace members. Empty for a single one.
+    /// Sub-projects: Maven modules, Gradle projects or Cargo workspace members. Empty for a single one.
     pub modules: Vec<String>,
     /// The resolved JDK version, when there is one (never for a Cargo root).
     pub jdk: Option<String>,
@@ -2808,13 +2808,17 @@ fn index_caveat(root: &str, file: &str) -> String {
 pub(crate) fn is_cargo_root(root: &str) -> bool {
     // Maven first: a root with both manifests is the Java project, as `open_project` and the build
     // and dependency tools decide. Cargo only when it is the sole manifest.
-    !Path::new(root).join("pom.xml").is_file() && Path::new(root).join("Cargo.toml").is_file()
+    !Path::new(root).join("pom.xml").is_file()
+        && !bennu_gradle::prelude::is_gradle_root(Path::new(root))
+        && Path::new(root).join("Cargo.toml").is_file()
 }
 
-/// A folder with neither manifest: opened as an editor-only project. It has no Java index and no build
+/// A folder with no manifest Bennu models: opened as an editor-only project. It has no Java index and no build
 /// model, so the tools that need one must say so rather than wait for something that never comes.
 pub(crate) fn is_plain_root(root: &str) -> bool {
-    !Path::new(root).join("pom.xml").is_file() && !Path::new(root).join("Cargo.toml").is_file()
+    !Path::new(root).join("pom.xml").is_file()
+        && !bennu_gradle::prelude::is_gradle_root(Path::new(root))
+        && !Path::new(root).join("Cargo.toml").is_file()
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────────

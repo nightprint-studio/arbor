@@ -232,6 +232,8 @@ export type MessageBlock =
   | { type: 'proposal'; proposal: EditProposal }
   | { type: 'live_summary'; summary: LiveSummary }
   | { type: 'screenshot'; shot: ScreenshotShot }
+  | { type: 'image'; image: ShownImage }
+  | { type: 'attachments'; items: AttachmentItem[] }
   | { type: 'agent'; agent: AgentCard };
 
 /** A screenshot the assistant took of a page on this machine. The thread carries a path, never the bytes. */
@@ -244,6 +246,27 @@ export interface ScreenshotShot {
   height: number;
   /** `http://localhost:3000/ · 1280×800`. */
   caption: string;
+}
+
+/** A picture the assistant showed with `show_image`: a file of the project, or an SVG it wrote. Path, never bytes. */
+export interface ShownImage {
+  id: string;
+  /** `<conversation>/<file>` under the assistant's data folder; fetched with `getAssistantImage`. */
+  path: string;
+  media_type: string;
+  caption: string;
+}
+
+/** One file attached to a user message, as the thread shows it. */
+export interface AttachmentItem {
+  name: string;
+  kind: 'image' | 'text';
+  size: number;
+  /** A picture's kept copy (`<conversation>/<file>`); absent for text, and until the message is saved. */
+  path?: string;
+  media_type?: string;
+  /** A picture not kept yet — the message just sent from this panel — as an `<img>` source. */
+  preview?: string;
 }
 
 export interface AssistantMessage {

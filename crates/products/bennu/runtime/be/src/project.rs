@@ -264,6 +264,16 @@ fn index_jdk_of(jdk: Option<&bennu_proto::prelude::JdkInfo>) -> String {
 pub(crate) fn detect_index_jdk(root: &str) -> String {
     let cfg = bennu_core::config::load();
     let override_version = cfg.jdk_overrides.get(root).map(|s| s.as_str());
+    if crate::build::is_gradle_root(Path::new(root)) {
+        let jdk = match override_version.filter(|v| !v.is_empty()) {
+            Some(v) => Some(bennu_proto::prelude::JdkInfo { version: v.to_string(), source: "override".to_string() }),
+            None => bennu_gradle::prelude::read(Path::new(root)).java_level().map(|level| bennu_proto::prelude::JdkInfo {
+                version: level.version,
+                source: format!("gradle {}", level.source),
+            }),
+        };
+        return index_jdk_of(jdk.as_ref());
+    }
     let pom = std::fs::read_to_string(Path::new(root).join("pom.xml"))
         .map(|xml| bennu_project::prelude::parse_pom(&xml))
         .unwrap_or_default();

@@ -34,26 +34,42 @@ pub(super) fn safe_rel(rel: &str) -> Option<(&str, &str)> {
     (store::valid_id(conversation) && plain(name) && !name.contains("..")).then_some((conversation, name))
 }
 
-/// `image/png` or `image/jpeg` from a file name's extension; `None` for anything else.
-pub(super) fn media_type_of(name: &str) -> Option<&'static str> {
+/// The type of a picture from a file name's extension; `None` for anything else. Screenshots are PNG or JPEG;
+/// the rest are pictures the user attached or the assistant showed (`show_image`), which the panel draws too.
+/// An SVG is served like any picture and drawn as an `<img>`, which never runs its scripts.
+pub(in crate::assistant) fn media_type_of(name: &str) -> Option<&'static str> {
     match name.rsplit('.').next().map(str::to_ascii_lowercase).as_deref() {
         Some("png") => Some("image/png"),
         Some("jpg" | "jpeg") => Some("image/jpeg"),
+        Some("gif") => Some("image/gif"),
+        Some("webp") => Some("image/webp"),
+        Some("svg") => Some("image/svg+xml"),
         _ => None,
     }
 }
 
+/// The extension a kept picture of this type gets.
+fn extension_of(media_type: &str) -> &'static str {
+    match media_type {
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        _ => "png",
+    }
+}
+
 /// A picture about to be kept: where it goes is decided here.
-pub(super) fn save(conversation: &str, bytes: &[u8], media_type: &str) -> Result<String, String> {
+pub(in crate::assistant) fn save(conversation: &str, bytes: &[u8], media_type: &str) -> Result<String, String> {
     if !store::valid_id(conversation) {
         return Err("this conversation has no usable id".into());
     }
-    let ext = if media_type == "image/jpeg" { "jpg" } else { "png" };
+    let ext = extension_of(media_type);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let dir = root().join(conversation);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("could not keep the screenshot: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("could not keep the picture: {e}"))?;
     let name = format!("shot-{nanos:x}.{ext}");
-    std::fs::write(dir.join(&name), bytes).map_err(|e| format!("could not keep the screenshot: {e}"))?;
+    std::fs::write(dir.join(&name), bytes).map_err(|e| format!("could not keep the picture: {e}"))?;
     Ok(format!("{conversation}/{name}"))
 }
 
@@ -152,8 +168,11 @@ mod tests {
     fn the_media_type_follows_the_extension_and_nothing_else_is_served() {
         assert_eq!(media_type_of("a.png"), Some("image/png"));
         assert_eq!(media_type_of("a.JPG"), Some("image/jpeg"));
-        assert_eq!(media_type_of("a.svg"), None);
+        assert_eq!(media_type_of("a.svg"), Some("image/svg+xml"));
+        assert_eq!(media_type_of("a.webp"), Some("image/webp"));
+        assert_eq!(media_type_of("a.pdf"), None);
         assert_eq!(media_type_of("a"), None);
+        assert_eq!(extension_of("image/svg+xml"), "svg");
     }
 
     #[test]

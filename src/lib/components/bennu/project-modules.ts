@@ -43,6 +43,7 @@ export function toolRootOf(root: string, dir: string): string {
  *  kind alone. Keeps the rail steady across the first paint and on a backend that cannot answer. */
 export function modulesFromKind(kind: ProjectKind | undefined): ProjectModule[] {
   if (kind === 'maven') return [{ kind: 'Maven', dir: '.' }];
+  if (kind === 'gradle') return [{ kind: 'Gradle', dir: '.' }];
   if (kind === 'cargo') return [{ kind: 'Cargo', dir: '.' }];
   return [];
 }

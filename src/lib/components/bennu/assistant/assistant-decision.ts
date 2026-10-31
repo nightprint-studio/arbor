@@ -34,3 +34,6 @@ export function decisionInfo(level: DecisionLevel): DecisionInfo {
 export function effectiveDecisionLevel(own: string | undefined, global: DecisionLevel): DecisionLevel {
   return own?.trim() ? parseDecisionLevel(own) : global;
 }
+
+/** Longest general context kept; mirrors the backend's `MAX_GENERAL_CONTEXT_CHARS`. */
+export const MAX_GENERAL_CONTEXT = 4000;

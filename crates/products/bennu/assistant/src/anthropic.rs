@@ -194,6 +194,10 @@ fn block(b: &Block, m: &Message) -> Option<Value> {
             }
             v
         }
+        // A picture the user attached belongs to no tool call (empty id): it is an image block of the message.
+        Block::ToolImage { tool_use_id, media_type, data: Some(data), .. } if tool_use_id.is_empty() => {
+            json!({ "type": "image", "source": { "type": "base64", "media_type": media_type, "data": data } })
+        }
         // Already inside its result when it has bytes. One without them (never loaded, or its file is gone)
         // is said in words by the host before the request; a stray one is dropped rather than sent broken.
         Block::ToolImage { .. } => return None,

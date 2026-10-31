@@ -269,7 +269,10 @@ impl TreeWatch {
             if burst.is_empty() {
                 continue;
             }
-            let is_module = |rel: &str| root.join(rel).join("pom.xml").is_file();
+            let is_module = |rel: &str| {
+                let dir = root.join(rel);
+                dir.join("pom.xml").is_file() || dir.join("build.gradle").is_file() || dir.join("build.gradle.kts").is_file()
+            };
             sink.emit(TOPIC, burst.into_payload(&root.to_string_lossy(), is_module));
         }
     }

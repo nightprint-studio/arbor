@@ -498,10 +498,8 @@ ol.step-list {
 }
 ol.step-list > li {
   counter-increment: step-counter;
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 10px 16px 10px 14px;
+  position: relative;
+  padding: 10px 16px 10px 50px;
   background: var(--bg-card);
   border: 1px solid var(--border-sub);
   border-radius: 6px;
@@ -511,7 +509,8 @@ ol.step-list > li {
 }
 ol.step-list > li::before {
   content: counter(step-counter);
-  flex-shrink: 0;
+  position: absolute;
+  left: 14px; top: 11px;
   width: 22px; height: 22px;
   background: var(--accent);
   color: white;
@@ -521,7 +520,6 @@ ol.step-list > li::before {
   justify-content: center;
   font-size: 11px;
   font-weight: 700;
-  margin-top: 1px;
 }
 
 /* ── Indicator legend ── */

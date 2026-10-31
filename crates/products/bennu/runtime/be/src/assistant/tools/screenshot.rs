@@ -34,7 +34,7 @@ use serde_json::{json, Value};
 
 use super::{clip, spec, ToolHost};
 use crate::live::live_for;
-pub(in crate::assistant) use store::prepare_messages;
+pub(in crate::assistant) use store::{media_type_of as picture_media_type, prepare_messages, save as save_picture};
 
 pub(super) const SCREENSHOT: &str = "screenshot_page";
 pub(super) const DIAGNOSTICS: &str = "page_diagnostics";

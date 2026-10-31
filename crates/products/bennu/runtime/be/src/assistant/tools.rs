@@ -65,6 +65,8 @@ pub(super) fn release_debug_matching(root: Option<&str>, reason: &str) {
 }
 mod profile;
 mod screenshot;
+mod image;
+pub(super) use screenshot::save_picture;
 mod skills;
 mod spawn;
 mod structural;
@@ -91,6 +93,7 @@ pub(super) fn all_specs() -> Vec<ToolSpec> {
     specs.extend(debug::specs());
     specs.extend(diagram::specs());
     specs.extend(history::specs());
+    specs.extend(image::specs());
     specs.extend(live::specs());
     specs.extend(profile::specs());
     specs.extend(reads::specs());
@@ -610,7 +613,7 @@ fn clip(text: String) -> String {
 /// What a chat may call: it reads and changes nothing in the project, but it can look up how Bennu works and
 /// open a panel or draw a diagram — showing the user a window or a picture touches neither files nor
 /// processes, so it needs no access.
-pub(super) const CHAT_TOOLS: [&str; 3] = ["bennu_help", "open_ui", diagram::NAME];
+pub(super) const CHAT_TOOLS: [&str; 4] = ["bennu_help", "open_ui", diagram::NAME, image::NAME];
 
 pub(super) fn chat_specs() -> Vec<ToolSpec> {
     all_specs().into_iter().filter(|t| CHAT_TOOLS.iter().any(|n| *n == t.name)).collect()
@@ -634,6 +637,7 @@ impl ToolHost {
             "structural_replace" => self.run_structural(&call.input),
             "open_ui" => self.run_open_ui(&call.input),
             "show_diagram" => self.run_show_diagram(&call.input),
+            "show_image" => self.run_show_image(&call.input),
             "load_skill" => self.run_load_skill(&call.input),
             n if spawn::is_agent_tool(n) => self.run_agent_tool(n, &call.input),
             n if live::is_live_tool(n) => self.run_live(n, &call.input),
@@ -732,8 +736,8 @@ impl Host for ToolHost {
             }
             AgentEvent::ToolDone { id, name, input, summary, ok } => {
                 // The questions, the proposals and the access cards are the record of those calls.
-                // A diagram that was drawn is its own record; one that failed leaves a receipt with the reason.
-                if !(name == "ask_user" || name == "update_plan" || (name == diagram::NAME && ok)) {
+                // A diagram or a picture that was shown is its own record; one that failed leaves a receipt with the reason.
+                if !(name == "ask_user" || name == "update_plan" || (name == diagram::NAME && ok) || (name == image::NAME && ok)) {
                     s.view().tool(&id, &name, &input, &summary, ok);
                 }
                 s.push_message();

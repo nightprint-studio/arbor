@@ -33,15 +33,16 @@ use tree_sitter::Node;
 pub fn iface_dup_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
+    let imports = single_type_imports(nodes, bytes);
     for &n in nodes {
         match n.kind() {
             // A class/enum/record carries its interface list under `implements` (`interfaces` field).
             "class_declaration" | "enum_declaration" | "record_declaration" => {
-                check_list(implements_types(n, bytes), &mut out);
+                check_list(implements_types(n, bytes), &imports, &mut out);
             }
             // An interface carries its interface list under `extends A, B` (`extends_interfaces`).
             "interface_declaration" => {
-                check_list(extends_types(n, bytes), &mut out);
+                check_list(extends_types(n, bytes), &imports, &mut out);
             }
             _ => {}
         }
@@ -53,17 +54,20 @@ pub fn iface_dup_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
 /// name is seen we remember whether its text carried type arguments; every LATER entry with the same
 /// simple name is flagged against that first sighting. Skips any entry without a clean simple name so
 /// an unparseable type can never fabricate (or hide) a collision.
-fn check_list(types: Vec<(String, Node)>, out: &mut Vec<Diagnostic>) {
-    // simple name → (text of the first occurrence, whether that first occurrence had type args).
-    let mut seen: HashMap<String, FirstSeen> = HashMap::new();
+fn check_list(types: Vec<(String, Node)>, imports: &HashMap<String, String>, out: &mut Vec<Diagnostic>) {
+    // simple name → what was written before it: (qualifier, whether that occurrence had type args).
+    let mut seen: HashMap<String, Vec<(String, FirstSeen)>> = HashMap::new();
     for (text, node) in types {
         let Some(simple) = erased_simple_name(&text) else { continue };
+        let qualifier = erased_qualifier(&text, imports);
         let has_args = text.contains('<');
-        match seen.get(&simple) {
-            None => {
-                seen.insert(simple, FirstSeen { has_args });
-            }
-            Some(first) => {
+        let earlier = seen.entry(simple.clone()).or_default();
+        // The same name under two DIFFERENT qualifiers is two types — `Encoder.Text` and
+        // `Decoder.Text`, `RouterFunctions.Visitor` and `RequestPredicates.Visitor` — and only an
+        // unqualified spelling (which may be either, or the imported one) cannot be told apart.
+        match earlier.iter().find(|(q, _)| q.is_empty() || qualifier.is_empty() || *q == qualifier) {
+            None => earlier.push((qualifier, FirstSeen { has_args })),
+            Some((_, first)) => {
                 // A duplicate. If EITHER the first or this occurrence carries type arguments, the two
                 // written forms differ in their (possibly-empty) argument lists, so we use the
                 // "different type arguments" wording; otherwise it's a plain identical duplicate.
@@ -77,6 +81,47 @@ fn check_list(types: Vec<(String, Node)>, out: &mut Vec<Diagnostic>) {
             }
         }
     }
+}
+
+/// What qualifies a written type, as far as the file says — `java.util` in `java.util.List<String>`,
+/// `javax.websocket.Encoder` in `Encoder.Text` when `Encoder` is imported, and for a bare `Validator`
+/// the package its single-type import names. Empty when the file does not say (a bare name from the
+/// own package or `java.lang`, an `Outer.Inner` of an unimported `Outer`).
+fn erased_qualifier(text: &str, imports: &HashMap<String, String>) -> String {
+    let erased: String = text.split('<').next().unwrap_or(text).split_whitespace().collect();
+    let (first, rest) = match erased.split_once('.') {
+        Some((first, rest)) => (first, Some(rest)),
+        None => (erased.as_str(), None),
+    };
+    let Some(imported) = imports.get(first) else {
+        // Written out in full, or an unimported name.
+        return match erased.rsplit_once('.') {
+            Some((qualifier, _)) => qualifier.to_string(),
+            None => String::new(),
+        };
+    };
+    // `Encoder.Text` with `import javax.websocket.Encoder;` is `javax.websocket.Encoder.Text`.
+    let full = match rest {
+        Some(rest) => format!("{imported}.{rest}"),
+        None => imported.clone(),
+    };
+    full.rsplit_once('.').map(|(q, _)| q.to_string()).unwrap_or_default()
+}
+
+/// `simple name → fully-qualified name` of every `import a.b.C;` of the file (no static, no `*`).
+fn single_type_imports(nodes: &[Node], bytes: &[u8]) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for n in nodes.iter().filter(|n| n.kind() == "import_declaration") {
+        let Ok(text) = n.utf8_text(bytes) else { continue };
+        let path: String = text.trim().trim_start_matches("import").trim().trim_end_matches(';').split_whitespace().collect();
+        if path.starts_with("static") || path.ends_with('*') {
+            continue;
+        }
+        if let Some((_, simple)) = path.rsplit_once('.') {
+            out.insert(simple.to_string(), path.clone());
+        }
+    }
+    out
 }
 
 /// The first-seen record for one erased simple name within a clause.
@@ -226,6 +271,28 @@ mod tests {
     }
 
     // ── negatives (never a false positive) ──────────────────────────────────
+
+    #[test]
+    fn one_name_under_two_qualifiers_is_two_interfaces() {
+        assert!(run("class C implements Encoder.Text<A>, Decoder.Text<A> {}").is_empty());
+        assert!(run("class C implements Router.Visitor, Predicates.Visitor {}").is_empty());
+        assert_eq!(msgs("class C implements Router.Visitor, Router.Visitor {}").len(), 1);
+        // A bare name could be either, so it still counts against the qualified one.
+        assert_eq!(msgs("class C implements Router.Visitor, Visitor {}").len(), 1);
+    }
+
+    #[test]
+    fn an_import_tells_a_bare_name_from_a_qualified_one() {
+        let src = "import org.spring.Validator;\nclass C implements jakarta.validation.Validator, Validator {}";
+        assert!(run(src).is_empty());
+        // The same package both ways is the same interface.
+        let same = "import org.spring.Validator;\nclass C implements org.spring.Validator, Validator {}";
+        assert_eq!(msgs(same).len(), 1);
+        // And an unimported bare name could be anyone's, so it stays against the qualified one.
+        assert_eq!(msgs("class C implements jakarta.validation.Validator, Validator {}").len(), 1);
+        let nested = "import javax.websocket.Encoder;\nimport javax.websocket.Decoder;\nclass C implements Encoder.Text<A>, Decoder.Text<A> {}";
+        assert!(run(nested).is_empty());
+    }
 
     #[test]
     fn distinct_generic_interfaces_are_ok() {

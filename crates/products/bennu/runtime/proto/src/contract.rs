@@ -162,6 +162,9 @@ pub enum ProjectKind {
     /// A Maven project — the root holds `pom.xml`. The full Java model applies.
     #[default]
     Maven,
+    /// A Gradle build — the root holds `settings.gradle[.kts]` or `build.gradle[.kts]`. The same Java
+    /// model as Maven: the build scripts are read where a pom would be.
+    Gradle,
     /// A Cargo project — the root holds `Cargo.toml`. Editor-only: no symbol index,
     /// no capability detection, no JDK.
     Cargo,
@@ -173,7 +176,7 @@ pub enum ProjectKind {
 impl ProjectKind {
     /// `true` for the kind that carries the Java analysis (index, capabilities, JDK).
     pub fn is_java(self) -> bool {
-        matches!(self, ProjectKind::Maven)
+        matches!(self, ProjectKind::Maven | ProjectKind::Gradle)
     }
 }
 
@@ -1289,8 +1292,9 @@ pub struct RunConfig {
     /// Display name of the configuration.
     pub name: String,
     /// What KIND of thing this launches — `"application"` (a `main` class), `"springboot"`
-    /// (a Boot application: the same launch plus its active profiles), `"junit"` (a test scope)
-    /// or `"cargo"` (a cargo subcommand). It is what the editor and the title-bar selector
+    /// (a Boot application: the same launch plus its active profiles), `"junit"` (a test scope),
+    /// `"cargo"` (a cargo subcommand) or `"attach"` (a debugger attached to a JVM that is already
+    /// running — launches nothing). It is what the editor and the title-bar selector
     /// group by.
     ///
     /// A plain string and not an enum: the set grows (a Tomcat deployment, a Maven goal), and
@@ -1412,6 +1416,12 @@ pub struct RunConfig {
     /// configuration is launched**. Not an import: the file is read at every run, so editing it
     /// takes effect without touching the configuration. Rows in [`RunConfig::env`] win over it.
     pub env_file: String,
+    /// `attach` only — the port a JVM already running with
+    /// `-agentlib:jdwp=transport=dt_socket,server=y,…,address=*:PORT` listens on, always on this
+    /// machine's loopback. A string like every other field here, so a hand-edited file with a
+    /// port that is not a number costs one configuration its port and not the project all of
+    /// them; it is checked (1–65535) when the configuration is launched. Empty = 5005.
+    pub attach_port: String,
 }
 
 impl Default for RunConfig {
@@ -1448,6 +1458,7 @@ impl Default for RunConfig {
             script_file: String::new(),
             script_shell: String::new(),
             env_file: String::new(),
+            attach_port: String::new(),
         }
     }
 }

@@ -173,6 +173,9 @@ bennu-pomedit = { path = "../../build/pomedit" }
 # resolves to against it without running Maven — the dependency tier's fallback and its diagnosis —
 # and the pom.xml editor answers that follow from the same reading.
 bennu-maven = { path = "../../build/maven" }
+# A Gradle build read off its files — settings, build scripts, version catalog, the Gradle cache. The
+# counterpart of `bennu-maven` for the build tool the other half of the Java world uses.
+bennu-gradle = { path = "../../build/gradle" }
 # Spreadsheets a project tree contains, read into a grid — the `.xlsx` a legacy repository is
 # full of. Reads only.
 bennu-sheet = { path = "../../formats/sheet" }

@@ -82,11 +82,11 @@ export interface CapabilitySet {
  * find-in-files, highlighting, `cargo check`) and nothing that would need a Java index
  * to be true. Gate Java-only UI on this rather than on `jdk === null`.
  */
-export type ProjectKind = 'maven' | 'cargo' | 'plain';
+export type ProjectKind = 'maven' | 'gradle' | 'cargo' | 'plain';
 
 /** An opened project (`bennu_open_project`) — Maven or Cargo, see {@link ProjectKind}. */
 export interface ProjectInfo {
-  /** Absolute project root folder (holds the root `pom.xml` / `Cargo.toml`). */
+  /** Absolute project root folder (holds the root `pom.xml` / `build.gradle` / `Cargo.toml`). */
   root: string;
   /** Display name (pom `<name>` / Cargo `package.name`, else the folder name). */
   name: string;
@@ -431,6 +431,8 @@ export interface RunConfigDto {
   script_shell?: string;
   /** A `.env` file read at launch and merged under `env`. */
   env_file?: string;
+  /** `attach` only — the JDWP port of the JVM to attach to, on loopback. Empty = 5005. */
+  attach_port?: string;
 }
 
 /** The per-repo run-config bundle stored in `<root>/.arbor/config.toml`. */

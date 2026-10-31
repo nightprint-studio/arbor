@@ -9,25 +9,33 @@
    * The class names are the panel-shell ones (`ps-btn`) because these live in the shell's header
    * slot and must look like the buttons either side of them.
    */
-  import { Square, Trash2, RotateCw, SlidersHorizontal } from 'lucide-svelte';
+  import { Square, Unplug, Trash2, RotateCw, SlidersHorizontal } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+
+  /** The tab in front is a debugger attached to a JVM we did not start: its Stop is a detach. */
+  const attached = $derived(bennuRunStore.activeTab?.spec.kind === 'attach');
+  const stopLabel = $derived(
+    attached ? 'Detach — the program keeps running' : 'Stop the program',
+  );
 </script>
 
 <!-- The tab in front, not "a run": several programs can be going at once, and Stop in this
      header is about the transcript underneath it. -->
 {#if bennuRunStore.activeIsLive}
-  <!-- Red: it is the one action here that ends something, and the only one you cannot take back. -->
+  <!-- Red: it is the one action here that ends something, and the only one you cannot take back.
+       Not red for an attached JVM: detaching ends nothing but the debugger. -->
   <button
-    class="ps-btn ps-btn-danger"
+    class="ps-btn"
+    class:ps-btn-danger={!attached}
     type="button"
-    use:tooltip={'Stop the program'}
-    aria-label="Stop the program"
+    use:tooltip={stopLabel}
+    aria-label={stopLabel}
     disabled={bennuRunStore.stopping}
     onclick={() => void bennuRunStore.stop()}
   >
-    <Square size={12} />
+    {#if attached}<Unplug size={13} />{:else}<Square size={12} />{/if}
   </button>
 {/if}
 <!-- Repeats THIS tab's run, into a new tab — so ⟳ on an old transcript reruns what that

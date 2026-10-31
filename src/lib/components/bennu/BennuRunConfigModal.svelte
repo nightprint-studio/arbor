@@ -30,7 +30,7 @@
    * (handled by <Modal>).
    */
   import {
-    Play, Plus, Copy, Trash2, SlidersHorizontal, CircleDot, Circle, X, Search, ChevronDown,
+    Play, Plug, Plus, Copy, Trash2, SlidersHorizontal, CircleDot, Circle, X, Search, ChevronDown,
     Layers, Leaf, Rocket, Bug,
   } from 'lucide-svelte';
   import FormSection from '$lib/components/shared/ui/FormSection.svelte';
@@ -53,13 +53,14 @@
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import {
-    bennuRunConfigStore, isJvmKind, isRunKind, runKindLabel, RUN_KINDS,
+    bennuRunConfigStore, attachPortOf, isJvmKind, isRunKind, runKindLabel, RUN_KINDS,
     type RunConfig, type EnvVar, type RunConfigKind, type TestScopeKind,
   } from '$lib/stores/bennu/run-config.svelte';
   import { springStore } from '$lib/stores/bennu/spring.svelte';
   import { runConfigIcon, runKindIcon } from './run-kinds';
   import BennuCargoRunForm from './BennuCargoRunForm.svelte';
   import BennuScriptRunForm from './BennuScriptRunForm.svelte';
+  import BennuAttachRunForm from './BennuAttachRunForm.svelte';
   import BennuRunEnvField from './BennuRunEnvField.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -287,6 +288,8 @@
       !bennuRunStore.active &&
       // A kind this build doesn't know (written by a newer Bennu) is shown but not runnable.
       isRunKind(selected.kind) &&
+      // An Attach configuration needs a usable port, like a JVM one needs a class.
+      (selected.kind !== 'attach' || attachPortOf(selected) !== null) &&
       // A Spring Boot configuration is runnable with an empty class when the module has one
       // `@SpringBootApplication` — that IS the class, and typing it changes nothing.
       // A Cargo configuration is runnable as soon as it exists: an empty command reads as
@@ -304,8 +307,9 @@
     const cfg = selected;
     onClose();
     // The whole configuration, not just its main class: VM args, working directory and
-    // environment are the reason it is a configuration and not a class name.
-    void bennuRunStore.runConfig(root, cfg);
+    // environment are the reason it is a configuration and not a class name. An Attach one has
+    // nothing to run, so the footer's button attaches it (the debugger is the whole of it).
+    void bennuRunStore.runConfig(root, cfg, cfg.kind === 'attach');
   }
 
   // ── Keyboard nav on the config list ──────────────────────────────────────────
@@ -389,6 +393,8 @@
     // machine that runs it — the backend answers it at launch and the console prints what it
     // actually spawned. A guess here would be a second answer, and the wrong one on Windows.
     if (selected.kind === 'script') return '';
+    // Nothing is launched: the form shows the JVM flag it needs instead.
+    if (selected.kind === 'attach') return '';
     if (selected.kind === 'junit') {
       const target = selected.testTarget.trim();
       if (selected.testScope === 'module' && target) return `mvn -pl ${target} test`;
@@ -634,6 +640,8 @@
             <!-- Its own file: a cargo configuration shares almost nothing with a JVM one below the
                  name field, and this modal is already the largest component in Bennu. -->
             <BennuCargoRunForm config={selected} {patch} />
+          {:else if selected.kind === 'attach'}
+            <BennuAttachRunForm config={selected} {patch} />
           {:else if selected.kind === 'script'}
             <!-- Same bargain as cargo above: a script has no module, no classpath and no VM
                  arguments, so an inline arm would be a form of fields that never apply. -->
@@ -829,10 +837,17 @@
           size="sm"
           onclick={runSelected}
           disabled={!canRun}
-          tooltip={{ content: 'Build & run this configuration', shortcut: 'Enter' }}
+          tooltip={{
+            content: selected?.kind === 'attach'
+              ? 'Attach the debugger to the running JVM'
+              : 'Build & run this configuration',
+            shortcut: 'Enter',
+          }}
         >
-          {#snippet iconStart()}<Play size={13} />{/snippet}
-          Run
+          {#snippet iconStart()}
+            {#if selected?.kind === 'attach'}<Plug size={13} />{:else}<Play size={13} />{/if}
+          {/snippet}
+          {selected?.kind === 'attach' ? 'Attach' : 'Run'}
         </Button>
       </div>
     </ModalFooter>

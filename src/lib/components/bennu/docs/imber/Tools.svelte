@@ -34,7 +34,7 @@
 
 <h2>Tools that are always there</h2>
 <p>
-  <code>ask_user</code> (questions, Imber › Decisions and questions), <code>bennu_help</code> (the help about Bennu itself), <code>open_ui</code> (opens a panel or window), <code>show_diagram</code> (draws a Mermaid diagram), <code>load_skill</code> (only when you enabled a skill, Imber › Skills) and <code>expand_result</code> (returns the detail of a digest). In a chat only <code>bennu_help</code>, <code>open_ui</code> and <code>show_diagram</code> are offered.
+  <code>ask_user</code> (questions, Imber › Decisions and questions), <code>bennu_help</code> (the help about Bennu itself), <code>open_ui</code> (opens a panel or window), <code>show_diagram</code> (draws a Mermaid diagram), <code>show_image</code> (shows a picture or an SVG, Imber › Screenshots and diagrams), <code>load_skill</code> (only when you enabled a skill, Imber › Skills) and <code>expand_result</code> (returns the detail of a digest). In a chat only <code>bennu_help</code>, <code>open_ui</code>, <code>show_diagram</code> and <code>show_image</code> are offered.
 </p>
 
 <h2>Switching a family off</h2>

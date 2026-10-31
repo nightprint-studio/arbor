@@ -14,12 +14,12 @@
 
 import { formatTokens, totalTokens } from '$lib/components/bennu/assistant/assistant-format';
 import type {
-  AccessAnswer, AccessScope, AssistantEffort, AssistantMessage, AssistantMode, AssistantModel, Conversation,
+  AccessAnswer, AccessScope, AttachmentItem, AssistantEffort, AssistantMessage, AssistantMode, AssistantModel, Conversation,
   EditProposal, MessageBlock, ProposalStatus,
 } from '$lib/components/bennu/assistant/assistant-types';
 import {
   cancelAssistantRun, retryAssistantRunNow, revokeAssistantGrant, decideProposal, remakeProposal as remakeProposalIpc, undoProposal as undoProposalIpc, canUndoProposal, type DecideResult, type RemakeResult, type UndoResult, deleteConversation, listConversations, loadConversation, onAssistantEvent,
-  compactConversation, getInstructions, getSpend, listModels, listSkills, type SkillListing, type SkillInfo, renameConversation, replyToAssistant, sendAssistantMessage, type AssistantEvent, type SendParams, type RequestPreview, type LastRequest, type SpendMeter, type SpendStatus,
+  compactConversation, getInstructions, getSpend, listModels, listSkills, type SkillListing, type SkillInfo, renameConversation, replyToAssistant, sendAssistantMessage, type AttachmentParam, type AssistantEvent, type SendParams, type RequestPreview, type LastRequest, type SpendMeter, type SpendStatus,
 } from '$lib/ipc/bennu/assistant';
 import { bennuConfigStore } from './config.svelte';
 import type { BennuAssistantLimits } from '$lib/ipc/bennu/config';
@@ -34,7 +34,7 @@ import { projectStore } from './project.svelte';
 import { bennuWorktreeStore } from './assistant-worktree.svelte';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import { contextChange, modelChange, type CostChange } from '$lib/components/bennu/assistant/assistant-cost-change';
-import { DEFAULT_DECISION_LEVEL, MAX_DECISION_NOTES, parseDecisionLevel, type DecisionLevel } from '$lib/components/bennu/assistant/assistant-decision';
+import { DEFAULT_DECISION_LEVEL, MAX_DECISION_NOTES, MAX_GENERAL_CONTEXT, parseDecisionLevel, type DecisionLevel } from '$lib/components/bennu/assistant/assistant-decision';
 import { nextSubagentsWord, parseSubagentsWord, subagentsEffective, type SubagentsWord } from '$lib/components/bennu/assistant/assistant-agents';
 
 /** What the window gives the store from the editor: the text selected in it. */
@@ -99,6 +99,8 @@ function createAssistantStore() {
   let debugMutate = $state(false);
   let decisionLevel = $state<DecisionLevel>(DEFAULT_DECISION_LEVEL);
   let decisionNotes = $state('');
+  let generalContext = $state('');
+  let contextOpen = $state(false);
   let confirmCostChanges = $state(true);
   let subagentsEnabled = $state(false);
   let debugIdleMinutes = $state(30);
@@ -204,6 +206,7 @@ function createAssistantStore() {
     hideAuthors = c.hide_authors ?? true;
     decisionLevel = parseDecisionLevel(c.decision_level);
     decisionNotes = c.decision_notes ?? '';
+    generalContext = c.general_context ?? '';
     confirmCostChanges = c.confirm_cost_changes ?? true;
     subagentsEnabled = c.subagents_enabled ?? false;
     debugIdleMinutes = c.debug_idle_minutes ?? 30;
@@ -221,7 +224,7 @@ function createAssistantStore() {
         chat_only: chatOnly, use_instructions: useInstructions, git_enabled: gitEnabled, hide_authors: hideAuthors, plan_enabled: planEnabled, max_projects: maxProjects, tool_families_off: familiesOff, bevy_write_enabled: bevyWrite, debug_mutate_enabled: debugMutate, skills_on: skillsOn,
         decision_level: decisionLevel, decision_notes: decisionNotes, confirm_cost_changes: confirmCostChanges,
         subagents_enabled: subagentsEnabled, debug_idle_minutes: debugIdleMinutes, auto_continue_on_stop: autoContinueOnStop, wrap_pasted_code: wrapPastedCode,
-        long_cache: longCache, side_model: sideModel,
+        long_cache: longCache, side_model: sideModel, general_context: generalContext,
       },
     });
   }
@@ -486,6 +489,12 @@ function createAssistantStore() {
 
     get maxProjects() { return maxProjects; },
     setMaxProjects(n: number) { maxProjects = Math.min(20, Math.max(1, Math.round(n))); persist(); },
+    /** The standing context sent with every conversation (Settings › Imber, the panel's menu). */
+    get generalContext() { return generalContext; },
+    setGeneralContext(v: string) { generalContext = v.slice(0, MAX_GENERAL_CONTEXT); persist(); },
+    get contextOpen() { return contextOpen; },
+    openContext() { contextOpen = true; },
+    closeContext() { contextOpen = false; },
     get decisionOpen() { return decisionOpen; },
     openDecision() { decisionOpen = true; },
     closeDecision() { decisionOpen = false; },
@@ -713,7 +722,7 @@ function createAssistantStore() {
      * Send `text` in the open conversation — or, with the dry run on, build the request and show it.
      * Returns whether the draft was consumed (a dry run keeps it, so it can be sent for real next).
      */
-    async send(text: string, opts: { retry?: boolean } = {}): Promise<boolean> {
+    async send(text: string, opts: { retry?: boolean; attachments?: { params: AttachmentParam[]; items: AttachmentItem[] } } = {}): Promise<boolean> {
       const retry = opts.retry === true;
       const ctx = context();
       if (!ctx) {
@@ -725,6 +734,8 @@ function createAssistantStore() {
       const conv = conversations.find((c) => c.id === activeId)!;
 
       const params = buildParams(conv, ctx, text, retry);
+      const attached = opts.attachments?.params.length ? opts.attachments : null;
+      if (attached) params.attachments = attached.params;
 
       if (dryRun && !retry) {
         await this.showPreview(text);
@@ -734,7 +745,12 @@ function createAssistantStore() {
       // The user's message appears at once; the run's reply streams in behind it. A retry has none: it picks up
       // the conversation where the failed request left it.
       const now = Date.now();
-      if (!retry) putMessage(conv.id, { id: `u${now}`, role: 'user', at: now, blocks: [{ type: 'text', text }] });
+      if (!retry) {
+        const blocks: MessageBlock[] = [];
+        if (attached) blocks.push({ type: 'attachments', items: attached.items });
+        if (text.trim()) blocks.push({ type: 'text', text });
+        putMessage(conv.id, { id: `u${now}`, role: 'user', at: now, blocks });
+      }
       try {
         const result = await sendAssistantMessage(params);
         if ('run_id' in result) {
@@ -747,6 +763,11 @@ function createAssistantStore() {
         return true;
       } catch (e) {
         toastStore.show(String(e), 'error');
+        // A refused attachment (too large, binary) leaves the draft and the files where they were: nothing was sent.
+        if (attached) {
+          update(conv.id, (c) => ({ ...c, messages: c.messages.filter((m) => m.id !== `u${now}`) }));
+          return false;
+        }
         return true;
       }
     },

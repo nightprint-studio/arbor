@@ -91,10 +91,47 @@ fn describe(dir: &Path) -> Option<BuildUnitWire> {
     if dir.join("pom.xml").is_file() {
         return maven(dir);
     }
+    if let Some(file) = ["build.gradle", "build.gradle.kts"].iter().map(|f| dir.join(f)).find(|p| p.is_file()) {
+        return gradle(dir, &file);
+    }
     if dir.join("Cargo.toml").is_file() {
         return cargo(dir);
     }
     None
+}
+
+/// A directory with a Gradle build script: the Java level it declares and what it builds, in the
+/// same two words a Maven module gets.
+fn gradle(dir: &Path, script: &Path) -> Option<BuildUnitWire> {
+    let text = std::fs::read(script).map(|b| String::from_utf8_lossy(&b).into_owned()).ok()?;
+    let none = std::collections::BTreeMap::new();
+    let info = bennu_gradle::prelude::BuildInfo::parse(
+        &text,
+        &bennu_gradle::prelude::Env { properties: &none, inherited: &none, catalogs: &[] },
+    );
+    let mut label: Vec<String> = Vec::new();
+    let mut detail: Vec<String> = Vec::new();
+    if let Some(level) = &info.java {
+        label.push(format!("JDK {}", level.version));
+        detail.push(format!("Java {} (from {})", level.version, level.source));
+    }
+    if info.applies("war") {
+        label.push("war".to_string());
+        detail.push("packaging war".to_string());
+    }
+    if dir.join("settings.gradle").is_file() || dir.join("settings.gradle.kts").is_file() {
+        let settings = ["settings.gradle", "settings.gradle.kts"]
+            .iter()
+            .map(|f| dir.join(f))
+            .find(|p| p.is_file())
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|t| bennu_gradle::prelude::Settings::parse(&t))
+            .unwrap_or_default();
+        if !settings.includes.is_empty() {
+            detail.push(format!("{} project{}", settings.includes.len(), plural(settings.includes.len())));
+        }
+    }
+    finish(dir, "", label, detail)
 }
 
 fn maven(dir: &Path) -> Option<BuildUnitWire> {

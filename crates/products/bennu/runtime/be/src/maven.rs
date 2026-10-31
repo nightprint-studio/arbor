@@ -376,7 +376,7 @@ pub(crate) fn bennu_maven_reload(ctx: &BennuState, args: MavenRootArgs) -> Resul
 /// and the poll is bounded: a stage that never leaves `building` ends the wait after
 /// [`REINDEX_WAIT`] with the benefit of the doubt, which is what the job did before it waited at all.
 /// `false` only when the rebuild could not start, or ended in `failed`.
-fn reindex_and_wait(root: &str, sink: &Arc<dyn EventSink>) -> bool {
+pub(crate) fn reindex_and_wait(root: &str, sink: &Arc<dyn EventSink>) -> bool {
     const POLL: std::time::Duration = std::time::Duration::from_millis(400);
     const REINDEX_WAIT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
     let svc = crate::index_service::IndexService::global();

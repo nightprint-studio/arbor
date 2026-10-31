@@ -1,10 +1,12 @@
 //! `dependencies` domain — `bennu_dependencies` (the Dependencies tool window) and
 //! `bennu_module_graph` (the Module Graph window).
 //!
-//! Two questions of one reading, two ecosystems, one report shape:
+//! Two questions of one reading, three ecosystems, one report shape:
 //!
 //! - a **Maven** root: the reactor's poms, matched against the dependency classpath the index service
 //!   **already** resolved;
+//! - a **Gradle** root: `settings.gradle`, the build scripts and the version catalog, matched against
+//!   the same classpath;
 //! - a **Cargo** root: the workspace's manifests, with the versions `Cargo.lock` actually chose and
 //!   the unpacked sources in the local registry.
 //!
@@ -19,7 +21,7 @@
 //! the two windows cannot disagree about what the project contains.
 
 use bennu_core::prelude::BennuState;
-use bennu_deps::prelude::{module_graph, read as read_dependencies, read_cargo, ModuleGraph, Report};
+use bennu_deps::prelude::{module_graph, read as read_dependencies, read_cargo, read_gradle, ModuleGraph, Report};
 use serde::Deserialize;
 
 use crate::dep_classpath::cached_dep_jars;
@@ -27,7 +29,7 @@ use crate::dep_classpath::cached_dep_jars;
 /// Args for [`bennu_dependencies`].
 #[derive(Deserialize)]
 pub struct DependenciesArgs {
-    /// Absolute path to the project root (the dir holding the root `pom.xml` / `Cargo.toml`).
+    /// Absolute path to the project root (the dir holding the root `pom.xml` / `build.gradle` / `Cargo.toml`).
     pub root: String,
 }
 
@@ -54,11 +56,15 @@ pub(crate) fn bennu_module_graph(_ctx: &BennuState, args: DependenciesArgs) -> R
 
 /// The dependency report for `root`, from whichever producer owns the project.
 ///
-/// Maven first when both manifests are there, which is the precedence `bennu-project`'s
-/// `open_project` applies: a polyglot root is the Java project, and a panel has to agree with the
-/// rest of the window about what it is looking at.
+/// Maven first when both manifests are there, then Gradle, then Cargo — the precedence
+/// `bennu-project`'s `open_project` applies: a polyglot root is the Java project, and a panel has to
+/// agree with the rest of the window about what it is looking at.
 pub(crate) fn report_of(root: &str) -> Report {
     let root = std::path::PathBuf::from(root);
+    if !root.join("pom.xml").is_file() && bennu_gradle::prelude::is_gradle_root(&root) {
+        let jars = cached_dep_jars(&root);
+        return read_gradle(&root, &jars);
+    }
     if root.join("pom.xml").is_file() || !root.join("Cargo.toml").is_file() {
         let jars = cached_dep_jars(&root);
         return read_dependencies(&root, &jars);

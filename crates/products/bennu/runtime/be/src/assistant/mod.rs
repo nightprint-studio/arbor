@@ -11,6 +11,7 @@
 
 mod agent_store;
 mod apply;
+mod attachments;
 #[cfg(test)]
 mod cache_audit;
 mod compact;
@@ -24,6 +25,7 @@ mod live_log;
 mod models;
 mod outline;
 mod projects;
+mod project_context;
 mod prompt;
 mod prompt_agents;
 mod pseudonyms;
@@ -136,6 +138,9 @@ pub struct SendArgs {
     #[serde(default)]
     pub conversation_id: Option<String>,
     pub text: String,
+    /// Files attached to this message: pictures and text files the user chose (see `attachments`).
+    #[serde(default)]
+    pub attachments: Vec<attachments::AttachmentArg>,
     /// Send the conversation again as it stands — a run that failed is picked up where it stopped, with no new
     /// message from the user.
     #[serde(default)]
@@ -329,6 +334,8 @@ fn build_request(args: &SendArgs, transcript: Vec<Message>, git_tools: &[arbor_r
         live: !args.chat && !tools::families_off(&args.families_off).hides("run_start"),
         worktree: args.worktree.as_deref().and_then(bennu_assistant::prelude::WorktreeMode::parse),
     }), debug_on), bevy_on, bevy_write_on), shots_on), &if args.chat { String::new() } else { args.decision_paragraph() }), args.agents_on());
+    let system = prompt::with_general_context(system, &bennu_core::config::load().assistant.general_context);
+    let system = prompt::with_project_context(system, &project_context::load(&args.root));
     Request {
         model: args.model.clone(),
         system,
@@ -414,7 +421,7 @@ fn spend_json(limits: &Limits, spent: &Spent) -> Value {
 /// Start a run (or, with `dry_run`, show the request it would make).
 #[arbor_rpc::handler]
 async fn assistant_send(ctx: &BennuState, args: SendArgs) -> Result<Value, String> {
-    if args.text.trim().is_empty() && !args.retry {
+    if args.text.trim().is_empty() && !args.retry && args.attachments.is_empty() {
         return Err("the message is empty".into());
     }
     if args.root.trim().is_empty() {
@@ -491,7 +498,22 @@ async fn assistant_send(ctx: &BennuState, args: SendArgs) -> Result<Value, Strin
     let mut transcript = conv.transcript.clone();
     let set = working_set(&args);
     let enabled_skills = enabled_skills(&args, &set);
-    let mut user_text = with_context(&args.text, args.file.as_deref(), args.selection.as_deref());
+    // What the user attached: read and kept off the runtime's threads. A dry run and a retry attach nothing new.
+    let attached = if args.retry || args.dry_run || args.attachments.is_empty() {
+        attachments::Prepared::default()
+    } else {
+        let (files, conversation, root) = (std::mem::take(&mut args.attachments), conversation_id.clone(), args.root.clone());
+        tokio::task::spawn_blocking(move || attachments::prepare(&conversation, &root, &files))
+            .await
+            .map_err(|e| format!("could not read the attachments: {e}"))??
+    };
+    // Held until the message is stored: any failure between here and there deletes the pictures just kept.
+    let mut kept_pictures = attached.guard();
+    let typed = if args.text.trim().is_empty() && !attached.is_empty() { attached.default_prompt().to_string() } else { args.text.clone() };
+    let mut user_text = with_context(&typed, args.file.as_deref(), args.selection.as_deref());
+    if !attached.text.is_empty() {
+        user_text = format!("{}{user_text}", attached.text);
+    }
     // A message that starts with `/name` asks for that skill: the model is told so, and the user's own text
     // (shown in the thread) is left as typed.
     let note = skills::attachment_note(&skills::attached(&args.text, &enabled_skills));
@@ -528,7 +550,14 @@ async fn assistant_send(ctx: &BennuState, args: SendArgs) -> Result<Value, Strin
             return Err("there is nothing to send again: the conversation does not end with your message".into());
         }
     } else {
-        transcript.push(Message::user(user_text));
+        transcript.push(if attached.images.is_empty() {
+            Message::user(user_text)
+        } else {
+            // The pictures come first, the words about them after — the order the provider reads best.
+            let mut blocks = attached.images.clone();
+            blocks.push(Block::Text { text: user_text });
+            Message { role: Role::User, blocks }
+        });
     }
     let request = build_request(&args, transcript.clone(), &git_tools, &set, &enabled_skills);
 
@@ -551,19 +580,25 @@ async fn assistant_send(ctx: &BennuState, args: SendArgs) -> Result<Value, Strin
     let key = api_key(ctx)?;
     let now = now_ms();
     if !args.retry {
-        let user_message = json!({
-            "id": format!("u{now}"), "role": "user", "at": now,
-            "blocks": [{ "type": "text", "text": args.text }],
-        });
+        let mut blocks = Vec::new();
+        if !attached.is_empty() {
+            blocks.push(json!({ "type": "attachments", "items": attached.items.clone() }));
+        }
+        if !args.text.trim().is_empty() {
+            blocks.push(json!({ "type": "text", "text": args.text }));
+        }
+        let user_message = json!({ "id": format!("u{now}"), "role": "user", "at": now, "blocks": blocks });
         conv.messages.push(user_message);
         if conv.title.trim().is_empty() || conv.title == "New conversation" {
-            conv.title = title_from(&args.text);
+            let first_words = if args.text.trim().is_empty() { attached.names() } else { args.text.clone() };
+            conv.title = title_from(&first_words);
         }
     }
     conv.transcript = transcript;
     conv.model = args.model.clone();
     conv.updated_at = now;
     store::save_in(&dir, &conv)?;
+    kept_pictures.disarm();
 
     let run_id = format!("r{now:x}");
     let session_base = conv.cost;

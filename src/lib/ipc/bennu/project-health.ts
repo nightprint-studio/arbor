@@ -43,6 +43,9 @@ export interface FileOwnership {
   owner: { root: string; ready: boolean } | null;
   /** The reactor root enclosing the file, offered only when there is no owner. */
   suggested_root: string | null;
+  /** Set when the file is a view of a dependency (library source, decompiled stub): the artifact's name,
+   *  or `decompiled`. Not a project file, so it is never "not indexed". */
+  library?: string | null;
 }
 
 /** Whether a remembered project root is still there. */

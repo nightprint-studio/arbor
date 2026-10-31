@@ -13,6 +13,8 @@ import type { TreeNode } from '$lib/types/bennu';
 /** The files a project model is parsed from — and the ones that decide which build tools the project carries
  *  (`bennu_project_modules`: Maven, Gradle, Cargo, Node). */
 const MANIFESTS = ['pom.xml', 'Cargo.toml', 'package.json', 'build.gradle', 'build.gradle.kts'];
+/** The files whose edit changes what the symbol index is built from. */
+const INDEX_MANIFESTS = ['pom.xml', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'libs.versions.toml'];
 
 /** Items named in a notice before it says "and N more". */
 const LISTED = 3;
@@ -90,7 +92,7 @@ export function structureNotice(payload: TreeChanged): StructureNotice | null {
     }
   }
   if (isEmptyNotice(notice)) return null;
-  if (payload.paths.some((p) => baseName(p) === 'pom.xml')) notice.rebuildIndex = true;
+  if (payload.paths.some((p) => INDEX_MANIFESTS.includes(baseName(p)))) notice.rebuildIndex = true;
   return notice;
 }
 

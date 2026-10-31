@@ -24,6 +24,20 @@ pub fn enclosing_maven_root(file: &Path) -> Option<PathBuf> {
     found
 }
 
+/// The root of the Gradle build `file` belongs to: the outermost ancestor holding a settings script,
+/// which is where Gradle itself decides what the build is.
+///
+/// Outermost for the same reason as [`enclosing_maven_root`] — a file in a subproject belongs to the
+/// build that includes it — and a settings script rather than any build script, since every
+/// subproject has one of those and they would stop the walk at the first directory.
+pub fn enclosing_gradle_root(file: &Path) -> Option<PathBuf> {
+    file.ancestors()
+        .skip(1)
+        .filter(|dir| dir.join("settings.gradle").is_file() || dir.join("settings.gradle.kts").is_file())
+        .last()
+        .map(Path::to_path_buf)
+}
+
 /// The nearest ancestor of `path` (itself included) that is an existing directory — where a
 /// folder picker should start when `path` has vanished.
 pub fn nearest_existing_dir(path: &Path) -> Option<PathBuf> {

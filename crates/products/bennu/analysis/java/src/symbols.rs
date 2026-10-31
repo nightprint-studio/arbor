@@ -1166,7 +1166,7 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
         .and_then(|n| node_text(&n, bytes))?;
     let return_type_text = node
         .child_by_field_name("type")
-        .and_then(|n| node_text(&n, bytes))
+        .and_then(|n| type_text_of(&n, bytes))
         .unwrap_or_else(|| "void".to_string());
     let is_static = has_modifier(node, bytes, "static");
     let visibility = parse_visibility(node, bytes, enclosing_is_interface);
@@ -1238,7 +1238,7 @@ fn parse_params(node: &Node, bytes: &[u8]) -> Vec<ParamDecl> {
                         .unwrap_or_default();
                     let ptype = p
                         .child_by_field_name("type")
-                        .and_then(|n| node_text(&n, bytes))
+                        .and_then(|n| type_text_of(&n, bytes))
                         .map(|t| with_declarator_dims(&t, &p, bytes))
                         .unwrap_or_default();
                     params.push(ParamDecl {
@@ -1280,7 +1280,7 @@ fn parse_spread_parameter(p: &Node, bytes: &[u8]) -> ParamDecl {
             "modifiers" | "annotation" | "marker_annotation" => {}
             // The first remaining named child is the element type (`String`, `List<X>`, `int`, …).
             _ if type_text.is_empty() => {
-                type_text = node_text(&ch, bytes).unwrap_or_default();
+                type_text = type_text_of(&ch, bytes).unwrap_or_default();
             }
             _ => {}
         }
@@ -1604,7 +1604,7 @@ fn parse_annotation_element(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         .and_then(|n| node_text(&n, bytes))?;
     let return_type_text = node
         .child_by_field_name("type")
-        .and_then(|n| node_text(&n, bytes))
+        .and_then(|n| type_text_of(&n, bytes))
         .unwrap_or_else(|| "void".to_string());
     Some(MethodDecl {
         span: Some(Span::of(node)),
@@ -1642,7 +1642,7 @@ pub fn with_declarator_dims(type_text: &str, declarator: &Node, bytes: &[u8]) ->
 fn parse_field(node: &Node, bytes: &[u8], in_interface: bool, out: &mut Vec<FieldDecl>) {
     let Some(type_text) = node
         .child_by_field_name("type")
-        .and_then(|n| node_text(&n, bytes))
+        .and_then(|n| type_text_of(&n, bytes))
     else {
         return;
     };
@@ -1747,6 +1747,41 @@ fn is_type_node(n: &Node) -> bool {
             | "boolean_type"
             | "void_type"
     )
+}
+
+/// The text of a type node with its **type annotations** removed — `@Nullable Unit` → `Unit`,
+/// `String @Nullable[]` → `String[]`, `java.util.@Nullable List` → `java.util.List`.
+///
+/// A TYPE_USE annotation (JSpecify, Checker Framework) is part of the type node in the grammar, so its
+/// text came along into the parameter's type and nothing resolved a type spelled `@Nullable Unit`.
+/// An annotation says nothing about which type this is, so it is no part of the answer.
+pub(crate) fn type_text_of(node: &Node, bytes: &[u8]) -> Option<String> {
+    let text = node.utf8_text(bytes).ok()?;
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut stack = vec![*node];
+    while let Some(n) = stack.pop() {
+        if matches!(n.kind(), "marker_annotation" | "annotation") {
+            spans.push((n.start_byte(), n.end_byte()));
+            continue;
+        }
+        let mut c = n.walk();
+        stack.extend(n.children(&mut c));
+    }
+    if spans.is_empty() {
+        return Some(text.to_string());
+    }
+    spans.sort_unstable();
+    let base = node.start_byte();
+    let mut plain = String::with_capacity(text.len());
+    let mut at = 0;
+    for (start, end) in spans {
+        plain.push_str(&text[at..start - base]);
+        at = end - base;
+    }
+    plain.push_str(&text[at..]);
+    // What the removal leaves behind: `String []`, `java.util. List`, `Map< K, V>`.
+    let collapsed = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    Some(collapsed.replace(" [", "[").replace(". ", ".").replace("< ", "<").replace(" >", ">"))
 }
 
 /// Exact source text of a node.
@@ -2469,6 +2504,23 @@ mod tests {
             .expect("the local record");
         assert_eq!(point.kind, TypeKind::Record);
         assert!(point.fields.iter().any(|f| f.name == "x"));
+    }
+
+    /// A TYPE_USE annotation (`@Nullable`) is no part of the type it sits on: a parameter, a return type
+    /// and a field read as the type alone, the array dimension and a qualified name included.
+    #[test]
+    fn a_type_annotation_is_no_part_of_the_declared_type() {
+        let src = "package p;\npublic class C {\n    @Nullable String f;\n    String @Nullable [] g;\n    \
+                   @Nullable Unit m(@Nullable Unit u, String @Nullable [] a, java.util.@Nullable List<@Nullable String> l, @Nullable Object... v) { return null; }\n}\n";
+        let fs = extract_symbols(src);
+        let c = &fs.types[0];
+        let field = |n: &str| c.fields.iter().find(|f| f.name == n).map(|f| f.type_text.clone()).unwrap();
+        assert_eq!(field("f"), "String");
+        assert_eq!(field("g"), "String[]");
+        let m = c.methods.iter().find(|m| m.name == "m").unwrap();
+        assert_eq!(m.return_type_text, "Unit");
+        let types: Vec<&str> = m.params.iter().map(|p| p.type_text.as_str()).collect();
+        assert_eq!(types, ["Unit", "String[]", "java.util.List<String>", "Object[]"]);
     }
 
     /// A local class inside a CONSTRUCTOR body, and one nested inside a local class's own method —

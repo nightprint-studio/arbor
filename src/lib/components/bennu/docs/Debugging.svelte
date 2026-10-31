@@ -28,6 +28,31 @@
   launch installs whatever is set. What happens once the program stops — frames, values, watches — is <strong>Frames, values &amp; watches</strong>.
 </p>
 
+<h3>Attaching to a running JVM</h3>
+<p>
+  A <strong>run configuration of the Attach to JVM kind</strong> debugs a program Bennu did not start — an application server, a service in a container with its debug port published. Start that JVM with
+</p>
+<pre><code>-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005</code></pre>
+<p>
+  (<code>suspend=y</code> makes it wait for the debugger before <code>main</code>; the older <code>-Xdebug -Xrunjdwp:…</code> spelling works too), then give the configuration the same <strong>port</strong>. The host is not a
+  field: Bennu connects to <code>127.0.0.1</code> only, so a JVM on another machine needs an SSH tunnel to a local port.
+</p>
+<table>
+  <thead><tr><th>Gesture</th><th>Does</th></tr></thead>
+  <tbody>
+    <tr><td>🐞 beside the configuration chip, which reads <em>Attach</em> for this kind, or <kbd>Shift</kbd> + <kbd>F9</kbd></td><td>Attaches; ▷ is off, since there is nothing to run</td></tr>
+    <tr><td>Command palette › <em>Attach to JVM…</em></td><td>Attaches with the active Attach configuration, else the first one; with none, creates one on port 5005 and opens the editor</td></tr>
+    <tr><td>The unplug button in the Run console header or in the debugger's controls, <em>Detach the debugger</em> in the palette or the ⋮ menu</td><td>Detaches; the program keeps running, with no debugger attached</td></tr>
+  </tbody>
+</table>
+<p>
+  The attach gets a console tab like a launch, and the session — starting, running, paused — is reported in the same panel with the same buttons. If nothing listens on the port, or what listens is not
+  a Java debug port, the reason appears as a notification and in the tab.
+</p>
+<Callout variant="warning" title="Stop detaches; it never kills">
+  The program was not started by Bennu, so Stop on an Attach tab, closing the tab and closing the window only let go of the debugger. A program stopped at a breakpoint at that moment is resumed.
+</Callout>
+
 <h3>More than one at once</h3>
 <p>
   Several programs can be under the debugger together, each in its own console tab. A session and its tab are one thing, so the panel shows the one whose tab is in front, and moving

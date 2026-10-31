@@ -109,11 +109,25 @@
     border-radius: var(--radius-md);
     border: 1px solid var(--border-subtle, var(--border));
     background: var(--bg-elevated);
-    transition: border-color var(--anim-dur-fast), background var(--anim-dur-fast),
-                transform var(--anim-dur-fast);
+    position: relative;
+    overflow: hidden;
+    transition: border-color var(--anim-dur-base), background var(--anim-dur-base),
+                transform var(--anim-dur-base);
   }
+  /* The product's own colour pools in the top corner, and only on hover and while it runs. */
+  .pc::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(90% 70% at 0% 0%, color-mix(in srgb, var(--pc) 16%, transparent), transparent 70%);
+    opacity: 0;
+    transition: opacity var(--anim-dur-slow);
+    pointer-events: none;
+  }
+  .pc:hover::before, .pc.running::before { opacity: 1; }
+  .pc > :global(*) { position: relative; }
   .pc:hover {
-    background: var(--bg-hover);
+    background: var(--bg-elevated);
     border-color: color-mix(in srgb, var(--pc) 45%, transparent);
     transform: translateY(-1px);
   }

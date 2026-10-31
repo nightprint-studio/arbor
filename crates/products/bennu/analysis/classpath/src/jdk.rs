@@ -469,6 +469,22 @@ fn default_probe_modules() -> Vec<String> {
         "java.scripting",
         "java.security.jgss",
         "java.transaction.xa",
+        // The rest of the platform's `java.*` modules. A list that stops at the common ones read
+        // `java.util.prefs.Preferences` (java.prefs) and `javax.sql.rowset` as types that do not
+        // exist, and the project that imports them got an error on a line that compiles.
+        "java.prefs",
+        "java.datatransfer",
+        "java.sql.rowset",
+        "java.xml.crypto",
+        "java.security.sasl",
+        "java.management.rmi",
+        "java.smartcardio",
+        // The `jdk.*` modules whose packages application code reaches for: `com.sun.net.httpserver`,
+        // `sun.misc.Unsafe`, Flight Recorder, the extended management beans.
+        "jdk.httpserver",
+        "jdk.unsupported",
+        "jdk.jfr",
+        "jdk.management",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -478,6 +494,14 @@ fn default_probe_modules() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_probed_modules_cover_every_java_module_of_the_platform() {
+        let probed = default_probe_modules();
+        for module in ["java.base", "java.prefs", "java.datatransfer", "java.sql.rowset", "java.xml.crypto"] {
+            assert!(probed.iter().any(|m| m == module), "{module} is not probed");
+        }
+    }
 
     #[test]
     fn requested_major_parses_all_forms() {

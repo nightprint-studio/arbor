@@ -21,7 +21,17 @@ use serde_json::{json, Value};
 
 /// Files whose **content** is worth an event: the manifests the project model is parsed from, and
 /// `.gitignore`, which decides which rows the tree dims.
-pub const CONTENT_FOLLOWED: &[&str] = &["pom.xml", "Cargo.toml", ".gitignore"];
+pub const CONTENT_FOLLOWED: &[&str] = &[
+    "pom.xml",
+    "Cargo.toml",
+    ".gitignore",
+    "build.gradle",
+    "build.gradle.kts",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "libs.versions.toml",
+    "gradle.properties",
+];
 
 /// Upper bound on paths and changes carried in one event. Past this the frontend reloads wholesale.
 pub const MAX_PATHS: usize = 200;

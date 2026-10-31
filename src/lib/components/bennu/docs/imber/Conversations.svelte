@@ -27,7 +27,7 @@
   <tbody>
     <tr><td><strong>Works in the project</strong></td><td>Yes: reads, searches, edits, builds, runs, debugs through Bennu's tools</td><td>No. It cannot read, search or change anything</td></tr>
     <tr><td><strong>What it sees</strong></td><td>The project, the open file, the selection, the instruction files</td><td>Only what you type or select</td></tr>
-    <tr><td><strong>Tools</strong></td><td>All the families you left on</td><td>Three: the help about Bennu, opening a panel, drawing a diagram</td></tr>
+    <tr><td><strong>Tools</strong></td><td>All the families you left on</td><td>Four: the help about Bennu, opening a panel, drawing a diagram, showing a picture</td></tr>
     <tr><td><strong>Modes and reach</strong></td><td>Mode menu and Reach apply</td><td>Not shown: nothing to ask</td></tr>
     <tr><td><strong>Good for</strong></td><td>Anything about the project</td><td>A question unrelated to the project, or when you want to be sure nothing is touched</td></tr>
   </tbody>

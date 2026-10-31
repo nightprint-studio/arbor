@@ -20,7 +20,7 @@
     Play, Bug, Unplug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
     UserCog, Bot,
     ListChecks, ChevronDown, RotateCw, ListRestart, LayoutDashboard,
-    Store, Package, ScrollText, Gauge, Activity,
+    Store, Package, ScrollText, Gauge, Activity, Plug,
   } from 'lucide-svelte';
   import type { BuildType } from '$lib/stores/bennu/run.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -42,6 +42,7 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { bennuRunConfigStore } from '$lib/stores/bennu/run-config.svelte';
   import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
 
   /** The runner for the open project — the toolbar's ▷ / ⟳ / ■ mean the same thing either way. */
@@ -66,6 +67,13 @@
   // later wave — it toasts). All disabled when no project is open.
   const hasProject = $derived(!!projectStore.project);
   const busy = $derived(bennuRunStore.active);
+  /** The selected configuration attaches to a JVM that is already running: it has nothing to Run,
+   *  and the Debug button is its Attach. */
+  const attachOnly = $derived.by(() => {
+    const root = projectStore.project?.root;
+    return !!root && bennuRunConfigStore.activeFor(root)?.kind === 'attach';
+  });
+  const runBlockedNote = 'This configuration attaches to a running JVM — use Attach (Debug)';
   /** A Cargo project has no Java model: `cargo check` is its only build, and "Validate
    *  (no compile)" / the JDK warning are statements about a Java stack that isn't there. */
   const isCargo = $derived(projectStore.isCargo);
@@ -152,7 +160,7 @@
   const runMenu = $derived<DropdownItem[]>([
     // `Run` launches the active run configuration, whatever kind it is: a Java main class, or a
     // cargo subcommand. Both stream into the same console, so Rerun means the same thing on either.
-    { kind: 'item', id: 'run', label: 'Run', icon: Play, shortcut: 'Shift+F10', disabled: busy, onclick: runProject },
+    { kind: 'item', id: 'run', label: 'Run', icon: Play, shortcut: 'Shift+F10', disabled: busy || attachOnly, onclick: runProject },
     { kind: 'item', id: 'rerun', label: 'Rerun', icon: RotateCw, disabled: busy || !bennuRunStore.canRerun,
       onclick: () => void bennuRunStore.rerunApp() },
     { kind: 'item', id: 'build',   label: buildLabel,        icon: isCargo || buildType !== 'validate' ? Hammer : ListChecks, shortcut: 'Ctrl+F9', disabled: busy, onclick: buildProject },
@@ -179,8 +187,8 @@
     // Both ecosystems: JDWP attaches to the JVM `bennu_run` spawned, a Cargo target is built and then
     // launched under a debug adapter. Detach means the same thing on both — the program keeps running
     // with nothing attached, which is not Stop.
-    { kind: 'item', id: 'debug', label: 'Debug', icon: Bug, shortcut: 'Shift+F9',
-      disabled: busy, onclick: debugProject },
+    { kind: 'item', id: 'debug', label: attachOnly ? 'Attach to JVM' : 'Debug', icon: attachOnly ? Plug : Bug,
+      shortcut: 'Shift+F9', disabled: busy, onclick: debugProject },
     { kind: 'item', id: 'profile', label: profRecording ? 'Stop profiling' : 'Profile', icon: Gauge, shortcut: 'Shift+F11',
       disabled: profBlocked, onclick: profileProject },
     { kind: 'item', id: 'profiledlg', label: 'Profile a command or running JVM…', icon: Activity,
@@ -384,8 +392,8 @@
       <button
         class="btb-run-btn btb-run-primary"
         onclick={runProject}
-        disabled={!hasProject || busy}
-        use:tooltip={{ content: 'Run', shortcut: 'Shift+F10' }}
+        disabled={!hasProject || busy || attachOnly}
+        use:tooltip={attachOnly ? runBlockedNote : { content: 'Run', shortcut: 'Shift+F10' }}
         aria-label="Run"
       >
         <Play size={16} />
@@ -398,10 +406,13 @@
         class:btb-debugging={bennuDebugStore.anyLive}
         onclick={debugProject}
         disabled={!hasProject || busy}
-        use:tooltip={{ content: 'Debug', shortcut: 'Shift+F9' }}
-        aria-label="Debug"
+        use:tooltip={{
+          content: attachOnly ? 'Attach to the running JVM' : 'Debug',
+          shortcut: 'Shift+F9',
+        }}
+        aria-label={attachOnly ? 'Attach to the running JVM' : 'Debug'}
       >
-        <Bug size={16} />
+        {#if attachOnly}<Plug size={16} />{:else}<Bug size={16} />{/if}
       </button>
       <!-- ⏱ the profiler: records the selected run configuration (JFR for a JVM application, samply for a
            Cargo binary). Not `disabled` when it cannot, so the tooltip can say why. -->

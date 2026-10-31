@@ -62,9 +62,9 @@
 
   let filter = $state('');
 
-  // The module the report describes: a Maven or Cargo module anywhere in the workspace (the project
-  // root for a plain Maven / Cargo project). A module tree picks it when there are several.
-  const target = $derived(moduleFocusStore.targetFor('Maven', 'Cargo'));
+  // The module the report describes: a Maven, Gradle or Cargo module anywhere in the workspace (the
+  // project root for a plain one). A module tree picks it when there are several.
+  const target = $derived(moduleFocusStore.targetFor('Maven', 'Gradle', 'Cargo'));
   const root = $derived(target?.toolRoot ?? null);
   // A primitive on purpose: `target` is a fresh object whenever the active file changes, and an
   // effect that read it would re-read the report on every tab switch.
@@ -73,9 +73,13 @@
   /** Which build tool this report describes — what decides the words, not the layout. */
   const ecosystem = $derived(report?.ecosystem ?? '');
   const isCargo = $derived(ecosystem === 'cargo');
-  /** What a module is called here. A Cargo "module" is a crate, and the panel should say so. */
-  const unitWord = $derived(isCargo ? 'crate' : 'module');
-  const manifestWord = $derived(isCargo ? 'Cargo.toml' : 'pom');
+  const isGradle = $derived(ecosystem === 'gradle');
+  /** What a module is called here. A Cargo "module" is a crate and a Gradle one a project, and the
+   *  panel should say so. */
+  const unitWord = $derived(isCargo ? 'crate' : isGradle ? 'project' : 'module');
+  const manifestWord = $derived(isCargo ? 'Cargo.toml' : isGradle ? 'build script' : 'pom');
+  /** The tool the resolved tree is asked of. */
+  const treeTool = $derived(isCargo ? 'cargo' : isGradle ? 'Gradle' : 'Maven');
 
   // The resolved tree, once asked for (Maven only).
   const tree = $derived(dependenciesStore.tree);
@@ -227,7 +231,7 @@
   {#if !root}
     <EmptyState message="Open a project to see its dependencies." />
   {:else if dependenciesStore.error}
-    <div class="dep-scroll"><BennuModuleTree kinds={['Maven', 'Cargo']} ariaLabel="Projects" /></div>
+    <div class="dep-scroll"><BennuModuleTree kinds={['Maven', 'Gradle', 'Cargo']} ariaLabel="Projects" /></div>
     <div class="dep-notice">
       <Alert variant="error" compact text={dependenciesStore.error} />
     </div>
@@ -235,7 +239,7 @@
     <div class="dep-loading"><Spinner size={16} /><span>Reading the project's manifests…</span></div>
   {:else if report}
     <div class="dep-body">
-      <BennuModuleTree kinds={['Maven', 'Cargo']} ariaLabel="Projects" />
+      <BennuModuleTree kinds={['Maven', 'Gradle', 'Cargo']} ariaLabel="Projects" />
       {#if report.unreadable.length > 0}
         <div class="dep-notice">
           <Alert variant="warning" compact>
@@ -279,7 +283,7 @@
             <Alert variant="info" compact>
               To see <strong>who brings each dependency in</strong> and which ones come in
               <strong>{isCargo ? 'at more than one version' : 'with conflicting versions'}</strong>, resolve
-              the tree. It runs {isCargo ? 'cargo' : 'Maven'} in the background.
+              the tree. It runs {treeTool} in the background.
             </Alert>
           {/if}
           <div class="dep-notice-act">

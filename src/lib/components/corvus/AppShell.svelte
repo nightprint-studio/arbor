@@ -59,7 +59,6 @@
   import { depsExplorerStore } from '$lib/stores/corvus/depsExplorer.svelte';
   import CommandPalette from '../shared/CommandPalette.svelte';
   import Tooltip from '../shared/Tooltip.svelte';
-  import ImageLightbox from '../shared/ImageLightbox.svelte';
   import ConflictResolutionModal from './stage/conflict/ConflictResolutionModal.svelte';
   import CheckoutConflictModal from './CheckoutConflictModal.svelte';
   import SyncPullMergeModal from './SyncPullMergeModal.svelte';
@@ -2360,10 +2359,6 @@
   <!-- Fatal "git backend stopped" overlay: self-subscribes to
        arbor://corvus-be-down and blocks the window until the user restarts. -->
   <CorvusBeDownOverlay />
-
-  <!-- Singleton image preview host: inline images in issue/MR/PR bodies open
-       here via `imageLightbox`. -->
-  <ImageLightbox />
 
   <!-- Conflict resolution modal (merge & stash) -->
   {#if uiStore.mergeModalOpen}

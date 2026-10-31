@@ -708,8 +708,9 @@ function createBennuDebugStore() {
     /** Detach, leaving the program running. Stopping the *program* is the Run console's Stop —
      *  a server you attached to in order to look at one request should not die because you
      *  finished looking. */
-    async detachSession(): Promise<void> {
-      const s = viewed;
+    async detachSession(id?: string): Promise<void> {
+      // A given id is a session that is not the one in front — the console's Stop on an Attach tab.
+      const s = id ? (sessions.get(id) ?? null) : viewed;
       if (!s) return;
       try {
         await debugDetach(s.id);

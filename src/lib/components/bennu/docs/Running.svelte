@@ -87,6 +87,11 @@
     <div class="fc-title">Script</div>
     <div class="fc-desc">A <code>.sh</code>, <code>.bat</code>/<code>.cmd</code> or <code>.ps1</code>, picked not typed, with arguments, a working directory and environment variables. <strong>Run with</strong> chooses the shell from those that can interpret the file — <em>Git Bash</em>, <em>zsh</em>, <em>sh</em> for a <code>.sh</code>; <em>PowerShell 7</em> or <em>Windows PowerShell</em> for a <code>.ps1</code> — and <em>Auto</em> picks by extension. A shell this machine lacks is listed, greyed, with the reason. Whether the script runs <em>here</em> is answered at launch. No Debug: a shell script's debugger is <code>set -x</code>.</div>
   </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow">Java</div>
+    <div class="fc-title">Attach to JVM</div>
+    <div class="fc-desc">Launches nothing: connects the debugger to a JVM that is already running with <code>-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:«port»</code>. One field, the <strong>port</strong> (1–65535, 5005 to start with); the host is always this machine. ▷ is off for it and 🐞 reads <em>Attach</em>. See <strong>Debugging</strong>.</div>
+  </div>
 </div>
 <h3>Environment</h3>
 <p>

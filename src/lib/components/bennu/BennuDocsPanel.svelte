@@ -38,6 +38,7 @@
   import DependencyVersions from './docs/DependencyVersions.svelte';
   import DependencySecurity from './docs/DependencySecurity.svelte';
   import Maven             from './docs/Maven.svelte';
+  import Gradle            from './docs/Gradle.svelte';
   import PomEditing        from './docs/PomEditing.svelte';
   import ModuleGraph       from './docs/ModuleGraph.svelte';
   import Encodings         from './docs/Encodings.svelte';
@@ -47,6 +48,12 @@
   import GoTo              from './docs/GoTo.svelte';
   import Structure         from './docs/Structure.svelte';
   import Completion        from './docs/Completion.svelte';
+  import CompletionOrder     from './docs/completion/Order.svelte';
+  import CompletionSmart     from './docs/completion/Smart.svelte';
+  import CompletionWriting   from './docs/completion/Writing.svelte';
+  import CompletionTemplates from './docs/completion/Templates.svelte';
+  import CompletionPositions from './docs/completion/Positions.svelte';
+  import CompletionMissing   from './docs/completion/Missing.svelte';
   import Refactoring       from './docs/Refactoring.svelte';
   import Validation        from './docs/Validation.svelte';
   import LocalHistory      from './docs/LocalHistory.svelte';
@@ -139,8 +146,9 @@
       { id: 'jdk',          label: 'The JDK',          icon: Coffee     },
       { id: 'encodings',    label: 'Encodings',        icon: FileType2  },
     ] },
-    { id: 'maven', label: 'Maven & pom', icon: Package, items: [
+    { id: 'maven', label: 'Maven, Gradle & pom', icon: Package, items: [
       { id: 'maven',        label: 'The Maven window',  icon: Play      },
+      { id: 'gradle',       label: 'The Gradle window', icon: Play      },
       { id: 'pom',          label: 'Editing a pom.xml', icon: FileCode2 },
       { id: 'dependencies', label: 'Dependencies',      icon: Package   },
       { id: 'dependency-versions', label: 'Dependency versions', icon: ListTree },
@@ -152,7 +160,6 @@
       { id: 'navigation',    label: 'Navigation',              icon: Compass     },
       { id: 'goto',          label: 'Go to class, file, symbol', icon: Search    },
       { id: 'structure',     label: 'Structure & trees',       icon: ListTree    },
-      { id: 'completion',    label: 'Completion',              icon: Sparkles    },
       { id: 'templates',     label: 'Code templates',          icon: FileCode2   },
       { id: 'template-language',  label: 'The template language', icon: Braces   },
       { id: 'template-reference', label: 'Template reference',    icon: BookOpen },
@@ -163,6 +170,15 @@
       { id: 'tool-config',   label: 'Tool configuration files', icon: SlidersHorizontal },
       { id: 'file-types',    label: 'Other file types',        icon: FileText    },
       { id: 'xml-schemas',   label: 'XML schemas',             icon: FileCode2   },
+    ] },
+    { id: 'completion-group', label: 'Completion', icon: Sparkles, items: [
+      { id: 'completion',           label: 'Completion',                          icon: Sparkles          },
+      { id: 'completion-order',     label: 'The order things are offered in',     icon: ListTree          },
+      { id: 'completion-smart',     label: 'Smart suggestions and ghost text',    icon: Layers            },
+      { id: 'completion-writing',   label: 'Matching and writing',                icon: PenLine           },
+      { id: 'completion-templates', label: 'Annotations, abbreviations, postfix', icon: FileCode2         },
+      { id: 'completion-positions', label: 'Positions with their own rules',      icon: Compass           },
+      { id: 'completion-missing',   label: 'Members that do not exist yet',       icon: Braces            },
     ] },
     { id: 'imber', label: 'Imber, the assistant', icon: Sparkles, items: imberItems },
     { id: 'search', label: 'Structural search', icon: Replace, items: [
@@ -233,6 +249,7 @@
     'project-tree':      ProjectTree,
     'jdk':               Jdk,
     'maven':             Maven,
+    'gradle':            Gradle,
     'dependencies':      Dependencies,
     'dependency-versions': DependencyVersions,
     'dependency-security': DependencySecurity,
@@ -244,6 +261,12 @@
     'goto':              GoTo,
     'structure':         Structure,
     'completion':        Completion,
+    'completion-order':     CompletionOrder,
+    'completion-smart':     CompletionSmart,
+    'completion-writing':   CompletionWriting,
+    'completion-templates': CompletionTemplates,
+    'completion-positions': CompletionPositions,
+    'completion-missing':   CompletionMissing,
     'refactoring':       Refactoring,
     'voice':             Voice,
     'validation':        Validation,

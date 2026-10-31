@@ -10,7 +10,7 @@
    * screen when there is no conversation open — and the composer with the choices that shape the next answer.
    */
   import { onDestroy, onMount, tick } from 'svelte';
-  import { Sparkles, SquarePen, Trash2, Ellipsis, KeyRound, Eye, FlaskConical, Bot, MessageSquare, WandSparkles, Maximize2, Minimize2 } from 'lucide-svelte';
+  import { BookUser, Sparkles, SquarePen, Trash2, Ellipsis, KeyRound, Eye, FlaskConical, Bot, MessageSquare, WandSparkles, Maximize2, Minimize2 } from 'lucide-svelte';
   import { assistantLayoutStore } from '$lib/stores/bennu/assistant-layout.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
@@ -88,6 +88,10 @@
       // The key is set once, in Settings, and lives in the credential vault — the panel only points there.
       kind: 'item', id: 'settings', label: 'Imber settings…', subtitle: 'API key, defaults and what it can reach',
       icon: KeyRound, onclick: () => bennuUiStore.openSettings('assistant'),
+    },
+    {
+      kind: 'item', id: 'context', label: 'General context…', subtitle: store.generalContext.trim() ? 'Standing notes sent with every conversation' : 'Tell Imber who you are and how you work',
+      icon: BookUser, onclick: () => store.openContext(),
     },
     {
       kind: 'item', id: 'skills', label: 'Skills…', subtitle: `${store.skillCounts.on} of ${store.skillCounts.total} enabled`,

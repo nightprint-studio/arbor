@@ -185,7 +185,17 @@
     {#if isJava}
       <!-- The file on screen is outside every indexed project: only syntax checks run on it, and
            without this it reads as a file whose semantics were checked and found clean. -->
-      {#if fileOwnerStore.notIndexed}
+      {#if fileOwnerStore.library}
+        <StatusBarItem
+          tone="muted"
+          tooltip={fileOwnerStore.library === 'decompiled'
+            ? 'Decompiled from bytecode — read-only, not part of the project'
+            : `Source from ${fileOwnerStore.library} — read-only, not part of the project`}
+        >
+          Library source
+        </StatusBarItem>
+        <StatusBarSeparator />
+      {:else if fileOwnerStore.notIndexed}
         {#if fileOwnerStore.suggestedRoot}
           <StatusBarItem
             tone="warning"

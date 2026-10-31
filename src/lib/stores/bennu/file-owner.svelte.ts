@@ -25,13 +25,16 @@ function createFileOwnerStore() {
    *  an older question is dropped. */
   let askedKey = '';
 
-  const notIndexed = $derived(!!file && !!ownership && !ownership.owner);
+  const library = $derived(ownership?.library ?? null);
+  const notIndexed = $derived(!!file && !!ownership && !ownership.owner && !library);
   const suggestedRoot = $derived(notIndexed ? ownership?.suggested_root ?? null : null);
   const suggestionIsMember = $derived(
     !!suggestedRoot && projectStore.workspaceRoots.includes(suggestedRoot),
   );
 
   return {
+    /** The file on screen is a view of a dependency (artifact name, or `decompiled`), not a project file. */
+    get library() { return file ? library : null; },
     /** The file on screen belongs to no indexed project. */
     get notIndexed() { return notIndexed; },
     /** The reactor root enclosing it, when there is one to open. */

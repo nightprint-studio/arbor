@@ -160,6 +160,20 @@ fn is_decompiled_stub(file: &str) -> bool {
     path.starts_with(data.join("decompiled")) || path.starts_with(data.join("library"))
 }
 
+/// What a file Bennu opened from a dependency is, for the status bar: the artifact a resource was
+/// extracted from (`library/<jar>/…`), or `"decompiled"` for a stub decompiled from bytecode. `None` for
+/// a file of the project (or of anywhere else).
+pub(crate) fn library_view_of(file: &str) -> Option<String> {
+    let data = arbor_core::prelude::bennu_data_dir();
+    let path = Path::new(file);
+    if path.starts_with(data.join("decompiled")) {
+        return Some("decompiled".to_string());
+    }
+    let rest = path.strip_prefix(data.join("library")).ok()?;
+    let jar = rest.components().next()?.as_os_str().to_string_lossy().into_owned();
+    Some(jar)
+}
+
 fn decompiled_cache_path(binary: &str) -> PathBuf {
     let simple = binary.rsplit(['/', '$']).next().unwrap_or(binary);
     let mut path = arbor_core::prelude::bennu_data_dir().join("decompiled");
@@ -5253,7 +5267,10 @@ static LOCAL_REPO: std::sync::OnceLock<bennu_maven::prelude::LocalRepo> = std::s
 /// — where the layout says nothing and a guess would be worse than silence.
 fn artifact_of_jar(jar: &Path) -> Option<String> {
     let repo = LOCAL_REPO.get_or_init(bennu_maven::prelude::LocalRepo::discover);
-    let coord = repo.coord_at(jar)?;
+    // A Gradle build keeps its jars in its own cache, whose layout names the coordinate just as well.
+    let Some(coord) = repo.coord_at(jar) else {
+        return bennu_gradle::prelude::cache_coord_of(jar).map(|(g, a, v)| format!("{g}:{a}:{v}"));
+    };
     (!coord.group_id.is_empty() && !coord.artifact_id.is_empty()).then(|| {
         if coord.version.is_empty() {
             format!("{}:{}", coord.group_id, coord.artifact_id)
@@ -5960,6 +5977,16 @@ mod tests {
         assert!(is_decompiled_stub(&stub.to_string_lossy()), "{}", stub.display());
         assert!(!is_decompiled_stub("C:/proj/src/main/java/com/acme/Foo.java"));
         assert!(!is_decompiled_stub("/home/u/proj/src/main/java/Foo.java"));
+    }
+
+    #[test]
+    fn a_file_opened_from_a_dependency_is_a_library_view_and_a_project_file_is_not() {
+        let data = arbor_core::prelude::bennu_data_dir();
+        let stub = decompiled_cache_path("javax/crypto/Cipher");
+        assert_eq!(library_view_of(&stub.to_string_lossy()).as_deref(), Some("decompiled"));
+        let extracted = data.join("library").join("spring-core-6.1.0.jar").join("org/springframework/Foo.java");
+        assert_eq!(library_view_of(&extracted.to_string_lossy()).as_deref(), Some("spring-core-6.1.0.jar"));
+        assert_eq!(library_view_of("/home/u/proj/src/main/java/Foo.java"), None);
     }
 
     #[test]

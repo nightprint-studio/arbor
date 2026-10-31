@@ -29,7 +29,7 @@ pub use crate::message::{Block, ImageRef, Message, Request, Role, ToolSpec};
 
 // Pictures in the conversation: cost, vision support, keeping only the latest few.
 pub use crate::images::{
-    estimate_image_tokens, image_dimensions, image_tokens, keep_latest_images, load_images, png_dimensions, supports_images, without_images, KEEP_LATEST_IMAGES,
+    estimate_image_tokens, image_dimensions, image_tokens, keep_latest_images, load_images, png_dimensions, supports_images, without_images, KEEP_LATEST_ATTACHED, KEEP_LATEST_IMAGES,
 };
 
 // The provider interface, and what a response stream says.

@@ -31,11 +31,20 @@ export function hasAssistantKey(provider = DEFAULT_PROVIDER): Promise<boolean> {
 // ── The conversation — served by `bennu-be` over the rpc seam ────────────────────────────────────
 
 /** What a send needs to know beyond the text — the choices made at the composer, and where the user is. */
+/** One attachment of `assistant_send`: read from `path`, or `data` (base64) when there is no file. */
+export interface AttachmentParam {
+  name: string;
+  path?: string;
+  data?: string;
+}
+
 export interface SendParams {
   conversation_id: string | null;
   text: string;
   /** Send the conversation again as it stands (a run that failed), with no new message. */
   retry?: boolean;
+  /** Files attached to the message: a path on disk, or the bytes of a picture pasted from the clipboard. */
+  attachments?: AttachmentParam[];
   root: string;
   file: string | null;
   selection: string | null;
@@ -142,6 +151,10 @@ export interface InstructionFile {
   bytes: number;
   truncated: boolean;
 }
+/** The notes kept for one project, in `<repo>/.arbor/bennu/config.toml` — the per-project sibling of the general context. */
+export const getProjectContext = (root: string) => bennu<string>('assistant_project_context_get', { root });
+export const setProjectContext = (root: string, text: string) => bennu<void>('assistant_project_context_set', { root, text });
+
 export const getInstructions = (root: string) => bennu<InstructionFile[]>('assistant_instructions', { root });
 
 /** A skill found on disk: a folder with a `SKILL.md`. */

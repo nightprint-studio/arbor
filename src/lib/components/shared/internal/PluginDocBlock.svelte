@@ -314,12 +314,12 @@
     gap: 6px;
     margin: 12px 0;
   }
+  /* A step is running text (<strong>, <code>, <em> between words), so it is a block with the number
+     taken out of the flow: as a flex row every inline child became a column of its own. */
   .doc-block :global(ol.step-list > li) {
     counter-increment: step-counter;
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 9px 14px 9px 12px;
+    position: relative;
+    padding: 9px 14px 9px 44px;
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
@@ -329,10 +329,11 @@
   }
   .doc-block :global(ol.step-list > li::before) {
     content: counter(step-counter);
-    flex-shrink: 0;
+    position: absolute;
+    left: 12px;
+    top: 10px;
     width: 20px;
     height: 20px;
-    margin-top: 1px;
     background: var(--accent);
     color: #fff;
     border-radius: 50%;

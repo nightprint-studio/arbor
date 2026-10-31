@@ -119,23 +119,32 @@ fn single_abstract_method(
     binary: &str,
     objects: &HashSet<String>,
 ) -> Sam {
-    // name → arity, deduped (a functional interface has no overloaded abstract method).
-    let mut abstracts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    // The inference engine's reading first: it compares methods by their SUBSTITUTED parameter types, so
+    // a `default get(BiFunction)` does not discharge an abstract `get(RegisteredBean)` the way a count
+    // by name and arity does. What it cannot call functional falls through to the count below.
+    if let Some(sam) = bennu_java::prelude::single_abstract_method(resolver, &bennu_java::prelude::TypeRef::simple(binary)) {
+        return Sam::One { arity: sam.params.len() };
+    }
+    // (name, arity) → arity: the key carries the arity because a `default get()` does not discharge an
+    // abstract `get(RegisteredBean)` — Spring's `InstanceSupplier` declares the latter beside the
+    // `ThrowingSupplier`'s default `get()`, and keyed by name alone the default erased the very method
+    // that makes it functional.
+    let mut abstracts: std::collections::HashMap<(String, usize), usize> = std::collections::HashMap::new();
     // Names some type in the hierarchy IMPLEMENTS. A `default` that overrides an inherited abstract
     // method discharges it — `org.apache.commons.collections4.Predicate` extends
     // `java.util.function.Predicate` and gives `test` a default body, leaving `evaluate` as its only
     // requirement. Counting the inherited `test` as well made it "not a functional interface", and
     // every lambda written against it was reported on code that compiles.
-    let mut implemented: HashSet<String> = HashSet::new();
+    let mut implemented: HashSet<(String, usize)> = HashSet::new();
     for_each_supertype(resolver, binary, &mut |_bn, cm| {
         for m in &cm.methods {
             if m.kind != MemberKind::Method || is_ctor(&m.name) || objects.contains(&m.name) {
                 continue;
             }
             if is_abstract_requirement(cm, m) {
-                abstracts.entry(m.name.clone()).or_insert(m.params.len());
+                abstracts.entry((m.name.clone(), m.params.len())).or_insert(m.params.len());
             } else {
-                implemented.insert(m.name.clone());
+                implemented.insert((m.name.clone(), m.params.len()));
             }
         }
     });
@@ -461,6 +470,51 @@ mod default_override_tests {
         let src = "class A { void f() { Pred<String> p = s -> s.isEmpty(); } }";
         let out: Vec<String> =
             functional_errors(src, &r).into_iter().map(|d| d.message).collect();
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    /// A `default get()` of a parent beside the interface's own abstract `get(Arg)` are two methods of
+    /// one name: only the zero-argument one is discharged, so `get(Arg)` is the single abstract method
+    /// (Spring's `InstanceSupplier` over `ThrowingSupplier` over `Supplier`).
+    #[test]
+    fn a_default_of_one_arity_does_not_discharge_an_abstract_of_another() {
+        let iface = |parents: &[&str], methods: Vec<Member>| {
+            let mut cm = ClassMembers {
+                type_params: Vec::new(),
+                superclass: None,
+                interfaces: parents.iter().map(|p| TypeRef::simple(*p)).collect(),
+                methods,
+                fields: Vec::new(),
+                flags: Default::default(),
+            };
+            cm.flags.is_interface = true;
+            cm
+        };
+        let object = || TypeRef::simple("java/lang/Object");
+        let mut m = HashMap::new();
+        m.insert("java/util/function/Supplier".to_string(), iface(&[], vec![Member::method("get", object(), vec![]).abstract_()]));
+        m.insert(
+            "p/Throwing".to_string(),
+            iface(
+                &["java/util/function/Supplier"],
+                vec![Member::method("getWithException", object(), vec![]).abstract_(), Member::method("get", object(), vec![]).default_(), Member::method("get", object(), vec![TypeRef::simple("p/Other")]).default_()],
+            ),
+        );
+        m.insert(
+            "p/Pred".to_string(),
+            iface(
+                &["p/Throwing"],
+                vec![
+                    Member::method("getWithException", object(), vec![]).default_(),
+                    Member::method("get", object(), vec![TypeRef::simple("p/Bean")]).abstract_(),
+                ],
+            ),
+        );
+        m.insert("p/Bean".to_string(), iface(&[], vec![]));
+        m.insert("p/Other".to_string(), iface(&[], vec![]));
+        let r = R(m);
+        let src = "class A { void f() { Pred p = b -> null; } }";
+        let out: Vec<String> = functional_errors(src, &r).into_iter().map(|d| d.message).collect();
         assert!(out.is_empty(), "{out:?}");
     }
 }

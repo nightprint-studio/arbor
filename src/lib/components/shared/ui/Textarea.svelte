@@ -8,7 +8,9 @@
    * a focus ring) for a field that stands alone in a form; `maxLength` caps the text and shows a
    * `n / max` counter under it. `Input` is the framed single-line field.
    *
-   * `Ctrl/Cmd+Enter` calls `onsubmit`; plain Enter is a newline, as in every multi-line field.
+   * `Ctrl/Cmd+Enter` calls `onsubmit`; plain Enter is a newline, as in every multi-line field. A caller
+   * that wants other keys (a list of fields where Enter adds the next one) gets them first through
+   * `onkeydown`, and `preventDefault()` keeps the field's own handling out of it.
    */
   let {
     value = $bindable(''),
@@ -20,6 +22,7 @@
     maxLength,
     ariaLabel,
     onsubmit,
+    onkeydown,
     element = $bindable<HTMLTextAreaElement | undefined>(),
   }: {
     value?: string;
@@ -34,6 +37,7 @@
     maxLength?: number;
     ariaLabel?: string;
     onsubmit?: () => void;
+    onkeydown?: (e: KeyboardEvent) => void;
     element?: HTMLTextAreaElement;
   } = $props();
 
@@ -56,6 +60,8 @@
   });
 
   function onKeydown(e: KeyboardEvent) {
+    onkeydown?.(e);
+    if (e.defaultPrevented) return;
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       onsubmit?.();

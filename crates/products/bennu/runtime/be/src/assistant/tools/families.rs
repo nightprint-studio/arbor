@@ -83,6 +83,8 @@ pub fn family_of(tool: &str) -> Option<Family> {
     match tool {
         "ask_user" | "bennu_help" | "update_plan" | "open_ui" | "load_skill" | "show_diagram" => None,
         "search_text" | "find_files" | "bennu_read_file" | "read_files" | "file_outline" => Some(Family::Read),
+        // Showing an image file is reading it; a chat (which has no families) shows SVG it wrote.
+        "show_image" => Some(Family::Read),
         // The way to get the rest of a digest: it follows whichever tool produced one, so it is never switched off alone.
         "expand_result" => None,
         "edit_file" | "edit_files" | "replace_in_files" | "create_file" | "delete_file" => Some(Family::Edit),

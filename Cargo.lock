@@ -990,6 +990,7 @@ dependencies = [
  "bennu-ext",
  "bennu-flc",
  "bennu-fulcrum-i18n",
+ "bennu-gradle",
  "bennu-i18n",
  "bennu-index",
  "bennu-intel",
@@ -1120,6 +1121,7 @@ version = "0.3.0"
 dependencies = [
  "arbor-core",
  "bennu-cargo",
+ "bennu-gradle",
  "bennu-xml",
  "serde",
 ]
@@ -1174,6 +1176,14 @@ dependencies = [
  "bennu-ext",
  "bennu-proto",
  "bennu-toml",
+ "serde",
+]
+
+[[package]]
+name = "bennu-gradle"
+version = "0.3.0"
+dependencies = [
+ "arbor-core",
  "serde",
 ]
 
@@ -1448,6 +1458,7 @@ dependencies = [
 name = "bennu-project"
 version = "0.3.0"
 dependencies = [
+ "bennu-gradle",
  "bennu-proto",
  "encoding_rs",
  "ignore",

@@ -605,7 +605,16 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
             let exists = |binary: &str| self.jdk.members_of(binary).is_some();
             if let Some(c) = candidates
                 .iter()
-                .find(|c| c.kind == ScopeKind::OnDemand && self.project.get(&c.binary).is_none() && c.confirmed_by(&exists))
+                .find(|c| {
+                    // `java.lang` is an import on demand too (JLS §7.5.5), and it outranks a type of a
+                    // package the file never mentions for the same reason: that type is not in scope.
+                    // `Error` or `Character` declared by some unrelated project package beat
+                    // `java.lang.Error` through the map below, and `e.getMessage()` was then "not found
+                    // in `Error`".
+                    matches!(c.kind, ScopeKind::OnDemand | ScopeKind::JavaLang)
+                        && self.project.get(&c.binary).is_none()
+                        && c.confirmed_by(&exists)
+                })
             {
                 return Some(c.binary.clone());
             }
@@ -662,7 +671,8 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         if recording {
             dep_record::note_simple_miss(name);
         }
-        if let Some(hint) = self.simple_hints.get(name) {
+        // The same guard as the project map above: a name shaped like a type variable is the class's own.
+        if let Some(hint) = self.simple_hints.get(name).filter(|_| !type_variable_shaped) {
             return Some(hint.clone());
         }
         // Fall through to the JDK / library bytecode, for the remaining tiers in Java's order: a

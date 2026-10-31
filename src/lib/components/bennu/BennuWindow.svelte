@@ -30,6 +30,7 @@
   import BennuPicusPanel from './picus/BennuPicusPanel.svelte';
   import BennuAssistantPanel from './assistant/BennuAssistantPanel.svelte';
   import BennuSkillsModal from './assistant/BennuSkillsModal.svelte';
+  import AssistantContextModal from './assistant/AssistantContextModal.svelte';
   import { openUi, type UiHost } from './assistant/assistant-ui-targets';
   import { MODES } from './assistant/assistant-mode';
   import { bennuPicusStore } from '$lib/stores/bennu/picus.svelte';
@@ -95,6 +96,7 @@
   import BennuStructurePanel from './BennuStructurePanel.svelte';
   import BennuDependenciesPanel from './BennuDependenciesPanel.svelte';
   import BennuMavenPanel from './BennuMavenPanel.svelte';
+  import BennuGradlePanel from './BennuGradlePanel.svelte';
   import BennuCargoPanel from './BennuCargoPanel.svelte';
   import BennuTestsCatalogPanel from './BennuTestsCatalogPanel.svelte';
   import BennuCargoTestsPanel from './BennuCargoTestsPanel.svelte';
@@ -102,6 +104,7 @@
   import SyntaxTreePanel from '$lib/components/shared/internal/SyntaxTreePanel.svelte';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
   import MavenIcon from './MavenIcon.svelte';
+  import GradleIcon from './GradleIcon.svelte';
   import JUnitIcon from './JUnitIcon.svelte';
   import { testIcon } from './test-icon';
   import BennuBottomDock from './BennuBottomDock.svelte';
@@ -222,6 +225,8 @@
   import { availableCatalogs } from './framework-catalogs';
   import { hotswapJsp } from '$lib/ipc/bennu/tomcat';
   import { mavenDownload } from '$lib/ipc/bennu/deps';
+  import { gradleDownload } from '$lib/ipc/bennu/gradle';
+  import { bennuGradleStore } from '$lib/stores/bennu/gradle.svelte';
   import { discoverTests } from '$lib/ipc/bennu/tests';
   import { discoverCargoTests } from '$lib/ipc/bennu/cargo-tests';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -232,6 +237,7 @@
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
   import { bennuWorktreeStore } from '$lib/stores/bennu/assistant-worktree.svelte';
   import { bennuAgentsStore } from '$lib/stores/bennu/assistant-agents.svelte';
+  import { assistantAttachmentsStore } from '$lib/stores/bennu/assistant-attachments.svelte';
   import { assistantLayoutStore } from '$lib/stores/bennu/assistant-layout.svelte';
 
   // Which file the editor is on, announced to the plugins as `bennu:file_opened`.
@@ -675,6 +681,13 @@
       if (!ran) bennuUiStore.openRunConfig();
     });
   }
+  /** Palette "Attach to JVM…" — see `attachToJvm`. */
+  function triggerAttach() {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    bennuUiStore.showBottom('run');
+    void bennuRunStore.attachToJvm(root);
+  }
   /**
    * Shift+F11 / palette Profile — record the selected run configuration under the profiler, or stop the
    * recording in progress. A configuration that cannot be profiled says why in a toast.
@@ -1041,12 +1054,25 @@
   // file or tab — so a button does not come and go as you edit. With no project open the Maven chrome
   // keeps its disabled shape, as it always has.
   const hasMaven = $derived(!projectStore.project || projectStore.hasModule('Maven'));
+  const hasGradle = $derived(projectStore.hasModule('Gradle'));
   const hasCargo = $derived(projectStore.hasModule('Cargo'));
-  const hasProjectTooling = $derived(hasMaven || hasCargo);
+  const hasProjectTooling = $derived(hasMaven || hasGradle || hasCargo);
   /** What Alt+8 opens: the primary kind's tool when the workspace has it, else whichever exists. */
-  const buildToolKey = $derived<'maven' | 'cargo'>(
-    projectStore.isCargo && hasCargo ? 'cargo' : hasMaven ? 'maven' : 'cargo',
+  const buildToolKey = $derived<'maven' | 'gradle' | 'cargo'>(
+    projectStore.isCargo && hasCargo
+      ? 'cargo'
+      : projectStore.kind === 'gradle' && hasGradle
+        ? 'gradle'
+        : hasMaven
+          ? 'maven'
+          : hasGradle
+            ? 'gradle'
+            : 'cargo',
   );
+  /** The dependency download of whichever Java build tool the project uses. */
+  function downloadDependencies(root: string): Promise<string> {
+    return projectStore.kind === 'gradle' ? gradleDownload(root) : mavenDownload(root);
+  }
   /** Picus ships with this install (see `bennuPicusStore.probe`). */
   const picusTools = $derived(bennuPicusStore.available);
   // Each project has its own database: switching project drops the previous one's connection from
@@ -1326,6 +1352,9 @@
     ...(hasMaven
       ? [{ id: 'maven', tooltip: 'Maven', shortcut: buildToolKey === 'maven' ? 'Alt+8' : undefined, icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') }]
       : []),
+    ...(hasGradle
+      ? [{ id: 'gradle', tooltip: 'Gradle', shortcut: buildToolKey === 'gradle' ? 'Alt+8' : undefined, icon: GradleIcon, active: bennuUiStore.rightPanel === 'gradle', onclick: () => bennuUiStore.toggleRight('gradle') }]
+      : []),
     ...(hasCargo
       ? [{ id: 'cargo', tooltip: 'Cargo — the crates, and what you can run on them', shortcut: buildToolKey === 'cargo' ? 'Alt+8' : undefined, icon: Cog, active: bennuUiStore.rightPanel === 'cargo', onclick: () => bennuUiStore.toggleRight('cargo') }]
       : []),
@@ -1430,6 +1459,7 @@
   $effect(() => {
     const java = javaTools;
     const maven = hasMaven;
+    const gradle = hasGradle;
     const cargo = hasCargo;
     const tooling = hasProjectTooling;
     const jsp = jspTools;
@@ -1449,6 +1479,7 @@
         right: [
           'i18n', 'assistant',
           ...(maven ? ['maven' as const] : []),
+          ...(gradle ? ['gradle' as const] : []),
           ...(cargo ? ['cargo' as const] : []),
           ...(tooling ? ['tests' as const] : []),
           ...(java ? ['ast' as const] : []),
@@ -1539,6 +1570,7 @@
    */
   const BRAND_ICONS: Record<string, IconComponent> = {
     Maven: MavenIcon as unknown as IconComponent,
+    Gradle: GradleIcon as unknown as IconComponent,
     JUnit: JUnitIcon as unknown as IconComponent,
     Bevy: BevyIcon as unknown as IconComponent,
   };
@@ -1960,6 +1992,7 @@
       { id: 'pluginlogs', title: 'Toggle Plugin Logs', icon: 'ScrollText',    action: () => run(() => bennuUiStore.togglePluginLogs()), when: true },
       { id: 'maven',     title: 'Toggle Maven',     icon: 'Maven',       shortcut: buildToolKey === 'maven' ? 'Alt+8' : undefined, action: () => run(() => bennuUiStore.toggleRight('maven')), when: hasMaven },
       { id: 'picus',     title: 'Toggle Database (Picus)', icon: 'Database', shortcut: 'Alt+D', action: () => run(() => bennuUiStore.toggleRight('picus')), when: javaTools && picusTools },
+      { id: 'gradle',    title: 'Toggle Gradle',    icon: 'Gradle',      shortcut: buildToolKey === 'gradle' ? 'Alt+8' : undefined, action: () => run(() => bennuUiStore.toggleRight('gradle')), when: hasGradle },
       { id: 'cargo',     title: 'Toggle Cargo',    icon: 'Cog',         shortcut: buildToolKey === 'cargo' ? 'Alt+8' : undefined, action: () => run(() => bennuUiStore.toggleRight('cargo')), when: hasCargo },
       // Runs the real `cargo add`. In the View section beside the Cargo window because that is where
       // it is otherwise reached from, and gated on the ecosystem: there is nothing to add to a pom.
@@ -1970,6 +2003,7 @@
       { id: 'assistant-expand', title: 'Imber:Expand panel', icon: 'Maximize2', shortcut: 'Ctrl+Shift+U', action: () => run(expandAssistant), when: !assistantLayoutStore.expanded || bennuUiStore.rightPanel !== 'assistant' },
       { id: 'assistant-restore', title: 'Imber:Restore panel', icon: 'Minimize2', shortcut: 'Ctrl+Shift+U', action: () => run(() => assistantLayoutStore.restore()), when: assistantLayoutStore.expanded && bennuUiStore.rightPanel === 'assistant' },
       // A failed request is sent again as it stood; while one waits to retry, "now" skips the wait.
+      { id: 'assistant-attach', title: 'Imber:Attach files to the message…', icon: 'Sparkles', action: () => run(() => { showAssistant(); setTimeout(() => assistantAttachmentsStore.requestPicker(), 0); }), when: true },
       { id: 'assistant-retry', title: 'Imber:Retry the failed request', icon: 'RotateCw', action: () => run(() => { showAssistant(); void bennuAssistantStore.retry(); }), when: bennuAssistantStore.canRetry },
       { id: 'assistant-retry-now', title: 'Imber:Retry now (skip the wait)', icon: 'RotateCw', action: () => run(() => void bennuAssistantStore.retryNow()), when: bennuAssistantStore.retrying !== null },
       { id: 'assistant-skills', title: 'Imber:Manage skills…', icon: 'Wand2', action: () => run(() => bennuAssistantStore.openSkills()), when: true },
@@ -1979,6 +2013,7 @@
         action: () => run(() => bennuAssistantStore.setMode(m.id)), when: bennuAssistantStore.mode !== m.id,
       })),
       // How much it decides alone, for the conversation in front of you; the text is edited in the same window.
+      { id: 'assistant-context', title: 'Imber:General context…', icon: 'SlidersHorizontal', action: () => run(() => { showAssistant(); bennuAssistantStore.openContext(); }), when: true },
       { id: 'assistant-decisions', title: 'Imber:Decisions in this conversation…', icon: 'SlidersHorizontal', action: () => run(() => { showAssistant(); bennuAssistantStore.openDecision(); }), when: true },
       // Sub-agents: helpers with a clean context. The verbs are the panel's, for the conversation in front of you.
       { id: 'assistant-agents-cycle', title: 'Imber:Sub-agents in this conversation — next (follow settings → on → off)', icon: 'Network', action: () => run(() => { showAssistant(); bennuAssistantStore.cycleChatSubagents(); }), when: !bennuAssistantStore.chatOnly },
@@ -2057,6 +2092,10 @@
       // then launched under a debug adapter.
       { id: 'debug', title: 'Debug', icon: 'Bug', shortcut: 'Shift+F9',
         action: () => run(triggerDebug), when: idle },
+      // A JVM that is already running with a JDWP agent: the active Attach configuration, or the
+      // first one, or a new one opened in the editor so the port can be confirmed.
+      { id: 'attach', title: 'Attach to JVM…', icon: 'Plug',
+        action: () => run(triggerAttach), when: idle && javaTools },
       // The profiler's other door: a command, or a JVM that is already running.
       { id: 'profiledlg', title: 'Profile a command or running JVM…', icon: 'Activity',
         action: () => run(() => bennuProfilerStore.openStart()), when: profilerTools },
@@ -2180,7 +2219,7 @@
         shortcut: 'Alt+Shift+U',
         action: () => run(async () => {
           const r = projectStore.project?.root;
-          if (r) await mavenDownload(r).catch(() => undefined);
+          if (r) await downloadDependencies(r).catch(() => undefined);
         }),
         when: !!projectStore.project && javaTools },
       // The two builds people actually type out, by name. Every other goal is a row in the Maven
@@ -2190,13 +2229,26 @@
           const r = projectStore.project?.root;
           if (r) void bennuRunStore.runMavenGoals(r, ['clean', 'install']);
         }),
-        when: !!projectStore.project && !projectStore.isCargo },
+        when: !!projectStore.project && projectStore.kind === 'maven' },
       { id: 'mvntest', title: 'Maven: test', icon: 'Play',
         action: () => run(() => {
           const r = projectStore.project?.root;
           if (r) void bennuRunStore.runMavenGoals(r, ['test']);
         }),
-        when: !!projectStore.project && !projectStore.isCargo },
+        when: !!projectStore.project && projectStore.kind === 'maven' },
+      // Gradle's two, for the same reason — and `-x test` / `--offline` follow the Gradle window's toggles.
+      { id: 'gradlecleanbuild', title: 'Gradle: clean build', icon: 'Play',
+        action: () => run(() => {
+          const r = projectStore.project?.root;
+          if (r) void bennuRunStore.runGradleTasks(r, ['clean', 'build'], { skipTests: bennuGradleStore.skipTests, offline: bennuGradleStore.offline });
+        }),
+        when: !!projectStore.project && projectStore.kind === 'gradle' },
+      { id: 'gradletest', title: 'Gradle: test', icon: 'Play',
+        action: () => run(() => {
+          const r = projectStore.project?.root;
+          if (r) void bennuRunStore.runGradleTasks(r, ['test'], { offline: bennuGradleStore.offline });
+        }),
+        when: !!projectStore.project && projectStore.kind === 'gradle' },
       { id: 'docs', title: 'Documentation', icon: 'Command', shortcut: 'F1', action: () => run(() => bennuUiStore.toggleDocs()), when: true },
       { id: 'tour', title: 'Welcome tour', icon: 'BookOpen',
         action: () => run(() => bennuOnboardingStore.show()), when: true },
@@ -2677,7 +2729,7 @@
     if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'u')) {
       const r = projectStore.project?.root;
       if (!r || !javaTools) return;
-      e.preventDefault(); void mavenDownload(r).catch(() => undefined); return;
+      e.preventDefault(); void downloadDependencies(r).catch(() => undefined); return;
     }
 
     // Expand the macro at the caret. Alt+Shift+M, in the same safe family as the format binding
@@ -2912,6 +2964,7 @@
             liftWidth={assistantLift}
           >
             {#if bennuUiStore.rightPanel === 'maven'}<BennuMavenPanel />{/if}
+            {#if bennuUiStore.rightPanel === 'gradle'}<BennuGradlePanel />{/if}
             {#if bennuUiStore.rightPanel === 'cargo'}<BennuCargoPanel />{/if}
             <!-- The catalogue is per-ecosystem: a Rust test is identified by crate + target +
                  module + name, which is four levels the Java panel has no columns for. -->
@@ -3003,6 +3056,7 @@
 
 <!-- The skills manager opens from the palette, the assistant panel and Settings, so it lives here. -->
 <BennuSkillsModal />
+<AssistantContextModal />
 
 {#if bennuUiStore.projectConfigOpen}
   <BennuProjectConfigModal onClose={() => bennuUiStore.closeProjectConfig()} />

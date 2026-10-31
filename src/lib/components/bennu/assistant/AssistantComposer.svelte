@@ -12,7 +12,7 @@
    */
   import {
     ArrowUp, Square, Eye, FlaskConical, ChevronDown, FileText, TextCursorInput, ShieldCheck, Zap, Lock, HardDrive,
-    Gauge, MessageSquare, SlidersHorizontal, Ruler, BookText, ListTodo, WandSparkles, GitBranch, Copy, Ban, Bot, Hammer, Scale, Network,
+    Gauge, MessageSquare, SlidersHorizontal, Ruler, BookText, ListTodo, WandSparkles, GitBranch, Copy, Ban, Bot, Hammer, Scale, Network, Paperclip,
   } from 'lucide-svelte';
   import { decisionInfo, effectiveDecisionLevel } from './assistant-decision';
   import { subagentsLabel } from './assistant-agents';
@@ -31,6 +31,10 @@
   import { formatEur, formatPrice, formatTokens } from './assistant-format';
   import { applySlash, matchSkills, slashQuery } from './assistant-skills';
   import AssistantComposerBlocks from './AssistantComposerBlocks.svelte';
+  import AssistantAttachments from './AssistantAttachments.svelte';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
+  import { assistantAttachmentsStore as files, MAX_ATTACHMENTS } from '$lib/stores/bennu/assistant-attachments.svelte';
+  import { pastedPictures, droppedFiles, dragHasFiles } from './assistant-attach-paste';
   import { createPasteHandlers } from './assistant-composer-paste';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { MODES, modeInfo } from './assistant-mode';
@@ -90,6 +94,12 @@
 
   // Arrows walk the list, Enter or Tab picks, Esc closes it — all while the text field keeps the focus.
   function onFieldKeydown(e: KeyboardEvent) {
+    // Backspace in an empty field takes back the last file, the way it takes back the last character.
+    if (e.key === 'Backspace' && files.count > 0 && store.draft === '' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      files.removeLast();
+      return;
+    }
     if (!slashOpen || e.ctrlKey || e.metaKey || e.altKey) return;
     const n = slashItems.length;
     if (e.key === 'ArrowDown') { e.preventDefault(); slashActive = (slashActive + 1) % n; }
@@ -250,7 +260,67 @@
       : `${effortLabel || 'no effort'} · ${formatTokens(store.maxContext)} · ${scopeLabel}`,
   );
 
-  const canSend = $derived(store.draft.trim().length > 0);
+  const canSend = $derived(store.draft.trim().length > 0 || files.count > 0);
+
+  // Attaching: the explorer in its picker mode (never the system dialog), opened by the clip or the palette.
+  let pickerOpen = $state(false);
+  let seenPickerRequest = files.pickerRequest;
+  $effect(() => {
+    const request = files.pickerRequest;
+    if (request === seenPickerRequest) return;
+    seenPickerRequest = request;
+    pickerOpen = true;
+  });
+
+  function attachPicked(paths: string[]) {
+    pickerOpen = false;
+    const left = files.addPaths(paths);
+    if (left > 0) toastStore.show(`At most ${MAX_ATTACHMENTS} files go with one message — ${left} left out.`, 'warning');
+    textEl?.focus();
+  }
+
+  /** Pictures on the clipboard become attachments; returns whether the paste was one (so it is not also text). */
+  function attachPasted(e: ClipboardEvent): boolean {
+    const found = pastedPictures(e);
+    if (found.length === 0) return false;
+    e.preventDefault();
+    void Promise.all(found).then((pictures) => {
+      for (const p of pictures) {
+        if (!files.addPasted(p.name, p.base64, p.size, p.preview)) {
+          toastStore.show(`At most ${MAX_ATTACHMENTS} files go with one message.`, 'warning');
+          break;
+        }
+      }
+    }).catch(() => toastStore.show('Could not read the pasted picture.', 'warning'));
+    return true;
+  }
+
+  // Files dropped on the composer. The system drag-drop handler is off app-wide, so the DOM events arrive; a
+  // dropped file has no path, so it is read whole and travels as bytes like a pasted picture.
+  let dropping = $state(false);
+
+  function onDragOver(e: DragEvent) {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    dropping = true;
+  }
+
+  function onDrop(e: DragEvent) {
+    dropping = false;
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    const { read, tooLarge } = droppedFiles(e);
+    if (tooLarge.length > 0) toastStore.show(`Too large to attach: ${tooLarge.join(', ')}.`, 'warning');
+    void Promise.all(read).then((dropped) => {
+      let left = 0;
+      for (const f of dropped) {
+        if (!files.addData(f.name, f.base64, f.size, f.kind, f.preview)) left += 1;
+      }
+      if (left > 0) toastStore.show(`At most ${MAX_ATTACHMENTS} files go with one message — ${left} left out.`, 'warning');
+      textEl?.focus();
+    }).catch(() => toastStore.show('Could not read the dropped file.', 'warning'));
+  }
 
   // Dictated text lands where the caret is (or replaces the selection), then the caret moves past it.
   function insertDictation(text: string) {
@@ -265,13 +335,22 @@
     if (!canSend || store.running) return;
     // A dry run shows the request that would go and keeps the draft, so it can be sent for real next.
     const text = store.draft;
-    const consumed = await store.send(text);
+    const consumed = await store.send(text, { attachments: files.snapshot() });
     if (consumed && store.draft === text) store.draft = '';
+    if (consumed) files.clear();
   }
 </script>
 
 <div class="composer">
-  <div class="frame" onfocusin={() => store.refreshSelection()}>
+  <div
+    class="frame"
+    class:dropping
+    role="presentation"
+    onfocusin={() => store.refreshSelection()}
+    ondragover={onDragOver}
+    ondragleave={() => (dropping = false)}
+    ondrop={onDrop}
+  >
     <div class="chips">
       {#if fileName && !store.chatOnly}
         <Badge variant="chip" size="sm" label={fileName}>
@@ -290,10 +369,14 @@
       {/each}
     </div>
 
+    {#if files.count > 0}
+      <AssistantAttachments items={files.items} onRemove={(i) => files.remove(i)} />
+    {/if}
+
     <!-- Keys are handled on the way up from the textarea, which keeps the focus. -->
     <AssistantComposerBlocks bind:draft={store.draft} />
 
-    <div class="field" role="presentation" onkeydown={(e) => { paste.onkeydown(e); onFieldKeydown(e); }} onpaste={paste.onpaste}>
+    <div class="field" role="presentation" onkeydown={(e) => { paste.onkeydown(e); onFieldKeydown(e); }} onpaste={(e) => { if (!attachPasted(e)) paste.onpaste(e); }}>
       {#if slashOpen}
         <div class="slash">
           <SuggestionList items={slashItems} active={slashActive} id="asst-slash" ariaLabel="Skills" onpick={pickSlash} />
@@ -325,6 +408,13 @@
           </IconButton>
         {/snippet}
       </Dropdown>
+
+      <IconButton
+        tooltip={files.full ? `At most ${MAX_ATTACHMENTS} files` : 'Attach files — pictures or text (or paste a picture)'}
+        size={24} disabled={files.full} onclick={() => (pickerOpen = true)}
+      >
+        <Paperclip size={14} />
+      </IconButton>
 
       <VoiceMicButton onText={insertDictation} onSetup={() => bennuUiStore.openSettings('voice')} />
 
@@ -374,9 +464,22 @@
   </div>
 </div>
 
+{#if pickerOpen}
+  <FileExplorerModal
+    mode="file"
+    multiple
+    title="Attach to Imber"
+    initialPath={projectStore.project?.root}
+    onConfirm={(path) => attachPicked([path])}
+    onConfirmMulti={attachPicked}
+    onCancel={() => (pickerOpen = false)}
+  />
+{/if}
+
 <style>
   .composer { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 8px; }
 
+  .frame.dropping { border-color: var(--accent-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 30%, transparent); }
   .frame {
     display: flex; flex-direction: column; gap: 8px;
     padding: 9px 10px 8px;

@@ -39,7 +39,7 @@ export interface EnvVar {
  * Kept deliberately small. A category belongs here when Bennu can actually run that thing;
  * inventing empty groups to look like IntelliJ would be a menu of dead ends.
  */
-export type RunConfigKind = 'application' | 'springboot' | 'junit' | 'cargo' | 'script';
+export type RunConfigKind = 'application' | 'springboot' | 'junit' | 'cargo' | 'script' | 'attach';
 
 /** How much a `junit` configuration runs. */
 export type TestScopeKind = 'all' | 'module' | 'class';
@@ -74,14 +74,29 @@ export const RUN_KINDS: {
   // what the project *is* would hide it from exactly the mixed repositories that have the most
   // of them.
   { id: 'script', label: 'Script', newName: 'Script' },
+  // A JVM is the thing attached to, so it is offered where a JVM can be debugged. It launches
+  // nothing: no Run, only Attach.
+  { id: 'attach', label: 'Attach to JVM', newName: 'Remote JVM', capability: 'java' },
 ];
+
+/** The port a new Attach configuration starts with — the one `-agentlib:jdwp` examples use. */
+export const DEFAULT_ATTACH_PORT = 5005;
 
 /** Whether `s` names a kind this build can run. Anything else came from a newer Bennu: it is
  *  listed but not launchable, because the file is shared and dropping what we don't
  *  understand would silently delete someone's configuration. */
 export function isRunKind(s: string): s is RunConfigKind {
   return s === 'application' || s === 'springboot' || s === 'junit' || s === 'cargo'
-    || s === 'script';
+    || s === 'script' || s === 'attach';
+}
+
+/** The port an `attach` configuration names, or `null` when it is not 1–65535. Empty reads as the
+ *  default: a file written by hand without the key still attaches somewhere sensible. */
+export function attachPortOf(cfg: Pick<RunConfig, 'attachPort'>): number | null {
+  const raw = cfg.attachPort.trim();
+  if (!raw) return DEFAULT_ATTACH_PORT;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null;
 }
 
 /** Whether a kind launches a JVM main class (and so wears the class / args / environment
@@ -195,6 +210,11 @@ export interface RunConfig {
   /** A `.env` file read **when the configuration is launched** (not imported): its variables sit
    *  under {@link env}, whose rows win on a clash. */
   envFile: string;
+
+  // ── `attach` only ─────────────────────────────────────────────────────────
+  /** The JDWP port of the JVM to attach to, on this machine's loopback. Kept as the string the
+   *  file holds; {@link attachPortOf} is the checked reading of it. */
+  attachPort: string;
 }
 
 /** The per-project run-config bundle — the ordered list plus which one is active. */
@@ -242,6 +262,7 @@ function toDto(c: RunConfig): RunConfigDto {
     script_file: c.scriptFile,
     script_shell: c.scriptShell,
     env_file: c.envFile,
+    attach_port: c.attachPort,
   };
 }
 
@@ -284,6 +305,7 @@ function fromDto(d: RunConfigDto): RunConfig {
     scriptFile: d.script_file ?? '',
     scriptShell: d.script_shell ?? '',
     envFile: d.env_file ?? '',
+    attachPort: d.attach_port ?? '',
   };
 }
 
@@ -319,6 +341,7 @@ export function emptyConfig(name = 'Unnamed', kind: RunConfigKind = 'application
     scriptFile: '',
     scriptShell: '',
     envFile: '',
+    attachPort: kind === 'attach' ? String(DEFAULT_ATTACH_PORT) : '',
   };
 }
 

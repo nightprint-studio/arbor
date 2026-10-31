@@ -13,7 +13,7 @@
    * under them, quieter. The content is capped and centred rather than
    * stretched: on a 1920px monitor the leftover is margin, not more columns.
    */
-  import { FolderOpen, Download } from 'lucide-svelte';
+  import { FolderOpen, Download, ArrowRight } from 'lucide-svelte';
   import TitleBarShell from '$lib/components/shared/ui/TitleBar.svelte';
   import WindowControls from '$lib/components/shared/WindowControls.svelte';
   import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
@@ -60,6 +60,11 @@
       r => r.name.toLowerCase().includes(q) || r.path.toLowerCase().includes(q),
     );
   });
+
+  /** The project you were last in, offered as one big way back in. Only when nothing is being
+   *  searched: a filter is a question about the whole list, not about the latest entry. */
+  const resume = $derived(query.trim() ? null : launcherState.recents[0] ?? null);
+  const listedRecents = $derived(resume ? shownRecents.filter(r => r !== resume) : shownRecents);
 
   function launch(t: DecoratedTool) {
     launcherState.launch(t.id)
@@ -130,25 +135,44 @@
     <div class="panel">
       <div class="page">
 
-        <header class="hero">
-          <div class="hero-mark"><ArborLogo size={42} /></div>
+        <header class="hero rise" style="--i:0">
+          <div class="hero-mark"><ArborLogo size={52} /></div>
           <div class="hero-ident">
             <h1>Arbor</h1>
             <p>Git · Java · Music · Files · Capture</p>
           </div>
           <div class="hero-actions">
-            <Button variant="primary" size="sm" onclick={openProject}>
-              {#snippet iconStart()}<FolderOpen size={14} />{/snippet}
-              Open project…
-            </Button>
-            <Button variant="outline" size="sm" onclick={cloneRepo}>
-              {#snippet iconStart()}<Download size={14} />{/snippet}
-              Clone…
-            </Button>
+            <button type="button" class="qa qa-primary" onclick={openProject}>
+              <span class="qa-icon"><FolderOpen size={16} /></span>
+              <span class="qa-text">
+                <span class="qa-title">Open project</span>
+                <span class="qa-sub">A repository or a folder</span>
+              </span>
+              <Kbd action="open_repo" size="sm" />
+            </button>
+            <button type="button" class="qa" onclick={cloneRepo}>
+              <span class="qa-icon"><Download size={16} /></span>
+              <span class="qa-text">
+                <span class="qa-title">Clone repository</span>
+                <span class="qa-sub">From a URL or a provider</span>
+              </span>
+            </button>
           </div>
         </header>
 
-        <section class="sec">
+        {#if resume}
+          <button type="button" class="resume rise" style="--i:1" onclick={() => openRecent(resume)} use:tooltip={resume.path}>
+            <ProductIcon id={resume.product} size={40} />
+            <span class="resume-body">
+              <span class="resume-kicker">Continue where you left off · {whenLabel(resume.opened_at)}</span>
+              <span class="resume-name">{resume.name}</span>
+              <span class="resume-path">{resume.path}</span>
+            </span>
+            <span class="resume-go" aria-hidden="true"><ArrowRight size={18} /></span>
+          </button>
+        {/if}
+
+        <section class="sec rise" style="--i:2">
           <div class="sec-head">
             <h2 class="sec-title">Products</h2>
             <div class="chips" role="group" aria-label="Filter products">
@@ -173,7 +197,7 @@
           </div>
         </section>
 
-        <section class="sec">
+        <section class="sec rise" style="--i:3">
           <div class="sec-head">
             <h2 class="sec-title">Recent projects</h2>
             <div class="sec-search">
@@ -182,13 +206,10 @@
           </div>
 
           <div class="rgrid">
-            {#each shownRecents as r (r.product + r.path)}
+            {#each listedRecents as r (r.product + r.path)}
               <button type="button" class="rcard" onclick={() => openRecent(r)} use:tooltip={r.path}>
-                <!-- The PRODUCT's icon, not a monogram of the project name. A row already
-                     spells the project out in full on the next line, so a letter derived
-                     from it added nothing; what the row could not say was which application
-                     opens it — that was left to a tint, which is not something you can read.
-                     Same choice Toolbox makes for its recents, for the same reason. -->
+                <!-- The PRODUCT's icon, not a monogram of the project name: the row spells the
+                     project out in full, what it could not say was which application opens it. -->
                 <ProductIcon id={r.product} size={26} />
                 <span class="r-body">
                   <span class="r-name">{r.name}</span>
@@ -197,13 +218,15 @@
                 <span class="r-when">{whenLabel(r.opened_at)}</span>
               </button>
             {:else}
-              <div class="r-empty">
-                <EmptyState
-                  message={query ? 'No match' : 'Nothing opened yet'}
-                  description={query
-                    ? 'No recent project matches this filter.'
-                    : 'Projects you open — repositories, Java projects, pieces — show up here, whichever product opened them.'} />
-              </div>
+              {#if !resume}
+                <div class="r-empty">
+                  <EmptyState
+                    message={query ? 'No match' : 'Nothing opened yet'}
+                    description={query
+                      ? 'No recent project matches this filter.'
+                      : 'Projects you open — repositories, Java projects, pieces — show up here, whichever product opened them.'} />
+                </div>
+              {/if}
             {/each}
           </div>
         </section>
@@ -259,22 +282,113 @@
     flex-direction: column;
   }
 
-  /* ── hero ── */
-  .hero { display: flex; align-items: center; gap: 15px; }
+  /* ── entrance: each block rises in turn. The duration is the app's animation token, so
+        switching animations off (it becomes 0ms) leaves the page simply there. ── */
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .rise {
+    animation: rise calc(var(--anim-dur-slow) * 2) cubic-bezier(.2, .7, .2, 1) both;
+    animation-delay: calc(var(--i, 0) * var(--anim-dur-fast));
+  }
+  @media (prefers-reduced-motion: reduce) { .rise { animation: none; } }
+
+  /* ── hero: the accent bleeds in from the corner, never fills the panel ── */
+  .hero {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 22px 24px;
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: var(--radius-lg);
+    background:
+      radial-gradient(70% 160% at 0% 0%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 65%),
+      var(--bg-elevated);
+  }
   .hero-mark { display: flex; flex: none; }
   .hero-ident { min-width: 0; }
   .hero h1 {
     margin: 0;
-    font-size: 23px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-size: 28px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
     color: var(--text-primary);
   }
-  .hero p { margin: 3px 0 0; font-size: var(--font-size-md); color: var(--text-muted); }
-  .hero-actions { margin-left: auto; display: flex; gap: 7px; flex: none; }
+  .hero p { margin: 4px 0 0; font-size: var(--font-size-md); color: var(--text-muted); }
+  .hero-actions { margin-left: auto; display: flex; gap: 10px; flex: none; }
+
+  .qa {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 10px 14px 10px 11px;
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: var(--radius-md);
+    background: var(--bg-base);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--anim-dur-base), background var(--anim-dur-base), transform var(--anim-dur-base);
+  }
+  .qa:hover { background: var(--bg-hover); border-color: var(--border); transform: translateY(-1px); }
+  .qa:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .qa-icon {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+  }
+  .qa-primary { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .qa-primary .qa-icon { background: var(--accent); color: #fff; }
+  .qa-text { display: flex; flex-direction: column; gap: 1px; }
+  .qa-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
+  .qa-sub { font-size: var(--font-size-xs); color: var(--text-muted); }
+
+  /* ── the way back into the last project ── */
+  .resume {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    margin-top: 14px;
+    padding: 14px 18px;
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: var(--radius-lg);
+    background: var(--bg-elevated);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--anim-dur-base), background var(--anim-dur-base);
+  }
+  .resume:hover { background: var(--bg-hover); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+  .resume:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .resume-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .resume-kicker {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .resume-name { font-size: 17px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .resume-path {
+    font-family: var(--font-code);
+    font-size: var(--font-size-xs);
+    color: var(--text-disabled);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl;
+    text-align: left;
+  }
+  .resume-go { color: var(--text-muted); transition: transform var(--anim-dur-base), color var(--anim-dur-base); }
+  .resume:hover .resume-go { color: var(--accent); transform: translateX(3px); }
 
   /* ── sections ── */
-  .sec { margin-top: 26px; }
+  .sec { margin-top: 30px; }
   .sec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .sec-title {
     margin: 0;
@@ -295,6 +409,8 @@
   .r-empty { grid-column: 1 / -1; }
 
   @media (max-width: 880px) {
+    .hero { flex-wrap: wrap; }
+    .hero-actions { margin-left: 0; width: 100%; }
     .pgrid { grid-template-columns: repeat(2, 1fr); }
     .rgrid { grid-template-columns: 1fr; }
   }

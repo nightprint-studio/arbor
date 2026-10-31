@@ -33,7 +33,15 @@ pub const SKIP_DIRS: [&str; 7] =
 const OUTPUT_DIRS: [&str; 3] = ["build", "dist", "out"];
 
 /// Files whose presence makes a sibling [`OUTPUT_DIRS`] entry build output.
-const MANIFESTS: [&str; 5] = ["pom.xml", "Cargo.toml", "build.gradle", "build.gradle.kts", "package.json"];
+const MANIFESTS: [&str; 7] = [
+    "pom.xml",
+    "Cargo.toml",
+    "build.gradle",
+    "build.gradle.kts",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "package.json",
+];
 
 /// The deepest a tree is ever walked, whatever the caller asks for.
 const MAX_DEPTH: usize = 64;

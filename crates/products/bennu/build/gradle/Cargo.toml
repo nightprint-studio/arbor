@@ -1,0 +1,19 @@
+[package]
+name         = "bennu-gradle"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "What a Gradle build IS, read off its files: the settings (subprojects), each build.gradle / build.gradle.kts (plugins, dependencies, Java level, tasks), the version catalog, and the jars the Gradle cache already holds. Reads files; runs nothing."
+
+[dependencies]
+# Groovy and Kotlin DSL are programs, not data, and no part of this crate evaluates them: what is
+# read is the declarative subset every real build file is made of (`include`, `plugins {}`,
+# `dependencies {}`, `sourceCompatibility = …`). Hand-scanned for the same reason `bennu-cargo`
+# hand-reads TOML — the buffer being looked at is half-typed most of the time, and every answer
+# needs its byte offset so the panel row is a place the editor can jump to.
+serde = { workspace = true }
+# `user_home()` — the Gradle cache is `$GRADLE_USER_HOME` or `~/.gradle`, and a windowed app's
+# environment does not reliably carry either.
+arbor-core = { path = "../../../../foundation/core" }

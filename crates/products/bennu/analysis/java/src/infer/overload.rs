@@ -426,14 +426,19 @@ impl Ctx<'_> {
     /// argument is typed (or `null`). A lambda, a method reference or an untyped argument at a
     /// position where the two differ leaves them incomparable.
     fn at_least_as_specific(&self, a: &Member, b: &Member, args: &[Arg], phase: Phase) -> bool {
-        (0..args.len()).all(|i| {
+        // JLS §15.12.2.5: a variable-arity pair is compared over the first k parameter types, k the
+        // larger of the two parameter counts — so the trailing `X...` is compared even when the call
+        // passes nothing for it (`registerBean(type)` against `(Class, Object...)` and
+        // `(Class, Customizer...)`), where there is no argument to look at and the types decide.
+        let compared = if phase == Phase::Varargs { args.len().max(a.params.len()).max(b.params.len()) } else { args.len() };
+        (0..compared).all(|i| {
             let (Some(pa), Some(pb)) = (param_for(a, i, phase), param_for(b, i, phase)) else {
                 return false;
             };
             if pa == pb {
                 return true;
             }
-            matches!(args[i], Arg::Value(Some(_)) | Arg::Null) && self.type_more_specific(&pa, &pb)
+            args.get(i).map_or(true, |arg| matches!(arg, Arg::Value(Some(_)) | Arg::Null)) && self.type_more_specific(&pa, &pb)
         })
     }
 

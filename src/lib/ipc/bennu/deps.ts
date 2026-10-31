@@ -253,7 +253,7 @@ export interface ModuleGraph {
  *  and a window whose every label said "module" on a Rust workspace would read as though it had been
  *  written for something else. */
 export function moduleWord(ecosystem: string, plural = false): string {
-  const word = ecosystem === 'cargo' ? 'crate' : 'module';
+  const word = ecosystem === 'cargo' ? 'crate' : ecosystem === 'gradle' ? 'project' : 'module';
   return plural ? `${word}s` : word;
 }
 

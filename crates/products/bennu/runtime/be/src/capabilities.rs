@@ -39,10 +39,14 @@ fn bennu_capabilities(_ctx: &BennuState, args: CapabilitiesArgs) -> Result<Capab
 /// in through `spring-boot-starter-validation`, a company parent, or a library that validates its
 /// own beans. Before the tree was read, Bean Validation was off on projects full of `@NotNull`.
 pub(crate) fn project_capabilities(root: &Path) -> CapabilitySet {
-    let xml = std::fs::read_to_string(root.join("pom.xml")).unwrap_or_default();
     let coordinates = resolved_dependencies(root).into_iter().map(|(group, artifact, _)| format!("{group}:{artifact}"));
-    let build = BuildEvidence::read(root, &parse_pom(&xml)).with_resolved(coordinates);
-    detect_capabilities_with(&build)
+    let declared = if crate::build::is_gradle_root(root) {
+        BuildEvidence::from_gradle(&bennu_gradle::prelude::read(root))
+    } else {
+        let xml = std::fs::read_to_string(root.join("pom.xml")).unwrap_or_default();
+        BuildEvidence::read(root, &parse_pom(&xml))
+    };
+    detect_capabilities_with(&declared.with_resolved(coordinates))
 }
 
 /// `groupId:artifactId` of every jar the build resolved to.
@@ -64,7 +68,11 @@ pub(crate) fn resolved_dependencies(root: &Path) -> Vec<(String, String, String)
     }
     let repo = LocalRepo::discover();
     jars.iter()
-        .filter_map(|jar| repo.coord_at(jar))
-        .map(|coord| (coord.group_id, coord.artifact_id, coord.version))
+        .filter_map(|jar| {
+            repo.coord_at(jar)
+                .map(|coord| (coord.group_id, coord.artifact_id, coord.version))
+                // A Gradle build's jars are in its own cache.
+                .or_else(|| bennu_gradle::prelude::cache_coord_of(jar))
+        })
         .collect()
 }

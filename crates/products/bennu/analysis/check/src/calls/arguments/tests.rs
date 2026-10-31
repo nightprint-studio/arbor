@@ -400,6 +400,11 @@ fn wider_resolver() -> MapResolver {
     svc.methods.push(method("pick", &["com/acme/Widget"]));
     svc.methods.push(method("gen2", &["T"]));
     svc.methods.push(method("gen2", &["java/lang/String"]));
+    // `reg(String, Object...)` beside `reg(String, Widget...)`: both variable-arity.
+    for element in ["java/lang/Object", "com/acme/Widget"] {
+        let array = TypeRef { dims: 1, ..TypeRef::simple(element) };
+        svc.methods.push(Member::method("reg", TypeRef::simple("void"), vec![TypeRef::simple("java/lang/String"), array]));
+    }
     r
 }
 
@@ -420,6 +425,14 @@ fn a_spelled_object_is_judged_and_an_inferred_one_is_not() {
 #[test]
 fn null_between_two_unrelated_reference_overloads_is_ambiguous() {
     one(&wider_diags("s.pick(null);"), &["Ambiguous call to `pick`", "`pick(String)`", "`pick(Widget)`"]);
+}
+
+/// Two variable-arity overloads are compared on their trailing element types even when the call passes
+/// nothing for them (JLS §15.12.2.5): `reg("a")` binds `reg(String, Widget...)`, the more specific.
+#[test]
+fn varargs_overloads_are_ordered_by_their_element_types_with_no_variable_argument() {
+    assert!(wider_diags("s.reg(\"a\");").is_empty(), "{:?}", wider_diags("s.reg(\"a\");"));
+    assert!(wider_diags("s.reg(\"a\", s.widget());").is_empty());
 }
 
 #[test]
@@ -584,6 +597,17 @@ fn a_bare_call_a_static_import_supplies_is_judged() {
     one(&file_diags(on_demand), &["convert"]);
     let fine = "import static com.acme.Util.*;\nclass C { void m() { convert(\"a\", 1, null); } }";
     assert!(file_diags(fine).is_empty(), "{:?}", file_diags(fine));
+}
+
+/// A method a NESTED type declares is not in scope of a call outside it, so it neither shadows the
+/// static import that supplies the name nor is the overload set the call is counted against.
+#[test]
+fn a_method_of_a_sibling_nested_type_does_not_hide_a_static_import() {
+    let nested = "record R(int x) { String convert() { return \"\"; } }";
+    let fine = format!("import static com.acme.Util.convert;\nclass C {{\n  void m() {{ convert(\"a\", 1, null); }}\n  {nested}\n}}");
+    assert!(file_diags(&fine).is_empty(), "{:?}", file_diags(&fine));
+    let wrong = format!("import static com.acme.Util.convert;\nclass C {{\n  void m() {{ convert(\"a\", \"b\", null); }}\n  {nested}\n}}");
+    one(&file_diags(&wrong), &["convert"]);
 }
 
 /// A parameter typed by the class's type variable is read through the receiver's argument.

@@ -70,6 +70,19 @@ export function debugSelectThread(sessionId: string, thread: string): Promise<De
   return bennu('bennu_debug_select_thread', { args: { session_id: sessionId, thread } });
 }
 
+/**
+ * Attach to a JVM that is already running with
+ * `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:PORT`, on this machine.
+ *
+ * Resolves with the session id once the connection is made and the JVM answered as a Java debug
+ * port; rejects with the backend's wording when nothing listens there or the port is not a debug
+ * port. From then on the session is reported by the same `debug-status` events as a launched one.
+ * Wire: `bennu_debug_attach` — `AttachArgs { root, port }`.
+ */
+export function debugAttach(root: string, port: number): Promise<{ session_id: string; port: number }> {
+  return bennu('bennu_debug_attach', { args: { root, port } });
+}
+
 /** Detach: the program keeps running, unsuspended, with no debugger attached. Deliberately
  *  not a kill — stopping the program is the Run console's Stop. Wire: `bennu_debug_detach`. */
 export function debugDetach(sessionId: string): Promise<void> {

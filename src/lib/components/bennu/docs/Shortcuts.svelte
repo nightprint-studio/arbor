@@ -23,7 +23,7 @@
     <tr><td><kbd>Alt</kbd> + <kbd>1</kbd></td><td><strong>Project</strong> — files</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>2</kbd></td><td><strong>Structure</strong> — symbols</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>N</kbd></td><td><strong>Dependencies</strong> — by module, or by crate on a Cargo project</td></tr>
-    <tr><td><kbd>Alt</kbd> + <kbd>8</kbd></td><td>The <strong>build tool</strong> window, right rail — Maven's goals on Java, Cargo's crates and commands on Rust; the open project's own kind when the workspace has both</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>8</kbd></td><td>The <strong>build tool</strong> window, right rail — Maven's goals or Gradle's tasks on Java, Cargo's crates and commands on Rust; the open project's own kind when the workspace has both</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>5</kbd></td><td><strong>Tests</strong> — the catalogue, right rail</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>9</kbd></td><td><strong>Trees</strong> — the parse and the declaration model, right rail; Java and JSP, since both views read Bennu's own engines</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd></td><td><strong>i18n</strong> — the fulcrum translation under the caret, rendered. Only on a translation bundle, so there is no rail button</td></tr>
@@ -35,7 +35,7 @@
     <tr><td><kbd>Alt</kbd> + <kbd>3</kbd></td><td><strong>Forms</strong> — JSP form analysis</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>F12</kbd></td><td><strong>Terminal</strong></td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd></td><td>The <strong>module graph</strong> window; inside it <kbd>Alt</kbd> + <kbd>S</kbd> isolates the selected module's world. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd> is <em>Switch window</em>, bound everywhere</td></tr>
-    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd></td><td><strong>Download dependencies</strong> the poms need and the local repository lacks, then rebuild the index — a background job, Maven only</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd></td><td><strong>Download dependencies</strong> the build needs and the local repository lacks (the poms' for Maven, every classpath for Gradle), then rebuild the index — a background job, Java projects only</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd></td><td><strong>Structural search &amp; replace</strong></td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd></td><td><strong>New Project</strong> — the wizard that creates a Maven, Gradle, Spring, Quarkus, web, Cargo or Node project. Inside it <kbd>Ctrl</kbd> + <kbd>Enter</kbd> creates and <kbd>Ctrl</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> switch the project type</td></tr>
   </tbody>
@@ -114,7 +114,7 @@
 <table>
   <thead><tr><th>Shortcut</th><th>Does</th></tr></thead>
   <tbody>
-    <tr><td><kbd>Ctrl</kbd> + <kbd>F9</kbd></td><td><strong>Build</strong> — the type chosen on the Build split button: a Maven compile, or a validation without compiling; <code>cargo check</code> on Cargo</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>F9</kbd></td><td><strong>Build</strong> — the type chosen on the Build split button: a Maven compile (<code>gradle classes</code> on Gradle), or a validation without compiling; <code>cargo check</code> on Cargo</td></tr>
     <tr><td><kbd>Shift</kbd> + <kbd>F10</kbd></td><td><strong>Run</strong> the active configuration — a JVM one builds first; a Cargo one is its own build</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd></td><td><strong>Run what is in front of you</strong> — the test at the caret, or a hot-swap deploy of the current JSP</td></tr>
     <tr><td><kbd>Shift</kbd> + <kbd>F9</kbd></td><td><strong>Debug</strong> the active configuration</td></tr>

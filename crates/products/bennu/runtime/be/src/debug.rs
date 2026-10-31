@@ -1637,6 +1637,52 @@ fn bennu_debug_mute(_ctx: &BennuState, args: MuteArgs) -> Result<(), String> {
     crate::debug_backend::get(&args.session_id)?.set_muted(args.muted)
 }
 
+/// Args for [`bennu_debug_attach`].
+#[derive(Deserialize)]
+pub struct AttachArgs {
+    /// Absolute path to the project root — whose breakpoints are installed once attached.
+    pub root: String,
+    /// The port the JVM's JDWP agent listens on, on this machine. A wide integer rather than a
+    /// `u16`: `70000` should come back as "not a port" in words, not as a deserialization error.
+    pub port: i64,
+}
+
+/// What [`bennu_debug_attach`] answers: the session to follow.
+#[derive(serde::Serialize)]
+pub struct AttachHandle {
+    /// The session id — what every `bennu_debug_*` verb and the `debug-status` events are keyed by.
+    pub session_id: String,
+    pub port: u16,
+}
+
+/// A port as the attach verbs take it: 1–65535, said in words when it is not.
+pub(crate) fn attach_port(raw: i64) -> Result<u16, String> {
+    u16::try_from(raw)
+        .ok()
+        .filter(|p| *p != 0)
+        .ok_or_else(|| format!("{raw} is not a port: use a number from 1 to 65535"))
+}
+
+/// Attach the debugger to a JVM that is already running with a JDWP agent listening on loopback
+/// `port` — the "Attach" run configuration. Nothing is launched and nothing is owned: detaching (or
+/// closing the window) leaves the program running.
+///
+/// The connection is made here, on the handler's own thread, so that "nothing is listening" is this
+/// call's error and not a status event nobody asked for; the messages are [`attach`]'s, verbatim.
+/// Progress after that — `starting`, `running`, `paused`, `terminated` — arrives as the same
+/// `debug-status` events a launched program produces.
+#[arbor_rpc::handler]
+fn bennu_debug_attach(ctx: &BennuState, args: AttachArgs) -> Result<AttachHandle, String> {
+    let port = attach_port(args.port)?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let session_id = format!("attach-{port}-{nanos}");
+    attach(session_id.clone(), args.root, port, ctx.event_sink())?;
+    Ok(AttachHandle { session_id, port })
+}
+
 /// Detach: the program keeps running, unsuspended, with no debugger attached.
 ///
 /// Deliberately not a kill. Stopping the *program* is the Run console's Stop, which kills the
@@ -1712,6 +1758,55 @@ fn session(id: &str) -> Result<Arc<Session>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An event sink that swallows everything: the attach tests care about the error, not the events.
+    struct NullSink;
+    impl EventSink for NullSink {
+        fn emit(&self, _topic: &str, _payload: serde_json::Value) {}
+    }
+
+    /// A port that answers TCP with something other than JDWP — a web server, a database, whatever
+    /// else sits on 5005 — must come back as "not a Java debug port", not as a hang or a panic.
+    #[test]
+    fn attach_to_a_port_that_does_not_speak_jdwp_says_so() {
+        use std::io::Write;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Fourteen bytes, the length of the real handshake, so the client reads a full answer
+        // and rejects its content rather than waiting for the rest.
+        let server = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let _ = conn.write_all(b"HTTP/1.1 400 B");
+        });
+        let err = attach("t".into(), String::new(), port, Arc::new(NullSink)).unwrap_err();
+        server.join().unwrap();
+        assert!(
+            err.contains(&format!("127.0.0.1:{port} did not answer as a Java debug port")),
+            "{err}"
+        );
+    }
+
+    /// A port nothing listens on is the common mistake (the JVM was started without the agent, or on
+    /// another port): the message names the port and says what was missing.
+    #[test]
+    fn attach_to_a_closed_port_says_nothing_is_listening() {
+        // Bind then drop: the OS just handed us a port that is free right now.
+        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let err = attach("t".into(), String::new(), port, Arc::new(NullSink)).unwrap_err();
+        assert!(err.starts_with(&format!("nothing is listening for a debugger on 127.0.0.1:{port}")), "{err}");
+    }
+
+    /// The edges of the port field: 1 and 65535 are ports, everything else is refused in words.
+    #[test]
+    fn the_attach_port_is_one_to_65535() {
+        assert_eq!(attach_port(1), Ok(1));
+        assert_eq!(attach_port(5005), Ok(5005));
+        assert_eq!(attach_port(65535), Ok(65535));
+        for bad in [0, -1, 65536, 70000] {
+            let e = attach_port(bad).unwrap_err();
+            assert!(e.contains("1 to 65535"), "{e}");
+        }
+    }
 
     /// The agent argument is the whole of how a launch becomes debuggable, and every piece of
     /// it matters: `server=n` because we listened first, the loopback address because a debug

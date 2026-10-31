@@ -77,6 +77,24 @@ impl BuildEvidence {
         build
     }
 
+    /// A Gradle build: the directory of every project (the root first, which is what [`detect_with`]
+    /// reads the config files of first) and the `groupId:artifactId` every script declares, the
+    /// ones an `allprojects {}` / `subprojects {}` block hands down included.
+    pub fn from_gradle(project: &bennu_gradle::prelude::GradleProject) -> Self {
+        let modules = project.modules.iter().map(|m| m.dir.clone()).collect();
+        let mut coordinates = Vec::new();
+        for module in &project.modules {
+            let own = module.info.dependencies.iter();
+            let inherited = project.inherited_dependencies(module).into_iter().map(|(d, _)| d);
+            coordinates.extend(
+                own.chain(inherited)
+                    .filter(|d| d.project.is_empty() && !d.name.is_empty())
+                    .map(|d| format!("{}:{}", d.group, d.name).to_ascii_lowercase()),
+            );
+        }
+        Self { modules, coordinates }
+    }
+
     /// Add what the build **resolves** to — the transitive tree, as `groupId:artifactId`. Empty
     /// until Maven has resolved it once, which is why it is added rather than required.
     pub fn with_resolved(mut self, coordinates: impl IntoIterator<Item = String>) -> Self {

@@ -130,7 +130,9 @@ pub fn erase_type_arguments(text: &str) -> std::borrow::Cow<'_, str> {
 /// a source `String[]` and a bytecode `java/lang/String[]` were the same type under two names that
 /// never compared equal.
 pub fn resolve_written_type(text: &str, scope: &dyn NameScope) -> TypeName {
-    let (element, dims) = split_array_dims(text);
+    // A TYPE_USE annotation (`@Nullable Unit`, `String @Nullable[]`) names no other type.
+    let plain = strip_type_annotations(text);
+    let (element, dims) = split_array_dims(&plain);
     if dims == 0 {
         return resolve_element(element, scope);
     }
@@ -142,6 +144,49 @@ pub fn resolve_written_type(text: &str, scope: &dyn NameScope) -> TypeName {
         // an unknown, or a varargs/array parameter stops being readable at all.
         TypeName::Unknown(t) => TypeName::Resolved(format!("{t}{suffix}")),
     }
+}
+
+/// `text` with every annotation written in it removed — `@Nullable Unit` → `Unit`,
+/// `String @Nullable []` → `String[]`, `java.util.@Nullable List` → `java.util.List`, an annotation's
+/// own argument list (`@A(x = "(")`) included.
+pub fn strip_type_annotations(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains('@') {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '@' {
+            out.push(c);
+            continue;
+        }
+        while chars.peek().is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '$' | '.')) {
+            chars.next();
+        }
+        let mut ahead = chars.clone();
+        while ahead.peek().is_some_and(|c| c.is_whitespace()) {
+            ahead.next();
+        }
+        if ahead.peek() == Some(&'(') {
+            chars = ahead;
+            let (mut depth, mut quoted) = (0usize, false);
+            for c in chars.by_ref() {
+                match c {
+                    '"' => quoted = !quoted,
+                    '(' if !quoted => depth += 1,
+                    ')' if !quoted => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let collapsed = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    std::borrow::Cow::Owned(collapsed.replace(" [", "[").replace(". ", ".").replace("< ", "<").replace(" >", ">"))
 }
 
 fn resolve_element(text: &str, scope: &dyn NameScope) -> TypeName {
@@ -727,6 +772,20 @@ pub fn jdk_on_demand_binding(simple: &str, imports: &[crate::symbols::Import]) -
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn type_annotations_are_stripped_from_a_written_type() {
+        for (written, plain) in [
+            ("@Nullable Unit", "Unit"),
+            ("String @Nullable[]", "String[]"),
+            ("java.util.@Nullable List<@Nullable String>", "java.util.List<String>"),
+            ("@Size(max = 3, message = \"(x)\") String", "String"),
+            ("Map<String, @A.B Object>", "Map<String, Object>"),
+            ("Plain", "Plain"),
+        ] {
+            assert_eq!(strip_type_annotations(written), plain, "{written}");
+        }
+    }
+
     use super::*;
 
     struct Scope;

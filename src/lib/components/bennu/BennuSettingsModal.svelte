@@ -30,7 +30,7 @@
   import {
     Settings, Coffee, TextCursorInput, ListTree, Bug, FoldVertical, Braces, RotateCcw, Wand2,
     ServerCog, Monitor, Sparkles, Command, Terminal, Beaker, FileCode2, Save, Boxes, Workflow,
-    FileStack, CaseSensitive, SpellCheck, Mic, Brain, Ghost,
+    FileStack, CaseSensitive, SpellCheck, Mic, Brain, Ghost, MessageSquare, ShieldCheck, Wrench, Wallet,
   } from 'lucide-svelte';
   import VoiceSettings from '$lib/components/shared/internal/VoiceSettings.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -168,7 +168,13 @@
     // The assistant is its own group: its key and its limits are not an editor setting, and a page of
     // its own is where the question "what can it touch?" gets a complete answer.
     { label: 'Imber', items: [
-      { id: 'assistant', label: 'Imber', icon: Sparkles },
+      // A page of its own (the key) that splits into what each part of using it is about
+      { id: 'assistant', label: 'Imber', icon: Sparkles, children: [
+        { id: 'assistant-conversations', label: 'Conversations', icon: MessageSquare },
+        { id: 'assistant-access', label: 'Access', icon: ShieldCheck },
+        { id: 'assistant-tools', label: 'Tools and skills', icon: Wrench },
+        { id: 'assistant-cost', label: 'Models and cost', icon: Wallet },
+      ] },
       { id: 'voice', label: 'Voice', icon: Mic },
     ] },
     { label: 'Languages & Frameworks', items: [
@@ -257,7 +263,15 @@
       {:else if active === 'completion-learning'}
         <BennuCompletionLearningSettings />
       {:else if active === 'assistant'}
-        <BennuAssistantSettings />
+        <BennuAssistantSettings page="connection" />
+      {:else if active === 'assistant-conversations'}
+        <BennuAssistantSettings page="conversations" />
+      {:else if active === 'assistant-access'}
+        <BennuAssistantSettings page="access" />
+      {:else if active === 'assistant-tools'}
+        <BennuAssistantSettings page="tools" />
+      {:else if active === 'assistant-cost'}
+        <BennuAssistantSettings page="cost" />
       {:else if active === 'voice'}
         <VoiceSettings />
       {:else if active === 'folding'}

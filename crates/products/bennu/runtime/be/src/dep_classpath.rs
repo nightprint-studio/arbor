@@ -108,16 +108,26 @@ pub enum DepOutcome {
 /// coordinate — which is the whole difference between "0 jars resolved" and
 /// `com.acme:legacy-core:2.4.0 is not in your local repository`.
 pub fn resolve_dep_classpath(root: &Path, jdk_version: &str) -> DepOutcome {
-    if !root.join("pom.xml").is_file() {
+    // Maven first when both are there — the precedence `bennu-project` applies when it opens the root.
+    let maven = root.join("pom.xml").is_file();
+    let gradle = !maven && bennu_gradle::prelude::is_gradle_root(root);
+    if !maven && !gradle {
         return DepOutcome::NotApplicable;
     }
     let Some(pom_mtime) = poms_mtime(root) else {
-        return DepOutcome::Failed("the project's pom.xml could not be read".to_string());
+        return DepOutcome::Failed("the project's build files could not be read".to_string());
     };
 
+    let resolve = || {
+        if gradle {
+            crate::gradle_classpath::resolve_fresh(root)
+        } else {
+            resolve_fresh(root, jdk_version)
+        }
+    };
     let (jars, partial) = match load_entry(root, pom_mtime) {
         Some(entry) => (entry.jars, entry.partial),
-        None => match resolve_fresh(root, jdk_version) {
+        None => match resolve() {
             Ok(fresh) => {
                 if fresh.cacheable {
                     save_entry(root, pom_mtime, &fresh);
@@ -463,7 +473,7 @@ pub(crate) fn find_mvn_launcher(root: &Path) -> String {
 }
 
 /// The first of `names` that exists as a file directly in `dir`.
-fn first_launcher(dir: &Path, names: &[&str]) -> Option<String> {
+pub(crate) fn first_launcher(dir: &Path, names: &[&str]) -> Option<String> {
     names.iter().map(|n| dir.join(n)).find(|p| p.is_file()).map(|p| p.display().to_string())
 }
 
@@ -534,13 +544,28 @@ pub(crate) fn poms_mtime(root: &Path) -> Option<u64> {
     newest
 }
 
+/// The files whose edit can change a project's dependencies: a pom, or — for a Gradle build — its
+/// scripts, the version catalog and `gradle.properties` (where `$springVersion` is often defined).
+const BUILD_FILES: [&str; 7] = [
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "libs.versions.toml",
+    "gradle.properties",
+];
+
 fn collect_pom_mtimes(dir: &Path, depth_left: usize, newest: &mut Option<u64>) {
-    if let Some(secs) = std::fs::metadata(dir.join("pom.xml"))
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-    {
+    for file in BUILD_FILES {
+        let Some(secs) = std::fs::metadata(dir.join(file))
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+        else {
+            continue;
+        };
         if newest.is_none_or(|cur| secs > cur) {
             *newest = Some(secs);
         }
@@ -556,7 +581,12 @@ fn collect_pom_mtimes(dir: &Path, depth_left: usize, newest: &mut Option<u64>) {
         }
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if matches!(name.as_ref(), "target" | ".git" | "node_modules" | ".idea" | "src") {
+        if matches!(name.as_ref(), "target" | ".git" | "node_modules" | ".idea" | "src" | ".gradle") {
+            continue;
+        }
+        // Gradle's output directory. A Maven module may legitimately be *called* `build`, so it is
+        // skipped only when it is not one.
+        if name == "build" && !entry.path().join("pom.xml").is_file() {
             continue;
         }
         collect_pom_mtimes(&entry.path(), depth_left - 1, newest);

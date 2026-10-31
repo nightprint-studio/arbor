@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::index_service::IndexService;
-use crate::project_locate::{enclosing_maven_root, nearest_existing_dir};
+use crate::project_locate::{enclosing_gradle_root, enclosing_maven_root, nearest_existing_dir};
 
 /// An open project's root directory is gone. Payload `{ root, nearest_existing }`. The backend has
 /// already dropped the project's index; the frontend offers to locate or remove it.
@@ -134,20 +134,29 @@ pub struct FileOwnerWire {
     pub owner: Option<OwnerWire>,
     /// The reactor root enclosing the file, offered only when there is no owner.
     pub suggested_root: Option<String>,
+    /// Set when the file is not the project's at all but a view of a dependency (source from a library,
+    /// a stub decompiled from bytecode): the artifact's name, or `"decompiled"`. Such a file has no
+    /// project to belong to, so "not indexed" would be a false alarm about it.
+    pub library: Option<String>,
 }
 
 /// Which indexed project owns `file`. A project still building IS an owner (`ready: false`): the
 /// "not indexed" state is reserved for a file no index will ever cover as things stand.
 #[arbor_rpc::handler]
 fn bennu_file_owner(_ctx: &BennuState, args: FileOwnerArgs) -> Result<FileOwnerWire, String> {
+    if let Some(library) = crate::index_service::library_view_of(&args.file) {
+        return Ok(FileOwnerWire { owner: None, suggested_root: None, library: Some(library) });
+    }
     let owner = IndexService::global()
         .file_owner(&args.file)
         .map(|(root, ready)| OwnerWire { root, ready });
     let suggested_root = match owner {
         Some(_) => None,
-        None => enclosing_maven_root(Path::new(&args.file)).map(|p| slash(&p)),
+        None => enclosing_maven_root(Path::new(&args.file))
+            .or_else(|| enclosing_gradle_root(Path::new(&args.file)))
+            .map(|p| slash(&p)),
     };
-    Ok(FileOwnerWire { owner, suggested_root })
+    Ok(FileOwnerWire { owner, suggested_root, library: None })
 }
 
 /// Args for [`bennu_root_status`].

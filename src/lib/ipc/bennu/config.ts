@@ -69,6 +69,8 @@ export interface BennuAssistantConfig {
   long_cache: boolean;
   /** Model for side jobs (compacting); empty picks the cheapest Haiku-class one. */
   side_model: string;
+  /** The user's standing context for every conversation; empty adds nothing. */
+  general_context?: string;
 }
 
 /** Mirrors the BE `BennuConfig` (snake_case, field-for-field). */

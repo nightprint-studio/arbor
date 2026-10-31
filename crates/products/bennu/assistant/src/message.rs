@@ -27,7 +27,8 @@ pub enum Block {
     /// What a tool answered, for the `ToolUse` with this id. An error is an answer too: the model is
     /// told what went wrong and decides what to do, rather than the loop guessing.
     ToolResult { tool_use_id: String, content: String, is_error: bool },
-    /// A picture a tool returned along with its result (a screenshot), for the `ToolResult` with this id.
+    /// A picture a tool returned along with its result (a screenshot), for the `ToolResult` with this id — or, with
+    /// an **empty** `tool_use_id`, one the user attached to their message.
     /// Only the file's *name* is persisted: the bytes live on disk, and the host loads them into `data`
     /// just before a request goes out (this crate has no filesystem). A provider that finds no `data`
     /// says what was there in words instead of sending nothing.

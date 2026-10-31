@@ -6,6 +6,7 @@
 
 // The one call a host makes, per ecosystem.
 pub use crate::cargo::read as read_cargo;
+pub use crate::gradle::read as read_gradle;
 pub use crate::graph::read;
 
 // What it returns.
@@ -15,6 +16,7 @@ pub use crate::model::{Dependency, Module, Origin, Report, Site, Transitive};
 pub use crate::module_graph::{module_graph, GraphEdge, GraphNode, ModuleGraph};
 
 // The resolved tree, read from `mvn dependency:tree` output.
+pub use crate::gradle_tree::parse_gradle_dependencies;
 pub use crate::tree::{parse_cargo_tree, parse_tree_output, ModuleTree, TreeNode};
 
 // One pom, for a consumer that has the text and wants the declarations.
