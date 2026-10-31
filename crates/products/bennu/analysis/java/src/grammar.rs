@@ -91,10 +91,12 @@ pub fn parse_java(source: &str) -> Option<Tree> {
         // `mask_varargs_annotations` — and keep the retry ONLY if it comes back clean, so a file
         // with a genuine syntax error still reports it.
         if tree.root_node().has_error() {
-            if let Some(masked) = mask_varargs_annotations(source) {
+            let masks = [mask_varargs_annotations(source), mask_nul_in_literals(source)];
+            for masked in masks.into_iter().flatten() {
                 if let Some(retry) = parser.parse(&masked, None) {
                     if !retry.root_node().has_error() {
                         tree = retry;
+                        break;
                     }
                 }
             }
@@ -193,6 +195,60 @@ fn mask_varargs_annotations(source: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// Blank the NUL bytes that sit inside a string / char literal or a comment.
+///
+/// javac takes a `\0` there as any other character (OSS-Fuzz inputs are written that way), but
+/// tree-sitter's scanner reads it as the end of the input, and the whole file comes back as one
+/// `ERROR`. Same length, so every offset stays valid; a NUL anywhere else is left alone, because
+/// there it is a genuine illegal character. `None` when there is nothing to mask.
+fn mask_nul_in_literals(source: &str) -> Option<String> {
+    if !source.contains('\0') {
+        return None;
+    }
+    let b = source.as_bytes();
+    let mut out = b.to_vec();
+    let mut masked = false;
+    let mut blank = |from: usize, to: usize, out: &mut Vec<u8>| {
+        for byte in &mut out[from..to.min(b.len())] {
+            if *byte == 0 {
+                *byte = b' ';
+                masked = true;
+            }
+        }
+    };
+    let mut i = 0usize;
+    while i < b.len() {
+        match b[i] {
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                let start = i;
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+                blank(start, i, &mut out);
+            }
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                let start = i;
+                i += 2;
+                while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
+                    i += 1;
+                }
+                i = (i + 2).min(b.len());
+                blank(start, i, &mut out);
+            }
+            b'"' | b'\'' => {
+                let end = skip_literal(b, i);
+                blank(i, end, &mut out);
+                i = end;
+            }
+            _ => i += 1,
+        }
+    }
+    if !masked {
+        return None;
+    }
+    String::from_utf8(out).ok()
+}
+
 /// The byte just past a string / char literal starting at `i` (a text block included).
 fn skip_literal(b: &[u8], i: usize) -> usize {
     let quote = b[i];
@@ -273,6 +329,24 @@ mod tests {
 
     /// The one thing worth asserting: a `Parser` accepts it. A grammar built against a
     /// different ABI than the runtime fails exactly here, and nowhere earlier.
+    /// OSS-Fuzz inputs put NUL bytes inside string literals; javac accepts them, tree-sitter's scanner
+    /// reads one as the end of the input.
+    #[test]
+    fn a_nul_inside_a_string_literal_or_comment_still_parses() {
+        let inside_string = "class A { String s = \"a\0b\"; }";
+        let inside_comment = "class A { /* a\0b */ int x; }";
+        for source in [inside_string, inside_comment] {
+            let tree = parse_java(source).expect("a parse");
+            assert!(!tree.root_node().has_error(), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn a_nul_outside_a_literal_is_still_an_error() {
+        let tree = parse_java("class A { int \0x; }").expect("a parse");
+        assert!(tree.root_node().has_error());
+    }
+
     #[test]
     fn the_grammar_is_one_this_runtime_can_use() {
         let mut parser = tree_sitter::Parser::new();

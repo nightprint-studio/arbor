@@ -67,7 +67,8 @@ import {
   fromStored, merge as mergePanes, moveTo as moveTabTo, open as openTab, paneOf, reorder as reorderTabs, replacePath,
   toStored, type PaneIndex, type Panes,
 } from './editor-panes';
-import { directoryKeys } from '$lib/components/bennu/tree-expansion';
+import { directoryKeys, relativeKey } from '$lib/components/bennu/tree-expansion';
+import { findNode, graftChildren, hasUnloaded, nextUnloadedOnTheWay, openAndUnlisted } from './tree-graft';
 import type { ProjectSession } from '$lib/ipc/bennu/config';
 import type { ProjectInfo, SourceEdit, TreeNode } from '$lib/types/bennu';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -719,27 +720,146 @@ function createProjectStore() {
   /** Latest tree request per root — see `loadTreeInto`. */
   const treeLoadSeq = new Map<string, number>();
 
+  /** How deep the first answer goes: the top level of the project. A folder's children are fetched when it is opened
+   *  (see `loadDir`), so a project with a hundred thousand files costs the same to show as one with a hundred. The
+   *  backend follows a chain of single-folder directories to its end whatever the depth, which keeps a row like
+   *  `com.acme.app` from changing under the user when its last link arrives. */
+  const INITIAL_TREE_DEPTH = 1;
+  /** The most rounds of "list the open folders that are still unlisted"; each round lists one more level. */
+  const MAX_RESTORE_ROUNDS = 64;
+
+  /** Put `t` where the tree lives: the stashed session and, when it is the active project, the live `tree`. */
+  function installTree(root: string, t: TreeNode) {
+    const s = sessions.get(root);
+    if (s) s.tree = t;
+    if (project?.root === root) tree = t;
+  }
+
+  /** The tree currently held for `root`, live or stashed. */
+  function treeOf(root: string): TreeNode | null {
+    if (project?.root === root) return tree;
+    return sessions.get(root)?.tree ?? null;
+  }
+
+  /** List the folders the user had open that the first answer did not reach, a level at a time, grafting each into
+   *  `t`; stops when none is left, the project was switched, or a newer load superseded this one. */
+  async function restoreOpenFolders(root: string, t: TreeNode, seq: number): Promise<TreeNode> {
+    let current = t;
+    for (let round = 0; round < MAX_RESTORE_ROUNDS; round++) {
+      const wanted = openAndUnlisted(current, treeExpansionStore.openPaths(root));
+      if (wanted.length === 0) break;
+      const answers = await Promise.all(wanted.map((dir) => ipcProjectTree(dir, 1).then((f) => ({ dir, f: canonTree(f) }), () => null)));
+      if (treeLoadSeq.get(root) !== seq) return current;
+      let grew = false;
+      for (const a of answers) {
+        if (!a) continue;
+        current = graftChildren(current, a.dir, a.f);
+        grew = true;
+      }
+      if (!grew) break;
+    }
+    return current;
+  }
+
   /** Fetch `root`'s file tree in the background, updating BOTH the stashed session and — when it's
    *  the active project — the live `tree`. The root guard drops a stale tree from a superseded open.
    *
    *  The sequence guard drops a stale tree from a superseded *load*: a Bennu-side create reloads,
    *  the watcher reloads again a moment later, and the first reply arriving last used to put the
-   *  folder that had just appeared back out of the tree. */
+   *  folder that had just appeared back out of the tree.
+   *
+   *  The answer is the top level only. A first load puts it on screen at once and then lists the folders that were
+   *  open last time; a reload keeps showing the old tree until those are listed too, so folders do not close and
+   *  open again at every change on disk. */
   function loadTreeInto(root: string): Promise<void> {
     const seq = (treeLoadSeq.get(root) ?? 0) + 1;
     treeLoadSeq.set(root, seq);
-    return ipcProjectTree(root)
-      .then((t) => {
+    return ipcProjectTree(root, INITIAL_TREE_DEPTH)
+      .then(async (t) => {
         if (treeLoadSeq.get(root) !== seq) return;
-        const ct = canonTree(t);
-        const s = sessions.get(root);
-        if (s) s.tree = ct;
-        if (project?.root === root) tree = ct;
-        // Only here — a complete tree that no newer request superseded — is it safe to forget the
-        // remembered folders that are gone. A failed or stale load forgets nothing.
-        treeExpansionStore.prune(root, 'project', directoryKeys(root, ct));
+        let ct = canonTree(t);
+        if (!treeOf(root)) installTree(root, ct);
+        ct = await restoreOpenFolders(root, ct, seq);
+        if (treeLoadSeq.get(root) !== seq) return;
+        installTree(root, ct);
+        treeEpoch++;
+        // Only here — every open folder listed, and no newer request having superseded this one — is it
+        // safe to forget the remembered folders that are gone. A failed or stale load forgets nothing.
+        // A remembered folder under one the tree has not listed is unknown, not gone: it stays.
+        const live = directoryKeys(root, ct);
+        for (const open of treeExpansionStore.openPaths(root)) {
+          if (nextUnloadedOnTheWay(ct, open) !== null) {
+            const key = relativeKey(root, open);
+            if (key) live.add(key);
+          }
+        }
+        treeExpansionStore.prune(root, 'project', live);
       })
       .catch(() => { /* leave the tree empty — the project still opened */ });
+  }
+
+  /** Bumped when a tree LOAD lands (not when a folder is grafted in): what re-reads things that depend on the project's
+   *  files — the git marks — without doing it again for every folder opened. */
+  let treeEpoch = $state(0);
+
+  /** Folders being fetched, by path, so a second request for one that is already on its way joins it. */
+  const dirLoads = new Map<string, Promise<void>>();
+  /** Folders whose fetch is taking long enough to show a spinner (see `slowDirs`). */
+  let slowDirPaths = $state<ReadonlySet<string>>(new Set());
+  const SLOW_DIR_MS = 250;
+
+  /** Fetch one folder's children and graft them into the tree (live and stashed). */
+  function loadDir(path: string): Promise<void> {
+    const root = project?.root;
+    if (!root || isDemo) return Promise.resolve();
+    const dir = canonPath(path);
+    const pending = dirLoads.get(dir);
+    if (pending) return pending;
+    const slow = setTimeout(() => (slowDirPaths = new Set([...slowDirPaths, dir])), SLOW_DIR_MS);
+    const done = ipcProjectTree(dir, 1)
+      .then((fresh) => {
+        const base = treeOf(root);
+        if (!base) return;
+        installTree(root, graftChildren(base, dir, canonTree(fresh)));
+      })
+      .catch(() => { /* the folder stays as it was; opening it again retries */ })
+      .finally(() => {
+        clearTimeout(slow);
+        dirLoads.delete(dir);
+        if (slowDirPaths.has(dir)) {
+          const next = new Set(slowDirPaths);
+          next.delete(dir);
+          slowDirPaths = next;
+        }
+      });
+    dirLoads.set(dir, done);
+    return done;
+  }
+
+  /** Fetch every folder on the way to `path` — a file to reveal, a folder to open — one level at a time. */
+  async function ensureTreePath(path: string): Promise<void> {
+    const root = project?.root;
+    if (!root) return;
+    for (let i = 0; i < MAX_RESTORE_ROUNDS; i++) {
+      const next = nextUnloadedOnTheWay(treeOf(root), canonPath(path));
+      if (!next) return;
+      await loadDir(next);
+      // a fetch that failed leaves the folder unlisted: stop rather than ask again for ever
+      if (nextUnloadedOnTheWay(treeOf(root), canonPath(path)) === next) return;
+    }
+  }
+
+  /** Replace the tree with the whole of it, for what has to look through every folder (filtering by name,
+   *  expand-all). The cap on a tree's size still applies. A no-op when nothing is left unlisted. */
+  async function loadFullTree(): Promise<void> {
+    const root = project?.root;
+    if (!root || isDemo || !hasUnloaded(treeOf(root))) return;
+    const seq = (treeLoadSeq.get(root) ?? 0) + 1;
+    treeLoadSeq.set(root, seq);
+    try {
+      const full = canonTree(await ipcProjectTree(root));
+      if (treeLoadSeq.get(root) === seq) installTree(root, full);
+    } catch { /* the tree stays as it was */ }
   }
 
   /** Ensure `path`'s source is loaded, then return it (''), for consumers (rename
@@ -1342,6 +1462,15 @@ function createProjectStore() {
      * be a reload that fixes nothing, and the member's tree would stay wrong until it was next
      * switched to. A root this window does not have open is ignored.
      */
+    get treeEpoch() { return treeEpoch; },
+    /** Fetch one folder's children into the tree (a no-op while it is already on its way). */
+    loadDir,
+    /** Fetch every folder on the way to a path, so a file or folder deep in the project can be shown. */
+    ensureTreePath,
+    /** Fetch the whole tree, for what has to look through every folder. */
+    loadFullTree,
+    /** Paths of folders whose fetch is slow enough to show a spinner. */
+    get slowDirs(): ReadonlySet<string> { return slowDirPaths; },
     refreshTreeOf(root: string) {
       if (isDemo) return;
       if (project?.root === root) {

@@ -175,12 +175,24 @@ impl bennu_java::prelude::NameScope for ProjectNameScope<'_> {
         }
         // Last, the project-wide map — one binary per simple name, so a guess, and taken only when
         // the file's own scope reaches nothing this build can see.
+        //
+        // Not for a name shaped like a type variable (`A`, `D`, `T`): in a generic method's return type
+        // or a class's field it IS the variable, and the guess bound it to whichever nested `A` or `D`
+        // some test file declares (Spring has dozens), so a `Class<A>` call read as returning that class.
+        if is_type_variable_shaped(simple) {
+            return None;
+        }
         self.names.project_types.get(simple).cloned()
     }
 
     fn is_type(&self, binary: &str) -> bool {
         (self.names.is_project)(binary)
     }
+}
+
+/// A single capital letter: the spelling of a type variable, which no project-wide guess may turn into a class.
+fn is_type_variable_shaped(simple: &str) -> bool {
+    simple.len() == 1 && simple.bytes().all(|b| b.is_ascii_uppercase())
 }
 
 /// The member type a JDK supertype hands to its subtypes, for the few the build can state without

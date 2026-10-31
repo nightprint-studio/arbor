@@ -86,6 +86,7 @@
   import { ChevronRight, ChevronDown } from 'lucide-svelte';
   import { onMount, tick } from 'svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { animStore } from '$lib/stores/animations.svelte';
 
   interface Props {
     // ── Data ────────────────────────────────────────────────────────────
@@ -274,7 +275,24 @@
     return false;
   }
 
+  // A branch opening or closing moves every row under it. For a moment after the toggle the rows glide to
+  // their new place and the ones that appear or go fade; the rest of the time — scrolling above all — the
+  // window of rows is recycled instantly, because an animation there would flash on every row it reuses.
+  let toggling = $state(false);
+  let togglingTimer: ReturnType<typeof setTimeout> | undefined;
+  function pulse(): void {
+    toggling = true;
+    clearTimeout(togglingTimer);
+    togglingTimer = setTimeout(() => (toggling = false), animStore.dFast + 80);
+  }
+  /** The row transition: opacity and a small drop, for as long as {@link toggling} says so. */
+  function rowFx(_node: Element, { enter }: { enter: boolean }) {
+    const duration = toggling ? animStore.dFast : 0;
+    return { duration, css: (t: number) => `opacity: ${t}; transform: translateY(${(1 - t) * (enter ? -6 : -4)}px)` };
+  }
+
   function toggle(node: T): void {
+    pulse();
     const id   = getId(node);
     const next = !isExpanded(node);
     if (isControlled()) {
@@ -647,7 +665,9 @@
   role="tree"
   aria-label={ariaLabel}
   bind:this={treeEl}
+  class:tree-toggling={toggling}
   style:--tree-row-h="{rowHeight}px"
+  style:--tree-glide="{animStore.dFast}ms"
 >
   {#if !nodes || nodes.length === 0 || flat.length === 0}
     {#if emptyState}{@render emptyState()}{:else}
@@ -674,6 +694,8 @@
           class:tree-row-drop-hover={isDropHover}
           class:tree-row-dragging={dragSourceId === r.id}
           data-tree-id={r.id}
+          in:rowFx={{ enter: true }}
+          out:rowFx={{ enter: false }}
           style="position: absolute; left: 0; right: 0; top: {(startIdx + vi) * rowHeight}px; height: {rowHeight}px; min-height: {rowHeight}px; padding-left: {basePadding + r.depth * indentSize}px; display: flex; align-items: center; gap: {cellGap}px; box-sizing: border-box;"
           role="treeitem"
           aria-expanded={r.hasChildren ? r.expanded : undefined}
@@ -781,6 +803,10 @@
        on scroll and a transition would flash on every reuse. */
     text-align: left;
     box-sizing: border-box;
+  }
+  /* Rows glide to their new place only while a branch is opening or closing (see `toggling`). */
+  :global(.tree.tree-toggling .tree-row) {
+    transition: top var(--tree-glide, 120ms) cubic-bezier(0.22, 1, 0.36, 1);
   }
   :global(.tree .tree-row:focus-visible) {
     outline: 1px solid var(--border-focus, var(--accent));

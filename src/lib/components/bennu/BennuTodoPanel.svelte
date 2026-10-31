@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   /**
    * TODO tool window (bottom dock) — every TODO/FIXME/XXX/HACK marker in the project
    * from `bennu_todos`, grouped by file, collapsible, with per-kind filter chips.
@@ -145,13 +146,15 @@
           <span class="grp-n">{group.length}</span>
         </button>
         {#if !collapsed.has(file)}
-          {#each group as t, i (i)}
-            <button class="row" type="button" onclick={() => open(t)} oncontextmenu={(e) => onRowContextMenu(t, e)}>
-              <span class="tag k-{t.kind.toLowerCase()}">{t.kind}</span>
-              <span class="row-text">{t.text || '—'}</span>
-              <span class="row-line">{t.line}</span>
-            </button>
-          {/each}
+          <div transition:collapse>
+            {#each group as t, i (i)}
+              <button class="row" type="button" onclick={() => open(t)} oncontextmenu={(e) => onRowContextMenu(t, e)}>
+                <span class="tag k-{t.kind.toLowerCase()}">{t.kind}</span>
+                <span class="row-text">{t.text || '—'}</span>
+                <span class="row-line">{t.line}</span>
+              </button>
+            {/each}
+          </div>
         {/if}
       {/each}
     </div>

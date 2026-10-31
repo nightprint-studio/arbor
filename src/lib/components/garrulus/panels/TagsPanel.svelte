@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   /**
    * The Tags and fields sidebar section: the axes this vault can be sliced along.
    *
@@ -226,7 +227,7 @@
           </button>
 
           {#if isOpen}
-            <ul class="tg-values">
+            <ul transition:collapse class="tg-values">
               {#each group.values as value (value)}
                 {@const token = fieldToken(group.facet.key, value)}
                 {@const active = garrulusSearchStore.has(token)}

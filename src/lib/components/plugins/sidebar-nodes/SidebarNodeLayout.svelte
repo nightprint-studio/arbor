@@ -8,6 +8,7 @@
   `renderNode` snippet so any child node type works at arbitrary depth.
 -->
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   import type { Snippet } from 'svelte';
   import { ChevronRight, ChevronDown } from 'lucide-svelte';
   import PluginIcon from '../PluginIcon.svelte';
@@ -96,7 +97,7 @@
       {/if}
     {/if}
     {#if !sectionCollapsed}
-      <div class="node-section-body">
+      <div transition:collapse class="node-section-body">
         {#each n.nodes as child, k (ctx.nodeKey(child, k))}
           {@render renderNode(child, k)}
         {/each}

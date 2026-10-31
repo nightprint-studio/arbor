@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   /**
    * One component (or resource) of the inspected game: its name, its value as typed editors, and the
    * raw-JSON editor behind a toggle.
@@ -87,12 +88,14 @@
   {/snippet}
 
   {#if expanded}
-    {#if error}
-      <Alert variant="warning" compact text={errorText || 'The game could not serialise this value.'} />
-    {:else if raw}
-      <BrpJsonEditor {value} onApply={onReplace} onCancel={() => (raw = false)} />
-    {:else}
-      <BrpValueEditor {value} shape={info?.shape} path="" {readonly} onCommit={commit} {onJump} />
-    {/if}
+    <div transition:collapse>
+      {#if error}
+        <Alert variant="warning" compact text={errorText || 'The game could not serialise this value.'} />
+      {:else if raw}
+        <BrpJsonEditor {value} onApply={onReplace} onCancel={() => (raw = false)} />
+      {:else}
+        <BrpValueEditor {value} shape={info?.shape} path="" {readonly} onCommit={commit} {onJump} />
+      {/if}
+    </div>
   {/if}
 </Card>

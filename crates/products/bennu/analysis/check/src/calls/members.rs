@@ -126,7 +126,7 @@ fn check_reference(
     let Some(ty) = receiver_type(root, source, bytes, symbols, resolver, cache, qualifier) else {
         return;
     };
-    if resolver.members_of(&ty.binary_name).is_none() {
+    if resolver.members_of(&ty.binary_name).is_none() || crate::support::nodes::is_type_var(simple_name(&ty.binary_name)) {
         return;
     }
     let has = crate::support::walk::hierarchy_has(resolver, &ty.binary_name, &|cm| {
@@ -170,6 +170,12 @@ fn check_call(
         return;
     };
     if ty.binary_name.is_empty() {
+        return;
+    }
+    // A type variable (`D d;` in `Foo<D extends Bar>`) has its bound's members, which the index does not
+    // keep — and a nested class of that name elsewhere in the project (`Stray.D`) must not stand in for
+    // it. A class called `D` is read as the variable: silence over a wrong "cannot resolve".
+    if crate::support::nodes::is_type_var(simple_name(&ty.binary_name)) {
         return;
     }
     // A primitive has no members at all — javac's `int cannot be dereferenced`.

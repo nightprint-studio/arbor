@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   /**
    * One declared dependency of a module.
    *
@@ -101,7 +102,7 @@
   {/if}
 
   {#if open}
-    <div class="detail">
+    <div transition:collapse class="detail">
       {#if conflicted && usage}
         <div class="d-head">Versions in the resolved tree</div>
         <ul class="d-list">

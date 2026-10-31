@@ -141,6 +141,10 @@ export interface TreeNode {
    *  `context.xml` in a `.war` and `<appname>.xml` under `conf/Catalina/localhost`. The root
    *  element is what the file says it is, and it is what the icon is chosen by. */
   root_tag?: string;
+  /** A directory with entries the walk did not list (it stopped at the depth asked for), so an empty
+   *  `children` means "not fetched yet" rather than "nothing here". Opened, it is fetched with
+   *  `projectTree(path, 1)`. Absent (false) for a file, an empty directory, and one that was listed. */
+  unloaded?: boolean;
 }
 
 /** Result of `bennu_read_file`: the decoded text and the encoding it was decoded

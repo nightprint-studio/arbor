@@ -42,6 +42,9 @@ const MAX_DEPTH: usize = 64;
 /// no caller wants materialised; past the cap the walk stops and the tree says so.
 pub const MAX_NODES: usize = 20_000;
 
+/// The most nodes one nested git checkout (a worktree, a submodule) may take out of the shared [`MAX_NODES`].
+pub const NESTED_CHECKOUT_NODES: usize = 1_500;
+
 /// Name of the marker node appended to the root when [`MAX_NODES`] was hit.
 pub const TRUNCATED_MARKER: &str = "… tree truncated (too many entries)";
 
@@ -76,8 +79,15 @@ fn truncation_marker(root: &Path) -> TreeNode {
         children: Vec::new(),
         hidden: false,
         ignored: true,
+        unloaded: false,
         root_tag: String::new(),
     }
+}
+
+/// Whether `dir` is the root of a git checkout of its own: it holds a `.git` (a folder for a clone, a file for a worktree
+/// or a submodule).
+fn is_nested_checkout(dir: &Path) -> bool {
+    dir.join(".git").exists()
 }
 
 /// Whether `name`, a real directory under `parent`, is noise the tree never walks.
@@ -141,8 +151,37 @@ fn build_node(
             let kid_ignored = inherited || ignores.is_ignored(&kid_path, kid_is_dir);
             // A link to a directory is shown as a directory but not entered: only a real directory
             // can be the start of a cycle-free walk.
-            let kid_depth = if real_dir { depth_left - 1 } else { 0 };
-            children.push(build_node(&kid_path, kid_depth, ignores, kid_ignored, remaining));
+            let mut kid_depth = if real_dir { depth_left - 1 } else { 0 };
+            // The walk is shallow on purpose (the sidebar opens a folder when it is asked to), except through a
+            // chain of folders that hold nothing but one folder: the tree draws those as one row (`com.acme.app`),
+            // and a row that merges when its last link arrives would change name and identity under the user.
+            let mut lazy_dir = false;
+            if real_dir && kid_depth == 0 {
+                match peek_children(&kid_path) {
+                    Peek::OnlyDir => kid_depth = 1,
+                    Peek::Several => lazy_dir = true,
+                    Peek::Nothing => {}
+                }
+            }
+            // A checkout nested in the project (a git worktree under `.claude/worktrees`, a submodule, a vendored
+            // clone) is a whole other project's files. Walked on the shared budget, one of them spends it all before
+            // the directories sorted after it are listed; so it gets a budget of its own, taken out of the shared one,
+            // and says so inside itself when it runs out.
+            if real_dir && is_nested_checkout(&kid_path) {
+                let mut own = (*remaining).min(NESTED_CHECKOUT_NODES);
+                let before = own;
+                let mut node = build_node(&kid_path, kid_depth, ignores, kid_ignored, &mut own);
+                *remaining -= before - own;
+                if own == 0 {
+                    node.children.push(truncation_marker(&kid_path));
+                }
+                node.unloaded = lazy_dir;
+                children.push(node);
+                continue;
+            }
+            let mut node = build_node(&kid_path, kid_depth, ignores, kid_ignored, remaining);
+            node.unloaded = lazy_dir;
+            children.push(node);
         }
         ignores.pop(pushed);
     }
@@ -155,6 +194,29 @@ fn build_node(
         path: path.display().to_string(),
         is_dir,
         children,
+        unloaded: false,
+    }
+}
+
+/// What a directory holds, as far as the walk needs to know: nothing, exactly one folder, or anything else.
+enum Peek {
+    Nothing,
+    OnlyDir,
+    Several,
+}
+
+/// Looks at `dir`'s entries (noise left out) without sorting them: two are enough to know it is not a one-folder chain.
+fn peek_children(dir: &Path) -> Peek {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Peek::Nothing };
+    let mut kept = entries.flatten().filter_map(|e| {
+        let real_dir = e.file_type().ok()?.is_dir();
+        let name = e.file_name().to_string_lossy().into_owned();
+        (!(real_dir && is_noise_dir(dir, &name))).then_some(real_dir)
+    });
+    match (kept.next(), kept.next()) {
+        (None, _) => Peek::Nothing,
+        (Some(true), None) => Peek::OnlyDir,
+        _ => Peek::Several,
     }
 }
 
@@ -318,6 +380,67 @@ mod tests {
             return Some(node);
         }
         node.children.iter().find_map(|c| find(c, name))
+    }
+
+    /// The reason for the rule: worktrees full of files, sorted before the real sources, must not use up the budget.
+    #[test]
+    fn a_nested_checkout_has_a_budget_of_its_own_and_cannot_starve_what_sorts_after_it() {
+        let t = TempDir::new("nested");
+        t.write(".claude/worktrees/one/.git", "gitdir: ../../../.git/worktrees/one");
+        for i in 0..(NESTED_CHECKOUT_NODES + 200) {
+            t.write(&format!(".claude/worktrees/one/src/f{i:05}.java"), "");
+        }
+        t.write("src/App.java", "");
+        let tree = build(&t.0, 64).unwrap();
+        let one = find(&tree, "one").expect("the worktree is listed");
+        let inside = one.children.iter().find(|c| c.name == "src").expect("its src");
+        assert!(inside.children.len() <= NESTED_CHECKOUT_NODES, "walked only as far as its own budget");
+        assert!(find(one, TRUNCATED_MARKER).is_some(), "and it says so inside itself");
+        assert!(find(&tree, "App.java").is_some(), "what sorts after it is still there");
+        assert!(tree.children.iter().all(|c| c.name != TRUNCATED_MARKER), "the root's budget was not spent");
+    }
+
+    /// A measurement, not a test: `TREE_PROBE=<dir> cargo test -p bennu-project probe_tree_cost -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn probe_tree_cost() {
+        let Ok(dir) = std::env::var("TREE_PROBE") else { return };
+        fn count(n: &TreeNode) -> usize {
+            1 + n.children.iter().map(count).sum::<usize>()
+        }
+        for depth in [1usize, 2, 64] {
+            let t = std::time::Instant::now();
+            let tree = build(std::path::Path::new(&dir), depth).unwrap();
+            println!("depth {depth:>2}: {:>6} nodes in {:>6.1} ms", count(&tree), t.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+
+    /// The shallow walk: a folder with entries the walk stopped before is marked `unloaded`; an empty one is not; and a
+    /// chain of folders each holding only the next is walked through, so the row the tree draws for it never changes.
+    #[test]
+    fn a_shallow_walk_marks_the_folders_it_did_not_list_and_follows_single_folder_chains() {
+        let t = TempDir::new("lazy");
+        t.write("docs/a.md", "");
+        t.write("docs/b.md", "");
+        t.dir("empty");
+        t.write("lib/com/acme/App.java", "");
+        t.write("lib/com/acme/Util.java", "");
+        let tree = build(&t.0, 1).unwrap();
+        let docs = find(&tree, "docs").unwrap();
+        assert!(docs.unloaded && docs.children.is_empty(), "several entries, not listed");
+        let empty = find(&tree, "empty").unwrap();
+        assert!(!empty.unloaded && empty.children.is_empty(), "nothing in it, so nothing to fetch");
+        // lib -> com -> acme is a chain of single folders: walked through to its end, where the files are not listed
+        let lib = find(&tree, "lib").unwrap();
+        assert!(!lib.unloaded && !find(lib, "com").unwrap().unloaded, "the links of the chain are listed");
+        let acme = find(lib, "acme").unwrap();
+        assert!(acme.unloaded && acme.children.is_empty(), "the end of the chain holds two files, not listed");
+        // opened on its own, a folder lists its children one level deep
+        let opened = build(&t.0.join("docs"), 1).unwrap();
+        assert_eq!(opened.children.len(), 2);
+        // and the whole walk lists everything, flagging nothing
+        let full = build(&t.0, 64).unwrap();
+        assert!(find(&full, "docs").is_some_and(|d| !d.unloaded && d.children.len() == 2));
     }
 
     #[test]

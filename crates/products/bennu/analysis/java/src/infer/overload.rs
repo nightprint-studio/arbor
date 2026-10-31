@@ -512,7 +512,15 @@ fn subtype_of(resolver: &dyn TypeResolver, sub: &TypeRef, sup: &TypeRef) -> Verd
                 "java/lang/Cloneable" | "java/io/Serializable"
             )),
             (0, _) => Verdict::No,
-            _ => subtype_of(resolver, &one_dim_less(sub), &one_dim_less(sup)),
+            // `int[]` is no `Object[]`: only a reference array is covariant (JLS §4.10.3), and the
+            // `Object` shortcut below would otherwise take the bare `int` for a subtype of it.
+            _ => {
+                let (element, target) = (one_dim_less(sub), one_dim_less(sup));
+                if element.dims == 0 && is_primitive(&element.binary_name) && element.binary_name != target.binary_name {
+                    return Verdict::No;
+                }
+                subtype_of(resolver, &element, &target)
+            }
         };
     }
     if crate::typename::same_binary_type(&sub.binary_name, &sup.binary_name) {
@@ -668,6 +676,31 @@ mod tests {
 
     fn array_of(binary: &str) -> TypeRef {
         TypeRef { dims: 1, ..TypeRef::simple(binary) }
+    }
+
+    #[test]
+    fn a_primitive_array_is_no_reference_array() {
+        let r = MapResolver { members: HashMap::new(), simple: HashMap::new() };
+        let (ints, objects, longs) = (array_of("int"), array_of("java/lang/Object"), array_of("long"));
+        assert_eq!(subtype_verdict(&r, &ints, &objects), Some(false));
+        assert_eq!(subtype_verdict(&r, &ints, &longs), Some(false));
+        assert_eq!(subtype_verdict(&r, &ints, &array_of("int")), Some(true));
+        assert_eq!(subtype_verdict(&r, &ints, &TypeRef::simple("java/lang/Object")), Some(true));
+    }
+
+    #[test]
+    fn a_source_annotation_type_is_an_annotation() {
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".to_string(), cm(vec![]));
+        members.insert("java/lang/annotation/Annotation".to_string(), interface(vec![]));
+        let mut tag = interface(vec![]);
+        tag.flags.is_annotation = true;
+        members.insert("acme/Tag".to_string(), tag);
+        members.insert("acme/Plain".to_string(), interface(vec![]));
+        let r = MapResolver { members, simple: HashMap::new() };
+        let annotation = TypeRef::simple("java/lang/annotation/Annotation");
+        assert_eq!(subtype_verdict(&r, &TypeRef::simple("acme/Tag"), &annotation), Some(true));
+        assert_eq!(subtype_verdict(&r, &TypeRef::simple("acme/Plain"), &annotation), Some(false));
     }
 
     /// Spring's `RestClient.UriSpec` in miniature, all five `uri` overloads, plus a `with` pair that

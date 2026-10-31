@@ -305,11 +305,9 @@
   async function projectFiles(): Promise<NavigateItem[]> {
     const out: NavigateItem[] = [];
     for (const { root, home } of searchRoots) {
-      // The active project's tree is already in memory; a workspace member's has to be asked
-      // for, which is why this half only costs anything when the toggle is on.
-      const tree = home === undefined
-        ? projectStore.tree
-        : await projectTree(root).catch(() => null);
+      // The sidebar's tree is fetched a folder at a time, so it is not the list of files: every project
+      // is asked for its whole listing here, in the background of the dialog.
+      const tree = await projectTree(root).catch(() => (home === undefined ? projectStore.tree : null));
       flattenFiles(tree, out, root, home);
     }
     return out;

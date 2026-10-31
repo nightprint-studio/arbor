@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { slide } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
+  import { collapse } from '$lib/utils/collapse';
   import { ChevronRight } from 'lucide-svelte';
   import { animStore } from '$lib/stores/animations.svelte';
 
@@ -66,7 +65,7 @@
     </div>
   </div>
   {#if open}
-    <div class="collapsible-body" transition:slide={{ duration: dur, easing: cubicOut }}>
+    <div class="collapsible-body" transition:collapse={{ duration: dur }}>
       {@render children()}
     </div>
   {/if}

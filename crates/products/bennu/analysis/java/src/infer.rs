@@ -3159,6 +3159,12 @@ impl crate::typename::NameScope for Ctx<'_> {
                 }
             }
         }
+        // Past the imports, the file's own types and its package, a bare capital letter (`A`, `D`) is a type variable
+        // far more often than a class — and the lookups below answer by simple name across the whole
+        // project, so they bind it to whichever nested `A` some other file declares (test fixtures).
+        if simple.len() == 1 && simple.bytes().all(|b| b.is_ascii_uppercase()) {
+            return None;
+        }
         // A member type INHERITED from a supertype — `Entry` inside a `Map` implementation. Ahead of
         // the resolver's flat simple-name lookup, which collapses same-named nested types across the
         // whole project and would answer with an unrelated one.

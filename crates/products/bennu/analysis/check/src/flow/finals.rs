@@ -310,8 +310,16 @@ fn check_final_locals(scope: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
                     *decl_count.entry(name).or_insert(0) += 1;
                 }
             }
-            "formal_parameter" | "spread_parameter" | "catch_formal_parameter" => {
+            // A for-each variable and a resource declare a name too: `for (Foo ctor : all)` after a
+            // `final Foo ctor = …` in a sibling block is another binding, not the final one.
+            "formal_parameter" | "spread_parameter" | "catch_formal_parameter" | "enhanced_for_statement" | "resource" => {
                 if let Some(name) = n.child_by_field_name("name").and_then(|x| text(x, bytes)) {
+                    *decl_count.entry(name).or_insert(0) += 1;
+                }
+            }
+            "type_pattern" | "record_pattern_component" => {
+                let mut pc = n.walk();
+                for name in n.named_children(&mut pc).filter(|x| x.kind() == "identifier").filter_map(|x| text(x, bytes)) {
                     *decl_count.entry(name).or_insert(0) += 1;
                 }
             }

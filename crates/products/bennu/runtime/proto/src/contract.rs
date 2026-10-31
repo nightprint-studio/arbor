@@ -223,7 +223,7 @@ pub struct JdkInfo {
 
 /// A node in the project file tree returned by `bennu_project_tree`. Directories
 /// carry `children`; files carry none. Lazy-friendly: a directory may be returned
-/// with an empty `children` and `expandable = true` so the FE fetches it on demand.
+/// with an empty `children` and `unloaded = true` so the FE fetches it on demand.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TreeNode {
     /// The node's own name (the final path segment).
@@ -247,6 +247,11 @@ pub struct TreeNode {
     /// still being picked up".
     #[serde(default, skip_serializing_if = "is_false")]
     pub ignored: bool,
+    /// A directory that has entries the tree did **not** list, because the walk stopped at the depth the caller
+    /// asked for. Without it an unlisted directory and an empty one both answer `children: []`; with it the
+    /// frontend draws the first as openable and fetches its children when it is opened.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unloaded: bool,
     /// For an XML file, the name of its **root element** — `Context`, `struts`, `beans`. Empty
     /// for everything else, and for an XML that could not be read.
     ///

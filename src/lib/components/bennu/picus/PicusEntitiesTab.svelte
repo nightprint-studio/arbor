@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   /**
    * Entities vs. the database — one row per `@Entity`, with what the schema says about it.
    *
@@ -109,7 +110,7 @@
             </span>
           </div>
           {#if open[c.entity.fqcn]}
-            <ul class="problems">
+            <ul transition:collapse class="problems">
               {#each c.problems as p, i (i)}
                 <li class:info={p.kind === 'unmapped-column'}>
                   {#if p.line}

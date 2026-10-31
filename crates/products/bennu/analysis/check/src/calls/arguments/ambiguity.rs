@@ -11,7 +11,7 @@
 //!   * the survivors all of one arity, so no varargs expansion compares a prefix against an element;
 //!   * wherever two survivors' parameters differ, the subtype question decided both ways.
 
-use bennu_java::prelude::{subtype_verdict, Member, TypeRef, TypeResolver};
+use bennu_java::prelude::{subtype_verdict, Member, TypeRef, TypeResolver, Visibility};
 
 use super::Judged;
 use crate::support::nodes::{is_primitive, is_type_var, simple_name};
@@ -36,6 +36,13 @@ pub(super) fn provably_ambiguous(kept: &[&Member], args: &[Judged], resolver: &d
     // Whether it is visible from here is the visibility check's question; this one stays out of it.
     // Candidates of one visibility stand or fall together, so only a MIXED set is in doubt.
     if kept.iter().any(|m| m.visibility != first.visibility) {
+        return false;
+    }
+    // ... and a set of PRIVATE methods is the same doubt, decided the other way: seen from another
+    // class none of them is a candidate, and the call binds to the wider one they were all more specific
+    // than (`TypeUtils.equals(null, type)` — private `equals(WildcardType, Type)` & co. beside the public
+    // `equals(Type, Type)`). Whether this call stands inside the declaring class is not asked here.
+    if first.visibility == Visibility::Private {
         return false;
     }
     // An argument whose own hierarchy has a gap may satisfy a parameter the walk could not see it

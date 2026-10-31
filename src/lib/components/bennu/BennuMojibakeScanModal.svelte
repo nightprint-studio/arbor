@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   /**
    * BennuMojibakeScanModal — whole-project mojibake report.
    *
@@ -129,7 +130,7 @@
                 <span class="count">{f.hits.length}</span>
               </button>
               {#if expanded.has(f.file)}
-                <div class="hits">
+                <div transition:collapse class="hits">
                   {#each f.hits as h, i (i)}
                     <button class="hit" type="button" onclick={() => openHit(f.file, h.start)}>
                       <span class="bad">{h.bad}</span>

@@ -81,7 +81,11 @@
   function liveChildren(dirAbs: string): TreeNode[] {
     const want = dirAbs.replace(/\\/g, '/').replace(/\/+$/, '');
     const walk = (n: TreeNode): TreeNode[] | null => {
-      if (n.path.replace(/\\/g, '/').replace(/\/+$/, '') === want) return n.children;
+      if (n.path.replace(/\\/g, '/').replace(/\/+$/, '') === want) {
+        // The sidebar's tree is fetched a folder at a time: ask for this one, and the rows arrive with it.
+        if (n.unloaded) void projectStore.loadDir(n.path);
+        return n.children;
+      }
       for (const c of n.children) {
         if (!c.is_dir) continue;
         const hit = walk(c);

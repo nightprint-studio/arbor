@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   /**
    * One reference entry in the Docs panel: a collapsible row showing the name +
    * signature, with the summary, parameters and example revealed on expand. Pure
@@ -39,7 +40,7 @@
   </button>
 
   {#if expanded}
-    <div class="body">
+    <div transition:collapse class="body">
       {#if entry.summary}<p class="summary">{entry.summary}</p>{/if}
 
       {#if entry.params.length > 0}

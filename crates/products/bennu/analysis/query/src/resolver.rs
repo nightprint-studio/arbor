@@ -356,7 +356,12 @@ impl<M: CpMemberIndex> IndexResolver<M> {
             }
         }
         // 1) project source type — its resolved members are baked into the record.
-        if let Some(sym) = self.project.get(&self.scoped_key(binary_name)) {
+        //
+        // Not under a bare capital letter (`A`, `D`): the project table also answers a SIMPLE name, so
+        // a type variable written like that was handed the members of whichever nested `A` some file
+        // declares — and a call on it judged against that class. Silence beats a wrong class.
+        let type_variable_shaped = binary_name.len() == 1 && binary_name.bytes().all(|b| b.is_ascii_uppercase());
+        if let Some(sym) = self.project.get(&self.scoped_key(binary_name)).filter(|_| !type_variable_shaped) {
             if !sym.members_json.is_empty() {
                 if let Ok(mut cm) = serde_json::from_str::<JClassMembers>(&sym.members_json) {
                     // Every reference type ultimately extends `java.lang.Object`. A project class
@@ -610,10 +615,11 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         // it was deliberately not recorded. A miss recorded here means "a project type appearing
         // under this name must invalidate the file" (the negative dependency).
         let recording = dep_record::recording();
+        let type_variable_shaped = name.len() == 1 && name.bytes().all(|b| b.is_ascii_uppercase());
         // An edited file's own (possibly renamed/added) type overrides the stale mmap.
         {
             let ov = self.overlay.read().unwrap_or_else(|p| p.into_inner());
-            if let Some(binary) = ov.simple.get(name) {
+            if let Some(binary) = ov.simple.get(name).filter(|_| !type_variable_shaped) {
                 if recording {
                     dep_record::note_simple_hit(name, binary);
                 }
@@ -639,7 +645,11 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         }
         // Then a project TYPE of that simple name (a member of that name is not one — see
         // `is_type_symbol`), then the common-JDK table.
-        if let Some(sym) = self.project.get(name) {
+        //
+        // Not a name shaped like a type variable (`A`, `D`): this map is keyed by simple name alone, so
+        // it answers with whichever NESTED `A` some other file declares, for a `D d;` field that is
+        // only the class's variable — a method call on it was then "unknown in `D`".
+        if let Some(sym) = self.project.get(name).filter(|_| !type_variable_shaped) {
             if is_type_symbol(&sym) && !sym.fqn.is_empty() {
                 if recording {
                     dep_record::note_simple_hit(name, &sym.fqn);

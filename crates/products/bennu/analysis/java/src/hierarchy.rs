@@ -30,6 +30,9 @@ use std::sync::Arc;
 
 use crate::seam::{ClassMembers, TypeRef, TypeResolver};
 
+/// The interface every annotation type implicitly extends (JLS §9.6).
+const ANNOTATION: &str = "java/lang/annotation/Annotation";
+
 /// One type reached by a hierarchy walk, with the arguments that actually reach it.
 pub struct Ancestor {
     /// The type as seen from where the walk started — `Range<Double>`, not `Range<T>`.
@@ -138,6 +141,11 @@ pub fn walk<T>(
         }
         for itf in &ancestor.members.interfaces {
             queue.push_back((substitute(itf, params, args), depth + 1));
+        }
+        // Every annotation type extends `java.lang.annotation.Annotation` (JLS §9.6) — a class file
+        // lists it, but a type read from source (`@interface Tag`) never writes it.
+        if ancestor.members.flags.is_annotation {
+            queue.push_back((TypeRef::simple(ANNOTATION), depth + 1));
         }
     }
     Walk { found: None, complete }

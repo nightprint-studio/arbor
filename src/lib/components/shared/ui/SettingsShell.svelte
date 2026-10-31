@@ -33,6 +33,7 @@
 </script>
 
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   /**
    * SettingsShell — the shared two-pane settings layout (the look Arbor's
    * SettingsPanel established): a `bg-elevated` frame revealing two floating
@@ -228,9 +229,11 @@
       </button>
     </div>
     {#if branch && open}
+      <div class="nav-children" transition:collapse>
       <!-- Under a top-level entry the children start at its label. Deeper, that is where the siblings'
            labels already are (they share the twisty column), so one more step in tells them apart. -->
       {@render rows(item.children ?? [], labelX(pad, anyBranch) + (depth > 0 ? TWISTY_COLUMN : 0), depth + 1)}
+      </div>
     {/if}
   {/each}
 {/snippet}

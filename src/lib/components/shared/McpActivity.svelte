@@ -33,6 +33,7 @@
      so and carries its date.
 -->
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   import { ChevronDown, ChevronRight, RefreshCw, Trash2 } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -308,7 +309,7 @@
           {#if isOpen(entry)}
             <!-- Newest last, like a console: what it is doing NOW is the bottom line, and
                  a reader watching a live run watches the bottom. -->
-            <pre class="output">{entry.progress.join('\n')}</pre>
+            <pre class="output" transition:collapse>{entry.progress.join('\n')}</pre>
           {/if}
         {/if}
 

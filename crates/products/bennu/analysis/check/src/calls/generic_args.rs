@@ -497,7 +497,15 @@ fn refusal<'t>(sig: &Signature, explicit: &[Node<'t>], args: &[Node<'t>], head: 
         }
     }
     let kinds: Vec<ParamKind> = sig.params.iter().map(|p| classify(p, &sig.variables)).collect();
-    let judged: Vec<Option<TypeRef>> = args.iter().map(|a| judged_type(*a, file)).collect();
+    // A generic method call or a diamond is a poly expression (JLS §15.12.2.6): its type arguments are
+    // inferred FROM the parameter it is passed to, so `Collections.singletonMap(k, String.class)` is a
+    // `Map<K, Type>` where `Map<K, Type>` is wanted, whatever it would be standing alone. What it reads
+    // as on its own says nothing about a parameter written with type arguments.
+    let judged: Vec<Option<TypeRef>> = args
+        .iter()
+        .zip(&kinds)
+        .map(|(a, kind)| judged_type(*a, file).filter(|_| !(matches!(kind, ParamKind::Generic { .. }) && is_poly_call(*a, file))))
+        .collect();
 
     // What the invariant positions fix: `Map<K, V>` given a `Map<String, Integer>` makes K a String.
     for (kind, ty) in kinds.iter().zip(&judged) {
@@ -543,6 +551,19 @@ fn judged_type(arg: Node, file: &File) -> Option<TypeRef> {
         return None;
     }
     file.infer(arg)
+}
+
+/// A method call, or `new G<>(…)`, however many parentheses wrap it: an expression typed by its target.
+fn is_poly_call(arg: Node, file: &File) -> bool {
+    match arg.kind() {
+        "method_invocation" => true,
+        "parenthesized_expression" => arg.named_child(0).is_some_and(|inner| is_poly_call(inner, file)),
+        "object_creation_expression" => arg
+            .child_by_field_name("type")
+            .and_then(|t| t.utf8_text(file.bytes()).ok())
+            .is_some_and(|t| t.trim_end().ends_with("<>")),
+        _ => false,
+    }
 }
 
 /// A primitive's box, or the class itself.

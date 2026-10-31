@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { collapse } from '$lib/utils/collapse';
   /**
    * One note's block of results: a sticky header, and the excerpt under it.
    *
@@ -99,7 +100,7 @@
   </div>
 
   {#if !collapsed && excerpt}
-    <button type="button" class="hg-excerpt" onclick={onSelect} ondblclick={() => onOpen?.()}>
+    <button transition:collapse type="button" class="hg-excerpt" onclick={onSelect} ondblclick={() => onOpen?.()}>
       {#each excerpt as part, i (i)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
     </button>
   {/if}

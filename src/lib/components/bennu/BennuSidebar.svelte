@@ -34,6 +34,8 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import { findNode as findTreeNode, openAndUnlisted } from '$lib/stores/bennu/tree-graft';
   import BennuNewFileModal from './BennuNewFileModal.svelte';
   import BennuNewFolderModal from './BennuNewFolderModal.svelte';
   import BennuNewModuleModal from './BennuNewModuleModal.svelte';
@@ -85,6 +87,15 @@
 
   let pickerOpen = $state(false);
   let filter = $state('');
+  // A folder that is open but not listed yet — its expansion was remembered, or restored after the tree arrived —
+  // is fetched; a fetch that lands may open the next one down, which this runs again for.
+  $effect(() => {
+    for (const dir of openAndUnlisted(projectStore.tree, expandedPaths)) void projectStore.loadDir(dir);
+  });
+  // A filter looks at names in every folder, so the folders the tree has not listed have to be listed.
+  $effect(() => {
+    if (filter.trim()) void projectStore.loadFullTree();
+  });
   // The Tree instance — for its imperative `scrollToId` / `focusId` (the tree is virtualized, so a
   // DOM `scrollIntoView` on the selected row can't work when it's off-screen).
   let treeRef = $state<TreeController | null>(null);
@@ -132,7 +143,7 @@
   // back into focus — a `git checkout` or a commit in another tool changes it with none of the
   // others firing.
   $effect(() => {
-    void projectStore.tree;
+    void projectStore.treeEpoch;
     void projectStore.dirtyPaths.length;
     bennuGitStatusStore.refresh(projectStore.project?.root);
   });
@@ -322,6 +333,8 @@
 
   function onExpandToggle(id: string, next: boolean) {
     setFoldersOpen([id], next);
+    // A folder the tree has not listed yet is fetched when it is opened; its rows arrive a moment later.
+    if (next && findTreeNode(projectStore.tree, id)?.unloaded) void projectStore.loadDir(id);
   }
 
   /** Every directory path in the (sub)tree — used by Expand-all. */
@@ -335,7 +348,11 @@
   }
 
   function collapseAll() { treeExpansionStore.clearScope(projectRoot, 'project'); }
-  function expandAll() { setFoldersOpen(allDirIds(rootChildren), true); }
+  /** Open every folder: the ones the tree has not listed have to be fetched first, so the whole tree is. */
+  async function expandAll() {
+    await projectStore.loadFullTree();
+    setFoldersOpen(allDirIds(rootChildren), true);
+  }
 
   /**
    * The ancestor directory ids leading to `path`, or `null` when the tree has no such row.
@@ -363,6 +380,7 @@
     const path = projectStore.activeFilePath;
     if (!path) return;
     focusedPath = null;
+    await projectStore.ensureTreePath(path);
     setFoldersOpen(trailTo(path) ?? [], true);
     await tick();
     treeRef?.scrollToId(path);
@@ -431,6 +449,7 @@
   async function revealPath(path: string) {
     focusedPath = null;
     await projectStore.openFile(path);
+    await projectStore.ensureTreePath(path);
     setFoldersOpen(trailTo(path) ?? [], true);
     await tick();
     treeRef?.scrollToId(path);
@@ -1085,6 +1104,7 @@
         rowHeight={TREE_ROW_H}
         getId={(n) => n.path}
         getChildren={(n) => (n.is_dir ? n.children : undefined)}
+        hasChildren={(n) => n.is_dir && (n.children.length > 0 || !!n.unloaded)}
         selectedId={focusedPath ?? projectStore.activeFilePath}
         expandedIds={expandedPaths}
         {onExpandToggle}
@@ -1127,7 +1147,8 @@
             class="tree-label {faint}"
             style:color={git && !ctx.node.is_dir ? GIT_BADGE_COLOR[git] : undefined}
             use:tooltip={isTruncationMarker(ctx.node) ? 'The tree is capped; use Go to file for the rest' : ctx.node.ignored ? 'Ignored by git' : ''}
-          >{ctx.node.name}</span>
+>{ctx.node.name}</span>
+          {#if projectStore.slowDirs.has(ctx.node.path)}<Spinner size="xs" />{/if}
           {#if git}
             <span
               class="tree-git"

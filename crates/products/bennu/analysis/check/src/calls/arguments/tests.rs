@@ -695,3 +695,59 @@ fn the_reported_call_with_the_right_third_argument_is_ok() {
     let src = check_delegate_src().replace("ARG3", "new Token()");
     assert!(file_diags(&src).is_empty(), "{:?}", file_diags(&src));
 }
+
+// ── the commons-lang shapes ────────────────────────────────────────────────────────────────────
+
+/// `Svc` plus: an annotation type read from source (it lists no interface), an `Annotation`
+/// parameter, `int[]` / `Object[]` overloads, and a public overload beside two private ones.
+fn commons_lang_resolver() -> MapResolver {
+    use bennu_java::prelude::Visibility;
+    let mut r = resolver();
+    r.members.insert("java/lang/annotation/Annotation".to_string(), interface(vec![]));
+    let mut tag = interface(vec![]);
+    tag.flags.is_annotation = true;
+    r.members.insert("com/acme/Tag".to_string(), tag);
+    r.simple.insert("Tag".to_string(), "com/acme/Tag".to_string());
+    let array = |binary: &str| TypeRef { dims: 1, ..TypeRef::simple(binary) };
+    let ints = |m: &mut Member| m.params = vec![array("int"), array("int")];
+    let objects = |m: &mut Member| m.params = vec![array("java/lang/Object"), array("java/lang/Object")];
+    let mut contains_ints = method("containsAny", &[]);
+    ints(&mut contains_ints);
+    let mut contains_objects = method("containsAny", &[]);
+    objects(&mut contains_objects);
+    let svc = r.members.get_mut("com/acme/Svc").expect("Svc");
+    svc.methods.push(method("annotated", &["java/lang/annotation/Annotation"]));
+    svc.methods.push(returning("tag", &[], TypeRef::simple("com/acme/Tag")));
+    svc.methods.push(returning("ints", &[], array("int")));
+    svc.methods.push(contains_ints);
+    svc.methods.push(contains_objects);
+    svc.methods.push(method("same", &["com/acme/Animal", "com/acme/Animal"]));
+    svc.methods.push(method("same", &["com/acme/Dog", "com/acme/Animal"]).vis(Visibility::Private));
+    svc.methods.push(method("same", &["com/acme/Widget", "com/acme/Animal"]).vis(Visibility::Private));
+    r
+}
+
+fn commons_lang_diags(body: &str) -> Vec<String> {
+    let src = format!("class C {{ Svc s; void m() {{ {body} }} }}");
+    argument_type_errors(&src, &commons_lang_resolver()).into_iter().map(|d| d.message).collect()
+}
+
+#[test]
+fn an_annotation_type_read_from_source_is_an_annotation() {
+    assert!(commons_lang_diags("s.annotated(s.tag());").is_empty());
+}
+
+#[test]
+fn a_type_that_is_no_annotation_is_still_refused_where_one_is_wanted() {
+    one(&commons_lang_diags("s.annotated(s.widget());"), &["`Widget` cannot be passed where `Annotation`"]);
+}
+
+#[test]
+fn a_primitive_array_binds_to_the_primitive_overload_not_both() {
+    assert!(commons_lang_diags("s.containsAny(s.ints(), s.ints());").is_empty());
+}
+
+#[test]
+fn private_overloads_are_not_candidates_of_an_ambiguity() {
+    assert!(commons_lang_diags("s.same(null, s.dog());").is_empty());
+}
