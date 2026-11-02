@@ -147,17 +147,39 @@
     if (openSub === id) { openSub = null; } else { openSub = id; subFlip = false; subShift = 0; }
   }
 
+  /**
+   * Hand a pick to the owner, then close — in that order.
+   *
+   * The owner's `onSelect` almost always needs the thing the menu was opened ON (`menu.conn`, the
+   * row, the file), and `onClose` is where it forgets it. Closing first made every such menu read
+   * `null` and do nothing — a connection's "Connect", a tab's "Close", a worktree's actions — which
+   * is what the order was changed *from*.
+   *
+   * What the first order was protecting is a pick that opens the NEXT menu (Imber's submenu actions):
+   * closing afterwards would shut the one just opened. So the close is skipped when the pick replaced
+   * this menu — its position or its items are no longer what was clicked — and also when the owner
+   * has already dropped it (its props then throw on read, which is the same answer).
+   */
+  function pick(id: string) {
+    const [at, to, was] = [x, y, items];
+    onSelect(id);
+    let replaced: boolean;
+    try {
+      replaced = x !== at || y !== to || items !== was;
+    } catch {
+      replaced = true;
+    }
+    if (!replaced) onClose();
+  }
+
   function handleItem(item: MenuItem) {
     if (item.disabled || item.separator) return;
-    // Close first: a pick may open the next menu (Imber's submenu actions), and closing after it would shut that one.
-    onClose();
-    onSelect(item.id);
+    pick(item.id);
   }
 
   function handleAction(action: MenuAction) {
     if (action.disabled) return;
-    onClose();
-    onSelect(action.id);
+    pick(action.id);
   }
 
   // ── Keyboard navigation ─────────────────────────────────────────────────────

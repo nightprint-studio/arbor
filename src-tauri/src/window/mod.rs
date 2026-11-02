@@ -512,7 +512,7 @@ impl SurfaceKind {
 pub fn surface_kind_for_label(label: &str) -> SurfaceKind {
     if is_launcher_label(label) {
         SurfaceKind::Launcher
-    } else if label == hud::TYTO_HUD_LABEL || label == explorer::DRAG_OVERLAY_LABEL {
+    } else if label == hud::TYTO_HUD_LABEL {
         SurfaceKind::Overlay
     } else if label == tyto::TYTO_WINDOW_LABEL {
         SurfaceKind::Ambient
@@ -538,7 +538,7 @@ pub fn surface_kind_for_label(label: &str) -> SurfaceKind {
 /// Map a native window label to the Canopy product id it belongs to, if any.
 /// `corvus` → Corvus, `explorer`/`explorer-N` → Sitta, `merula`/`merula-N` →
 /// Merula, and one arm per single-window product (Tyto, Bennu, Picus, Garrulus).
-/// Anything else (launcher, drag-overlay, …) is not a product window.
+/// Anything else (launcher, the recording HUD, …) is not a product window.
 ///
 /// **Three behaviours hang off this map** and all three fail silently when a
 /// product is missing an arm: the launcher's running-state node, the backend

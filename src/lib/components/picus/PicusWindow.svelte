@@ -87,7 +87,10 @@
    */
   $effect(() => {
     for (const tab of picusTabsStore.tabs) {
-      if (tab.kind === 'query') void queryStore.read(tab.id).sql;
+      if (tab.kind === 'query') {
+        void queryStore.read(tab.id).sql;
+        void tab.title; // a rename is saved like an edit
+      }
     }
     void picusTabsStore.activeId;
     picusScratchStore.touch();

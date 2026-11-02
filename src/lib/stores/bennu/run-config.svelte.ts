@@ -22,6 +22,9 @@ import { SvelteMap } from 'svelte/reactivity';
 import { getRunConfig, setRunConfig } from '$lib/ipc/bennu';
 import type { CargoInvocation } from '$lib/ipc/bennu/cargo';
 import type { RunConfigDto, RunConfigSetDto } from '$lib/types/bennu';
+import {
+  emptyTomcat, nextResourceId, tomcatFromDto, tomcatToDto, type TomcatSettings,
+} from './tomcat-config';
 
 /** One key/value environment-variable row. Empty keys are dropped on the way to
  *  the run flow (see {@link envRecord}); kept in the draft so a half-typed row
@@ -39,7 +42,8 @@ export interface EnvVar {
  * Kept deliberately small. A category belongs here when Bennu can actually run that thing;
  * inventing empty groups to look like IntelliJ would be a menu of dead ends.
  */
-export type RunConfigKind = 'application' | 'springboot' | 'junit' | 'cargo' | 'script' | 'attach';
+export type RunConfigKind =
+  | 'application' | 'springboot' | 'junit' | 'cargo' | 'script' | 'attach' | 'tomcat';
 
 /** How much a `junit` configuration runs. */
 export type TestScopeKind = 'all' | 'module' | 'class';
@@ -77,6 +81,8 @@ export const RUN_KINDS: {
   // A JVM is the thing attached to, so it is offered where a JVM can be debugged. It launches
   // nothing: no Run, only Attach.
   { id: 'attach', label: 'Attach to JVM', newName: 'Remote JVM', capability: 'java' },
+  // A web module run on a Tomcat that Bennu starts and configures itself. Offered wherever a JVM runs.
+  { id: 'tomcat', label: 'Tomcat Server', newName: 'Tomcat', capability: 'java' },
 ];
 
 /** The port a new Attach configuration starts with — the one `-agentlib:jdwp` examples use. */
@@ -87,7 +93,7 @@ export const DEFAULT_ATTACH_PORT = 5005;
  *  understand would silently delete someone's configuration. */
 export function isRunKind(s: string): s is RunConfigKind {
   return s === 'application' || s === 'springboot' || s === 'junit' || s === 'cargo'
-    || s === 'script' || s === 'attach';
+    || s === 'script' || s === 'attach' || s === 'tomcat';
 }
 
 /** The port an `attach` configuration names, or `null` when it is not 1–65535. Empty reads as the
@@ -215,6 +221,11 @@ export interface RunConfig {
   /** The JDWP port of the JVM to attach to, on this machine's loopback. Kept as the string the
    *  file holds; {@link attachPortOf} is the checked reading of it. */
   attachPort: string;
+
+  // ── `tomcat` only ─────────────────────────────────────────────────────────
+  /** The server, its deployment and the resources of its context. `env`, `vmArgs` and `module` are
+   *  shared with the other kinds: they reach the Tomcat JVM and pick the web module. */
+  tomcat: TomcatSettings;
 }
 
 /** The per-project run-config bundle — the ordered list plus which one is active. */
@@ -263,8 +274,12 @@ function toDto(c: RunConfig): RunConfigDto {
     script_shell: c.scriptShell,
     env_file: c.envFile,
     attach_port: c.attachPort,
+    tomcat: tomcatToDto(c.tomcat),
   };
 }
+
+/** The wire form of a configuration, for a caller that sends the whole of one (the Tomcat launch). */
+export const runConfigToDto = toDto;
 
 /** Wire shape → store shape. Tolerant of a hand-edited TOML with fields missing: a config
  *  with no `vm_args` key is a config with no VM args, not a crash on opening the editor.
@@ -306,6 +321,7 @@ function fromDto(d: RunConfigDto): RunConfig {
     scriptShell: d.script_shell ?? '',
     envFile: d.env_file ?? '',
     attachPort: d.attach_port ?? '',
+    tomcat: tomcatFromDto(d.tomcat),
   };
 }
 
@@ -342,6 +358,7 @@ export function emptyConfig(name = 'Unnamed', kind: RunConfigKind = 'application
     scriptShell: '',
     envFile: '',
     attachPort: kind === 'attach' ? String(DEFAULT_ATTACH_PORT) : '',
+    tomcat: emptyTomcat(),
   };
 }
 
@@ -542,6 +559,12 @@ function createRunConfigStore() {
         id: nextId(),
         name: uniqueName(set.configs, `${src.name} copy`),
         env: src.env.map((e) => ({ ...e })),
+        // Resources are objects with identities: a stored password is filed under one, so the copy
+        // gets its own (it starts without a password — that belongs to the original configuration).
+        tomcat: {
+          ...src.tomcat,
+          resources: src.tomcat.resources.map((r) => ({ ...r, id: nextResourceId() })),
+        },
       };
       const idx = set.configs.indexOf(src);
       set.configs.splice(idx + 1, 0, copy);

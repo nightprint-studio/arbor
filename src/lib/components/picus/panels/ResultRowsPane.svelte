@@ -22,6 +22,8 @@
   import { readOrigins, type Origins } from './column-origins';
   import { openResultContextMenu } from './result-context-menu';
   import { asCell } from './result-cells';
+  import { columnKeyMarks } from './column-keys';
+  import { schemaStore } from '$lib/stores/picus/schema.svelte';
   import { resultEditStore, type Editability } from '$lib/stores/picus/result-edit.svelte';
   import type { PicusResult } from '$lib/stores/picus/result.svelte';
 
@@ -100,6 +102,39 @@
     pickedTable && origins.groups.some((g) => g.table === pickedTable) ? pickedTable : null,
   );
 
+  // ── Key icons ───────────────────────────────────────────────────────────────
+  //
+  // A column is a key of the table the SERVER says it was read from, so the lookup goes
+  // through `columnSources` and not through the column's name: `SELECT a.id, b.id` has two
+  // columns called `id` and only one of them is a primary key. Constraints are not in the
+  // schema snapshot, so a table's detail is read once, the first time a result needs it.
+
+  const relationOf = (table: string) => {
+    const bare = table.split('.').pop()?.replace(/"/g, '') ?? table;
+    const upper = bare.toUpperCase();
+    return schemaStore.of(result.connectionId).relations.find((r) => r.name.toUpperCase() === upper) ?? null;
+  };
+
+  const sourceByColumn = $derived(new Map(result.columnSources.map((s) => [s.index, s])));
+
+  const detailRequested = new Set<string>();
+  $effect(() => {
+    const id = result.connectionId;
+    for (const table of origins.tableByColumn.values()) {
+      const relation = relationOf(table);
+      if (!relation || relation.kind !== 'table' || relation.foreignKeys !== undefined) continue;
+      const key = `${id}::${relation.name}`;
+      if (detailRequested.has(key)) continue;
+      detailRequested.add(key);
+      void schemaStore.detail(relation.name, id);
+    }
+  });
+
+  const keyMarksOf = (i: number) => {
+    const source = sourceByColumn.get(i);
+    return source?.table && source.name ? columnKeyMarks(relationOf(source.table), source.name) : [];
+  };
+
   const gridColumns = $derived<DataGridColumn[]>(
     result.columns.slice(0, visibleColumnCount).map((c, i) => ({
       id: c.name,
@@ -114,6 +149,7 @@
       // bright class of column to look for rather than two competing ones.
       muted: highlight !== null && origins.tableByColumn.get(i) !== highlight,
       title: origins.labelByColumn.get(i),
+      marks: keyMarksOf(i),
     })),
   );
 

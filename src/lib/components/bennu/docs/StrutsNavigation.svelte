@@ -85,6 +85,19 @@
   variables are left alone.
 </p>
 
+<h2>From <code>struts.xml</code></h2>
+<p>
+  The config file points the other way: it names the class and the method an action runs. <kbd>Ctrl</kbd> + <kbd>B</kbd> on an <code>&lt;action&gt;</code> tag:
+</p>
+<table>
+  <thead><tr><th>The caret on</th><th>Opens</th></tr></thead>
+  <tbody>
+    <tr><td><code>class="…"</code></td><td>The action class — a fully qualified name, or a Spring bean id resolved to its class</td></tr>
+    <tr><td><code>method="…"</code></td><td>That method, on the action class or on a project superclass that declares it. A wildcard like <code>method="&lbrace;1&rbrace;"</code> is left alone</td></tr>
+    <tr><td><code>name="…"</code></td><td>The action class</td></tr>
+  </tbody>
+</table>
+
 <h2>Following the whole path</h2>
 <p>
   Go-to and hover <strong>follow every segment</strong>, not only the head. On <code>%&lbrace;ordine.cliente.nome&rbrace;</code> — or a field named that way —

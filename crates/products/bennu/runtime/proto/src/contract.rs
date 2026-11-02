@@ -1422,6 +1422,145 @@ pub struct RunConfig {
     /// port that is not a number costs one configuration its port and not the project all of
     /// them; it is checked (1–65535) when the configuration is launched. Empty = 5005.
     pub attach_port: String,
+    /// `tomcat` only — the server, its deployment and the JNDI resources of its context. Everything
+    /// else a Tomcat launch needs is shared: `env` and `vm_args` reach the Tomcat JVM, `module`
+    /// names the web module, `debug_suspend` and `classpath_scope` mean what they mean for any JVM.
+    pub tomcat: TomcatRunConfig,
+}
+
+/// The Tomcat-specific half of a `tomcat` [`RunConfig`] — one `[bennu.run.configs.tomcat]` table.
+///
+/// Nothing secret lives here: a datasource password in `"secret"` mode is kept outside the
+/// repository (see `tomcat_run::secrets`) and this struct carries only the fact that it is one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TomcatRunConfig {
+    /// Absolute path of the Tomcat installation (`CATALINA_HOME`). Empty = none chosen yet.
+    pub home: String,
+    /// The HTTP connector's port.
+    pub http_port: u16,
+    /// The port Tomcat listens on for its shutdown command. Distinct from the HTTP one.
+    pub shutdown_port: u16,
+    /// The context path the application is served under (`/gestionale`, or `/` for the root).
+    pub context_path: String,
+    /// `"live"` — Tomcat serves the module's `src/main/webapp` with the compiled classes and the
+    /// runtime dependencies mounted under it, so nothing is packaged — or `"external"` — Tomcat
+    /// serves [`doc_base`](Self::doc_base), an exploded directory or a `.war` built elsewhere.
+    pub deploy: String,
+    /// `external` only — the directory or `.war` to serve.
+    pub doc_base: String,
+    /// Reload the context when `WEB-INF/classes` changes (Tomcat's `reloadable`).
+    pub reloadable: bool,
+    /// Extra JVM options for the Tomcat process, a raw single-line string.
+    pub jvm_args: String,
+    /// Open the application in the browser once Tomcat reports it has started.
+    pub open_browser: bool,
+    /// Where the generated `CATALINA_BASE` directories live. Empty = `<root>/.arbor/bennu/tomcat`.
+    pub base_dir: String,
+    /// Where downloaded Tomcat installations are unpacked. Empty = one folder in the Bennu profile,
+    /// shared by every project (an installation is the same program for all of them).
+    pub install_dir: String,
+    /// `"guided"` — the context is generated from [`resources`](Self::resources) — or `"raw"` —
+    /// [`context_raw`](Self::context_raw) is written as it is.
+    pub context_mode: String,
+    /// The hand-written `context.xml`, used when [`context_mode`](Self::context_mode) is `"raw"`.
+    pub context_raw: String,
+    /// The JNDI resources of the generated context.
+    pub resources: Vec<TomcatResource>,
+}
+
+impl Default for TomcatRunConfig {
+    fn default() -> Self {
+        Self {
+            home: String::new(),
+            http_port: 8080,
+            shutdown_port: 8005,
+            context_path: "/".to_string(),
+            deploy: "live".to_string(),
+            doc_base: String::new(),
+            reloadable: false,
+            jvm_args: String::new(),
+            open_browser: true,
+            base_dir: String::new(),
+            install_dir: String::new(),
+            context_mode: "guided".to_string(),
+            context_raw: String::new(),
+            resources: Vec::new(),
+        }
+    }
+}
+
+/// One entry of a generated Tomcat `context.xml`: a JDBC data source, an environment entry or a
+/// context parameter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TomcatResource {
+    /// Stable id (FE-generated) — what a stored secret is filed under.
+    pub id: String,
+    /// `"datasource"`, `"env"` or `"param"`.
+    pub kind: String,
+    /// The JNDI name (`jdbc/Gestionale`, relative to `java:comp/env/`), or the parameter name.
+    pub name: String,
+    /// `datasource` — the JDBC driver class.
+    pub driver: String,
+    /// `datasource` — a driver jar to copy into the server's `lib/` at launch, for a driver the
+    /// project does not depend on. Empty = find it on the project's runtime classpath by name.
+    /// Absolute, or relative to the project root.
+    pub driver_jar: String,
+    /// `datasource` — the JDBC URL.
+    pub url: String,
+    /// `datasource` — the database user.
+    pub user: String,
+    /// `datasource` — `"secret"` (kept outside the repository, handed to Tomcat as a system
+    /// property) or `"clear"` (written into the generated context).
+    pub password_mode: String,
+    /// `datasource` in `"clear"` mode — the password. Always empty in `"secret"` mode.
+    pub password: String,
+    /// `datasource` — `maxTotal`.
+    pub max_total: u32,
+    /// `datasource` — `maxIdle`.
+    pub max_idle: u32,
+    /// `datasource` — `maxWaitMillis`.
+    pub max_wait_ms: u32,
+    /// `datasource` — `validationQuery`; empty omits it.
+    pub validation_query: String,
+    /// `datasource` — `testOnBorrow`.
+    pub test_on_borrow: bool,
+    /// `datasource` — the id of the Picus connection this one was taken from, or is checked with.
+    /// Only the front end uses it (to ask Picus whether that database answers); the generated
+    /// context does not mention it.
+    pub picus_connection: String,
+    /// `env` — the Java type of the value (`java.lang.String`).
+    pub value_type: String,
+    /// `env` / `param` — the value.
+    pub value: String,
+    /// `env` — whether the application's `web.xml` may override the value.
+    pub allow_override: bool,
+}
+
+impl Default for TomcatResource {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            kind: "datasource".to_string(),
+            name: String::new(),
+            driver: String::new(),
+            driver_jar: String::new(),
+            url: String::new(),
+            user: String::new(),
+            password_mode: "secret".to_string(),
+            password: String::new(),
+            max_total: 20,
+            max_idle: 5,
+            max_wait_ms: 10_000,
+            validation_query: String::new(),
+            test_on_borrow: true,
+            picus_connection: String::new(),
+            value_type: "java.lang.String".to_string(),
+            value: String::new(),
+            allow_override: false,
+        }
+    }
 }
 
 impl Default for RunConfig {
@@ -1459,6 +1598,7 @@ impl Default for RunConfig {
             script_shell: String::new(),
             env_file: String::new(),
             attach_port: String::new(),
+            tomcat: TomcatRunConfig::default(),
         }
     }
 }

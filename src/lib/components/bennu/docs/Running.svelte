@@ -213,6 +213,25 @@
   The configuration is read when a run starts.
 </p>
 
+<h3>The clean view</h3>
+<p>
+  A log says a lot that is not what you are looking for. The <strong>eye</strong> at the top of the console (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd>) draws it without that,
+  and only draws it: the text the program wrote is untouched, so copy, select-all, search and <em>Fix with Imber</em> all work on the original.
+</p>
+<ul>
+  <li><strong>Columns</strong> — the time, the level word (or its letter), the thread (hidden, shortened to <code>exec-3</code>, or full) and the logger (abbreviated, class name only, full or
+    hidden) are each chosen from the <strong>panel button</strong> at the right of the toolbar. The logger shows on lines whose layout Bennu read from the project's logging configuration.</li>
+  <li><strong>Rules</strong> hide, dim or highlight the lines of a logger, a thread, a level or a message — by prefix, text, exact value or regular expression. The quick way is to
+    <strong>right-click a line</strong>: hide, dim or highlight its logger, hide everything from its package, hide its thread. A toast offers <em>Undo</em>; the settings list every rule to edit or remove.
+    A run of hidden lines is one row, <code>▸ 14 hidden lines</code>, that opens in place.</li>
+  <li><strong>Stack traces</strong> keep the exception, every <code>Caused by:</code> and the frames of <em>your</em> code, and fold the rest into <code>▸ 14 framework frames</code> (press to open).
+    Your code is the packages Bennu finds in the project's sources; <strong>Also mine</strong> adds more. With no package known nothing folds.</li>
+  <li><strong>Repeats</strong> — identical lines in a row (a pool's heartbeat) become one with <code>×12</code>.</li>
+  <li><strong>The level</strong> menu and the <strong>filter</strong> box narrow the console by severity and by text, with the eye on or off.</li>
+  <li>The command palette has <em>Console: toggle clean view</em>, <em>show all levels</em> and <em>show only warnings and errors</em>; <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> works from anywhere in Bennu.</li>
+</ul>
+<p>The settings are kept in your Bennu profile and apply to every project's console.</p>
+
 <h3>Tabs</h3>
 <ul>
   <li><strong>Each tab says which project it came from</strong> in a workspace with more than one — a chip after the label, since run

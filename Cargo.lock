@@ -1027,6 +1027,7 @@ dependencies = [
  "bennu-ssr",
  "bennu-templates",
  "bennu-test",
+ "bennu-tomcat",
  "bennu-toolconf",
  "bennu-web",
  "bennu-wgsl",
@@ -1576,6 +1577,14 @@ dependencies = [
  "bennu-complete",
  "bennu-facts",
  "roxmltree",
+ "serde",
+]
+
+[[package]]
+name = "bennu-tomcat"
+version = "0.3.0"
+dependencies = [
+ "bennu-proto",
  "serde",
 ]
 

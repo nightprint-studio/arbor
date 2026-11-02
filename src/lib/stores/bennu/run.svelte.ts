@@ -41,6 +41,8 @@
  */
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { runTomcat as ipcRunTomcat } from '$lib/ipc/bennu/tomcat';
 import { coalesceBatch, coalesceLatest } from '$lib/utils/coalesce';
 import { appendLogLines } from './log-buffer';
 import {
@@ -62,7 +64,7 @@ import { bennuDebugStore } from './debug.svelte';
 import { debugAttach } from '$lib/ipc/bennu/debug';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import {
-  bennuRunConfigStore, splitArgs, envRecord, isRunKind, cargoInvocationOf, attachPortOf,
+  bennuRunConfigStore, splitArgs, envRecord, isRunKind, cargoInvocationOf, attachPortOf, runConfigToDto,
   type RunConfig,
 } from './run-config.svelte';
 import {
@@ -177,7 +179,19 @@ interface GradleRunSpec {
   label: string;
 }
 
-type RunSpec = JvmRunSpec | CargoRunSpec | ScriptRunSpec | MavenRunSpec | GradleRunSpec | AttachRunSpec;
+type RunSpec =
+  | JvmRunSpec | CargoRunSpec | ScriptRunSpec | MavenRunSpec | GradleRunSpec | AttachRunSpec | TomcatRunSpec;
+
+/** A web module run on Tomcat. The whole configuration is kept: the backend regenerates the
+ *  server's base from it at every launch, so a rerun repeats exactly what was configured. */
+interface TomcatRunSpec {
+  kind: 'tomcat';
+  root: string;
+  cfg: RunConfig;
+  env: Record<string, string>;
+  label: string;
+  debug: boolean;
+}
 
 /** A debugger attached to a JVM that is already running. Not a launch: there is no process of
  *  ours, so the tab's "run" is the debug session and its Stop is a detach. */
@@ -589,7 +603,8 @@ function createBennuRunStore() {
     add(
       await listen<{ run_id: string; stream: string; text: string } & LogAnnotation>(
         'arbor://bennu/run-output',
-        (e) =>
+        (e) => {
+          noteTomcatOutput(e.payload.run_id, e.payload.text);
           flushRunEvents({
             kind: 'out',
             runId: e.payload.run_id,
@@ -599,7 +614,8 @@ function createBennuRunStore() {
               level: e.payload.level,
               pieces: e.payload.pieces,
             },
-          }),
+          });
+        },
       ),
     );
     add(
@@ -824,23 +840,21 @@ function createBennuRunStore() {
     claimRun(id, p.run_id, { command: p.command ?? '', workingDir: p.working_dir ?? '' });
   }
 
-  async function launch(spec: JvmRunSpec): Promise<void> {
-    // A launch is never refused for a compile in flight: another project's compile does not
-    // concern it, and an earlier one of THIS project is waited for (see `build`). A program already
-    // RUNNING is no reason at all — a server and the client that talks to it are two runs.
-    const cls = spec.mainClass.trim();
-    if (!cls) return;
-
-    // A new tab, not a cleared buffer: the previous run stays readable beside this one.
-    const id = openTab(spec, spec.label || cls.split('.').pop() || cls, cls);
+  /**
+   * Compile what a launch will run, narrating into its console tab. `true` when the classes are
+   * current; on `false` the tab is already marked finished and says why.
+   *
+   * One function for the two launchers that start a JVM on the project's own classes (an
+   * application and a Tomcat), so "what counts as a usable build" is decided once.
+   */
+  async function compileBeforeRun(id: string, root: string, module: string): Promise<boolean> {
     pushTo(
       id,
-      locks.isBusy(rootKey(spec.root)) ? 'Waiting for the build in progress on this project…' : 'Compiling…',
+      locks.isBusy(rootKey(root)) ? 'Waiting for the build in progress on this project…' : 'Compiling…',
       'meta',
     );
-
     // Only the module being run (and what it is built from) — see `bennu_build`'s `module`.
-    const res = await build(spec.root, false, spec.module);
+    const res = await build(root, false, module);
     if (res?.ok && res.tool === 'up-to-date') {
       // Worth saying: the launch was instant because there was nothing to compile, not
       // because the compile was skipped by accident.
@@ -856,7 +870,7 @@ function createBennuRunStore() {
         'err',
       );
       patchTab(id, { finished: true });
-      return;
+      return false;
     }
     if (res.tool === 'javac') {
       // The fallback compiles into `target/bennu-classes`, which no run classpath reads: launching
@@ -868,8 +882,61 @@ function createBennuRunStore() {
         'err',
       );
       patchTab(id, { finished: true });
-      return;
+      return false;
     }
+    return true;
+  }
+
+  /**
+   * Start Tomcat for a configuration: compile, then let the backend generate the server's base and
+   * start it. The console is the server's own — Stop kills it, ⟳ repeats the launch, and the
+   * debugger attaches the way it does for any JVM.
+   */
+  async function launchTomcat(spec: TomcatRunSpec): Promise<void> {
+    const id = openTab(spec, spec.label, `Tomcat :${spec.cfg.tomcat.httpPort}`);
+    if (!(await compileBeforeRun(id, spec.root, spec.cfg.module.trim()))) return;
+
+    patchTab(id, { live: true, startedAt: Date.now() });
+    try {
+      const handle = await ipcRunTomcat(spec.root, runConfigToDto(spec.cfg), {
+        env: spec.env,
+        debug: spec.debug,
+      });
+      claimRun(id, handle.run_id, { command: handle.command, workingDir: handle.working_dir });
+    } catch (e) {
+      patchTab(id, { live: false, finished: true });
+      // The refusals — a port in use, a Tomcat that needs a newer Java — name what to change, so they
+      // are kept in the tab beside the launch that did not happen.
+      pushTo(id, `Could not start: ${e instanceof Error ? e.message : String(e)}`, 'err');
+    }
+  }
+
+  /** Runs whose browser has already been opened, so a restart that prints the line again does not
+   *  open a second tab. */
+  const browserOpened = new Set<string>();
+
+  /** Open the application once Tomcat says it has started — the line `catalina` prints last. */
+  function noteTomcatOutput(runId: string, text: string) {
+    if (!text.includes('Server startup in') || browserOpened.has(runId)) return;
+    const tab = tabForRun(runId);
+    if (!tab || tab.spec.kind !== 'tomcat') return;
+    browserOpened.add(runId);
+    const t = tab.spec.cfg.tomcat;
+    if (!t.openBrowser) return;
+    const path = t.contextPath.trim() || '/';
+    void openUrl(`http://localhost:${t.httpPort}${path.endsWith('/') ? path : path + '/'}`);
+  }
+
+  async function launch(spec: JvmRunSpec): Promise<void> {
+    // A launch is never refused for a compile in flight: another project's compile does not
+    // concern it, and an earlier one of THIS project is waited for (see `build`). A program already
+    // RUNNING is no reason at all — a server and the client that talks to it are two runs.
+    const cls = spec.mainClass.trim();
+    if (!cls) return;
+
+    // A new tab, not a cleared buffer: the previous run stays readable beside this one.
+    const id = openTab(spec, spec.label || cls.split('.').pop() || cls, cls);
+    if (!(await compileBeforeRun(id, spec.root, spec.module))) return;
 
     patchTab(id, { live: true, startedAt: Date.now() });
     try {
@@ -1062,6 +1129,15 @@ function createBennuRunStore() {
     }
     const env = await launchEnv(root, cfg);
     if (!env) return;
+    if (cfg.kind === 'tomcat') {
+      if (!cfg.tomcat.home.trim()) {
+        bennuUiStore.showBottom('run');
+        pushRun(`“${cfg.name}” has no Tomcat chosen — pick an installation or download one in the configuration.`, 'err');
+        return;
+      }
+      await launchTomcat({ kind: 'tomcat', root, cfg, env, label: debug ? `Debug ${cfg.name}` : cfg.name, debug });
+      return;
+    }
     if (cfg.kind === 'cargo') {
       // Debugging a cargo configuration is the configuration you have, with a debugger. The backend
       // builds the target first and launches the binary under an adapter — `cargo run` cannot be
@@ -1328,6 +1404,10 @@ function createBennuRunStore() {
     }
     if (from.spec.kind === 'attach') {
       await launchAttach(from.spec);
+      return;
+    }
+    if (from.spec.kind === 'tomcat') {
+      await launchTomcat(from.spec);
       return;
     }
     await launch(from.spec);

@@ -433,6 +433,56 @@ export interface RunConfigDto {
   env_file?: string;
   /** `attach` only — the JDWP port of the JVM to attach to, on loopback. Empty = 5005. */
   attach_port?: string;
+  /** `tomcat` only — the server, its deployment and the resources of its context. */
+  tomcat?: TomcatRunConfigDto;
+}
+
+/** One JNDI resource of a generated Tomcat `context.xml`. A `secret` password is never in here:
+ *  it lives outside the repository and the form only knows whether one is stored. */
+export interface TomcatResourceDto {
+  id: string;
+  /** `"datasource"` | `"env"` | `"param"`. */
+  kind: string;
+  name: string;
+  driver: string;
+  /** A driver jar to copy into the server's `lib/` (`''` = find it on the classpath). */
+  driver_jar: string;
+  url: string;
+  user: string;
+  /** `"secret"` | `"clear"`. */
+  password_mode: string;
+  /** Only meaningful when `password_mode` is `"clear"`. */
+  password: string;
+  max_total: number;
+  max_idle: number;
+  max_wait_ms: number;
+  validation_query: string;
+  test_on_borrow: boolean;
+  /** The Picus connection this data source came from or is tested with (`''` = none). */
+  picus_connection: string;
+  value_type: string;
+  value: string;
+  allow_override: boolean;
+}
+
+/** The Tomcat half of a `tomcat` run configuration — wire shape of `TomcatRunConfig`. */
+export interface TomcatRunConfigDto {
+  home: string;
+  http_port: number;
+  shutdown_port: number;
+  context_path: string;
+  /** `"live"` | `"external"`. */
+  deploy: string;
+  doc_base: string;
+  reloadable: boolean;
+  jvm_args: string;
+  open_browser: boolean;
+  base_dir: string;
+  install_dir: string;
+  /** `"guided"` | `"raw"`. */
+  context_mode: string;
+  context_raw: string;
+  resources: TomcatResourceDto[];
 }
 
 /** The per-repo run-config bundle stored in `<root>/.arbor/config.toml`. */

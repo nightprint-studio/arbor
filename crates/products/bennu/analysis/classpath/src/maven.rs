@@ -413,9 +413,12 @@ fn resolve_reactor_module(
         .arg("-pl")
         .arg(&module)
         .arg("-am")
-        // The launch compiled a moment ago: the phase is wanted, the work is not.
+        // The launch compiled a moment ago: the phase is wanted, the work is not. Ant steps bound to
+        // the early phases are skipped too: they copy or generate files for a packaged build, and one
+        // that fails on a module stops that module's classpath from being written at all.
         .arg("-Dmaven.main.skip=true")
         .arg("-Dmaven.resources.skip=true")
+        .arg("-Dmaven.antrun.skip=true")
         .arg(format!("-Dmdep.outputFile=target/{REACTOR_OUTPUT_FILE_NAME}"))
         .arg("-Dmdep.ignoreMissing=true")
         .arg("--fail-never")

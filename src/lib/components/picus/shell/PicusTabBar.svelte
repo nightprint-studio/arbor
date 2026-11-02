@@ -10,9 +10,10 @@
   import { tooltip } from '$lib/actions/tooltip';
   import {
     FileText, Table2, Play, FormInput, Layers, Eye, ListOrdered, Zap, Replace,
-    X, XCircle, ArrowRightFromLine, Copy,
+    X, XCircle, ArrowRightFromLine, Copy, Pencil,
   } from 'lucide-svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
+  import InlineEdit from '$lib/components/shared/ui/InlineEdit.svelte';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import PicusDialectChip from '../PicusDialectChip.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -52,6 +53,12 @@
     const others = picusTabsStore.closableCount(t.id);
     const right = picusTabsStore.closableToRight(t.id);
     return [
+      ...(picusTabsStore.isRenamable(t)
+        ? [
+            { id: 'rename', label: 'Rename', icon: Pencil, shortcut: 'F2' },
+            { id: 'sep-rename', label: '', separator: true },
+          ]
+        : []),
       {
         id: 'close', label: 'Close', icon: X, shortcut: 'Ctrl+W',
         disabled: pinned,
@@ -78,6 +85,7 @@
     menu = null;
     if (!t) return;
     switch (id) {
+      case 'rename':       picusTabsStore.startRename(t.id); break;
       case 'close':        picusTabsStore.close(t.id); break;
       case 'close-others': picusTabsStore.closeOthers(t.id); break;
       case 'close-right':  picusTabsStore.closeToRight(t.id); break;
@@ -130,7 +138,30 @@
     {:else if Icon}
       <Icon size={13} />
     {/if}
-    <span class="ptab-label">{item.label}</span>
+    {#if picusTabsStore.renamingId === tab.id}
+      <!-- Keys and pointer stay inside the editor: the strip would otherwise read Space/Enter
+           as "activate the tab" and a press as the start of a drag. -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <span
+        class="ptab-rename"
+        onpointerdown={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
+        ondblclick={(e) => e.stopPropagation()}
+      >
+        <InlineEdit
+          value={tab.title}
+          maxlength={80}
+          onconfirm={(title) => picusTabsStore.rename(tab.id, title)}
+          oncancel={() => picusTabsStore.cancelRename()}
+        />
+      </span>
+    {:else}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <span
+        class="ptab-label"
+        ondblclick={() => picusTabsStore.startRename(tab.id)}
+      >{item.label}</span>
+    {/if}
     {#if tab.dialect}
       <PicusDialectChip engine={tab.dialect} terse />
     {/if}
@@ -164,6 +195,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .ptab-rename { display: inline-flex; min-width: 140px; }
   .ptab-dirty {
     width: 6px;
     height: 6px;

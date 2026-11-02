@@ -49,6 +49,7 @@
     "@iconify-icons/simple-icons": "^1.2.74",
     "@iconify-icons/vscode-icons": "^1.2.29",
     "@iconify/svelte": "^5.2.1",
+    "@crabnebula/tauri-plugin-drag": "^2.1.0",
     "@lezer/highlight": "^1.2.0",
     "@replit/codemirror-minimap": "^0.5.2",
     "@tauri-apps/api": "^2",

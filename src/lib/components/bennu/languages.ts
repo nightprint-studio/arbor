@@ -163,6 +163,8 @@ function jinjaLang(name: string): LanguageDescriptor {
 // generic one cannot: element/attribute/value completion, ghost text, and a hover carrying the
 // schema's own documentation. Silent when no schema resolves, which is most files.
 const xmlLang = xmlSchemaLang('xml', xml);
+/** Plain XML for a field that holds a document (a Tomcat `context.xml`), not a file of the project. */
+export const xmlLanguage = xmlLang;
 // A pom is XML whose top-level blocks mean different things, so each section gets its own hue.
 // A descriptor of its own: the identity keys the editor, and the pom's extra colouring must not
 // leak onto every other XML file.

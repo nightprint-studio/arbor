@@ -526,7 +526,6 @@
       "src/lib/components/shared/docs/RepoBrowser.svelte": 1,
       "src/lib/components/shared/docs/Submodules.svelte": 4,
       "src/lib/components/shared/DocsShell.svelte": 6,
-      "src/lib/components/shared/DragOverlay.svelte": 3,
       "src/lib/components/shared/ImageLightbox.svelte": 5,
       "src/lib/components/shared/internal/diff/DiffHunk.svelte": 3,
       "src/lib/components/shared/internal/diff/DiffToolbar.svelte": 1,

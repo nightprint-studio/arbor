@@ -21,7 +21,7 @@
   </tbody>
 </table>
 <p>By default, re-summoning <strong>focuses the existing window</strong> instead of opening a second one. Turn on <strong>Always open a new window</strong> (in the explorer's settings) if you prefer a fresh window each time. Closing a window (its close button or <Kbd label="Ctrl+W" /> on the last tab) closes it for good — the next open starts fresh.</p>
-<p>Open windows work <strong>together</strong>: the clipboard is shared, so you can copy in one and paste in another, and you can <strong>drag items from one explorer window onto another</strong> to move them into the folder it's showing — a ghost follows the cursor across the desktop, and the target window comes forward on drop.</p>
+<p>Open windows work <strong>together</strong>: the clipboard is shared, so you can copy in one and paste in another, and you can <strong>drag items from one explorer window onto another</strong> to move them into the folder it's showing — the target window comes forward on drop. The drag is the system's own, so the same gesture carries the real files to any other application too: a browser upload, a chat, another file manager.</p>
 
 <h2>Layout</h2>
 <ul class="step-list">

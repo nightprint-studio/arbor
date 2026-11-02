@@ -40,18 +40,6 @@ pub struct PendingReveals(pub Mutex<HashMap<String, RevealPayload>>);
 /// `getCurrentWindow().label` and matches this to switch into explorer mode.
 pub const EXPLORER_WINDOW_LABEL: &str = "explorer";
 
-/// Label for the shared drag-ghost overlay window. A single, transparent,
-/// click-through, always-on-top window (created lazily, then reused + hidden)
-/// that renders the dragged item label and follows the cursor — so a drag that
-/// leaves its source window's bounds keeps a visible ghost across the desktop,
-/// which a DOM-only ghost (clipped to the source webview) cannot do.
-pub const DRAG_OVERLAY_LABEL: &str = "drag-overlay";
-
-/// True for any dedicated explorer window label (`explorer` or `explorer-N`).
-fn is_explorer_label(label: &str) -> bool {
-    label == EXPLORER_WINDOW_LABEL || label.starts_with(&format!("{EXPLORER_WINDOW_LABEL}-"))
-}
-
 /// Parse a Tauri accelerator string (e.g. `"Ctrl+Shift+E"`) into a `Shortcut`.
 /// Returns `None` for an empty or unparseable string.
 fn parse_accel(accel: &str) -> Option<Shortcut> {
@@ -391,123 +379,59 @@ pub fn explorer_clip_clear(app: AppHandle, state: State<'_, ExplorerClipboard>) 
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-//  Cross-window drag & drop (overlay ghost + drop hit-testing)
+//  Drag & drop out of, and between, explorer windows
 // ───────────────────────────────────────────────────────────────────────────
+//
+// The drag itself is the OS's (`tauri-plugin-drag`, started from the front end), so it carries the
+// real files and can end on any window or application. What the OS hands a webview that is dropped
+// on is a list of `File` objects without paths, so the paths of the drag in flight are kept here:
+// the explorer window that receives the drop asks for them, which is how a move between two
+// explorer windows knows what to move.
 
-/// Label shown on the drag-ghost overlay (e.g. `"3 items"`). The overlay window
-/// pulls this on mount and re-reads it on the `arbor://drag-overlay-set` event,
-/// avoiding an emit-before-listen race the first time it's shown.
+/// The paths of the drag that started in an explorer window. Overwritten by the next drag; cleared
+/// shortly after one ends (the receiving window may still be reading it as the drag finishes).
 #[derive(Default)]
-pub struct DragOverlayText(pub Mutex<String>);
+pub struct ExplorerDrag(pub Mutex<Vec<String>>);
 
-/// Drain the current overlay label (called by the overlay window's frontend on
-/// mount). Subsequent updates arrive via `arbor://drag-overlay-set`.
+/// Remember the paths a drag is carrying.
 #[tauri::command]
-pub fn get_drag_overlay_text(state: State<'_, DragOverlayText>) -> String {
+pub fn explorer_drag_set(state: State<'_, ExplorerDrag>, paths: Vec<String>) {
+    if let Ok(mut g) = state.0.lock() { *g = paths; }
+}
+
+/// The paths of the drag in flight (empty when it did not start in an explorer window).
+#[tauri::command]
+pub fn explorer_drag_get(state: State<'_, ExplorerDrag>) -> Vec<String> {
     state.0.lock().map(|g| g.clone()).unwrap_or_default()
 }
 
-/// Build the shared drag-ghost overlay window: transparent, frameless,
-/// always-on-top, skip-taskbar, unfocusable and click-through, created hidden
-/// (shown only for the duration of a drag — a *visible* window parked off-screen
-/// gets yanked back on-screen by the Windows WM at creation). Mirrors the
-/// explorer windows' WebView2 env (see [`WEBVIEW_BROWSER_ARGS`]) — a mismatched
-/// second webview fails with `HRESULT 0x8007139F`.
-fn build_drag_overlay(app: &AppHandle) {
-    let res = WebviewWindowBuilder::new(app, DRAG_OVERLAY_LABEL, WebviewUrl::default())
-        .title("")
-        .inner_size(360.0, 52.0)
-        .decorations(false)
-        // .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .shadow(false)
-        .focused(false)
-        .visible(false)
-        .additional_browser_args(WEBVIEW_BROWSER_ARGS)
-        .build();
-    match res {
-        Ok(w) => { let _ = w.set_ignore_cursor_events(true); }
-        Err(e) => tracing::error!("failed to build drag overlay window: {e}"),
-    }
+/// Forget them.
+#[tauri::command]
+pub fn explorer_drag_clear(state: State<'_, ExplorerDrag>) {
+    if let Ok(mut g) = state.0.lock() { g.clear(); }
 }
 
-/// Ensure the drag-ghost overlay exists (build it on the main thread on first
-/// use, then reuse). Async so it runs off the main thread, like
-/// [`open_explorer_window`]; blocks briefly until the window is registered so
-/// the caller can immediately position + show it.
+/// The picture the OS shows under the cursor for a drag, when the front end has none of its own:
+/// the app icon, written once into the cache folder because the drag plugin takes a file path.
 #[tauri::command]
-#[allow(clippy::unused_async)]
-pub async fn ensure_drag_overlay(app: AppHandle) {
-    if app.get_webview_window(DRAG_OVERLAY_LABEL).is_some() { return; }
-    let (tx, rx) = std::sync::mpsc::channel();
-    let handle = app.clone();
-    if app
-        .run_on_main_thread(move || { build_drag_overlay(&handle); let _ = tx.send(()); })
-        .is_ok()
-    {
-        let _ = rx.recv();
+pub fn drag_icon_path(app: AppHandle) -> Result<String, String> {
+    let file = drag_cache_dir(&app)?.join("drag-icon.png");
+    if !file.is_file() {
+        std::fs::write(&file, include_bytes!("../../icons/32x32.png")).map_err(|e| e.to_string())?;
     }
+    Ok(file.to_string_lossy().into_owned())
 }
 
-/// Overlay offset from the cursor (logical px) so the ghost trails the pointer
-/// instead of sitting under it (and stealing nothing, being click-through).
-const DRAG_OVERLAY_DX: f64 = 14.0;
-const DRAG_OVERLAY_DY: f64 = 16.0;
-
-/// Set the ghost label, move the overlay to the cursor and show it (drag start).
-/// `x`/`y` are LOGICAL screen coordinates (a `MouseEvent`'s `screenX`/`screenY`).
-/// Position is set BEFORE showing so it never flashes at a stale location.
+/// Write the PNG the front end drew for this drag (its label on a pill) and return its path.
 #[tauri::command]
-pub fn drag_overlay_show(app: AppHandle, state: State<'_, DragOverlayText>, text: String, x: f64, y: f64) {
-    if let Ok(mut g) = state.0.lock() { *g = text.clone(); }
-    if let Some(w) = app.get_webview_window(DRAG_OVERLAY_LABEL) {
-        let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x + DRAG_OVERLAY_DX, y + DRAG_OVERLAY_DY)));
-        let _ = w.show();
-        let _ = w.emit("arbor://drag-overlay-set", text);
-    }
+pub fn drag_icon_write(app: AppHandle, png: Vec<u8>) -> Result<String, String> {
+    let file = drag_cache_dir(&app)?.join("drag-label.png");
+    std::fs::write(&file, png).map_err(|e| e.to_string())?;
+    Ok(file.to_string_lossy().into_owned())
 }
 
-/// Move the overlay to follow the cursor (logical screen coordinates).
-#[tauri::command]
-pub fn drag_overlay_move(app: AppHandle, x: f64, y: f64) {
-    if let Some(w) = app.get_webview_window(DRAG_OVERLAY_LABEL) {
-        let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x + DRAG_OVERLAY_DX, y + DRAG_OVERLAY_DY)));
-    }
-}
-
-/// Hide the overlay (drag ended).
-#[tauri::command]
-pub fn drag_overlay_hide(app: AppHandle) {
-    if let Some(w) = app.get_webview_window(DRAG_OVERLAY_LABEL) {
-        let _ = w.hide();
-    }
-}
-
-/// On drop, find a DIFFERENT explorer window whose bounds contain the cursor
-/// (logical screen coordinates) and hand it the dragged paths via
-/// `arbor://explorer-external-drop` — that window moves them into its current
-/// folder. Returns true when a target window was found & notified (the source
-/// then just clears its selection); false ⇒ dropped on the desktop / a
-/// non-explorer window, so the source handles it as an in-window drop.
-#[tauri::command]
-pub fn explorer_drop_dispatch(app: AppHandle, source_label: String, x: f64, y: f64, paths: Vec<String>) -> bool {
-    for (label, w) in app.webview_windows() {
-        if label == source_label || !is_explorer_label(&label) { continue; }
-        let pos = match w.outer_position() { Ok(p) => p, Err(_) => continue };
-        let size = match w.outer_size() { Ok(s) => s, Err(_) => continue };
-        // Compare in logical space, scaling each window by ITS OWN factor so
-        // multi-monitor / mixed-DPI setups hit-test correctly.
-        let scale = w.scale_factor().unwrap_or(1.0);
-        let (lx, ly) = (pos.x as f64 / scale, pos.y as f64 / scale);
-        let (lw, lh) = (size.width as f64 / scale, size.height as f64 / scale);
-        if x >= lx && x <= lx + lw && y >= ly && y <= ly + lh {
-            let _ = w.unminimize();
-            let _ = w.set_focus();
-            let _ = w.emit("arbor://explorer-external-drop", paths);
-            return true;
-        }
-    }
-    false
+fn drag_cache_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
 }

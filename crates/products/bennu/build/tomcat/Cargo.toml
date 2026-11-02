@@ -1,0 +1,13 @@
+[package]
+name         = "bennu-tomcat"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Everything about running a web application on Apache Tomcat that is pure: the release catalogue, reading an installation, the generated CATALINA_BASE (server.xml and the application's context.xml), the JVM command line, the JDBC driver jars a data source needs, and the JNDI resources and servlet namespace a project's sources declare. No process, no network — the backend drives it."
+
+[dependencies]
+# The wire types the generator reads (`TomcatRunConfig`, `TomcatResource`).
+bennu-proto = { path = "../../runtime/proto" }
+serde       = { workspace = true }

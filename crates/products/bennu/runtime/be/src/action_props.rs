@@ -55,6 +55,31 @@ pub fn find_property_member(source: &str, prop: &str) -> Option<(usize, usize)> 
     field_named(source, prop).and_then(|f| f.span).map(|s| (s.start, s.end))
 }
 
+/// The NAME token of the method `name` declared in the file, as absolute byte offsets. This is what
+/// a Struts `<action method="…">` points at: the action's entry method, which is not a bean accessor.
+///
+/// The declaration span covers modifiers and return type too, so the name is located inside it as a
+/// whole word followed by `(`. A method with no written span (synthesized) has nowhere to land.
+pub fn find_method_member(source: &str, name: &str) -> Option<(usize, usize)> {
+    let symbols = bennu_java::prelude::extract_symbols(source);
+    symbols.types.iter().flat_map(|t| t.methods.iter()).filter(|m| m.name == name).find_map(|m| {
+        let span = m.span.as_ref()?;
+        let text = source.get(span.start..span.end)?;
+        let bytes = text.as_bytes();
+        let mut from = 0;
+        while let Some(rel) = text[from..].find(name) {
+            let at = from + rel;
+            let end = at + name.len();
+            let boundary_before = at == 0 || !(bytes[at - 1].is_ascii_alphanumeric() || matches!(bytes[at - 1], b'_' | b'$'));
+            if boundary_before && text[end..].trim_start().starts_with('(') {
+                return Some((span.start + at, span.start + end));
+            }
+            from = end;
+        }
+        None
+    })
+}
+
 /// The field declared under `prop` anywhere in the file — a **nested** class's included, since
 /// that is where a parameter bag usually lives.
 ///

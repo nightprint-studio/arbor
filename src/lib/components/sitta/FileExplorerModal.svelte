@@ -23,6 +23,8 @@
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { startDrag } from '@crabnebula/tauri-plugin-drag';
+  import { renderDragIcon } from '$lib/utils/drag-icon';
   import { highlightCode } from '$lib/utils/highlight';
   import {
     ArrowLeft, ArrowRight, ArrowUp, RefreshCw, Search, X, Eye, Info,
@@ -55,7 +57,7 @@
     fsGitStatus, fsGitStage, fsGitUnstage, fsGitDiscard, fsGitIgnore, fsOpenInArbor, fsGitChanges,
     fsGitBranches, fsGitCheckout, fsGitRemoteUrl, takeExplorerReveal,
     explorerClipSet, explorerClipGet, explorerClipClear,
-    ensureDragOverlay, dragOverlayShow, dragOverlayMove, dragOverlayHide, explorerDropDispatch,
+    explorerDragSet, explorerDragGet, explorerDragClear, dragIconPath, dragIconWrite,
     type FsEntry, type FsRoot, type FsGitStatus, type GitBadge, type GitRepoMarker, type GitChange, type GitChanges, type FsBranch,
     type ExplorerRevealPayload, type ClipData, type FsOpProgress, type DirSize, type OverviewStats, type TrashEntry,
   } from '$lib/ipc/fs';
@@ -1437,7 +1439,6 @@
    *  re-targets "the folder itself" (currentPath) instead of any sub-folder. */
   function deselectAll() { selected = new Set(); anchor = ''; }
   function clickEntry(entry: FsEntry, ev?: MouseEvent) {
-    if (consumeDragClick()) return;
     cancelCreate();
     // Save-mode picker: selecting a file seeds the filename (Explorer-style).
     if (isPicker && mode === 'save' && !entry.is_dir) saveFilename = entry.name;
@@ -1667,135 +1668,107 @@
     finally { historyBusy = false; }
   }
 
-  // ── Drag & drop (move entries into a folder, or onto another window) ────────
-  // Mouse-event based, NOT native HTML5 DnD: on Windows WebView2 the OS drag
-  // handler (Tauri `dragDropEnabled`, on by default) swallows the DOM `drop`
-  // event, so native DnD silently fails. Same approach as Tabs.svelte. Bonus:
-  // re-rendering the dragged row mid-drag (selection/virtualization) can't
-  // cancel the gesture, since the listeners live on `window`, not the node.
+  // ── Drag & drop (out of the window, between windows, into a folder) ─────────
+  // The drag is the OS's own (`tauri-plugin-drag`): it carries the real files, so it can end on any
+  // application, and it draws its own image under the cursor — a pill with the label, rendered to
+  // a PNG ahead of time because the OS wants a file, not a DOM node. The browser's drag is
+  // cancelled in `dragstart` and replaced by it.
   //
-  // The drag ghost is ALWAYS rendered in the shared overlay window (a top-level
-  // OS window), never as a DOM node — so it's never clipped by this window's
-  // edges (a DOM ghost vanishes near the right margin) and stays visible across
-  // the desktop. Implicit pointer capture keeps mousemove/up flowing here even
-  // when the cursor leaves our bounds; on drop the backend checks whether
-  // another explorer window is under the cursor and, if so, moves the items
-  // into its folder.
+  // Dropping on a webview still raises `dragover`/`drop` here (the system file-drop handler is off
+  // app-wide), but what arrives is `File` objects without paths. So the paths of the drag in flight
+  // are kept by the backend (`explorerDragSet`), and the window that receives the drop asks for
+  // them: that is how a drag from one explorer window moves files in another.
   let dragging      = $state(false);
   let dragOverDir   = $state<string | null>(null);
   let dragPaths: string[] = [];
   let dragPathSet   = new Set<string>();
-  let suppressClick = false;
+  /** The label pill drawn for the drag about to start, and the app icon as the fallback. */
+  let dragIcon = '';
+  let appIcon  = '';
 
-  // This window's Tauri label — excludes self from cross-window drop targeting.
-  let selfLabel = 'main';
-  try { selfLabel = getCurrentWindow().label; } catch { /* non-Tauri / SSR */ }
+  /** What the drag of a grabbed row carries: the whole selection if the row is part of it, else it. */
+  const dragSetFor = (entry: FsEntry): string[] =>
+    selected.has(entry.path) && selected.size > 0 ? [...selected] : [entry.path];
 
-  /** True (and clears the flag) when a click is the tail of a finished drag. */
-  function consumeDragClick(): boolean {
-    if (!suppressClick) return false;
-    suppressClick = false;
-    return true;
-  }
-
-  function startRowDrag(e: MouseEvent, entry: FsEntry) {
-    if (e.button !== 0 || renamingPath || createKind) return;
-    suppressClick = false;
-    const startX = e.clientX, startY = e.clientY;
-    let started = false;
-    let lastInside = true;             // cursor inside this window at last move
-    let lastSX = e.screenX, lastSY = e.screenY;
-    let moveRaf = 0;                   // rAF throttle for overlay repositioning
-
-    /** Cursor inside this window's viewport? (logical CSS px both sides) */
-    const isInside = (ev: MouseEvent) =>
-      ev.clientX >= 0 && ev.clientY >= 0 && ev.clientX <= window.innerWidth && ev.clientY <= window.innerHeight;
-
-    const onMove = (ev: MouseEvent) => {
-      if (!started) {
-        if (Math.abs(ev.clientX - startX) < 5 && Math.abs(ev.clientY - startY) < 5) return;
-        started = true;
-        // Drag the whole selection if the grabbed row is part of it, else just it.
-        if (!selected.has(entry.path)) { selected = new Set([entry.path]); anchor = entry.path; lead = entry.path; }
-        dragPaths   = selected.has(entry.path) && selected.size > 0 ? [...selected] : [entry.path];
-        dragPathSet = new Set(dragPaths);
-        dragging    = true;
-        document.body.style.cursor = 'grabbing';
-        document.body.style.userSelect = 'none';
-        const label = dragPaths.length === 1 ? baseName(dragPaths[0]) : `${dragPaths.length} items`;
-        const sx = ev.screenX, sy = ev.screenY;
-        void (async () => { try { await ensureDragOverlay(); await dragOverlayShow(label, sx, sy); } catch { /* ignore */ } })();
-      }
-      lastSX = ev.screenX; lastSY = ev.screenY;
-      lastInside = isInside(ev);
-      // Folder drop targeting only applies while the cursor is over our list.
-      if (lastInside) updateDropTarget(ev.clientX, ev.clientY); else dragOverDir = null;
-      if (!moveRaf) moveRaf = requestAnimationFrame(() => { moveRaf = 0; void dragOverlayMove(lastSX, lastSY); });
-    };
-
-    const onUp = (ev: MouseEvent) => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; }
-      if (started) {
-        void dragOverlayHide();           // park the overlay off-screen
-        suppressClick = true;             // swallow the click the browser fires next
-        if (lastInside) {
-          if (dragOverDir) void moveInto(dragOverDir);
-        } else {
-          // Dropped outside this window → maybe onto another explorer window.
-          const sx = ev.screenX ?? lastSX, sy = ev.screenY ?? lastSY;
-          const paths = [...dragPaths];
-          void (async () => {
-            try { if (await explorerDropDispatch(selfLabel, sx, sy, paths)) clearSelection(); }
-            catch { /* dropped on the desktop / a non-explorer window */ }
-          })();
-        }
-      }
-      dragging = false; dragOverDir = null;
-      dragPaths = []; dragPathSet = new Set();
-      document.body.style.cursor = ''; document.body.style.userSelect = '';
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }
-
-  /** Receive a cross-window drop: another explorer window dragged these paths
-   *  onto this one — move them into the current folder. Wired in onMount. */
-  async function acceptExternalDrop(paths: string[]) {
-    if (!paths?.length || view !== 'browse' || !currentPath) return;
-    // Skip items already living in this folder (a no-op move).
-    const toMove = paths.filter(p => normPath(parentOf(p) ?? '') !== normPath(currentPath));
-    if (!toMove.length) { try { await getCurrentWindow().setFocus(); } catch { /* ignore */ } return; }
+  /** Draw the pill before the drag begins: `dragstart` has to hand the OS its image at once. */
+  async function prepareDragIcon(entry: FsEntry) {
+    const set = dragSetFor(entry);
     try {
-      const moved = await runFsOp(id => fsMove(toMove, currentPath, false, id));
-      pushMoveHistory(toMove, moved);
-      await refreshCurrent();
-      uiStore.showToast(`Moved ${toMove.length} item${toMove.length !== 1 ? 's' : ''} here`, 'success');
-    } catch (e) {
-      if (isCancel(e)) { uiStore.showToast('Operation cancelled', 'info'); await refreshCurrent(); }
-      else uiStore.showToast(`Move failed: ${e}`, 'error');
-    }
-    try { await getCurrentWindow().setFocus(); } catch { /* ignore */ }
+      dragIcon = await dragIconWrite(await renderDragIcon(set.length === 1 ? baseName(set[0]) : `${set.length} items`));
+    } catch { dragIcon = ''; }
   }
 
-  /** Hit-test the row under the cursor; highlight it only when it's a folder
-   *  outside the dragged set. Reads `data-path`/`data-dir` off the row — no
-   *  per-move list scan. */
-  function updateDropTarget(x: number, y: number) {
-    const row  = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest<HTMLElement>('.fx-row');
+  function beginDrag(e: DragEvent, entry: FsEntry) {
+    e.preventDefault();                       // the OS drag below replaces the browser's own
+    if (renamingPath || createKind) return;
+    const paths = dragSetFor(entry);
+    if (!selected.has(entry.path)) { selected = new Set([entry.path]); anchor = entry.path; lead = entry.path; }
+    dragPaths = paths; dragPathSet = new Set(paths); dragging = true;
+    void runOsDrag(paths);
+  }
+
+  async function runOsDrag(paths: string[]) {
+    // Everything that ends the drag lives in the callback: the promise of `startDrag` settles when
+    // the drag has started, not when it is over.
+    const finish = (dropped: boolean) => {
+      dragging = false; dragOverDir = null; dragPaths = []; dragPathSet = new Set();
+      // The window that was dropped on may still be asking for the paths as the drag ends.
+      window.setTimeout(() => void explorerDragClear().catch(() => {}), 1000);
+      if (dropped) void refreshCurrent();     // a drop elsewhere may have moved them out of this folder
+    };
+    try {
+      await explorerDragSet(paths);
+      if (!appIcon) appIcon = await dragIconPath();
+      await startDrag({ item: paths, icon: dragIcon || appIcon }, (p) => finish(p.result === 'Dropped'));
+    } catch (err) {
+      finish(false);
+      uiStore.showToast(`Drag failed: ${err}`, 'error');
+    }
+  }
+
+  /** Over a folder row the folder takes the drop; anywhere else the current folder does. */
+  function dragOverList(e: DragEvent) {
+    if (view !== 'browse' || !currentPath) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const row  = (e.target as HTMLElement).closest<HTMLElement>('.fx-row');
     const path = row?.dataset.path;
     dragOverDir = (path && row?.dataset.dir === 'true' && !dragPathSet.has(path)) ? path : null;
   }
 
-  async function moveInto(target: string) {
-    const paths = dragPaths.filter(p => p && p !== target);
+  function dragLeaveList(e: DragEvent) {
+    if (!listEl?.contains(e.relatedTarget as Node | null)) dragOverDir = null;
+  }
+
+  async function dropOnList(e: DragEvent) {
+    if (view !== 'browse' || !currentPath) return;
+    e.preventDefault();
+    const target = dragOverDir ?? currentPath;
+    dragOverDir = null;
+    // Read before the first await: the browser empties the transfer once the handler returns.
+    const names = [...(e.dataTransfer?.files ?? [])].map(f => f.name);
+    const local = dragPaths.length > 0;
+    const paths = local ? [...dragPaths] : await explorerDragGet();
+    // A drag that did not start in an explorer window (files from another application) has no
+    // paths of ours; and stale paths must never move files the drop does not name.
     if (!paths.length) return;
-    try { const moved = await runFsOp(id => fsMove(paths, target, false, id)); pushMoveHistory(paths, moved); clearSelection(); await refreshCurrent(); }
-    catch (err) {
+    if (names.length && !names.every(n => paths.some(p => baseName(p) === n))) return;
+    await moveInto(target, paths, !local);
+  }
+
+  async function moveInto(target: string, sources: string[], announce = false) {
+    // Items already living in `target` (a no-op move) and the folder itself stay out.
+    const paths = sources.filter(p => p && p !== target && normPath(parentOf(p) ?? '') !== normPath(target));
+    if (!paths.length) { if (announce) { try { await getCurrentWindow().setFocus(); } catch { /* ignore */ } } return; }
+    try {
+      const moved = await runFsOp(id => fsMove(paths, target, false, id));
+      pushMoveHistory(paths, moved); clearSelection(); await refreshCurrent();
+      if (announce) uiStore.showToast(`Moved ${paths.length} item${paths.length !== 1 ? 's' : ''} here`, 'success');
+    } catch (err) {
       if (isCancel(err)) { uiStore.showToast('Operation cancelled', 'info'); await refreshCurrent(); }
       else uiStore.showToast(`Move failed: ${err}`, 'error');
     }
+    if (announce) { try { await getCurrentWindow().setFocus(); } catch { /* ignore */ } }
   }
 
   // ── Compress / extract (ZIP) ────────────────────────────────────────────────
@@ -2684,7 +2657,6 @@
   let unlisten: UnlistenFn | null = null;
   let revealUnlisten: UnlistenFn | null = null;
   let clipUnlisten: UnlistenFn | null = null;
-  let dropUnlisten: UnlistenFn | null = null;
   let focusUnlisten: UnlistenFn | null = null;
   let ideUnlisten: UnlistenFn | null = null;
   let fsOpUnlisten: UnlistenFn | null = null;
@@ -2749,12 +2721,8 @@
       try {
         revealUnlisten = await listen<ExplorerRevealPayload>('arbor://explorer-reveal', ev => { void revealHere(ev.payload); });
       } catch { /* ignore */ }
-      // Cross-window drops land here; pre-warm the shared drag overlay so the
-      // first drag out of this window shows its ghost without a build delay.
-      try {
-        dropUnlisten = await listen<string[]>('arbor://explorer-external-drop', ev => { void acceptExternalDrop(ev.payload); });
-      } catch { /* ignore */ }
-      void ensureDragOverlay();
+      // The app icon is the drag image until a row's own label has been drawn.
+      void dragIconPath().then((p) => { appIcon = p; }).catch(() => {});
     }
     // Keep the Devices list current: poll for removable-media changes and refresh the instant the
     // window regains focus (e.g. after plugging a USB).
@@ -2789,7 +2757,7 @@
       else if (view === 'browse') listEl?.focus();
     });
   });
-  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); dropUnlisten?.(); focusUnlisten?.(); ideUnlisten?.(); fsOpUnlisten?.(); pvFileUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); fsWatchFileStop().catch(() => {}); });
+  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); focusUnlisten?.(); ideUnlisten?.(); fsOpUnlisten?.(); pvFileUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); fsWatchFileStop().catch(() => {}); });
 </script>
 
 {#snippet sbLabel(id: string, Ico: typeof Folder, text: string)}
@@ -3296,7 +3264,8 @@
              role="listbox" tabindex="0" aria-multiselectable="true" aria-label="Files"
              aria-activedescendant={leadIdx >= 0 ? `fx-opt-${leadIdx}` : undefined} onscroll={onScroll}
              oncontextmenu={(e) => { if (kbdCtxGuard) { kbdCtxGuard = false; e.preventDefault(); return; } if (!(e.target as HTMLElement).closest('.fx-row')) openCtx(e, null); }}
-             onclick={(e) => { if (consumeDragClick()) return; if (!(e.target as HTMLElement).closest('.fx-row')) deselectAll(); }}>
+             ondragover={dragOverList} ondragleave={dragLeaveList} ondrop={dropOnList}
+             onclick={(e) => { if (!(e.target as HTMLElement).closest('.fx-row')) deselectAll(); }}>
           {#if loading}
             <div class="fx-state"><Spinner size="sm" /> Loading…</div>
           {:else if loadError}
@@ -3317,7 +3286,9 @@
                        id={`fx-opt-${vsStart + i}`}
                        data-path={entry.path} data-dir={entry.is_dir}
                        class:selected={selected.has(entry.path)} class:lead={lead === entry.path} class:cut={cutSet.has(entry.path)} class:drop-target={dragOverDir === entry.path}
-                       onmousedown={(e) => { if (e.button === 1) { e.preventDefault(); return; } startRowDrag(e, entry); }}
+                       draggable={!isPicker && renamingPath !== entry.path}
+                       ondragstart={(e) => beginDrag(e, entry)}
+                       onmousedown={(e) => { if (e.button === 1) { e.preventDefault(); return; } if (e.button === 0) void prepareDragIcon(entry); }}
                        onclick={(ev) => clickEntry(entry, ev)} ondblclick={() => openEntry(entry)} oncontextmenu={(e) => openCtx(e, entry)}
                        onauxclick={(e) => { if (entry.is_dir) auxOpenTab(e, entry.path); }}
                        role="option" aria-selected={selected.has(entry.path)} tabindex="-1">

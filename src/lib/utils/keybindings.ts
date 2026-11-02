@@ -48,6 +48,8 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // found by typing. Ctrl+Shift+D — free in Bennu and in the global map, and not a Chromium
   // DevTools chord (unlike Ctrl+Shift+J / C / I).
   goto_project:        { key: 'd',    ctrl: true,  shift: true,  description: 'Go to project (Bennu)',      group: 'Navigation' },
+  // Bennu's own window handles it, so Corvus's Ctrl+Shift+L (Pull) is a different window's.
+  console_clean_view:  { key: 'l',    ctrl: true,  shift: true,  description: 'Toggle the console clean view (Bennu)', group: 'Navigation' },
   switch_project_prev:{ key: 'Tab',  ctrl: true,  shift: true,  description: 'Switch project, backwards (Bennu)', group: 'Navigation' },
   // Generic IDE-style left-rail expand/collapse — closes whatever section is
   // open or restores the last one. The explicit "open Branches" shortcut is

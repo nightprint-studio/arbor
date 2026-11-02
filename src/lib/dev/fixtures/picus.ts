@@ -1025,7 +1025,6 @@ export const picusFixtures: Record<string, FixtureHandler> = {
   'picus.picus_project_settings': { versionTable: { table: '', versionColumn: '', filter: '' }, products: [] },
   fs_watch_start: null,
   take_explorer_reveal: null,
-  ensure_drag_overlay: null,
   'picus.picus_destination_sets': [],
   'picus.picus_folders_named': ['POS', 'ORACLE/POS', 'Utility/POS'],
   'picus.picus_files_named': ['POS/Init/001_schema.sql', 'ORACLE/Update/POS_2.5.0.sql'],

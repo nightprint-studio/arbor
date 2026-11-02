@@ -1,0 +1,1006 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bennu · Tomcat Run — mock UI</title>
+<style>
+  :root {
+    --canvas:#0d1117; --elev:#161b22; --overlay:#1c2128; --border:#30363d; --border-muted:#21262d;
+    --fg:#e6edf3; --fg-muted:#8b949e; --fg-faint:#6e7681;
+    --accent:#2f81f7; --accent-subtle:rgba(56,139,253,.15);
+    --success:#3fb950; --success-emph:#238636; --danger:#f85149; --warning:#d29922; --purple:#a371f7;
+    --kw:#ff7b72; --str:#a5d6ff; --fn:#d2a8ff; --ty:#ffa657; --const:#79c0ff;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    --radius:8px;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; background:#010409; color:var(--fg); font:13px/1.45 -apple-system,"Segoe UI",system-ui,sans-serif; display:flex; flex-direction:column; }
+  .ic { vertical-align:-2px; flex:none; }
+  button { font:inherit; color:inherit; }
+
+  /* ── barra demo ── */
+  .demo { display:flex; gap:16px; align-items:center; padding:7px 14px; background:#010409; border-bottom:1px solid var(--border-muted); font-size:12px; color:var(--fg-muted); flex-wrap:wrap; }
+  .demo b { color:var(--fg); font-weight:600; }
+  .demo label { display:inline-flex; gap:6px; align-items:center; cursor:pointer; }
+  .demo input { accent-color:var(--accent); }
+
+  /* ── guscio Bennu ── */
+  .app { flex:1; min-height:620px; display:flex; flex-direction:column; background:var(--elev); position:relative; overflow:hidden; }
+  .titlebar { height:40px; display:flex; align-items:center; gap:10px; padding:0 10px; background:var(--elev); flex:none; }
+  .logo { display:flex; align-items:center; gap:7px; font-weight:700; letter-spacing:.01em; }
+  .logo i { width:18px; height:18px; border-radius:5px; background:linear-gradient(135deg,#2f81f7,#a371f7); display:inline-block; }
+  .crumb { color:var(--fg-muted); display:flex; gap:6px; align-items:center; }
+  .crumb b { color:var(--fg); font-weight:600; }
+  .chipx { font-size:11px; padding:1px 8px; border:1px solid var(--border); border-radius:99px; color:var(--fg-muted); }
+  .sp { flex:1; }
+  .cfgsel { display:flex; align-items:center; gap:8px; height:28px; padding:0 10px; border:1px solid var(--border); border-radius:6px; background:var(--canvas); cursor:pointer; min-width:230px; }
+  .cfgsel:hover { border-color:var(--fg-faint); }
+  .cfgsel span { flex:1; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tb { width:28px; height:28px; display:inline-grid; place-items:center; border:0; background:transparent; border-radius:6px; cursor:pointer; color:var(--fg-muted); }
+  .tb:hover:not(:disabled) { background:rgba(177,186,196,.12); color:var(--fg); }
+  .tb:disabled { opacity:.35; cursor:default; }
+  .tb.run { color:var(--success); } .tb.stop { color:var(--danger); } .tb.dbg { color:var(--warning); }
+  .main { flex:1; display:flex; min-height:0; }
+  .rail { width:40px; display:flex; flex-direction:column; align-items:center; gap:2px; padding:4px 0; flex:none; }
+  .rail .tb.on { background:var(--accent-subtle); color:var(--accent); }
+  .rail .gap { flex:1; }
+  .panels { flex:1; display:flex; gap:6px; padding:0 6px 6px 0; min-width:0; }
+  .panel { background:var(--canvas); border-radius:var(--radius); overflow:hidden; min-height:0; display:flex; flex-direction:column; }
+  .tree { width:230px; flex:none; }
+  .col { flex:1; display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .editor { flex:1; }
+  .runp { height:250px; flex:none; }
+  .ph { display:flex; align-items:center; gap:8px; height:32px; padding:0 10px; border-bottom:1px solid var(--border-muted); font-size:12px; color:var(--fg-muted); flex:none; }
+  .ph b { color:var(--fg); font-weight:600; }
+  .statusbar { height:24px; display:flex; align-items:center; gap:14px; padding:0 12px; font-size:11.5px; color:var(--fg-muted); flex:none; background:var(--elev); }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; background:var(--fg-faint); margin-right:5px; }
+  .dot.go { background:var(--success); } .dot.wait { background:var(--warning); animation:pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity:.35; } }
+
+  .tr { padding:6px 4px; font-size:12.5px; overflow:auto; flex:1; }
+  .tr div { padding:2px 8px; border-radius:4px; display:flex; gap:6px; align-items:center; color:var(--fg-muted); white-space:nowrap; }
+  .tr div.on { background:var(--accent-subtle); color:var(--fg); }
+  .tr .l1 { padding-left:22px; } .tr .l2 { padding-left:36px; } .tr .l3 { padding-left:50px; } .tr .l4 { padding-left:64px; }
+  .etabs { display:flex; border-bottom:1px solid var(--border-muted); background:var(--elev); flex:none; }
+  .etab { padding:7px 14px; font-size:12px; color:var(--fg-muted); border:0; background:transparent; border-bottom:2px solid transparent; cursor:pointer; }
+  .etab.on { color:var(--fg); border-bottom-color:var(--accent); background:var(--canvas); }
+  .code { flex:1; overflow:auto; font:12.5px/1.65 var(--mono); padding:8px 0; }
+  .code .ln { display:flex; } .code .ln i { width:44px; text-align:right; padding-right:14px; color:var(--fg-faint); font-style:normal; flex:none; user-select:none; }
+  .code .ln span { white-space:pre; }
+  .k{color:var(--kw)} .s{color:var(--str)} .f{color:var(--fn)} .t{color:var(--ty)} .c{color:var(--fg-faint)} .n{color:var(--const)}
+  .hint { margin-left:12px; font:11px var(--mono); color:var(--warning); }
+
+  /* ── pannello Run ── */
+  .console { flex:1; overflow:auto; padding:8px 12px; font:12px/1.55 var(--mono); }
+  .console .a { color:var(--purple); } .console .m { color:var(--fg-muted); }
+  .console .I { color:var(--fg-muted); } .console .W { color:var(--warning); } .console .E { color:var(--danger); } .console .ok { color:var(--success); }
+  .empty { margin:auto; text-align:center; color:var(--fg-muted); padding:20px; }
+  .badge { font-size:11px; padding:1px 8px; border-radius:99px; border:1px solid var(--border); }
+  .badge.go { color:var(--success); border-color:rgba(63,185,80,.4); background:rgba(63,185,80,.1); }
+  .badge.wait { color:var(--warning); border-color:rgba(210,153,34,.4); }
+  .badge.err { color:var(--danger); border-color:rgba(248,81,73,.4); }
+
+  /* ── controlli ── */
+  .btn { height:28px; padding:0 12px; border:1px solid var(--border); border-radius:6px; background:var(--overlay); color:var(--fg); cursor:pointer; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+  .btn:hover:not(:disabled) { background:#262c36; border-color:var(--fg-faint); }
+  .btn:disabled { opacity:.45; cursor:default; }
+  .btn.pri { background:var(--success-emph); border-color:rgba(240,246,252,.1); color:#fff; font-weight:600; }
+  .btn.pri:hover:not(:disabled) { background:#2ea043; }
+  .btn.sm { height:24px; padding:0 8px; font-size:12px; }
+  .btn.ghost { background:transparent; }
+  .btn.link { border:0; background:transparent; color:var(--accent); padding:0 4px; height:auto; }
+  .inp, select.inp, textarea.inp { height:28px; width:100%; background:var(--canvas); border:1px solid var(--border); border-radius:6px; color:var(--fg); padding:0 9px; font:inherit; outline:0; }
+  textarea.inp { height:auto; padding:8px 10px; font:12px/1.55 var(--mono); resize:none; }
+  .inp.mono { font-family:var(--mono); font-size:12px; }
+  .inp:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-subtle); }
+  .inp.bad { border-color:var(--danger); }
+  .inp.sm { max-width:110px; }
+  kbd { font:10.5px var(--mono); border:1px solid var(--border); border-bottom-width:2px; border-radius:4px; padding:0 5px; color:var(--fg-muted); background:var(--canvas); }
+  .seg { display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+  .seg button { border:0; background:var(--canvas); padding:0 11px; height:26px; cursor:pointer; color:var(--fg-muted); border-right:1px solid var(--border); }
+  .seg button:last-child { border-right:0; }
+  .seg button.on { background:var(--accent-subtle); color:var(--accent); font-weight:600; }
+  .sw { display:inline-flex; gap:8px; align-items:center; cursor:pointer; user-select:none; }
+  .sw input { appearance:none; width:30px; height:17px; border-radius:99px; background:var(--border); position:relative; cursor:pointer; margin:0; transition:background .12s; }
+  .sw input::after { content:""; position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%; background:#fff; transition:left .12s; }
+  .sw input:checked { background:var(--accent); } .sw input:checked::after { left:15px; }
+  .sw input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* ── modale ── */
+  .scrim { position:absolute; inset:0; background:rgba(1,4,9,.72); display:grid; place-items:center; z-index:20; }
+  .scrim.top { z-index:30; }
+  .modal { width:min(1120px,96%); height:min(690px,94%); background:var(--elev); border:1px solid var(--border); border-radius:12px; box-shadow:0 24px 70px rgba(0,0,0,.6); display:flex; flex-direction:column; overflow:hidden; }
+  .modal.small { width:min(560px,94%); height:auto; max-height:92%; }
+  .mh { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--border); flex:none; }
+  .mh b { font-size:14px; }
+  .mb { flex:1; display:flex; min-height:0; }
+  .side { width:210px; flex:none; border-right:1px solid var(--border); padding:8px; background:var(--canvas); display:flex; flex-direction:column; gap:2px; overflow:auto; }
+  .side .tools { display:flex; gap:2px; padding-bottom:6px; border-bottom:1px solid var(--border-muted); margin-bottom:4px; }
+  .side .grp { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--fg-faint); padding:6px 8px 3px; }
+  .side .it { display:flex; align-items:center; gap:7px; padding:6px 8px; border-radius:6px; cursor:pointer; color:var(--fg-muted); border:0; background:transparent; text-align:left; width:100%; }
+  .side .it:hover { background:rgba(177,186,196,.08); }
+  .side .it.on { background:var(--accent-subtle); color:var(--fg); }
+  .side .it span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .main2 { flex:1; display:flex; flex-direction:column; min-width:0; background:var(--elev); }
+  .top2 { padding:14px 18px 0; }
+  .nm { display:grid; grid-template-columns:90px 1fr; gap:10px; align-items:center; margin-bottom:10px; }
+  .tabs { display:flex; gap:2px; border-bottom:1px solid var(--border); }
+  .tabs button { border:0; background:transparent; padding:8px 13px; cursor:pointer; color:var(--fg-muted); border-bottom:2px solid transparent; margin-bottom:-1px; display:flex; gap:7px; align-items:center; }
+  .tabs button:hover { color:var(--fg); }
+  .tabs button.on { color:var(--fg); border-bottom-color:#f78166; font-weight:600; }
+  .tabs .n { font-size:10.5px; min-width:17px; height:17px; border-radius:99px; background:rgba(210,153,34,.2); color:var(--warning); display:inline-grid; place-items:center; padding:0 5px; }
+  .tabs .n.e { background:rgba(248,81,73,.2); color:var(--danger); }
+  .pane { flex:1; overflow:auto; padding:16px 18px; min-height:0; }
+  .row { display:grid; grid-template-columns:150px 1fr; gap:6px 12px; align-items:center; margin-bottom:11px; }
+  .row > label { color:var(--fg-muted); }
+  .row .sub { grid-column:2; font-size:12px; color:var(--fg-faint); margin-top:-3px; }
+  .ferr { grid-column:2; color:var(--danger); font-size:12px; margin-top:-3px; display:none; }
+  .ferr.on { display:flex; gap:8px; align-items:center; }
+  .inline { display:flex; gap:8px; align-items:center; }
+  .sect { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--fg-faint); margin:18px 0 8px; padding-top:12px; border-top:1px solid var(--border-muted); }
+  .card2 { background:var(--canvas); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
+  .info { display:flex; flex-wrap:wrap; gap:6px; margin-top:2px; }
+  .tag { font-size:11px; padding:1px 8px; border-radius:99px; background:var(--overlay); border:1px solid var(--border); color:var(--fg-muted); }
+  .tag.jk { color:var(--purple); border-color:rgba(163,113,247,.4); } .tag.jv { color:var(--ty); border-color:rgba(255,166,87,.4); }
+  .tag.ok { color:var(--success); border-color:rgba(63,185,80,.4); } .tag.bad { color:var(--danger); border-color:rgba(248,81,73,.45); }
+
+  .issues { border-top:1px solid var(--border); background:var(--canvas); padding:0 16px; flex:none; }
+  .issue { display:flex; gap:9px; align-items:center; padding:5px 0; font-size:12.5px; }
+  .issue.error { color:#ffa198; } .issue.warn { color:#e3b341; }
+  .issue span { flex:1; }
+  .cmdbar { border-top:1px solid var(--border); flex:none; }
+  .cmdbar > button { width:100%; text-align:left; background:var(--elev); border:0; padding:6px 16px; color:var(--fg-muted); cursor:pointer; display:flex; gap:8px; align-items:center; }
+  .cmdbar pre { margin:0; padding:8px 16px 10px; background:var(--canvas); font:11.5px/1.55 var(--mono); color:var(--fg-muted); white-space:pre-wrap; word-break:break-all; max-height:130px; overflow:auto; }
+  .mf { display:flex; align-items:center; gap:8px; padding:10px 16px; border-top:1px solid var(--border); flex:none; }
+
+  /* contesto: 3 colonne */
+  .ctx3 { display:grid; grid-template-columns:215px minmax(0,1fr) 330px; gap:14px; height:100%; min-height:420px; }
+  .ctx3 > div { min-height:0; display:flex; flex-direction:column; }
+  .rlist { display:flex; flex-direction:column; gap:2px; overflow:auto; flex:1; margin:8px 0; }
+  .rit { display:flex; gap:8px; align-items:center; padding:6px 8px; border-radius:6px; cursor:pointer; border:0; background:transparent; width:100%; text-align:left; color:var(--fg-muted); }
+  .rit:hover { background:rgba(177,186,196,.08); } .rit.on { background:var(--accent-subtle); color:var(--fg); }
+  .rit span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--mono); font-size:12px; }
+  .rit .w { color:var(--warning); }
+  .smart { border-top:1px solid var(--border-muted); padding-top:10px; display:flex; flex-direction:column; gap:6px; }
+  .smart .btn { justify-content:flex-start; width:100%; }
+  .smart .btn em { margin-left:auto; font-style:normal; font-size:11px; background:rgba(210,153,34,.2); color:var(--warning); border-radius:99px; padding:0 7px; }
+  .xmlbox { background:var(--canvas); border:1px solid var(--border); border-radius:8px; flex:1; min-height:0; display:flex; flex-direction:column; }
+  .xmlbox .xh { padding:7px 11px; border-bottom:1px solid var(--border-muted); font-size:11.5px; color:var(--fg-muted); display:flex; gap:7px; align-items:center; }
+  .xmlbox pre { margin:0; padding:10px 12px; font:11.5px/1.6 var(--mono); overflow:auto; flex:1; white-space:pre; }
+  pre .t { color:#7ee787; } pre .a { color:var(--const); } pre .v { color:var(--str); } pre .c { color:var(--fg-faint); }
+  .res-form h4 { margin:0 0 10px; font-size:13px; display:flex; gap:8px; align-items:center; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .lbl { font-size:12px; color:var(--fg-muted); margin-bottom:3px; display:block; }
+  .fld { margin-bottom:10px; }
+  .okline { font-size:12px; margin-top:4px; display:flex; gap:6px; align-items:center; }
+  .okline.ok { color:var(--success); } .okline.bad { color:var(--warning); }
+  .list { display:flex; flex-direction:column; gap:6px; }
+  .lit { display:flex; gap:10px; align-items:center; padding:9px 11px; background:var(--canvas); border:1px solid var(--border); border-radius:8px; }
+  .lit .tx { flex:1; min-width:0; } .lit .tx b { font:600 12.5px var(--mono); display:block; } .lit .tx small { color:var(--fg-faint); font-size:11.5px; }
+  .lit.click { cursor:pointer; } .lit.click:hover { border-color:var(--accent); }
+
+  /* download */
+  .lines { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .line { border:1px solid var(--border); background:var(--canvas); border-radius:8px; padding:10px 12px; cursor:pointer; text-align:left; }
+  .line.on { border-color:var(--accent); background:var(--accent-subtle); }
+  .line b { font-size:14px; display:block; margin-bottom:5px; }
+  .bar { height:8px; border-radius:99px; background:var(--border); overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--accent); width:0; transition:width .12s linear; }
+  .steps { display:flex; flex-direction:column; gap:3px; font-size:12.5px; color:var(--fg-muted); margin-top:10px; }
+  .steps .d { color:var(--success); }
+
+  .pop { position:absolute; z-index:40; min-width:270px; background:var(--overlay); border:1px solid var(--border); border-radius:10px; box-shadow:0 14px 40px rgba(0,0,0,.55); padding:5px; }
+  .pop button { width:100%; text-align:left; display:flex; gap:8px; align-items:center; padding:7px 10px; border:0; background:transparent; border-radius:6px; cursor:pointer; }
+  .pop button:hover { background:var(--accent-subtle); }
+  .pop hr { border:0; border-top:1px solid var(--border); margin:4px 0; }
+  .toast { position:absolute; right:16px; bottom:34px; z-index:60; background:var(--overlay); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:8px; padding:9px 14px; box-shadow:0 10px 30px rgba(0,0,0,.5); max-width:420px; }
+  .toast.err { border-left-color:var(--danger); } .toast.ok { border-left-color:var(--success); }
+  ::-webkit-scrollbar { width:10px; height:10px; } ::-webkit-scrollbar-thumb { background:#30363d; border-radius:8px; border:2px solid transparent; background-clip:content-box; }
+</style>
+</head>
+<body>
+
+<div class="demo">
+  <b>Mock UI · Bennu › Tomcat Server</b>
+  <span>Prova: <kbd>▶</kbd> nel titlebar, il selettore configurazioni, <kbd>Shift+F10</kbd>, <kbd>Esc</kbd>, <kbd>Ctrl+Invio</kbd> nella modale.</span>
+  <span class="sp"></span>
+  <label><input type="checkbox" id="dBusy"> porta 8080 occupata</label>
+  <label><input type="checkbox" id="dNone"> nessun Tomcat installato</label>
+  <label><input type="checkbox" id="dJakarta"> il progetto usa <code>jakarta.*</code></label>
+</div>
+
+<div class="app" id="app">
+  <div class="titlebar">
+    <div class="logo"><i></i> Bennu</div>
+    <div class="crumb"><b>gestionale</b> <span class="chipx">⎇ main</span></div>
+    <div class="sp"></div>
+    <button class="cfgsel" id="cfgSel" aria-haspopup="menu"><span data-ic="server"></span><span id="cfgName"></span><span data-ic="chevron" data-s="12"></span></button>
+    <button class="tb run" id="bRun" title="Esegui (Shift+F10)"><span data-ic="play" data-s="16"></span></button>
+    <button class="tb dbg" id="bDbg" title="Debug (Shift+F9)"><span data-ic="bug" data-s="16"></span></button>
+    <button class="tb stop" id="bStop" title="Ferma (Ctrl+F2)"><span data-ic="stop" data-s="14"></span></button>
+    <div class="sp"></div>
+    <span class="chipx">Maven · JDK 17</span>
+  </div>
+
+  <div class="main">
+    <div class="rail">
+      <button class="tb on" title="Progetto"><span data-ic="folder" data-s="17"></span></button>
+      <button class="tb" title="Struttura"><span data-ic="tree" data-s="17"></span></button>
+      <button class="tb" title="Maven"><span data-ic="hammer" data-s="17"></span></button>
+      <button class="tb" title="Picus"><span data-ic="db" data-s="17"></span></button>
+      <div class="gap"></div>
+      <button class="tb" title="Build"><span data-ic="hammer" data-s="17"></span></button>
+      <button class="tb on" id="railRun" title="Run (Alt+4)"><span data-ic="play" data-s="17"></span></button>
+      <button class="tb" title="Terminale"><span data-ic="term" data-s="17"></span></button>
+    </div>
+
+    <div class="panels">
+      <div class="panel tree">
+        <div class="ph"><b>Progetto</b></div>
+        <div class="tr">
+          <div><span data-ic="folder" data-s="13"></span> gestionale</div>
+          <div class="l1"><span data-ic="folder" data-s="13"></span> web</div>
+          <div class="l2"><span data-ic="folder" data-s="13"></span> src/main/java</div>
+          <div class="l3"><span data-ic="folder" data-s="13"></span> it.acme.gest.dao</div>
+          <div class="l4 on" data-open="java"><span data-ic="file" data-s="13"></span> ReportDao.java</div>
+          <div class="l2"><span data-ic="folder" data-s="13"></span> src/main/webapp</div>
+          <div class="l3"><span data-ic="folder" data-s="13"></span> WEB-INF</div>
+          <div class="l4" data-open="xml"><span data-ic="file" data-s="13"></span> web.xml</div>
+          <div class="l2"><span data-ic="folder" data-s="13"></span> src/main/resources</div>
+          <div class="l3"><span data-ic="folder" data-s="13"></span> META-INF</div>
+          <div class="l4"><span data-ic="file" data-s="13"></span> persistence.xml</div>
+          <div class="l1"><span data-ic="file" data-s="13"></span> pom.xml</div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="panel editor">
+          <div class="etabs"><button class="etab on" data-tab="java">ReportDao.java</button><button class="etab" data-tab="xml">web.xml</button></div>
+          <div class="code" id="code"></div>
+        </div>
+        <div class="panel runp" id="runPanel"></div>
+      </div>
+    </div>
+    <div class="rail"></div>
+  </div>
+
+  <div class="statusbar">
+    <span id="sbTomcat"></span><span class="sp"></span><span>JDK 17</span><span>UTF-8</span><span>LF</span><span>Java</span>
+  </div>
+  <div id="overlay"></div>
+  <div id="toastHost"></div>
+</div>
+
+<script>
+/* ───────────────────────── utilità ───────────────────────── */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const xa = s => String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+const PATHS = {
+  play:'<polygon points="6 3 20 12 6 21 6 3"/>', stop:'<rect x="5" y="5" width="14" height="14" rx="2"/>',
+  chevron:'<path d="m6 9 6 6 6-6"/>', plus:'<path d="M5 12h14M12 5v14"/>', minus:'<path d="M5 12h14"/>', x:'<path d="M18 6 6 18M6 6l12 12"/>',
+  folder:'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  server:'<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
+  bug:'<path d="m8 2 1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9M6.53 9C4.6 8.8 3 7.1 3 5M6 13H2M3 21c0-2.1 1.7-3.9 3.8-4M20.97 5c0 2.1-1.6 3.8-3.5 4M22 13h-4M17.2 17c2.1.1 3.8 1.9 3.8 4"/>',
+  key:'<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
+  link:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  refresh:'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5"/>',
+  globe:'<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>', alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4M12 17h.01"/>',
+  term:'<path d="m4 17 6-6-6-6M12 19h8"/>', file:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
+  db:'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/>',
+  hammer:'<path d="m15 12-8.5 8.5a2.12 2.12 0 0 1-3-3L12 9M17.64 15 22 10.64M20.91 11.7l-1.25-1.25c-.6-.6-.93-1.4-.93-2.25v-.86L16.01 4.6a5.56 5.56 0 0 0-3.94-1.64H9l.92.82A6.18 6.18 0 0 1 12 8.4v1.56l2 2h2.47l2.26 1.91"/>',
+  tree:'<path d="M21 12h-8M21 6H8M21 18h-8M3 6v4c0 1.1.9 2 2 2h3M3 10v6c0 1.1.9 2 2 2h3"/>',
+  trash:'<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  wand:'<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72M14 7l3 3M5 6v4M19 14v4M10 2v2M7 8H3M21 16h-4M11 3H9"/>',
+  clip:'<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+  copy:'<rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  var:'<path d="M8 21s-4-3-4-9 4-9 4-9M16 3s4 3 4 9-4 9-4 9M15 9l-6 6M9 9l6 6"/>',
+};
+const ic = (n, s = 14) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${PATHS[n] || ''}</svg>`;
+const hydrate = (root = document) => root.querySelectorAll('[data-ic]').forEach(e => { e.outerHTML = ic(e.dataset.ic, +e.dataset.s || 14); });
+
+/* ───────────────────────── dati di esempio ───────────────────────── */
+const CATALOG = [
+  { line:'11.0', ns:'jakarta', java:17, servlet:'6.1', versions:['11.0.2','11.0.1'], size:'12.4' },
+  { line:'10.1', ns:'jakarta', java:11, servlet:'6.0', versions:['10.1.34','10.1.33','10.1.28'], size:'12.1' },
+  { line:'9.0',  ns:'javax',   java:8,  servlet:'4.0', versions:['9.0.98','9.0.97','9.0.90'], size:'11.8' },
+  { line:'8.5',  ns:'javax',   java:7,  servlet:'3.1', versions:['8.5.100','8.5.99'], size:'10.9' },
+];
+const lineOf = v => CATALOG.find(c => v.startsWith(c.line + '.'));
+const DRIVERS = {
+  'org.postgresql.Driver':{ jar:'postgresql-42.7.3.jar', inMaven:true, eng:'PostgreSQL' },
+  'com.mysql.cj.jdbc.Driver':{ jar:'mysql-connector-j-8.3.0.jar', inMaven:true, eng:'MySQL' },
+  'com.ibm.db2.jcc.DB2Driver':{ jar:'db2jcc4.jar', inMaven:false, eng:'DB2' },
+  'oracle.jdbc.OracleDriver':{ jar:'ojdbc8.jar', inMaven:false, eng:'Oracle' },
+};
+const PICUS = [
+  { id:'p1', name:'Gestionale (locale)', driver:'org.postgresql.Driver', url:'jdbc:postgresql://localhost:5432/gest', user:'app', eng:'PostgreSQL' },
+  { id:'p2', name:'Reporting', driver:'org.postgresql.Driver', url:'jdbc:postgresql://db-rep:5432/rep', user:'report', eng:'PostgreSQL' },
+  { id:'p3', name:'Storico (DB2)', driver:'com.ibm.db2.jcc.DB2Driver', url:'jdbc:db2://mainframe:50000/STO', user:'sto', eng:'DB2' },
+];
+/* Risorse che il progetto DICHIARA di usare (web.xml, @Resource, persistence.xml…): è l'indice di Bennu a saperlo. */
+const REQUIRED = [
+  { name:'jdbc/Gestionale', kind:'datasource', src:'WEB-INF/web.xml:18 · <resource-ref>' },
+  { name:'jdbc/Reporting',  kind:'datasource', src:'ReportDao.java:5 · @Resource' },
+  { name:'jdbc/Storico',    kind:'datasource', src:'META-INF/persistence.xml:9 · <jta-data-source>', hint:'p3' },
+  { name:'app/modalita',    kind:'env', type:'java.lang.String', src:'WEB-INF/web.xml:27 · <env-entry>' },
+];
+const PROJECT_CONTEXT = `<?xml version="1.0" encoding="UTF-8"?>
+<Context>
+  <Resource name="jdbc/Gestionale" auth="Container" type="javax.sql.DataSource"
+            driverClassName="org.postgresql.Driver"
+            url="jdbc:postgresql://localhost:5432/gest"
+            username="app" password="gest2011" maxTotal="20"/>
+  <Environment name="app/modalita" value="sviluppo" type="java.lang.String"/>
+</Context>`;
+
+let uid = 100;
+const newRes = (kind, over = {}) => kind === 'datasource'
+  ? { id:'r' + (++uid), kind, name:'jdbc/Nuovo', driver:'org.postgresql.Driver', url:'', user:'', pwdMode:'secret', pwd:'', maxTotal:20, maxIdle:5, maxWait:10000, validationQuery:'SELECT 1', testOnBorrow:true, ...over }
+  : kind === 'env'
+  ? { id:'r' + (++uid), kind, name:'app/valore', type:'java.lang.String', value:'', override:false, ...over }
+  : { id:'r' + (++uid), kind:'param', name:'parametro', value:'', ...over };
+
+const baseCfg = (id, name, tomcat) => ({
+  id, name, tomcat, jdk:'project', httpPort:8080, shutdownPort:8005, jvm:'-Xms256m -Xmx1g -Dfile.encoding=UTF-8',
+  openBrowser:true, ctxPath:'/gestionale', artifact:'exploded', before:'war:exploded', jspHot:true, reloadable:false,
+  env:[{k:'APP_ENV',v:'dev'}], sysprops:'-Dspring.profiles.active=dev', debugPort:5005, suspend:false,
+  ctxMode:'guided', raw:'', resources:[],
+});
+
+const S = {
+  demo:{ busy:false, none:false, jakarta:false },
+  installs:['10.1.34','9.0.98','8.5.100'],
+  installDir:'.arbor/bennu/tomcat/_dist',
+  baseDir:'.arbor/bennu/tomcat',
+  configs:[], active:'tc1', modal:null, dl:null, pop:null,
+  run:{ state:'stopped', log:[], timers:[], cfgName:'', errors:0, debug:false },
+};
+S.configs = [
+  { ...baseCfg('tc1','Tomcat 9 — gestionale','9.0.98'), resources:[
+      newRes('datasource', { id:'r1', name:'jdbc/Gestionale', url:'jdbc:postgresql://localhost:5432/gest', user:'app', pwd:'********' }),
+      newRes('env', { id:'r2', name:'app/modalita', value:'sviluppo' }) ] },
+  { ...baseCfg('tc2','Tomcat 8.5 — legacy','8.5.100'), httpPort:8081, shutdownPort:8006, ctxPath:'/legacy', debugPort:5006, resources:[] },
+];
+
+const projectNs = () => S.demo.jakarta ? 'jakarta' : 'javax';
+const cfgOf = id => S.configs.find(c => c.id === id);
+const M = () => S.modal;
+const mcur = () => M().cfgs.find(c => c.id === M().sel);
+const mres = () => mcur()?.resources.find(r => r.id === M().rs);
+
+/* ───────────────────────── logica di dominio ───────────────────────── */
+const pwdVar = name => name.replace(/[^A-Za-z0-9]+/g, '.').replace(/^\.|\.$/g, '') + '.password';
+const ref = v => '$' + '{' + v + '}';
+const ctxFile = c => { const p = c.ctxPath.replace(/^\/+|\/+$/g, ''); return (p ? p.replace(/\//g, '#') : 'ROOT') + '.xml'; };
+const docBase = c => c.artifact === 'war' ? 'C:/Sviluppo/gestionale/web/target/gestionale.war' : 'C:/Sviluppo/gestionale/web/target/gestionale';
+const missingReq = c => REQUIRED.filter(q => !c.resources.some(r => r.name === q.name));
+const driverInfo = d => DRIVERS[d] || null;
+
+function genXml(c) {
+  const L = ['<?xml version="1.0" encoding="UTF-8"?>',
+    '<!-- Generato da Bennu per ' + ctxFile(c) + ' · si modifica dalla modale, non a mano -->',
+    '<Context docBase="' + xa(docBase(c)) + '"' + (c.reloadable ? ' reloadable="true"' : '') + '>'];
+  for (const r of c.resources) {
+    if (r.kind === 'datasource') {
+      const pw = r.pwdMode === 'secret' ? ref(pwdVar(r.name)) : (r.pwd || '');
+      L.push('  <Resource name="' + xa(r.name) + '" auth="Container" type="javax.sql.DataSource"',
+        '            driverClassName="' + xa(r.driver) + '"',
+        '            url="' + xa(r.url) + '"',
+        '            username="' + xa(r.user) + '" password="' + xa(pw) + '"',
+        '            maxTotal="' + r.maxTotal + '" maxIdle="' + r.maxIdle + '" maxWaitMillis="' + r.maxWait + '"',
+        '            validationQuery="' + xa(r.validationQuery) + '" testOnBorrow="' + !!r.testOnBorrow + '"/>');
+    } else if (r.kind === 'env') {
+      L.push('  <Environment name="' + xa(r.name) + '" value="' + xa(r.value) + '" type="' + xa(r.type) + '" override="' + !!r.override + '"/>');
+    } else {
+      L.push('  <Parameter name="' + xa(r.name) + '" value="' + xa(r.value) + '" override="false"/>');
+    }
+  }
+  L.push('</Context>');
+  return L.join('\n');
+}
+const effectiveXml = c => c.ctxMode === 'raw' ? (c.raw || genXml(c)) : c.ctxMode === 'project' ? PROJECT_CONTEXT : genXml(c);
+const hx = raw => esc(raw)
+  .replace(/&lt;(\/?)([\w:]+)/g, '&lt;$1<span class="t">$2</span>')
+  .replace(/([\w:]+)=(&quot;[\s\S]*?&quot;)/g, '<span class="a">$1</span>=<span class="v">$2</span>')
+  .replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="c">$1</span>');
+
+function parseContext(text) {
+  const body = text.replace(/<\?xml[\s\S]*?\?>/g, '');
+  const doc = new DOMParser().parseFromString('<__r>' + body + '</__r>', 'application/xml');
+  if (doc.querySelector('parsererror')) return { error:'XML non valido: ' + doc.querySelector('parsererror').textContent.split('\n')[0].slice(0, 90), resources:[] };
+  const out = [];
+  doc.querySelectorAll('Resource, Environment, Parameter').forEach(el => {
+    const g = a => el.getAttribute(a) || '';
+    if (el.tagName === 'Resource') {
+      if (!/DataSource/i.test(g('type')) && !g('url')) return;
+      const pw = g('password');
+      out.push(newRes('datasource', { name:g('name'), driver:g('driverClassName'), url:g('url'), user:g('username'),
+        pwdMode:'secret', pwd:pw && !pw.includes('$' + '{') ? pw : '', maxTotal:+(g('maxTotal') || g('maxActive')) || 20,
+        maxIdle:+g('maxIdle') || 5, maxWait:+(g('maxWaitMillis') || g('maxWait')) || 10000, validationQuery:g('validationQuery') || 'SELECT 1',
+        testOnBorrow:g('testOnBorrow') !== 'false' }));
+    } else if (el.tagName === 'Environment') {
+      out.push(newRes('env', { name:g('name'), value:g('value'), type:g('type') || 'java.lang.String', override:g('override') === 'true' }));
+    } else out.push(newRes('param', { name:g('name'), value:g('value') }));
+  });
+  return { error:null, resources:out };
+}
+
+function issuesOf(c) {
+  const I = [];
+  const inst = S.installs.includes(c.tomcat);
+  const line = lineOf(c.tomcat);
+  if (!inst) I.push({ lvl:'error', tab:'server', msg:`Tomcat ${c.tomcat} non è installato`, fix:{ label:'Scarica…', act:'dl-open' } });
+  if (line && line.ns !== projectNs()) I.push({ lvl:'error', tab:'server', msg:`Il progetto usa ${projectNs()}.* ma Tomcat ${line.line} usa ${line.ns}.*: l'app non partirebbe`, fix:{ label:'Cambia versione', act:'tab', val:'server' } });
+  const okPort = p => Number.isInteger(+p) && +p >= 1 && +p <= 65535;
+  if (!okPort(c.httpPort)) I.push({ lvl:'error', tab:'server', field:'httpPort', msg:'Porta HTTP non valida (1–65535)' });
+  else if (S.demo.busy && +c.httpPort === 8080) I.push({ lvl:'error', tab:'server', field:'httpPort', msg:'8080 è occupata da java.exe (PID 4812)', fix:{ label:'Usa 8081', act:'fixport' } });
+  if (!okPort(c.shutdownPort)) I.push({ lvl:'error', tab:'server', field:'shutdownPort', msg:'Porta di shutdown non valida' });
+  else if (+c.shutdownPort === +c.httpPort) I.push({ lvl:'error', tab:'server', field:'shutdownPort', msg:'Shutdown e HTTP non possono usare la stessa porta' });
+  if (!c.ctxPath.startsWith('/')) I.push({ lvl:'error', tab:'deploy', field:'ctxPath', msg:'Il context path deve iniziare con /' });
+  if (c.ctxMode !== 'project') {
+    const miss = missingReq(c);
+    if (miss.length) I.push({ lvl:'warn', tab:'context', msg:`Il progetto richiede ${miss.length} risorse JNDI non definite: ${miss.map(m => m.name).join(', ')}`, fix:{ label:'Rileva…', act:'goto-detect' } });
+  }
+  c.resources.filter(r => r.kind === 'datasource').forEach(r => {
+    const d = driverInfo(r.driver);
+    if (!r.url) I.push({ lvl:'warn', tab:'context', msg:`${r.name}: URL JDBC mancante` });
+    else if (d && !d.inMaven) I.push({ lvl:'warn', tab:'context', msg:`${r.name}: driver ${d.jar} non trovato nelle dipendenze Maven` });
+  });
+  return I;
+}
+const blocking = c => issuesOf(c).filter(i => i.lvl === 'error');
+
+function cmdLine(c) {
+  const base = S.baseDir + '/' + c.id, home = S.installDir + '/' + c.tomcat;
+  const secrets = c.resources.filter(r => r.kind === 'datasource' && r.pwdMode === 'secret').map(r => '-D' + pwdVar(r.name) + '=••••••');
+  const dbg = c.__debug ? [`-agentlib:jdwp=transport=dt_socket,server=y,suspend=${c.suspend ? 'y' : 'n'},address=*:${c.debugPort}`] : [];
+  return ['"C:/Program Files/Java/jdk-17/bin/java.exe"', `-Dcatalina.home="${home}"`, `-Dcatalina.base="${base}"`, `-Djava.io.tmpdir="${base}/temp"`,
+    ...c.jvm.split(/\s+/).filter(Boolean), ...c.sysprops.split(/\s+/).filter(Boolean), ...secrets, ...dbg,
+    `-cp "${home}/bin/bootstrap.jar;${home}/bin/tomcat-juli.jar"`, 'org.apache.catalina.startup.Bootstrap start'].join(' \\\n  ');
+}
+
+/* ───────────────────────── editor statico ───────────────────────── */
+const CODE = {
+  java:[
+    `<span class="k">package</span> it.acme.gest.dao;`, ``,
+    `<span class="k">import</span> javax.annotation.Resource;`,
+    `<span class="k">@Stateless</span>`,
+    `<span class="k">public class</span> <span class="t">ReportDao</span> {`,
+    `    <span class="f">@Resource</span>(name = <span class="s">"jdbc/Reporting"</span>)<span class="hint">⚠ non definito nel context di “Tomcat 9 — gestionale”</span>`,
+    `    <span class="k">private</span> <span class="t">DataSource</span> ds;`, ``,
+    `    <span class="k">public</span> <span class="t">List</span>&lt;<span class="t">Riga</span>&gt; <span class="f">righe</span>(<span class="k">int</span> anno) <span class="k">throws</span> <span class="t">SQLException</span> {`,
+    `        <span class="k">try</span> (<span class="t">Connection</span> c = ds.<span class="f">getConnection</span>();`,
+    `             <span class="t">PreparedStatement</span> ps = c.<span class="f">prepareStatement</span>(SQL)) {`,
+    `            ps.<span class="f">setInt</span>(<span class="n">1</span>, anno);`,
+    `            <span class="c">// …</span>`, `        }`, `    }`, `}`],
+  xml:[
+    `<span class="c">&lt;!-- WEB-INF/web.xml --&gt;</span>`,
+    `&lt;<span class="t">web-app</span> <span class="n">version</span>=<span class="s">"4.0"</span> <span class="n">xmlns</span>=<span class="s">"http://xmlns.jcp.org/xml/ns/javaee"</span>&gt;`,
+    `  &lt;<span class="t">display-name</span>&gt;gestionale&lt;/<span class="t">display-name</span>&gt;`,
+    `  &lt;<span class="t">resource-ref</span>&gt;`,
+    `    &lt;<span class="t">res-ref-name</span>&gt;<span class="s">jdbc/Gestionale</span>&lt;/<span class="t">res-ref-name</span>&gt;`,
+    `    &lt;<span class="t">res-type</span>&gt;javax.sql.DataSource&lt;/<span class="t">res-type</span>&gt;`,
+    `    &lt;<span class="t">res-auth</span>&gt;Container&lt;/<span class="t">res-auth</span>&gt;`,
+    `  &lt;/<span class="t">resource-ref</span>&gt;`,
+    `  &lt;<span class="t">env-entry</span>&gt;`,
+    `    &lt;<span class="t">env-entry-name</span>&gt;<span class="s">app/modalita</span>&lt;/<span class="t">env-entry-name</span>&gt;`,
+    `    &lt;<span class="t">env-entry-type</span>&gt;java.lang.String&lt;/<span class="t">env-entry-type</span>&gt;`,
+    `  &lt;/<span class="t">env-entry</span>&gt;`,
+    `&lt;/<span class="t">web-app</span>&gt;`],
+};
+function showCode(which) {
+  $('#code').innerHTML = CODE[which].map((l, i) => `<div class="ln"><i>${i + 1}</i><span>${l}</span></div>`).join('');
+  document.querySelectorAll('.etab').forEach(b => b.classList.toggle('on', b.dataset.tab === which));
+}
+
+/* ───────────────────────── titlebar / run panel ───────────────────────── */
+const activeCfg = () => cfgOf(S.active) || S.configs[0];
+function renderChrome() {
+  const c = activeCfg(), st = S.run.state;
+  $('#cfgName').textContent = c ? c.name : 'Aggiungi configurazione…';
+  $('#bRun').disabled = st === 'starting';
+  $('#bDbg').disabled = st === 'starting';
+  $('#bStop').disabled = st === 'stopped';
+  const line = st === 'running' ? `<span class="dot go"></span>Tomcat in ascolto :${activeCfg()?.httpPort}` : st === 'starting' ? '<span class="dot wait"></span>Tomcat in avvio…' : '<span class="dot"></span>Tomcat fermo';
+  $('#sbTomcat').innerHTML = line;
+  renderRunPanel();
+}
+function renderRunPanel() {
+  const r = S.run, st = r.state, c = activeCfg();
+  const chip = st === 'running' ? `<span class="badge ${r.errors ? 'err' : 'go'}">● in esecuzione${r.errors ? ' · ' + r.errors + ' errore' : ''}</span>` : st === 'starting' ? '<span class="badge wait">avvio…</span>' : '<span class="badge">fermo</span>';
+  const head = `<div class="ph"><span data-ic="server"></span><b>Run</b><span>›</span><span>${esc(r.cfgName || (c && c.name) || '—')}</span>${chip}${r.debug ? '<span class="badge wait">🐞 debugger attaccato :' + (c?.debugPort) + '</span>' : ''}
+    <span class="sp"></span>
+    <button class="btn sm ghost" data-act="r-restart" ${st === 'stopped' ? 'disabled' : ''}>${ic('refresh', 12)} Riavvia</button>
+    <button class="btn sm ghost" data-act="r-redeploy" ${st !== 'running' ? 'disabled' : ''}>${ic('download', 12)} Aggiorna</button>
+    <button class="btn sm ghost" data-act="r-open" ${st !== 'running' ? 'disabled' : ''}>${ic('globe', 12)} Apri nel browser</button>
+    <button class="btn sm ghost" data-act="r-stop" ${st === 'stopped' ? 'disabled' : ''}>${ic('stop', 11)} Ferma</button></div>`;
+  const body = r.log.length
+    ? `<div class="console" id="console">${r.log.map(l => `<div class="${l.c}">${l.t}</div>`).join('')}</div>`
+    : `<div class="empty">Nessuna esecuzione.<br>Premi ▶ o <kbd>Shift+F10</kbd> per avviare <b>${esc(c ? c.name : '—')}</b>.</div>`;
+  $('#runPanel').innerHTML = head + body;
+  hydrate($('#runPanel'));
+  const con = $('#console'); if (con) con.scrollTop = con.scrollHeight;
+}
+function toast(msg, kind = '') {
+  const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg;
+  $('#toastHost').appendChild(t); setTimeout(() => t.remove(), 3800);
+}
+
+/* ───────────────────────── simulazione run ───────────────────────── */
+const clock = () => { const d = new Date(); return `02-Nov-2026 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}.${String(d.getMilliseconds()).padStart(3,'0')}`; };
+function log(c, t) { S.run.log.push({ c, t:esc(t) }); renderRunPanel(); }
+function clearTimers() { S.run.timers.forEach(clearTimeout); S.run.timers = []; }
+function later(ms, fn) { S.run.timers.push(setTimeout(fn, ms)); }
+
+function startRun(debug = false) {
+  const c = activeCfg();
+  if (!c) { openModal(true); return; }
+  const errs = blocking(c);
+  if (errs.length) { openModal(false, c.id, errs[0].tab); toast(`Correggi ${errs.length} problema/i prima di avviare`, 'err'); return; }
+  const line = lineOf(c.tomcat), miss = missingReq(c);
+  clearTimers();
+  Object.assign(S.run, { state:'starting', log:[], cfgName:c.name, errors:0, debug:false });
+  const cc = { ...c, __debug:debug };
+  const base = S.baseDir + '/' + c.id;
+  let t = 0;
+  const step = (ms, cls, txt) => { t += ms; later(t, () => log(cls, txt)); };
+  step(0, 'a', `[Arbor] Tomcat ${c.tomcat} · ${line.ns}.* · richiede Java ${line.java}+ (JDK 17) → OK`);
+  step(250, 'a', `[Arbor] Porte ${c.httpPort} (HTTP) e ${c.shutdownPort} (shutdown) libere`);
+  if (c.before !== 'none') { step(250, 'm', `$ mvn -pl web ${c.before} -q`); step(700, 'ok', '[INFO] BUILD SUCCESS'); }
+  step(200, 'a', `[Arbor] Base generata in ${base} (server.xml, conf/Catalina/localhost/${ctxFile(c)})`);
+  c.resources.filter(r => r.kind === 'datasource').forEach(r => { const d = driverInfo(r.driver); if (d && d.inMaven) step(120, 'a', `[Arbor] Driver copiato: ${d.jar} → lib/`); });
+  const secrets = c.resources.filter(r => r.kind === 'datasource' && r.pwdMode === 'secret').length;
+  if (secrets) step(120, 'a', `[Arbor] ${secrets} password dal keyring → passate come -D al processo (non scritte su disco)`);
+  step(200, 'a', `[Arbor] Avvio JVM: ${c.jvm.split(/\s+/).filter(x => x.startsWith('-Xm')).join(' ')}`);
+  if (debug) step(120, 'W', `Listening for transport dt_socket at address: ${c.debugPort}`);
+  const J = (lvl, msg) => step(120, lvl, `${clock()} ${lvl === 'I' ? 'INFO' : lvl === 'W' ? 'WARNING' : 'SEVERE'} ${msg}`);
+  J('I', `[main] org.apache.catalina.startup.VersionLoggerListener.log Server version name:   Apache Tomcat/${c.tomcat}`);
+  J('I', `[main] org.apache.coyote.AbstractProtocol.init Initializing ProtocolHandler ["http-nio-${c.httpPort}"]`);
+  J('I', `[main] org.apache.catalina.startup.Catalina.load Server initialization in [${580 + Math.floor(Math.random() * 90)}] milliseconds`);
+  J('I', '[main] org.apache.catalina.core.StandardService.startInternal Starting service [Catalina]');
+  J('I', `[main] org.apache.catalina.startup.HostConfig.deployDescriptor Deploying deployment descriptor [${base}/conf/Catalina/localhost/${ctxFile(c)}]`);
+  if (miss.length && c.ctxMode !== 'project') {
+    miss.filter(m => m.kind === 'datasource').slice(0, 1).forEach(m =>
+      J('E', `[Catalina-utility-1] org.apache.catalina.core.StandardContext.listenerStart Exception sending context initialized event: javax.naming.NameNotFoundException: Name [${m.name}] is not bound in this Context. Unable to find [${m.name}].`));
+    later(t, () => { S.run.errors = 1; });
+  }
+  J('I', `[main] org.apache.catalina.startup.HostConfig.deployDescriptor Deployment of deployment descriptor [${ctxFile(c)}] has finished in [1,842] ms`);
+  J('I', `[main] org.apache.coyote.AbstractProtocol.start Starting ProtocolHandler ["http-nio-${c.httpPort}"]`);
+  J('I', `[main] org.apache.catalina.startup.Catalina.start Server startup in [2 481] milliseconds`);
+  later(t + 150, () => {
+    S.run.state = 'running'; S.run.debug = debug;
+    log('ok', `[Arbor] Pronto → http://localhost:${c.httpPort}${c.ctxPath}/${c.openBrowser ? '  (aperto nel browser)' : ''}`);
+    renderChrome();
+  });
+  renderChrome();
+}
+function stopRun(then) {
+  if (S.run.state === 'stopped') { then && then(); return; }
+  const c = activeCfg(); clearTimers();
+  log('a', `[Arbor] Stop: shutdown sulla porta ${c.shutdownPort}…`);
+  later(250, () => log('I', `${clock()} INFO [main] org.apache.catalina.core.StandardService.stopInternal Stopping service [Catalina]`));
+  later(550, () => log('I', `${clock()} INFO [main] org.apache.coyote.AbstractProtocol.stop Stopping ProtocolHandler ["http-nio-${c.httpPort}"]`));
+  later(800, () => { log('m', 'Processo terminato con codice 0'); S.run.state = 'stopped'; S.run.debug = false; renderChrome(); then && then(); });
+}
+
+/* ───────────────────────── popover selettore config ───────────────────────── */
+function togglePop() {
+  if (S.pop) { S.pop = null; $('#popHost')?.remove(); return; }
+  const r = $('#cfgSel').getBoundingClientRect(), a = $('#app').getBoundingClientRect();
+  const host = document.createElement('div'); host.id = 'popHost'; host.className = 'pop';
+  host.style.left = (r.left - a.left) + 'px'; host.style.top = (r.bottom - a.top + 4) + 'px';
+  host.innerHTML = S.configs.map(c => `<button data-act="pick" data-id="${c.id}">${ic('server', 13)} <span style="flex:1">${esc(c.name)}</span>${c.id === S.active ? ic('check', 13) : ''}<small style="color:var(--fg-faint)">:${c.httpPort}</small></button>`).join('')
+    + `<hr><button data-act="edit-cfgs">${ic('hammer', 13)} Modifica configurazioni…</button><button data-act="new-cfg">${ic('plus', 13)} Nuovo Tomcat Server…</button>`;
+  $('#app').appendChild(host); S.pop = true;
+}
+const closePop = () => { if (S.pop) { S.pop = null; $('#popHost')?.remove(); } };
+
+/* ───────────────────────── modale: apertura / render ───────────────────────── */
+function openModal(addNew = false, sel = null, tab = 'server') {
+  closePop();
+  const cfgs = JSON.parse(JSON.stringify(S.configs));
+  S.modal = { cfgs, sel:sel || S.active, tab, ctxView:'form', rs:null, cmd:false, pasteErr:'', testMsg:'', paste:'' };
+  if (addNew || !cfgs.length) addCfg();
+  const c = mcur(); if (c) M().rs = c.resources[0]?.id || null;
+  renderModal();
+}
+function closeModal() { S.modal = null; S.dl = null; $('#overlay').innerHTML = ''; }
+function addCfg() {
+  const ver = S.installs[0] || '9.0.98', id = 'tc' + (++uid);
+  const n = M().cfgs.length + 1;
+  M().cfgs.push({ ...baseCfg(id, 'Tomcat Server' + (n > 1 ? ' ' + n : ''), ver), httpPort:8080 + n - 1, shutdownPort:8005 + n - 1, debugPort:5005 + n - 1, ctxPath:'/gestionale' });
+  M().sel = id; M().rs = null;
+}
+
+function tabsHtml(c) {
+  const iss = issuesOf(c), cnt = t => iss.filter(i => i.tab === t);
+  const badge = t => { const l = cnt(t); if (!l.length) return ''; return `<span class="n ${l.some(i => i.lvl === 'error') ? 'e' : ''}">${l.length}</span>`; };
+  const T = [['server','Server'],['deploy','Deployment'],['context','context.xml'],['env','Ambiente'],['debug','Debug']];
+  return T.map(([id, l]) => `<button class="${M().tab === id ? 'on' : ''}" data-act="tab" data-val="${id}">${l}${badge(id)}</button>`).join('');
+}
+function issuesHtml(c) {
+  const iss = issuesOf(c);
+  return iss.slice(0, 3).map((i, n) => `<div class="issue ${i.lvl}">${ic(i.lvl === 'error' ? 'x' : 'alert', 13)}<span>${esc(i.msg)}</span>${i.fix ? `<button class="btn sm" data-act="${i.fix.act}" ${i.fix.val ? `data-val="${i.fix.val}"` : ''}>${esc(i.fix.label)}</button>` : ''}</div>`).join('')
+    + (iss.length > 3 ? `<div class="issue" style="color:var(--fg-muted)"><span>…e altri ${iss.length - 3}</span></div>` : '');
+}
+
+function renderModal() {
+  const c = mcur();
+  const sideItems = M().cfgs.map(x => `<button class="it ${x.id === M().sel ? 'on' : ''}" data-act="sel" data-id="${x.id}">${ic('server', 13)}<span>${esc(x.name)}</span>${blocking(x).length ? ic('alert', 12) : ''}</button>`).join('');
+  $('#overlay').innerHTML = `<div class="scrim" id="scrim"><div class="modal" role="dialog" aria-label="Run/Debug Configurations">
+    <div class="mh">${ic('hammer', 15)}<b>Run/Debug Configurations</b><span class="sp"></span><span class="tag">Tomcat Server</span></div>
+    <div class="mb">
+      <div class="side"><div class="tools"><button class="tb" data-act="addcfg" title="Aggiungi">${ic('plus')}</button><button class="tb" data-act="delcfg" title="Rimuovi">${ic('minus')}</button><button class="tb" data-act="dupcfg" title="Duplica">${ic('copy')}</button></div>
+        <div class="grp">Tomcat Server</div><div id="sideList">${sideItems}</div>
+        <div class="grp">Application</div><button class="it"><span>Main</span></button>
+        <div class="grp">JUnit</div><button class="it"><span>Tests</span></button></div>
+      <div class="main2">${c ? `<div class="top2"><div class="nm"><label>Nome</label><input class="inp" data-k="name" value="${esc(c.name)}" id="nameInp"></div>
+          <div class="tabs" id="tabsBar">${tabsHtml(c)}</div></div>
+        <div class="pane" id="pane">${paneHtml(c)}</div>` : '<div class="empty">Nessuna configurazione.</div>'}</div>
+    </div>
+    <div class="issues" id="issues">${c ? issuesHtml(c) : ''}</div>
+    <div class="cmdbar"><button data-act="cmd">${ic('chevron', 12)} Comando di avvio</button>${M().cmd ? `<pre id="cmdPre">${esc(c ? cmdLine(c) : '')}</pre>` : ''}</div>
+    <div class="mf"><span style="color:var(--fg-faint)"><kbd>Esc</kbd> annulla · <kbd>Ctrl+Invio</kbd> applica e avvia</span><span class="sp"></span>
+      <button class="btn" data-act="cancel">Annulla</button><button class="btn" data-act="apply">Applica</button>
+      <button class="btn dbg" data-act="apply-debug" style="color:var(--warning)">${ic('bug', 13)} Debug</button>
+      <button class="btn pri" data-act="apply-run" ${c && blocking(c).length ? 'disabled' : ''}>${ic('play', 12)} Avvia</button></div>
+  </div></div>${S.dl ? dlHtml() : ''}`;
+  hydrate($('#overlay'));
+  if (M().tab === 'server' && !M().focused) { $('#nameInp')?.focus(); M().focused = true; }
+  refreshFieldErrors();
+}
+
+function refreshDerived() {
+  const c = mcur(); if (!c) return;
+  const x = $('#xmlPre'); if (x) x.innerHTML = hx(effectiveXml(c));
+  const cm = $('#cmdPre'); if (cm) cm.textContent = cmdLine(c);
+  $('#issues').innerHTML = issuesHtml(c);
+  $('#tabsBar').innerHTML = tabsHtml(c);
+  $('#sideList').innerHTML = M().cfgs.map(y => `<button class="it ${y.id === M().sel ? 'on' : ''}" data-act="sel" data-id="${y.id}">${ic('server', 13)}<span>${esc(y.name)}</span>${blocking(y).length ? ic('alert', 12) : ''}</button>`).join('');
+  const rb = $('[data-act="apply-run"]'); if (rb) rb.disabled = blocking(c).length > 0;
+  refreshFieldErrors();
+  const info = $('#tcInfo'); if (info) info.innerHTML = tcInfoHtml(c);
+  const xf = $('#xmlFile'); if (xf) xf.textContent = 'conf/Catalina/localhost/' + ctxFile(c);
+  const rl = $('#rlist'); if (rl) rl.innerHTML = rlistHtml(c);
+}
+function refreshFieldErrors() {
+  const c = mcur(); if (!c) return;
+  const iss = issuesOf(c);
+  document.querySelectorAll('[data-err]').forEach(el => {
+    const hit = iss.find(i => i.field === el.dataset.err);
+    el.classList.toggle('on', !!hit);
+    el.innerHTML = hit ? `${ic('x', 12)}<span>${esc(hit.msg)}</span>${hit.fix ? `<button class="btn sm" data-act="${hit.fix.act}">${esc(hit.fix.label)}</button>` : ''}` : '';
+    const inp = el.previousElementSibling?.querySelector?.('input') || el.parentElement.querySelector('.inp');
+  });
+  document.querySelectorAll('[data-bad]').forEach(el => el.classList.toggle('bad', iss.some(i => i.field === el.dataset.bad)));
+}
+
+/* ───────────────────────── pannelli ───────────────────────── */
+const sw = (k, v, label, target = 'k') => `<label class="sw"><input type="checkbox" data-${target}="${k}" ${v ? 'checked' : ''}> ${label}</label>`;
+function tcInfoHtml(c) {
+  const l = lineOf(c.tomcat); if (!l) return '';
+  const compat = l.ns === projectNs();
+  return `<div class="info"><span class="tag">Servlet ${l.servlet}</span><span class="tag ${l.ns === 'jakarta' ? 'jk' : 'jv'}">${l.ns}.*</span><span class="tag">Java ${l.java}+</span>
+    <span class="tag ${compat ? 'ok' : 'bad'}">${compat ? '✓ compatibile col progetto (' + projectNs() + '.*)' : '✗ il progetto usa ' + projectNs() + '.*'}</span></div>`;
+}
+function paneHtml(c) {
+  return { server:paneServer, deploy:paneDeploy, context:paneContext, env:paneEnv, debug:paneDebug }[M().tab](c);
+}
+function paneServer(c) {
+  const opts = [...new Set([...S.installs, c.tomcat])].sort().reverse().map(v => `<option value="${v}" ${v === c.tomcat ? 'selected' : ''}>Apache Tomcat ${v}${S.installs.includes(v) ? '' : ' — non installato'}</option>`).join('');
+  return `<div class="row"><label>Tomcat</label><div><div class="inline"><select class="inp" data-k="tomcat" data-rerender="1" style="flex:1">${opts}<option value="__dl">⇩ Scarica un'altra versione…</option></select>
+      <button class="btn" data-act="dl-open">${ic('download', 13)} Scarica…</button></div><div id="tcInfo" style="margin-top:6px">${tcInfoHtml(c)}</div></div></div>
+    <div class="row"><label>JDK</label><select class="inp" data-k="jdk" style="max-width:320px"><option value="project">Quello del progetto (17)</option><option value="21">jdk-21 (C:\\Program Files\\Java)</option><option value="11">jdk-11</option></select></div>
+    <div class="row"><label>Porta HTTP</label><div><input class="inp sm" data-k="httpPort" data-num="1" data-bad="httpPort" value="${c.httpPort}"></div><div class="ferr" data-err="httpPort"></div></div>
+    <div class="row"><label>Porta shutdown</label><div><input class="inp sm" data-k="shutdownPort" data-num="1" data-bad="shutdownPort" value="${c.shutdownPort}"></div><div class="ferr" data-err="shutdownPort"></div></div>
+    <div class="row"><label>Opzioni JVM</label><input class="inp mono" data-k="jvm" value="${esc(c.jvm)}"></div>
+    <div class="row"><label>Dopo l'avvio</label><div>${sw('openBrowser', c.openBrowser, 'Apri nel browser')} <span style="color:var(--fg-faint);margin-left:8px">http://localhost:${c.httpPort}${esc(c.ctxPath)}/</span></div></div>
+    <div class="sect">Cartelle (valori predefiniti, modificabili)</div>
+    <div class="row"><label>Installazioni</label><div class="inline"><input class="inp mono" data-g="installDir" value="${esc(S.installDir)}"><button class="btn">Sfoglia…</button></div><div class="sub">Dove “Scarica…” mette le distribuzioni di Tomcat.</div></div>
+    <div class="row"><label>Basi generate</label><div class="inline"><input class="inp mono" data-g="baseDir" value="${esc(S.baseDir)}"><button class="btn">Sfoglia…</button></div><div class="sub">Una sottocartella per configurazione: <code>${esc(S.baseDir)}/${c.id}</code> (server.xml, context, logs, work).</div></div>`;
+}
+function paneDeploy(c) {
+  const before = c.artifact === 'war'
+    ? [['package','Maven: package'],['none','Nessuno (compilo a parte)']] : [['war:exploded','Maven: war:exploded'],['package','Maven: package'],['none','Nessuno (compilo a parte)']];
+  if (!before.some(([v]) => v === c.before)) c.before = before[0][0];
+  return `<div class="row"><label>Modulo</label><select class="inp" style="max-width:320px"><option>web (war)</option></select></div>
+    <div class="row"><label>Artefatto</label><div><div class="seg">${[['exploded','Exploded'],['war','WAR']].map(([v, l]) => `<button class="${c.artifact === v ? 'on' : ''}" data-act="seg" data-k="artifact" data-val="${v}">${l}</button>`).join('')}</div></div>
+      <div class="sub">${c.artifact === 'exploded' ? 'Tomcat legge direttamente la cartella di build (docBase): nessuna copia, le JSP si aggiornano da sole.' : 'Tomcat apre il .war: il context è fisso fino al prossimo build.'}</div></div>
+    <div class="row"><label>Context path</label><div><input class="inp sm" style="max-width:240px" data-k="ctxPath" data-bad="ctxPath" value="${esc(c.ctxPath)}"></div><div class="ferr" data-err="ctxPath"></div><div class="sub">Proposto da <code>&lt;finalName&gt;</code>. File generato: <code>${esc(ctxFile(c))}</code></div></div>
+    <div class="row"><label>docBase</label><input class="inp mono" readonly value="${esc(docBase(c))}"></div>
+    <div class="row"><label>Prima di avviare</label><select class="inp" data-k="before" style="max-width:320px">${before.map(([v, l]) => `<option value="${v}" ${c.before === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="sect">Aggiornamenti a caldo</div>
+    <div class="row"><label>JSP</label><div>${sw('jspHot', c.jspHot, 'Ricompila a caldo (Jasper dev-mode)')}</div><div class="sub">Con il deployment exploded l'hot-swap esistente non serve: resta per i Tomcat già avviati fuori da Bennu.</div></div>
+    <div class="row"><label>Classi</label><div>${sw('reloadable', c.reloadable, '<code>reloadable</code> — ricarica il contesto se cambia WEB-INF/classes')}</div></div>`;
+}
+function paneEnv(c) {
+  const rows = c.env.map((e, i) => `<div class="inline" style="margin-bottom:6px"><input class="inp mono" style="max-width:220px" data-ei="${i}" data-ef="k" value="${esc(e.k)}" placeholder="NOME"><span>=</span><input class="inp mono" data-ei="${i}" data-ef="v" value="${esc(e.v)}" placeholder="valore"><button class="tb" data-act="envdel" data-i="${i}">${ic('x')}</button></div>`).join('');
+  return `<div class="row" style="align-items:start"><label>Variabili d'ambiente</label><div>${rows}<button class="btn sm" data-act="envadd">${ic('plus', 12)} Aggiungi</button><div class="sub" style="margin-top:6px">Stesso editor delle altre configurazioni (<code>BennuRunEnvField</code>): finiscono nell'ambiente del processo Tomcat.</div></div></div>
+    <div class="row"><label>System property</label><input class="inp mono" data-k="sysprops" value="${esc(c.sysprops)}"></div>
+    <div class="row"><label>Directory di lavoro</label><div class="inline"><input class="inp mono" readonly value="${esc(S.baseDir)}/${c.id}"><button class="btn">Apri cartella</button></div></div>`;
+}
+function paneDebug(c) {
+  return `<div class="row"><label>Porta JDWP</label><div><input class="inp sm" data-k="debugPort" data-num="1" value="${c.debugPort}"></div><div class="sub">Con 🐞 Tomcat parte con <code>-agentlib:jdwp</code> e Bennu si attacca da solo (stesso meccanismo di “Attach to JVM”).</div></div>
+    <div class="row"><label>All'avvio</label><div>${sw('suspend', c.suspend, 'Sospendi finché non premo Resume (<code>suspend=y</code>)')}</div><div class="sub">Serve solo per fermarsi nei listener di startup; di solito è spento.</div></div>`;
+}
+
+/* ── context.xml avanzato ── */
+const rIcon = r => r.kind === 'datasource' ? 'db' : r.kind === 'env' ? 'var' : 'link';
+function rlistHtml(c) {
+  if (!c.resources.length) return '<div style="color:var(--fg-faint);padding:8px">Nessuna risorsa.</div>';
+  return c.resources.map(r => {
+    const bad = r.kind === 'datasource' && (!r.url || (driverInfo(r.driver) && !driverInfo(r.driver).inMaven));
+    return `<button class="rit ${r.id === M().rs && M().ctxView === 'form' ? 'on' : ''}" data-act="selres" data-id="${r.id}">${ic(rIcon(r), 13)}<span>${esc(r.name)}</span>${bad ? `<i class="w">${ic('alert', 12)}</i>` : ''}</button>`;
+  }).join('');
+}
+function paneContext(c) {
+  const seg = [['guided','Guidato'],['raw','XML grezzo'],['project','Del progetto']];
+  const head = `<div class="inline" style="margin-bottom:12px"><div class="seg">${seg.map(([v, l]) => `<button class="${c.ctxMode === v ? 'on' : ''}" data-act="ctxmode" data-val="${v}">${l}</button>`).join('')}</div>
+    <span style="color:var(--fg-faint)">${c.ctxMode === 'guided' ? 'Il file è generato da questo modulo.' : c.ctxMode === 'raw' ? 'Scrivi tu il file: la modale non lo riscrive.' : 'Usa META-INF/context.xml del progetto (sola lettura).'}</span></div>`;
+  if (c.ctxMode === 'raw') {
+    return head + `<div class="ctx3" style="grid-template-columns:minmax(0,1fr) 330px"><div><textarea class="inp" id="rawTa" data-k="raw" style="flex:1;min-height:360px" spellcheck="false">${esc(c.raw)}</textarea></div>
+      <div><div class="card2" id="rawLint">${rawLint(c)}</div><div style="display:flex;gap:6px;margin-top:10px"><button class="btn" data-act="regen">${ic('refresh', 13)} Rigenera dal modulo</button><button class="btn" data-act="goto-paste">${ic('clip', 13)} Incolla…</button></div></div></div>`;
+  }
+  if (c.ctxMode === 'project') {
+    const hasClear = /password="(?!\$\{)[^"]+"/.test(PROJECT_CONTEXT);
+    return head + `<div class="ctx3" style="grid-template-columns:minmax(0,1fr) 330px"><div class="xmlbox"><div class="xh">${ic('file', 12)} src/main/resources/META-INF/context.xml · sola lettura</div><pre>${hx(PROJECT_CONTEXT)}</pre></div>
+      <div><div class="card2">${hasClear ? `<div class="okline bad">${ic('alert', 13)} Contiene una <b>password in chiaro</b> in un file versionato.</div>` : ''}
+        <p style="color:var(--fg-muted);margin:10px 0">Posso estrarre le risorse nel modulo guidato, mettere le password nel keyring e generare un context senza segreti.</p>
+        <button class="btn pri" data-act="extract">${ic('wand', 13)} Estrai nel modulo guidato</button></div></div></div>`;
+  }
+  const miss = missingReq(c);
+  return head + `<div class="ctx3">
+    <div><div class="inline" style="justify-content:space-between"><b>Risorse (${c.resources.length})</b><span class="inline" style="gap:2px">
+        <button class="btn sm ghost" data-act="addres" data-val="datasource">${ic('plus', 11)} DS</button><button class="btn sm ghost" data-act="addres" data-val="env">${ic('plus', 11)} Env</button><button class="btn sm ghost" data-act="addres" data-val="param">${ic('plus', 11)} Par</button></span></div>
+      <div class="rlist" id="rlist">${rlistHtml(c)}</div>
+      <div class="smart">
+        <button class="btn" data-act="goto-detect">${ic('wand', 13)} Rileva dal progetto${miss.length ? `<em>${miss.length} mancanti</em>` : ''}</button>
+        <button class="btn" data-act="goto-picus">${ic('db', 13)} Da connessione Picus…</button>
+        <button class="btn" data-act="goto-paste">${ic('clip', 13)} Incolla XML / server.xml…</button></div></div>
+    <div class="res-form">${ctxMiddle(c)}</div>
+    <div><div class="xmlbox"><div class="xh">${ic('file', 12)} <span id="xmlFile">conf/Catalina/localhost/${esc(ctxFile(c))}</span></div><pre id="xmlPre">${hx(effectiveXml(c))}</pre></div></div></div>`;
+}
+function rawLint(c) {
+  const text = c.raw || '';
+  const p = parseContext(text);
+  if (p.error) return `<div class="okline bad">${ic('x', 13)} ${esc(p.error)}</div>`;
+  const miss = REQUIRED.filter(q => !p.resources.some(r => r.name === q.name));
+  return `<div class="okline ok">${ic('check', 13)} XML ben formato · ${p.resources.length} risorse</div>`
+    + (miss.length ? `<div class="okline bad" style="margin-top:6px">${ic('alert', 13)} Mancano: ${miss.map(m => esc(m.name)).join(', ')}</div>` : `<div class="okline ok" style="margin-top:6px">${ic('check', 13)} Tutte le risorse richieste dal progetto sono presenti</div>`);
+}
+function ctxMiddle(c) {
+  const v = M().ctxView;
+  if (v === 'detect') {
+    const rows = REQUIRED.map(q => {
+      const have = c.resources.some(r => r.name === q.name);
+      return `<div class="lit"><span style="color:${have ? 'var(--success)' : 'var(--warning)'}">${ic(have ? 'check' : 'alert', 15)}</span><div class="tx"><b>${esc(q.name)}</b><small>${esc(q.src)}</small></div>
+        ${have ? '<span class="tag ok">definita</span>' : `<button class="btn sm" data-act="adddet" data-id="${esc(q.name)}">${ic('plus', 11)} Aggiungi</button>`}</div>`;
+    }).join('');
+    const n = missingReq(c).length;
+    return `<h4>${ic('wand', 15)} Risorse richieste dal progetto</h4><p style="color:var(--fg-muted);margin:0 0 10px">Bennu legge <code>web.xml</code>, <code>@Resource</code>, <code>lookup()</code>, <code>persistence.xml</code> e i bean Spring: sa già quali nomi JNDI l'app si aspetta di trovare.</p>
+      <div class="list">${rows}</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn pri" data-act="adddetall" ${n ? '' : 'disabled'}>Aggiungi le ${n} mancanti</button><button class="btn" data-act="ctxview" data-val="form">Chiudi</button></div>`;
+  }
+  if (v === 'picus') {
+    const next = missingReq(c).find(m => m.kind === 'datasource');
+    return `<h4>${ic('db', 15)} Da connessione Picus</h4><p style="color:var(--fg-muted);margin:0 0 10px">Driver, URL e utente vengono dalla connessione; la password dal vault di Picus (mai in chiaro).${next ? ` Il nome JNDI proposto è <code>${esc(next.name)}</code>, la prima risorsa mancante.` : ''}</p>
+      <div class="list">${PICUS.map(p => `<div class="lit click" data-act="usepicus" data-id="${p.id}" tabindex="0">${ic('db', 16)}<div class="tx"><b style="font-family:inherit">${esc(p.name)}</b><small>${esc(p.eng)} · ${esc(p.url)}</small></div>${ic('plus', 13)}</div>`).join('')}</div>
+      <div style="margin-top:12px"><button class="btn" data-act="ctxview" data-val="form">Annulla</button></div>`;
+  }
+  if (v === 'paste') {
+    return `<h4>${ic('clip', 15)} Incolla XML</h4><p style="color:var(--fg-muted);margin:0 0 8px">Un <code>context.xml</code>, un blocco <code>&lt;Resource&gt;</code> di <code>server.xml</code> / <code>GlobalNamingResources</code>, o il context di un altro server. Le password vanno nel keyring.</p>
+      <textarea class="inp" id="pasteTa" rows="11" spellcheck="false" placeholder="&lt;Resource name=&quot;jdbc/…&quot; …/&gt;">${esc(M().paste)}</textarea>
+      ${M().pasteErr ? `<div class="okline bad">${ic('x', 13)} ${esc(M().pasteErr)}</div>` : ''}
+      <div style="display:flex;gap:8px;margin-top:10px"><button class="btn pri" data-act="import">Importa risorse</button><button class="btn" data-act="ctxview" data-val="form">Annulla</button></div>`;
+  }
+  const r = mres();
+  if (!r) return `<div class="empty" style="margin-top:30px">Seleziona una risorsa o usa<br><b>Rileva dal progetto</b> per partire da quelle richieste.</div>`;
+  if (r.kind === 'env') return `<h4>${ic('var', 15)} Environment</h4>
+    <div class="fld"><label class="lbl">Nome JNDI (<code>java:comp/env/</code>…)</label><input class="inp mono" data-r="name" value="${esc(r.name)}"></div>
+    <div class="grid2"><div class="fld"><label class="lbl">Tipo</label><select class="inp" data-r="type">${['java.lang.String','java.lang.Integer','java.lang.Boolean','java.lang.Double'].map(t => `<option ${r.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div class="fld"><label class="lbl">Valore</label><input class="inp mono" data-r="value" value="${esc(r.value)}"></div></div>
+    <div class="fld">${sw('override', r.override, 'Il <code>web.xml</code> può sovrascriverlo (<code>override</code>)', 'r')}</div>
+    <button class="btn" data-act="delres">${ic('trash', 13)} Elimina</button>`;
+  if (r.kind === 'param') return `<h4>${ic('link', 15)} Parameter</h4>
+    <div class="fld"><label class="lbl">Nome</label><input class="inp mono" data-r="name" value="${esc(r.name)}"></div>
+    <div class="fld"><label class="lbl">Valore</label><input class="inp mono" data-r="value" value="${esc(r.value)}"></div>
+    <button class="btn" data-act="delres">${ic('trash', 13)} Elimina</button>`;
+  const d = driverInfo(r.driver);
+  return `<h4>${ic('db', 15)} DataSource JDBC <span class="tag">${esc(d ? d.eng : 'driver personalizzato')}</span></h4>
+    <div class="fld"><label class="lbl">Nome JNDI (<code>java:comp/env/</code>…)</label><input class="inp mono" data-r="name" value="${esc(r.name)}"></div>
+    <div class="fld"><label class="lbl">Driver</label><input class="inp mono" list="drv" data-r="driver" data-rerender-ctx="1" value="${esc(r.driver)}"><datalist id="drv">${Object.keys(DRIVERS).map(k => `<option value="${k}">`).join('')}</datalist>
+      <div class="okline ${d ? (d.inMaven ? 'ok' : 'bad') : 'bad'}" id="drvLine">${d ? (d.inMaven ? ic('check', 13) + ' ' + d.jar + ' dalle dipendenze Maven → copiato in lib/ all\'avvio' : ic('alert', 13) + ' ' + d.jar + ' non è nel pom: aggiungi la dipendenza o scegli un file') : ic('alert', 13) + ' driver sconosciuto'}</div></div>
+    <div class="fld"><label class="lbl">URL JDBC</label><input class="inp mono" data-r="url" value="${esc(r.url)}" placeholder="jdbc:…"></div>
+    <div class="grid2"><div class="fld"><label class="lbl">Utente</label><input class="inp mono" data-r="user" value="${esc(r.user)}"></div>
+      <div class="fld"><label class="lbl">Password</label><input class="inp mono" type="password" data-r="pwd" value="${esc(r.pwd)}"></div></div>
+    <div class="fld"><div class="inline"><div class="seg">${[['secret','Keyring (consigliato)'],['clear','In chiaro nel file']].map(([v, l]) => `<button class="${r.pwdMode === v ? 'on' : ''}" data-act="pwdmode" data-val="${v}">${l}</button>`).join('')}</div></div>
+      <div class="okline ${r.pwdMode === 'secret' ? 'ok' : 'bad'}" id="pwdLine">${pwdNote(r)}</div></div>
+    <div class="sect" style="margin-top:6px;padding-top:8px">Pool</div>
+    <div class="grid2" style="grid-template-columns:1fr 1fr 1fr"><div class="fld"><label class="lbl">maxTotal</label><input class="inp" data-r="maxTotal" data-num="1" value="${r.maxTotal}"></div>
+      <div class="fld"><label class="lbl">maxIdle</label><input class="inp" data-r="maxIdle" data-num="1" value="${r.maxIdle}"></div>
+      <div class="fld"><label class="lbl">maxWait (ms)</label><input class="inp" data-r="maxWait" data-num="1" value="${r.maxWait}"></div></div>
+    <div class="grid2"><div class="fld"><label class="lbl">validationQuery</label><input class="inp mono" data-r="validationQuery" value="${esc(r.validationQuery)}"></div>
+      <div class="fld" style="align-self:end;padding-bottom:5px">${sw('testOnBorrow', r.testOnBorrow, 'testOnBorrow', 'r')}</div></div>
+    <div class="inline"><button class="btn" data-act="test">${ic('refresh', 13)} Prova connessione</button><span id="testMsg" style="font-size:12px"></span><span class="sp"></span><button class="btn" data-act="delres">${ic('trash', 13)} Elimina</button></div>`;
+}
+const pwdNote = r => r.pwdMode === 'secret'
+  ? `${ic('check', 13)} Nel file: <code>${ref(pwdVar(r.name))}</code>. Il valore sta nel keyring e viene passato come <code>-D${esc(pwdVar(r.name))}</code> al processo.`
+  : `${ic('alert', 13)} La password verrà scritta in chiaro in ${esc(ctxFile(mcur()))} (fuori dal repository, dentro la base generata).`;
+
+/* ── download Tomcat ── */
+function dlHtml() {
+  const D = S.dl, l = CATALOG.find(x => x.line === D.line), run = D.phase !== 'idle';
+  const mb = (l.size * D.pct / 100).toFixed(1);
+  return `<div class="scrim top"><div class="modal small" role="dialog" aria-label="Scarica Tomcat">
+    <div class="mh">${ic('download', 15)}<b>Scarica Apache Tomcat</b><span class="sp"></span><button class="tb" data-act="dl-close">${ic('x')}</button></div>
+    <div style="padding:16px 18px;overflow:auto">
+      <div class="lines">${CATALOG.map(x => `<button class="line ${x.line === D.line ? 'on' : ''}" data-act="dl-line" data-id="${x.line}" ${run ? 'disabled' : ''}><b>Tomcat ${x.line}</b>
+        <div class="info"><span class="tag ${x.ns === 'jakarta' ? 'jk' : 'jv'}">${x.ns}.*</span><span class="tag">Servlet ${x.servlet}</span><span class="tag">Java ${x.java}+</span></div></button>`).join('')}</div>
+      <div class="row" style="margin-top:14px;grid-template-columns:110px 1fr"><label>Versione</label><select class="inp" data-dlver="1" ${run ? 'disabled' : ''} style="max-width:200px">${l.versions.map(v => `<option ${v === D.ver ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      <div class="row" style="grid-template-columns:110px 1fr"><label>Installa in</label><input class="inp mono" data-g="installDir" value="${esc(S.installDir)}" ${run ? 'disabled' : ''}></div>
+      <div class="sub" style="color:var(--fg-faint);margin:-4px 0 0 122px">Da downloads.apache.org · verifica SHA-512 prima di estrarre.</div>
+      ${run ? `<div style="margin-top:14px"><div class="bar"><i style="width:${D.pct}%"></i></div>
+        <div class="steps"><div class="${D.pct > 0 ? '' : ''}">${D.pct >= 70 ? '<span class="d">✓</span>' : '…'} Download ${mb} / ${l.size} MB</div>
+          <div>${D.pct >= 85 ? '<span class="d">✓</span> SHA-512 verificato' : '<span style="color:var(--fg-faint)">· verifica SHA-512</span>'}</div>
+          <div>${D.pct >= 100 ? '<span class="d">✓</span> Estratto in ' + esc(S.installDir) + '/' + D.ver : '<span style="color:var(--fg-faint)">· estrazione</span>'}</div></div></div>` : ''}
+    </div>
+    <div class="mf"><span class="sp"></span><button class="btn" data-act="dl-close" ${run ? 'disabled' : ''}>Annulla</button><button class="btn pri" data-act="dl-go" ${run ? 'disabled' : ''}>${ic('download', 13)} Scarica e installa ${esc(D.ver)}</button></div>
+  </div></div>`;
+}
+function dlStart() {
+  const D = S.dl; D.phase = 'run'; D.pct = 0; renderDl();
+  const tick = setInterval(() => {
+    D.pct = Math.min(100, D.pct + 6 + Math.random() * 7); renderDl();
+    if (D.pct >= 100) {
+      clearInterval(tick);
+      setTimeout(() => {
+        if (!S.installs.includes(D.ver)) S.installs.push(D.ver);
+        if (M()) { mcur().tomcat = D.ver; }
+        const v = D.ver; S.dl = null; if (M()) renderModal();
+        toast(`Tomcat ${v} installato in ${S.installDir}/${v}`, 'ok');
+      }, 350);
+    }
+  }, 110);
+}
+function renderDl() {
+  const host = document.querySelector('.scrim.top'); if (!host) return;
+  host.outerHTML = dlHtml(); hydrate($('#overlay'));
+}
+
+/* ───────────────────────── eventi ───────────────────────── */
+const ACT = {
+  tab: el => { M().tab = el.dataset.val; M().ctxView = 'form'; renderModal(); },
+  sel: el => { M().sel = el.dataset.id; M().rs = mcur().resources[0]?.id || null; M().ctxView = 'form'; renderModal(); },
+  addcfg: () => { addCfg(); M().tab = 'server'; renderModal(); },
+  dupcfg: () => { const c = JSON.parse(JSON.stringify(mcur())); c.id = 'tc' + (++uid); c.name += ' (copia)'; c.httpPort++; c.shutdownPort++; c.debugPort++; M().cfgs.push(c); M().sel = c.id; renderModal(); },
+  delcfg: () => { if (M().cfgs.length < 1) return; M().cfgs = M().cfgs.filter(c => c.id !== M().sel); M().sel = M().cfgs[0]?.id; renderModal(); },
+  seg: el => { const k = el.dataset.k; mcur()[k] = el.dataset.val; renderModal(); },
+  ctxmode: el => { const c = mcur(); c.ctxMode = el.dataset.val; if (c.ctxMode === 'raw' && !c.raw) c.raw = genXml(c); M().ctxView = 'form'; renderModal(); },
+  ctxview: el => { M().ctxView = el.dataset.val; renderModal(); },
+  'goto-detect': () => { M().tab = 'context'; mcur().ctxMode = 'guided'; M().ctxView = 'detect'; renderModal(); },
+  'goto-picus': () => { M().ctxView = 'picus'; renderModal(); },
+  'goto-paste': () => { M().ctxView = 'paste'; M().pasteErr = ''; renderModal(); },
+  addres: el => { const r = newRes(el.dataset.val); mcur().resources.push(r); M().rs = r.id; M().ctxView = 'form'; renderModal(); },
+  selres: el => { M().rs = el.dataset.id; M().ctxView = 'form'; renderModal(); },
+  delres: () => { const c = mcur(); c.resources = c.resources.filter(r => r.id !== M().rs); M().rs = c.resources[0]?.id || null; renderModal(); },
+  adddet: el => addDetected(el.dataset.id),
+  adddetall: () => { missingReq(mcur()).forEach(q => addDetected(q.name, true)); M().ctxView = 'form'; renderModal(); toast('Risorse aggiunte: completa URL e credenziali di quelle da collegare.', 'ok'); },
+  usepicus: el => {
+    const p = PICUS.find(x => x.id === el.dataset.id), c = mcur();
+    const target = missingReq(c).find(m => m.kind === 'datasource');
+    const r = newRes('datasource', { name:target ? target.name : 'jdbc/' + p.name.replace(/\W+/g, ''), driver:p.driver, url:p.url, user:p.user, pwd:'(dal vault Picus)' });
+    c.resources.push(r); M().rs = r.id; M().ctxView = 'form'; renderModal();
+    toast(`Importata “${p.name}” come ${r.name}.`, 'ok');
+  },
+  import: () => {
+    const text = $('#pasteTa').value; M().paste = text;
+    const p = parseContext(text);
+    if (p.error || !p.resources.length) { M().pasteErr = p.error || 'Nessuna <Resource>, <Environment> o <Parameter> trovata.'; renderModal(); return; }
+    const c = mcur(); let added = 0;
+    p.resources.forEach(r => { const i = c.resources.findIndex(x => x.name === r.name); if (i >= 0) c.resources[i] = { ...r, id:c.resources[i].id }; else c.resources.push(r); added++; });
+    M().rs = c.resources[c.resources.length - 1].id; M().ctxView = 'form'; M().paste = ''; c.ctxMode = 'guided'; renderModal();
+    toast(`${added} risorse importate; le password sono andate nel keyring.`, 'ok');
+  },
+  extract: () => { const p = parseContext(PROJECT_CONTEXT), c = mcur(); c.resources = p.resources; c.ctxMode = 'guided'; M().rs = c.resources[0]?.id; M().ctxView = 'form'; renderModal(); toast('Estratto: password nel keyring, il context generato non contiene segreti.', 'ok'); },
+  regen: () => { const c = mcur(); c.raw = genXml(c); renderModal(); },
+  pwdmode: el => { mres().pwdMode = el.dataset.val; renderModal(); },
+  test: () => {
+    const r = mres(), d = driverInfo(r.driver), out = $('#testMsg'); out.style.color = 'var(--fg-muted)'; out.textContent = 'connessione in corso…';
+    setTimeout(() => {
+      if (!r.url) { out.style.color = 'var(--warning)'; out.textContent = '✗ URL mancante'; }
+      else if (!d || !d.inMaven) { out.style.color = 'var(--warning)'; out.textContent = '✗ Driver non trovato: aggiungi ' + (d ? d.jar : 'il jar') + ' al progetto'; }
+      else { out.style.color = 'var(--success)'; out.textContent = '✓ Connesso in 41 ms · ' + d.eng + ' 16.2'; }
+    }, 700);
+  },
+  envadd: () => { mcur().env.push({ k:'', v:'' }); renderModal(); },
+  envdel: el => { mcur().env.splice(+el.dataset.i, 1); renderModal(); },
+  cmd: () => { M().cmd = !M().cmd; renderModal(); },
+  fixport: () => { mcur().httpPort = 8081; renderModal(); },
+  'dl-open': () => { const v = S.installs[0] ? null : null; S.dl = { line:'10.1', ver:'10.1.34', phase:'idle', pct:0 }; renderModal(); },
+  'dl-close': () => { if (S.dl?.phase === 'run') return; S.dl = null; renderModal(); },
+  'dl-line': el => { S.dl.line = el.dataset.id; S.dl.ver = CATALOG.find(x => x.line === el.dataset.id).versions[0]; renderDl(); },
+  'dl-go': () => dlStart(),
+  cancel: () => closeModal(),
+  apply: () => commit(),
+  'apply-run': () => { commit(); startRun(false); },
+  'apply-debug': () => { if (blocking(mcur()).length) { toast('Correggi i problemi prima di avviare', 'err'); return; } commit(); startRun(true); },
+  // titlebar / run panel
+  pick: el => { S.active = el.dataset.id; closePop(); renderChrome(); },
+  'edit-cfgs': () => openModal(false),
+  'new-cfg': () => openModal(true),
+  'r-stop': () => stopRun(),
+  'r-restart': () => stopRun(() => startRun(S.run.debug)),
+  'r-redeploy': () => { const c = activeCfg(); log('m', '$ mvn -pl web war:exploded -q'); later(600, () => { log('ok', '[INFO] BUILD SUCCESS'); log('I', `${clock()} INFO [Catalina-utility-1] org.apache.catalina.core.StandardContext.reload Context [${c.ctxPath}] reloaded`); }); },
+  'r-open': () => toast(`Aperto http://localhost:${activeCfg().httpPort}${activeCfg().ctxPath}/ nel browser`),
+};
+function addDetected(name, quiet = false) {
+  const q = REQUIRED.find(x => x.name === name), c = mcur(); if (!q || c.resources.some(r => r.name === name)) return;
+  const p = q.hint ? PICUS.find(x => x.id === q.hint) : null;
+  const r = q.kind === 'env' ? newRes('env', { name:q.name, type:q.type, value:'' })
+    : newRes('datasource', p ? { name:q.name, driver:p.driver, url:p.url, user:p.user, pwd:'(dal vault Picus)' } : { name:q.name });
+  c.resources.push(r); M().rs = r.id;
+  if (!quiet) { M().ctxView = 'form'; renderModal(); }
+}
+function commit() {
+  S.configs = JSON.parse(JSON.stringify(M().cfgs));
+  if (!S.configs.some(c => c.id === S.active)) S.active = S.configs[0]?.id;
+  if (M().sel && S.configs.some(c => c.id === M().sel)) S.active = M().sel;
+  closeModal(); renderChrome();
+}
+function onField(el) {
+  const val = el.type === 'checkbox' ? el.checked : (el.dataset.num ? (el.value === '' ? '' : +el.value) : el.value);
+  if (el.dataset.dlver) { S.dl.ver = el.value; return; }
+  if (el.dataset.g) { S[el.dataset.g] = el.value; refreshDerived(); return; }
+  if (el.dataset.ei !== undefined) { mcur().env[+el.dataset.ei][el.dataset.ef] = el.value; return; }
+  const c = mcur(); if (!c) return;
+  if (el.dataset.r) {
+    const r = mres(); r[el.dataset.r] = val;
+    if (el.dataset.r === 'name') { const it = document.querySelector('.rit.on span'); if (it) it.textContent = val; }
+    if (el.dataset.r === 'driver') {
+      const d = driverInfo(val), l = $('#drvLine');
+      if (l) { l.className = 'okline ' + (d && d.inMaven ? 'ok' : 'bad'); l.innerHTML = d ? (d.inMaven ? ic('check', 13) + ' ' + d.jar + ' dalle dipendenze Maven → copiato in lib/ all\'avvio' : ic('alert', 13) + ' ' + d.jar + ' non è nel pom: aggiungi la dipendenza o scegli un file') : ic('alert', 13) + ' driver sconosciuto'; }
+    }
+    const pl = $('#pwdLine'); if (pl) pl.innerHTML = pwdNote(r);
+    refreshDerived(); return;
+  }
+  if (el.dataset.k === 'tomcat' && val === '__dl') { el.value = c.tomcat; ACT['dl-open'](); return; }
+  c[el.dataset.k] = val;
+  if (el.dataset.k === 'raw') { const l = $('#rawLint'); if (l) l.innerHTML = rawLint(c); }
+  refreshDerived();
+  if (el.dataset.k === 'tomcat' || el.dataset.k === 'httpPort' || el.dataset.k === 'ctxPath') { const sub = document.querySelector('.row .sub code'); }
+  if (el.dataset.rerender) renderModal();
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-act]');
+  if (t && ACT[t.dataset.act]) { e.preventDefault(); ACT[t.dataset.act](t); return; }
+  if (e.target.closest('#cfgSel')) { togglePop(); return; }
+  if (S.pop && !e.target.closest('#popHost')) closePop();
+  const tab = e.target.closest('.etab'); if (tab) showCode(tab.dataset.tab);
+  const op = e.target.closest('[data-open]'); if (op) showCode(op.dataset.open);
+});
+document.addEventListener('input', e => { if (S.modal && e.target.matches('[data-k],[data-r],[data-g],[data-ei],[data-dlver]')) onField(e.target); });
+document.addEventListener('change', e => { if (S.modal && e.target.matches('select[data-k],select[data-r],select[data-dlver]')) onField(e.target); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if (S.dl && S.dl.phase !== 'run') { S.dl = null; renderModal(); } else if (S.modal) closeModal(); else closePop(); return; }
+  if (S.modal && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!blocking(mcur()).length) { commit(); startRun(false); } else toast('Correggi i problemi prima di avviare', 'err'); return; }
+  if (!S.modal && e.key === 'F10' && e.shiftKey) { e.preventDefault(); startRun(false); }
+  if (!S.modal && e.key === 'F9' && e.shiftKey) { e.preventDefault(); startRun(true); }
+  if (S.modal && e.key === 'Enter' && e.target.matches('.lit.click')) e.target.click();
+});
+$('#bRun').onclick = () => startRun(false);
+$('#bDbg').onclick = () => startRun(true);
+$('#bStop').onclick = () => stopRun();
+$('#railRun').onclick = () => {};
+$('#dBusy').onchange = e => { S.demo.busy = e.target.checked; if (S.modal) refreshDerived(); };
+$('#dJakarta').onchange = e => { S.demo.jakarta = e.target.checked; if (S.modal) refreshDerived(); };
+$('#dNone').onchange = e => { S.installs = e.target.checked ? [] : ['10.1.34', '9.0.98', '8.5.100']; if (S.modal) renderModal(); };
+
+hydrate(); showCode('java'); renderChrome();
+</script>
+</body>
+</html>

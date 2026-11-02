@@ -66,6 +66,9 @@
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { onMount } from 'svelte';
+  import {
+    clampOffset, insertBefore, landingIndex, settleOffset, shiftDirection, type TabSlot,
+  } from '$lib/components/shared/ui/tabs-sort';
 
   let {
     tabs,
@@ -98,10 +101,27 @@
   const active = $derived(working.find((t) => t.id === activeId) ?? null);
 
   // ── Drag and drop ──────────────────────────────────────────────────────────
-  // The same mouse-event pattern the rest of the app reorders with (TitleBar, BranchTree):
-  // a 4px threshold before anything moves, so a click on the handle is still a click.
+  // The same sortable the tab strips use (`Tabs.svelte`), on the vertical axis: the row you hold
+  // follows the pointer, lifted above the rest, the rows it passes slide aside to open the slot it
+  // would land in — so what is on screen while you drag IS the order you will get — and on release it
+  // slides the last few pixels into the slot before the order is committed. Escape puts it back.
+  // The geometry is `tabs-sort.ts`, which only knows a start and a size along an axis: here the
+  // start is a row's top and the size its height.
+  //
+  // Mouse events, not native drag-and-drop: a 4px threshold keeps a click on the handle a click.
 
-  let dragState = $state<{ section: string; fromIndex: number; insertBefore: number } | null>(null);
+  interface RowDrag {
+    section: string;
+    from: number;
+    /** The index the held row would be inserted before. */
+    insert: number;
+    /** How far the held row is from where it started, along the list. */
+    offset: number;
+    /** How far a row it passes slides: the held row's height and the gap. */
+    shift: number;
+    settling: boolean;
+  }
+  let drag = $state<RowDrag | null>(null);
   // `$state`: `bind:this` into a plain object writes a property Svelte is not tracking, which
   // it warns about — and rightly, because the write would be invisible to anything deriving
   // from it. Nothing derives from it today (the drag reads it imperatively, long after the
@@ -109,51 +129,97 @@
   // around in a widget other products build on.
   let listEls = $state<Record<string, HTMLElement | undefined>>({});
 
+  const SETTLE_MS = 170;
+
+  function measureRows(listEl: HTMLElement | undefined): TabSlot[] {
+    if (!listEl) return [];
+    return [...listEl.querySelectorAll<HTMLElement>('[data-drag-idx]')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return { index: parseInt(el.getAttribute('data-drag-idx') ?? '0', 10), left: r.top, width: r.height };
+    });
+  }
+
   function startDrag(e: MouseEvent, sectionId: string, fromIndex: number) {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || drag?.settling) return;
     const startY = e.clientY;
+    const listEl = listEls[sectionId];
     let engaged = false;
+    let slots: TabSlot[] = [];
+    let gap = 0;
+    let raw = 0;
+
+    function recompute(insertOverride?: number) {
+      const me = slots.find((s) => s.index === fromIndex);
+      if (!me) return;
+      const offset = clampOffset(slots, fromIndex, raw);
+      const insert = insertOverride ?? insertBefore(slots, fromIndex, me.left + me.width / 2 + offset);
+      drag = { section: sectionId, from: fromIndex, insert, offset, shift: me.width + gap, settling: false };
+    }
 
     function onMove(ev: MouseEvent) {
       if (!engaged) {
         if (Math.abs(ev.clientY - startY) < 4) return;
+        slots = measureRows(listEl);
+        if (!slots.some((s) => s.index === fromIndex)) { stop(); return; }
+        gap = listEl ? parseFloat(getComputedStyle(listEl).rowGap) || 0 : 0;
         engaged = true;
-        dragState = { section: sectionId, fromIndex, insertBefore: fromIndex };
         document.body.style.cursor = 'grabbing';
       }
-      if (!dragState) return;
-      dragState = { ...dragState, insertBefore: insertIndexAt(ev.clientY, listEls[sectionId]) };
+      raw = ev.clientY - startY;
+      recompute();
     }
 
-    function onUp() {
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key !== 'Escape' || !engaged) return;
+      // The dialog closes on Escape; while a row is held it only puts the row back.
+      ev.preventDefault();
+      ev.stopPropagation();
+      raw = 0;
+      recompute(fromIndex + 1);   // "before the row after me" is how staying put reads
+      finish();
+    }
+
+    function stop() {
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mouseup', finish);
+      window.removeEventListener('keydown', onKey, true);
       document.body.style.cursor = '';
-      const drag = dragState;
-      dragState = null;
+    }
+
+    function finish() {
+      stop();
       if (!engaged || !drag) return;
-      const to = drag.insertBefore <= drag.fromIndex ? drag.insertBefore : drag.insertBefore - 1;
-      if (to === drag.fromIndex) return;
-      mutate(sectionId, (items) => {
-        const next = [...items];
-        const [moved] = next.splice(drag.fromIndex, 1);
-        next.splice(to, 0, moved);
-        return next;
-      });
+      engaged = false;
+      const { insert } = drag;
+      const to = landingIndex(fromIndex, insert);
+      // Slide into the slot, THEN reorder — the DOM order after the reorder puts the row exactly where
+      // the slide ended, so clearing the transforms in the same tick changes nothing visible.
+      drag = { ...drag, offset: settleOffset(slots, fromIndex, insert, gap), settling: true };
+      setTimeout(() => {
+        if (to !== fromIndex) {
+          mutate(sectionId, (items) => {
+            const next = [...items];
+            const [moved] = next.splice(fromIndex, 1);
+            next.splice(to, 0, moved);
+            return next;
+          });
+        }
+        drag = null;
+      }, SETTLE_MS);
     }
 
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mouseup', finish);
+    window.addEventListener('keydown', onKey, true);
   }
 
-  function insertIndexAt(y: number, listEl: HTMLElement | undefined): number {
-    if (!listEl) return 0;
-    const rows = listEl.querySelectorAll<HTMLElement>('[data-drag-idx]');
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i].getBoundingClientRect();
-      if (y < r.top + r.height / 2) return i;
-    }
-    return rows.length;
+  /** The transform a row wears while a drag is in progress: the held row follows the pointer, the ones
+   *  it passes slide by the held row's height, the rest are untouched. */
+  function rowTransform(sectionId: string, i: number): string | undefined {
+    if (!drag || drag.section !== sectionId) return undefined;
+    if (i === drag.from) return `translateY(${drag.offset}px)`;
+    const dir = shiftDirection(i, drag.from, drag.insert);
+    return dir === 0 ? undefined : `translateY(${dir * drag.shift}px)`;
   }
 
   /** Replace one section's items in the working copy. */
@@ -231,18 +297,17 @@
             <span>{section.label}</span>
             {#if section.hint}<span class="section-label-hint">{section.hint}</span>{/if}
           </div>
-          <div class="item-list" bind:this={listEls[section.id]}>
+          <div class="item-list" class:sorting={drag?.section === section.id} bind:this={listEls[section.id]}>
             {#if section.items.length === 0}
               <p class="section-empty">Nothing on this part of the bar for this project.</p>
             {/if}
             {#each section.items as item, i (item.id)}
-              {#if dragState?.section === section.id && dragState.insertBefore === i}
-                <div class="drop-indicator" aria-hidden="true"></div>
-              {/if}
               <div
                 class="item"
                 class:item-hidden={!item.visible}
-                class:item-dragging={dragState?.section === section.id && dragState.fromIndex === i}
+                class:item-dragging={drag?.section === section.id && drag.from === i}
+                class:item-settling={drag?.section === section.id && drag.from === i && drag.settling}
+                style:transform={rowTransform(section.id, i)}
                 data-drag-idx={i}
               >
                 <button
@@ -284,9 +349,6 @@
                 {/if}
               </div>
             {/each}
-            {#if dragState?.section === section.id && dragState.insertBefore === section.items.length}
-              <div class="drop-indicator" aria-hidden="true"></div>
-            {/if}
           </div>
         </div>
       {/each}
@@ -425,7 +487,27 @@
   }
   .item:hover { background: var(--bg-hover); border-color: var(--border); }
   .item.item-hidden { opacity: 0.45; }
-  .item.item-dragging { opacity: 0.3; border-style: dashed; border-color: var(--border); }
+  /* While sorting, the rows it passes slide rather than jump. The held row follows the pointer with no
+     transition at all — any easing on it would read as lag — until it is released, when it slides into
+     its slot. */
+  .item-list.sorting .item:not(.item-dragging) {
+    transition: transform 190ms cubic-bezier(0.2, 0.8, 0.2, 1), background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+    will-change: transform;
+  }
+  .item.item-dragging {
+    position: relative;
+    z-index: 5;
+    pointer-events: none;
+    transition: none;
+    will-change: transform;
+    background: var(--bg-elevated);
+    border-color: var(--border);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38), 0 0 0 1px var(--border);
+  }
+  .item.item-dragging.item-settling {
+    transition: transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 170ms;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  }
 
   .drag-handle {
     display: flex;
@@ -497,11 +579,4 @@
     flex-shrink: 0;
   }
 
-  .drop-indicator {
-    height: 2px;
-    background: var(--accent);
-    border-radius: 1px;
-    margin: 1px 0;
-    pointer-events: none;
-  }
 </style>

@@ -170,23 +170,17 @@ export const explorerClipGet = () => invoke<ClipData | null>('explorer_clip_get'
 /** Clear the shared clipboard (after a cut→paste move); broadcasts the change. */
 export const explorerClipClear = () => invoke<void>('explorer_clip_clear');
 
-// ── Cross-window drag & drop (overlay ghost + drop hit-testing) ──────────────
-/** Ensure the shared drag-ghost overlay window exists (built once, reused). */
-export const ensureDragOverlay = () => invoke<void>('ensure_drag_overlay');
-/** Show the overlay with `text` at logical screen coordinates `x`/`y`. */
-export const dragOverlayShow = (text: string, x: number, y: number) =>
-  invoke<void>('drag_overlay_show', { text, x, y });
-/** Move the overlay to logical screen coordinates `x`/`y`. */
-export const dragOverlayMove = (x: number, y: number) =>
-  invoke<void>('drag_overlay_move', { x, y });
-/** Hide the overlay (drag ended, or cursor re-entered the source window). */
-export const dragOverlayHide = () => invoke<void>('drag_overlay_hide');
-/** Drain the current overlay label (overlay window pulls this on mount). */
-export const getDragOverlayText = () => invoke<string>('get_drag_overlay_text');
-/** On drop, hand the dragged paths to another explorer window under the cursor
- *  (logical screen coords). Returns true when a target window was notified. */
-export const explorerDropDispatch = (sourceLabel: string, x: number, y: number, paths: string[]) =>
-  invoke<boolean>('explorer_drop_dispatch', { sourceLabel, x, y, paths });
+// ── Drag & drop out of, and between, explorer windows ────────────────────────
+/** Remember the paths the drag now starting carries — the window that receives the drop asks for them. */
+export const explorerDragSet = (paths: string[]) => invoke<void>('explorer_drag_set', { paths });
+/** The paths of the drag in flight (empty when it did not start in an explorer window). */
+export const explorerDragGet = () => invoke<string[]>('explorer_drag_get');
+/** Forget them. */
+export const explorerDragClear = () => invoke<void>('explorer_drag_clear');
+/** Path of the app icon, the picture the OS shows under the cursor when there is no label of its own. */
+export const dragIconPath = () => invoke<string>('drag_icon_path');
+/** Store the PNG drawn for this drag (its label on a pill); returns its path. */
+export const dragIconWrite = (png: number[]) => invoke<string>('drag_icon_write', { png });
 /** Open the OS-native Properties dialog for a path (Windows property sheet /
  *  macOS Finder Get Info / Linux FileManager1 D-Bus). */
 export const fsShowProperties = (path: string) => invoke<void>('fs_show_properties', { path });

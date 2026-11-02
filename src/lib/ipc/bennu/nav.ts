@@ -127,6 +127,18 @@ export function strutsResultTarget(
   return bennu('bennu_struts_result_target', { args: { file, source, offset } });
 }
 
+/** Go-to on a Struts `<action>` tag under the caret in a config XML: `method="…"` opens that method on
+ *  the action class (or a project superclass), `name="…"` opens the action class. `null` when the
+ *  caret is on neither, or the class isn't a project class.
+ *  Wire: `bennu_struts_action_target` — `{ file, source, offset }`. */
+export function strutsActionTarget(
+  file: string,
+  source: string,
+  offset: number,
+): Promise<DeclarationTarget | null> {
+  return bennu('bennu_struts_action_target', { args: { file, source, offset } });
+}
+
 /** Lint a Struts config XML's `<result>` targets: a JSP path that resolves to no file under the web
  *  app → "JSP not found"; an OGNL/EL root that isn't a property of the owning action → warning.
  *  Byte-offset diagnostics against the live buffer. Empty when nothing (never a false positive).

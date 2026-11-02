@@ -583,6 +583,15 @@
     // The default is prevented even with no tab open: Ctrl+W must never reach the WebView.
     { id: 'close_tab', match: chord({ mod: true, shift: false, key: 'w' }), run: () => { if (tab) picusTabsStore.close(tab.id); } },
     { id: 'new_query_tab', match: chord({ mod: true, key: 't' }), run: () => picusTabsStore.openQuery() },
+    // Declines on a tab that cannot be renamed, so F2 stays free for whatever else wants it there.
+    {
+      id: 'rename_tab',
+      match: chord({ key: 'F2', mod: false, shift: false, alt: false }),
+      run: () => {
+        if (!tab || !picusTabsStore.isRenamable(tab)) return DECLINE;
+        picusTabsStore.startRename(tab.id);
+      },
+    },
 
     // Database. The TAB's connection, never the sidebar's selection: a query tab
     // can be bound to another database than the one highlighted in the sidebar, and

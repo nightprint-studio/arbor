@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bennu · Log view — mock UI</title>
+<style>
+  :root {
+    --canvas:#0d1117; --elev:#161b22; --overlay:#1c2128; --border:#30363d; --border-muted:#21262d;
+    --fg:#e6edf3; --fg-muted:#8b949e; --fg-faint:#6e7681;
+    --accent:#2f81f7; --accent-subtle:rgba(56,139,253,.15);
+    --success:#3fb950; --danger:#f85149; --warning:#d29922; --purple:#a371f7; --info:#58a6ff;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    --radius:8px;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; background:#010409; color:var(--fg); font:13px/1.45 -apple-system,"Segoe UI",system-ui,sans-serif; display:flex; flex-direction:column; }
+  button,input,select { font:inherit; color:inherit; }
+  .demo { padding:7px 14px; background:#010409; border-bottom:1px solid var(--border-muted); font-size:12px; color:var(--fg-muted); }
+  .demo b { color:var(--fg); }
+  .app { flex:1; min-height:640px; display:flex; background:var(--elev); padding:6px; gap:6px; overflow:hidden; }
+  .panel { background:var(--canvas); border-radius:var(--radius); overflow:hidden; display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .console { flex:1; }
+  .side { width:340px; flex:none; }
+  .side.off { display:none; }
+
+  /* toolbar */
+  .bar { display:flex; align-items:center; gap:8px; height:36px; padding:0 8px; border-bottom:1px solid var(--border-muted); flex:none; }
+  .bar .title { font-weight:600; margin-right:4px; }
+  .sp { flex:1; }
+  .ib { width:28px; height:28px; display:inline-grid; place-items:center; border:0; background:transparent; border-radius:6px; cursor:pointer; color:var(--fg-muted); }
+  .ib:hover { background:rgba(177,186,196,.14); color:var(--fg); }
+  .ib.on { background:var(--accent-subtle); color:var(--accent); }
+  .btn { height:26px; padding:0 10px; border:1px solid var(--border); background:var(--elev); border-radius:6px; cursor:pointer; color:var(--fg-muted); display:inline-flex; gap:6px; align-items:center; }
+  .btn:hover { border-color:var(--fg-faint); color:var(--fg); }
+  .search, .lvlsel { height:26px; padding:0 8px; background:var(--elev); border:1px solid var(--border); border-radius:6px; }
+  .search { width:170px; }
+  .lvlsel { width:auto; padding-right:4px; cursor:pointer; }
+  .search:focus, .lvlsel:focus { outline:none; border-color:var(--accent); }
+  .badge { font-size:11px; padding:1px 8px; border-radius:99px; border:1px solid var(--border); color:var(--fg-muted); }
+  .badge.ok { color:var(--success); border-color:rgba(63,185,80,.4); }
+
+  /* toggle */
+  .tgl { display:inline-flex; align-items:center; gap:8px; cursor:pointer; color:var(--fg-muted); user-select:none; }
+  .tgl input { position:absolute; opacity:0; pointer-events:none; }
+  .tgl .sw { width:30px; height:16px; border-radius:99px; background:var(--border); position:relative; transition:background .12s; }
+  .tgl .sw::after { content:""; position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--fg); transition:transform .12s; }
+  .tgl input:checked + .sw { background:var(--accent); }
+  .tgl input:checked + .sw::after { transform:translateX(14px); }
+  .tgl input:focus-visible + .sw { outline:2px solid var(--accent); outline-offset:2px; }
+  .tgl:hover { color:var(--fg); }
+
+  /* log */
+  .log { flex:1; overflow:auto; font:12.5px/1.6 var(--mono); padding:4px 0; }
+  .row { display:flex; gap:10px; padding:0 12px 0 0; align-items:baseline; white-space:pre; border-left:3px solid transparent; }
+  .row:hover { background:rgba(177,186,196,.06); }
+  .row .gut { width:38px; text-align:right; color:var(--fg-faint); flex:none; user-select:none; font-size:11px; }
+  .row.l-ERROR { border-left-color:var(--danger); background:rgba(248,81,73,.07); }
+  .row.l-WARN  { border-left-color:var(--warning); background:rgba(210,153,34,.06); }
+  .row.dim { opacity:.45; }
+  .row.hl { background:rgba(163,113,247,.16); border-left-color:var(--purple); }
+  .row.raw { color:var(--fg-muted); }
+  .c-time { color:var(--fg-faint); flex:none; }
+  .c-lvl { flex:none; font-weight:600; }
+  .c-lvl.pill { padding:0 6px; border-radius:4px; font-size:11px; line-height:18px; }
+  .lv-ERROR { color:var(--danger); } .lv-WARN { color:var(--warning); } .lv-INFO { color:var(--info); } .lv-DEBUG { color:var(--fg-faint); } .lv-TRACE { color:var(--fg-faint); }
+  .pill.lv-ERROR { background:rgba(248,81,73,.18); } .pill.lv-WARN { background:rgba(210,153,34,.18); }
+  .pill.lv-INFO { background:rgba(88,166,255,.15); } .pill.lv-DEBUG,.pill.lv-TRACE { background:rgba(110,118,129,.18); }
+  .c-thr { color:var(--fg-faint); flex:none; }
+  .c-log { color:var(--purple); flex:none; }
+  .c-msg { white-space:pre-wrap; min-width:0; overflow-wrap:anywhere; }
+  .c-msg mark { background:rgba(210,153,34,.35); color:inherit; border-radius:2px; }
+  .rep { color:var(--fg-muted); border:1px solid var(--border); border-radius:99px; padding:0 7px; font-size:11px; margin-left:6px; }
+  .trace { margin:0 0 2px 51px; padding-left:10px; border-left:1px solid var(--border); font-size:12px; }
+  .fr { color:var(--fg-muted); white-space:pre; }
+  .fr.own { color:var(--fg); }
+  .fr.own b { color:var(--success); font-weight:600; }
+  .fr.cause { color:var(--danger); font-weight:600; margin-top:2px; }
+  .fold { color:var(--fg-faint); cursor:pointer; border:0; background:transparent; padding:0; font:inherit; }
+  .fold:hover { color:var(--accent); }
+  .hidden-note { text-align:center; color:var(--fg-faint); font:11.5px var(--mono); padding:3px; cursor:pointer; }
+
+  /* drawer */
+  .tabs { display:flex; border-bottom:1px solid var(--border-muted); flex:none; }
+  .tab { flex:1; padding:8px 0; text-align:center; background:transparent; border:0; border-bottom:2px solid transparent; color:var(--fg-muted); cursor:pointer; }
+  .tab.on { color:var(--fg); border-bottom-color:var(--accent); }
+  .body { flex:1; overflow:auto; padding:12px; display:flex; flex-direction:column; gap:14px; }
+  .fld label.k { display:block; color:var(--fg-muted); font-size:11.5px; margin-bottom:4px; }
+  .fld .hint { color:var(--fg-faint); font-size:11.5px; margin-top:4px; line-height:1.4; }
+  input[type=text], select.f { width:100%; height:28px; padding:0 8px; background:var(--elev); border:1px solid var(--border); border-radius:6px; }
+  input[type=text]:focus, select.f:focus { outline:none; border-color:var(--accent); }
+  input.mono { font-family:var(--mono); font-size:12px; }
+  .toks { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+  .tok { font:11px var(--mono); padding:1px 7px; border-radius:4px; background:var(--accent-subtle); color:var(--accent); }
+  .colrow { display:grid; grid-template-columns:70px 1fr; gap:8px; align-items:center; }
+  .colrow > span { color:var(--fg-muted); }
+  .chk { display:flex; gap:8px; align-items:center; cursor:pointer; color:var(--fg); }
+  .chk input { accent-color:var(--accent); }
+  .rule { border:1px solid var(--border); border-radius:6px; padding:8px; display:grid; gap:6px; background:var(--elev); }
+  .rule .top { display:flex; gap:6px; align-items:center; }
+  .rule .top input[type=checkbox] { accent-color:var(--accent); }
+  .rule .acts { display:grid; grid-template-columns:90px 1fr; gap:6px; }
+  .rule .del { opacity:0; border:0; background:transparent; color:var(--fg-muted); cursor:pointer; margin-left:auto; }
+  .rule:hover .del { opacity:1; } .rule .del:hover { color:var(--danger); }
+  .h { font-weight:600; margin:0 0 -6px; }
+  .note { color:var(--fg-faint); font-size:11.5px; line-height:1.5; }
+  .preview { font:12px var(--mono); background:var(--elev); border:1px solid var(--border-muted); border-radius:6px; padding:8px; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--fg-muted); }
+</style>
+</head>
+<body>
+<div class="demo"><b>Mock · Bennu Log view</b> — la vista ripulita è <b>solo visiva</b>: il buffer resta quello grezzo (Copy / Save / ricerca / “Explain with Imber” lavorano sul testo originale; il toggle <b>Clean</b> spento e il click su una riga lo mostrano). Tutto ciò che vedi qui è interattivo.</div>
+
+<div class="app">
+  <section class="panel console">
+    <div class="bar">
+      <span class="title">▶ Gestionale (Tomcat)</span>
+      <span class="badge ok" id="detected"></span>
+      <span class="sp"></span>
+      <input class="search" id="q" type="text" placeholder="Filter…  (Ctrl+F)">
+      <select class="lvlsel" id="minlvl" title="Minimum level shown"></select>
+      <label class="tgl" title="Clean view — off shows the text as the app wrote it">
+        <input type="checkbox" id="cleanTgl" checked><span class="sw"></span><span>Clean</span>
+      </label>
+      <button class="ib on" id="toggleSide" title="Log view settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>
+      </button>
+    </div>
+    <div class="log" id="log"></div>
+  </section>
+
+  <aside class="panel side" id="side">
+    <div class="tabs" id="tabs">
+      <button class="tab on" data-t="format">Format</button>
+      <button class="tab" data-t="columns">Columns</button>
+      <button class="tab" data-t="rules">Rules</button>
+      <button class="tab" data-t="traces">Traces</button>
+    </div>
+    <div class="body" id="body"></div>
+  </aside>
+</div>
+
+<script>
+// ── dati di esempio: record già "parsati" ────────────────────────────────────────
+const OWN = ['it.acme.gestionale'];
+const FRAMEWORK = ['java.','javax.','jakarta.','jdk.','sun.','org.apache.','org.springframework.','org.hibernate.','com.zaxxer.','org.postgresql.'];
+const R = (t,lvl,thr,logger,msg,trace) => ({t,lvl,thr,logger,msg,trace});
+const exFrames = [
+  'org.postgresql.core.v3.QueryExecutorImpl.receiveErrorResponse(QueryExecutorImpl.java:2713)',
+  'org.postgresql.core.v3.QueryExecutorImpl.processResults(QueryExecutorImpl.java:2401)',
+  'org.postgresql.core.v3.QueryExecutorImpl.execute(QueryExecutorImpl.java:368)',
+  'org.postgresql.jdbc.PgStatement.executeInternal(PgStatement.java:498)',
+  'com.zaxxer.hikari.pool.ProxyPreparedStatement.executeQuery(ProxyPreparedStatement.java:52)',
+  'org.hibernate.engine.jdbc.internal.ResultSetReturnImpl.extract(ResultSetReturnImpl.java:57)',
+  'org.hibernate.loader.Loader.getResultSet(Loader.java:2322)',
+  'org.hibernate.loader.Loader.executeQueryStatement(Loader.java:2099)',
+  'org.hibernate.internal.QueryImpl.list(QueryImpl.java:1424)',
+  'it.acme.gestionale.dao.FatturaDao.findByCliente(FatturaDao.java:88)',
+  'it.acme.gestionale.service.FatturaService.elenco(FatturaService.java:141)',
+  'jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)',
+  'jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)',
+  'java.lang.reflect.Method.invoke(Method.java:568)',
+  'org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:343)',
+  'org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:123)',
+  'org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:698)',
+  'it.acme.gestionale.web.FatturaController.lista(FatturaController.java:57)',
+  'org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:883)',
+  'org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:197)',
+  'org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:97)',
+  'org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1733)',
+  'java.base/java.lang.Thread.run(Thread.java:833)',
+];
+const REC = [
+  R('09:14:02.118','INFO','main','it.acme.gestionale.GestionaleApplication','Starting GestionaleApplication using Java 17.0.9 with PID 18244'),
+  R('09:14:02.121','DEBUG','main','org.springframework.boot.SpringApplication','Running with Spring Boot v2.7.18, Spring v5.3.31'),
+  R('09:14:02.640','INFO','main','org.springframework.boot.web.embedded.tomcat.TomcatWebServer','Tomcat initialized with port(s): 8080 (http)'),
+  R('09:14:03.402','INFO','main','com.zaxxer.hikari.HikariDataSource','HikariPool-1 - Starting...'),
+  R('09:14:03.511','INFO','main','com.zaxxer.hikari.HikariDataSource','HikariPool-1 - Start completed.'),
+  R('09:14:03.980','DEBUG','main','org.hibernate.SQL','select f.id, f.numero, f.cliente_id from fattura f where f.anno=?'),
+  R('09:14:03.981','TRACE','main','org.hibernate.type.descriptor.sql.BasicBinder','binding parameter [1] as [INTEGER] - [2026]'),
+  R('09:14:04.220','WARN','main','org.hibernate.orm.deprecation','HHH90000026: PostgreSQL95Dialect has been deprecated; use PostgreSQLDialect instead'),
+  R('09:14:05.377','INFO','main','it.acme.gestionale.GestionaleApplication','Started GestionaleApplication in 3.41 seconds (JVM running for 4.02)'),
+  ...[0,1,2,3,4,5,6].map(i=>R('09:14:'+String(10+i*5).padStart(2,'0')+'.003','DEBUG','HikariPool-1 housekeeper','com.zaxxer.hikari.pool.HikariPool','HikariPool-1 - Pool stats (total=10, active=0, idle=10, waiting=0)')),
+  R('09:15:01.870','INFO','http-nio-8080-exec-3','it.acme.gestionale.web.FatturaController','GET /fatture?cliente=4471 user=mrossi'),
+  R('09:15:01.902','DEBUG','http-nio-8080-exec-3','org.hibernate.SQL','select f.id, f.numero, f.cliente_id from fattura f where f.cliente_id=?'),
+  R('09:15:01.944','ERROR','http-nio-8080-exec-3','it.acme.gestionale.dao.FatturaDao','Query failed for cliente 4471', {head:'org.hibernate.exception.SQLGrammarException: could not extract ResultSet', frames:exFrames, cause:'Caused by: org.postgresql.util.PSQLException: ERROR: column f.cliente_id does not exist\n  Position: 54'}),
+  R('09:15:02.010','WARN','http-nio-8080-exec-3','it.acme.gestionale.web.FatturaController','Returning empty list after DAO failure'),
+  ...[0,1,2].map(i=>R('09:15:'+String(10+i*5).padStart(2,'0')+'.003','DEBUG','HikariPool-1 housekeeper','com.zaxxer.hikari.pool.HikariPool','HikariPool-1 - Pool stats (total=10, active=0, idle=10, waiting=0)')),
+  R('09:15:31.200','INFO','http-nio-8080-exec-5','it.acme.gestionale.web.FatturaController','GET /fatture?cliente=4472 user=mrossi'),
+];
+const LEVELS = ['TRACE','DEBUG','INFO','WARN','ERROR'];
+const LEVEL_OPTS = [['TRACE','All levels'],['DEBUG','Debug and above'],['INFO','Info and above'],['WARN','Warn and above'],['ERROR','Errors only']];
+const FORMATS = {
+  boot:   {name:'Spring Boot', pattern:'%d{yyyy-MM-dd HH:mm:ss.SSS} %5p %pid --- [%15.15t] %-40.40logger{39} : %m%n'},
+  logback:{name:'Logback default', pattern:'%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n'},
+  log4j2: {name:'Log4j 2', pattern:'%d{ISO8601} %-5p [%t] %c{1.} - %m%n'},
+  jul:    {name:'Tomcat / JUL', pattern:'%d{dd-MMM-yyyy HH:mm:ss.SSS} %level [%thread] %class.%method %msg%n'},
+  custom: {name:'Custom regex…', pattern:'^(?<time>\\S+) (?<level>\\w+) \\[(?<thread>[^\\]]+)\\] (?<logger>\\S+) - (?<msg>.*)$'},
+};
+
+// ── stato della vista ──────────────────────────────────────────────────────────
+const S = {
+  tab:'format', side:true, mode:'clean', minLvl:'TRACE', q:'', fmt:'boot', rawLine:new Set(), open:new Set(),
+  col:{ time:'time', level:'pill', thread:'hide', logger:'abbr', gutter:true },
+  traces:{ fold:true, keep:2, ownBold:true, expandCause:true },
+  dedupe:true,
+  rules:[
+    {on:true, field:'logger', op:'starts', val:'org.hibernate.type', act:'hide', color:'#a371f7'},
+    {on:true, field:'logger', op:'starts', val:'com.zaxxer.hikari', act:'dim', color:'#a371f7'},
+    {on:true, field:'msg', op:'contains', val:'user=', act:'highlight', color:'#a371f7'},
+  ],
+};
+
+// ── helpers ────────────────────────────────────────────────────────────────────
+const esc = s => s.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const isOwn = f => OWN.some(p=>f.startsWith(p));
+const isFw = f => FRAMEWORK.some(p=>f.replace(/^java\.base\//,'java.').startsWith(p));
+function abbr(name){ const p=name.split('.'); return p.length<2?name:p.slice(0,-1).map(x=>x[0]).join('.')+'.'+p.at(-1); }
+function loggerOf(name){ return S.col.logger==='full'?name : S.col.logger==='abbr'?abbr(name) : S.col.logger==='last'?name.split('.').at(-1) : ''; }
+function timeOf(t){ if(S.col.time==='hide')return ''; if(S.col.time==='rel'){ const [h,m,s]=t.split(':'); const sec=(+h*3600+ +m*60+ parseFloat(s))-(9*3600+14*60+2.118); return '+'+sec.toFixed(1).padStart(6)+'s'; } return t; }
+function rawLine(r){
+  const lv=r.lvl;
+  if(S.fmt==='boot')   return `2026-11-02 ${r.t} ${lv.padStart(5)} 18244 --- [${r.thr.slice(-15).padStart(15)}] ${r.logger.slice(-40).padEnd(40)} : ${r.msg}`;
+  if(S.fmt==='log4j2') return `2026-11-02T${r.t} ${lv.padEnd(5)} [${r.thr}] ${abbr(r.logger)} - ${r.msg}`;
+  if(S.fmt==='jul')    return `02-Nov-2026 ${r.t} ${lv} [${r.thr}] ${r.logger} ${r.msg}`;
+  if(S.fmt==='custom') return `${r.t} ${lv} [${r.thr}] ${r.logger} - ${r.msg}`;
+  return `${r.t} [${r.thr}] ${lv.padEnd(5)} ${r.logger.slice(-36)} - ${r.msg}`;
+}
+function ruleHit(r,rec){
+  const v = r.field==='msg'?rec.msg : r.field==='logger'?rec.logger : r.field==='thread'?rec.thr : rec.lvl;
+  const needle=r.val; if(!needle) return false;
+  return r.op==='starts'?v.startsWith(needle) : r.op==='contains'?v.includes(needle) : r.op==='regex'?safeRe(needle).test(v) : v===needle;
+}
+function safeRe(s){ try{return new RegExp(s);}catch{return /$^/;} }
+
+// ── render del log ─────────────────────────────────────────────────────────────
+function renderLog(){
+  const out=[]; let hiddenRun=0; let prev=null; let prevIdx=-1; let n=0; let repCount=1;
+  const flushHidden=()=>{ if(hiddenRun){ out.push(`<div class="hidden-note" title="Hidden by a rule or by the level filter">⋯ ${hiddenRun} hidden line${hiddenRun>1?'s':''}</div>`); hiddenRun=0; } };
+  REC.forEach((r,i)=>{
+    n++;
+    const lvOk = LEVELS.indexOf(r.lvl) >= LEVELS.indexOf(S.minLvl);
+    const text = S.q && !(r.msg+r.logger).toLowerCase().includes(S.q.toLowerCase());
+    const hidden = S.mode==='clean' && S.rules.some(x=>x.on&&x.act==='hide'&&ruleHit(x,r));
+    if(!lvOk || text || hidden){ hiddenRun++; return; }
+    flushHidden();
+    if(S.mode==='raw'){
+      out.push(`<div class="row raw l-${r.lvl}"><span class="gut">${n}</span><span class="c-msg">${esc(rawLine(r))}</span></div>`);
+      if(r.trace){ out.push(`<div class="row raw"><span class="gut"></span><span class="c-msg">${esc(r.trace.head+'\n'+r.trace.frames.map(f=>'\tat '+f).join('\n')+'\n'+r.trace.cause)}</span></div>`); }
+      return;
+    }
+    // dedupe righe consecutive identiche
+    if(S.dedupe && prev && !r.trace && prev.logger===r.logger && prev.msg===r.msg){
+      repCount++; out[prevIdx]=out[prevIdx].replace(/<!--rep-->.*?<!--\/rep-->|<\/div>$/, `<!--rep--><span class="rep" title="${repCount} identical lines">×${repCount}</span><!--/rep--></div>`); return;
+    }
+    const cls=['row','l-'+r.lvl]; let style='';
+    for(const x of S.rules){ if(!x.on||!ruleHit(x,r)) continue; if(x.act==='dim')cls.push('dim'); if(x.act==='highlight'){cls.push('hl'); style=`border-left-color:${x.color};background:${x.color}29`;} }
+    const q=S.q?esc(r.msg).replace(new RegExp(S.q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'),m=>`<mark>${m}</mark>`):esc(r.msg);
+    const cells=[];
+    if(S.col.gutter) cells.push(`<span class="gut">${n}</span>`);
+    const tm=timeOf(r.t); if(tm) cells.push(`<span class="c-time">${tm}</span>`);
+    if(S.col.level==='pill') cells.push(`<span class="c-lvl pill lv-${r.lvl}" style="width:50px;text-align:center">${r.lvl}</span>`);
+    else if(S.col.level==='text') cells.push(`<span class="c-lvl lv-${r.lvl}" style="width:42px">${r.lvl}</span>`);
+    else if(S.col.level==='letter') cells.push(`<span class="c-lvl lv-${r.lvl}" style="width:12px">${r.lvl[0]}</span>`);
+    if(S.col.thread!=='hide') cells.push(`<span class="c-thr">[${S.col.thread==='short'?r.thr.replace(/^http-nio-\d+-/,'').replace('HikariPool-1 ',''):r.thr}]</span>`);
+    const lg=loggerOf(r.logger); if(lg) cells.push(`<span class="c-log" title="${esc(r.logger)}">${esc(lg)}</span>`);
+    out.push(`<div class="${cls.join(' ')}" style="${style}" data-i="${i}" title="Click: show the original line">${cells.join('')}<span class="c-msg">${q}</span></div>`);
+    prevIdx=out.length-1; prev=r; repCount=1;
+    if(S.rawLine.has(i)) out.push(`<div class="row raw"><span class="gut"></span><span class="c-msg">${esc(rawLine(r))}</span></div>`);
+    if(r.trace) out.push(renderTrace(r.trace,i));
+  });
+  flushHidden();
+  document.getElementById('log').innerHTML = out.join('');
+  document.getElementById('detected').textContent = `Detected: ${FORMATS[S.fmt].name} · 100% of lines`;
+}
+function renderTrace(t,i){
+  const rows=[`<div class="fr">${esc(t.head)}</div>`];
+  const open=S.open.has(i); let fw=0; const flush=()=>{ if(fw){ rows.push(`<button class="fold" data-fold="${i}">⋯ ${fw} framework frame${fw>1?'s':''}</button>`); fw=0; } };
+  t.frames.forEach(f=>{
+    const own=isOwn(f), fwf=isFw(f)&&!own;
+    if(S.traces.fold && !open && fwf){ fw++; return; }
+    flush();
+    const m=f.match(/^(.*)\.([^.(]+)\((.*)\)$/);
+    const html = m?`${esc(m[1])}.<b>${esc(m[2])}</b>(${esc(m[3])})`:esc(f);
+    rows.push(`<div class="fr ${own&&S.traces.ownBold?'own':''}">  at ${html}</div>`);
+  });
+  flush();
+  if(S.traces.fold && open) rows.push(`<button class="fold" data-fold="${i}">▲ fold framework frames</button>`);
+  rows.push(`<div class="fr cause">${esc(t.cause)}</div>`);
+  return `<div class="trace">${rows.join('')}</div>`;
+}
+
+// ── drawer ─────────────────────────────────────────────────────────────────────
+const sel=(id,opts,val)=>`<select class="f" data-k="${id}">${opts.map(([v,l])=>`<option value="${v}" ${v===val?'selected':''}>${l}</option>`).join('')}</select>`;
+function renderBody(){
+  const b=document.getElementById('body');
+  if(S.tab==='format'){
+    const F=FORMATS[S.fmt];
+    b.innerHTML=`
+      <div class="fld"><label class="k">Log pattern</label>
+        ${sel('fmt',Object.entries(FORMATS).map(([k,v])=>[k,v.name]),S.fmt)}
+        <div class="hint">Bennu reads your <code>logback.xml</code> / <code>log4j2.xml</code> / <code>application.properties</code> and recognises the pattern on its own. Pick another here if it guessed wrong.</div></div>
+      <div class="fld"><label class="k">${S.fmt==='custom'?'Regular expression (named groups)':'Pattern (read-only: from the project)'}</label>
+        <input type="text" class="mono" value="${esc(F.pattern)}" ${S.fmt==='custom'?'':'readonly'}>
+        <div class="toks">${[...F.pattern.matchAll(/%[-\d.]*([a-zA-Z]+)|\(\?<(\w+)>/g)].map(m=>`<span class="tok">${m[1]||m[2]}</span>`).join('')}</div></div>
+      <div class="fld"><label class="k">First line as the app wrote it</label>
+        <div class="preview">${esc(rawLine(REC[0]))}</div></div>
+      <div class="note">Lines that do not match (banners, <code>System.out</code>, output of other tools) are shown untouched, so nothing is ever swallowed by a wrong pattern.</div>`;
+  } else if(S.tab==='columns'){
+    b.innerHTML=`
+      <div class="colrow"><span>Time</span>${sel('col.time',[['time','Time'],['rel','Since start'],['hide','Hidden']],S.col.time)}</div>
+      <div class="colrow"><span>Level</span>${sel('col.level',[['pill','Badge'],['text','Coloured text'],['letter','Letter only'],['hide','Hidden (row colour only)']],S.col.level)}</div>
+      <div class="colrow"><span>Thread</span>${sel('col.thread',[['hide','Hidden'],['short','Shortened'],['full','Full']],S.col.thread)}</div>
+      <div class="colrow"><span>Logger</span>${sel('col.logger',[['abbr','Abbreviated  i.a.g.dao.FatturaDao'],['last','Class name only'],['full','Full name'],['hide','Hidden']],S.col.logger)}</div>
+      <label class="chk"><input type="checkbox" data-k="col.gutter" ${S.col.gutter?'checked':''}> Line numbers</label>
+      <label class="chk"><input type="checkbox" data-k="dedupe" ${S.dedupe?'checked':''}> Collapse identical consecutive lines (×N)</label>
+      <div class="note">Only what is <em>drawn</em> changes. Hover a logger for the full name; click a line to see the original text under it.</div>`;
+  } else if(S.tab==='rules'){
+    b.innerHTML=`<p class="h">Rules</p><div class="note">Applied top to bottom on the parsed fields. “Hide” folds the lines into a “⋯ N hidden lines” marker so you can still see something is there.</div>`
+      + S.rules.map((r,i)=>`<div class="rule"><div class="top"><input type="checkbox" data-r="${i}.on" ${r.on?'checked':''}>
+          ${sel(`r${i}.field`,[['logger','Logger'],['msg','Message'],['thread','Thread'],['lvl','Level']],r.field)}
+          ${sel(`r${i}.op`,[['starts','starts with'],['contains','contains'],['equals','equals'],['regex','matches']],r.op)}
+          <button class="del" data-del="${i}" title="Delete rule">🗑</button></div>
+        <input type="text" class="mono" data-r="${i}.val" value="${esc(r.val)}" placeholder="text or regex">
+        <div class="acts">${sel(`r${i}.act`,[['hide','Hide'],['dim','Dim'],['highlight','Highlight']],r.act)}
+          ${r.act==='highlight'?`<input type="text" class="mono" data-r="${i}.color" value="${r.color}">`:'<span></span>'}</div></div>`).join('')
+      + `<button class="btn" id="addRule">＋ Add rule</button>
+         <div class="fld"><label class="k">Quick rules</label>
+         <div class="toks">${['Hide DEBUG & TRACE','Dim Hikari / pools','Hide Hibernate binders','Highlight my package'].map(x=>`<button class="btn" data-quick="${x}">${x}</button>`).join('')}</div></div>`;
+  } else {
+    b.innerHTML=`
+      <label class="chk"><input type="checkbox" data-k="traces.fold" ${S.traces.fold?'checked':''}> Fold framework frames (<code>⋯ 14 framework frames</code>)</label>
+      <label class="chk"><input type="checkbox" data-k="traces.ownBold" ${S.traces.ownBold?'checked':''}> Emphasise frames from my code</label>
+      <div class="fld"><label class="k">My packages</label><input type="text" class="mono" value="it.acme.gestionale" readonly>
+        <div class="hint">Taken from the project’s source roots. Everything else matching <code>java.*, org.springframework.*, org.apache.*, org.hibernate.*, …</code> counts as framework.</div></div>
+      <div class="note">A <code>Caused by:</code> is always shown in red and never folded: it is usually the line that matters. “Explain with Imber” on a trace still sends the full, unfolded text.</div>`;
+  }
+}
+
+// ── eventi ─────────────────────────────────────────────────────────────────────
+const setPath=(path,val)=>{ const p=path.split('.'); let o=S; while(p.length>1) o=o[p.shift()]; o[p[0]]=val; };
+document.getElementById('body').addEventListener('input',e=>{
+  const t=e.target; if(t.dataset.k){ const v=t.type==='checkbox'?t.checked:t.value;
+    if(/^r\d+\./.test(t.dataset.k)){ const [,i,f]=t.dataset.k.match(/^r(\d+)\.(.*)$/); S.rules[i][f]=v; } else setPath(t.dataset.k,v);
+    renderLog(); if(t.dataset.k==='fmt'||/^r\d/.test(t.dataset.k)) renderBody(); }
+  if(t.dataset.r){ const [i,f]=t.dataset.r.split('.'); S.rules[i][f]=t.type==='checkbox'?t.checked:t.value; renderLog(); if(t.tagName==='SELECT') renderBody(); }
+});
+document.getElementById('body').addEventListener('click',e=>{
+  const t=e.target.closest('button'); if(!t) return;
+  if(t.id==='addRule'){ S.rules.push({on:true,field:'logger',op:'starts',val:'',act:'hide',color:'#a371f7'}); renderBody(); }
+  if(t.dataset.del){ S.rules.splice(+t.dataset.del,1); renderBody(); renderLog(); }
+  if(t.dataset.quick){ const q=t.dataset.quick;
+    const add={'Hide DEBUG & TRACE':{field:'lvl',op:'regex',val:'DEBUG|TRACE',act:'hide'},'Dim Hikari / pools':{field:'logger',op:'starts',val:'com.zaxxer',act:'dim'},'Hide Hibernate binders':{field:'logger',op:'starts',val:'org.hibernate.type',act:'hide'},'Highlight my package':{field:'logger',op:'starts',val:'it.acme',act:'highlight'}}[q];
+    S.rules.push({on:true,color:'#a371f7',...add}); renderBody(); renderLog(); }
+});
+document.getElementById('tabs').addEventListener('click',e=>{ const t=e.target.closest('.tab'); if(!t)return; S.tab=t.dataset.t; document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t)); renderBody(); });
+document.getElementById('log').addEventListener('click',e=>{
+  const f=e.target.closest('[data-fold]'); if(f){ const i=+f.dataset.fold; S.open.has(i)?S.open.delete(i):S.open.add(i); renderLog(); return; }
+  const h=e.target.closest('.hidden-note'); if(h){ S.mode='raw'; syncMode(); renderLog(); return; }
+  const r=e.target.closest('.row[data-i]'); if(r){ const i=+r.dataset.i; S.rawLine.has(i)?S.rawLine.delete(i):S.rawLine.add(i); renderLog(); }
+});
+document.getElementById('q').addEventListener('input',e=>{ S.q=e.target.value; renderLog(); });
+function syncMode(){ document.getElementById('cleanTgl').checked = S.mode==='clean'; }
+document.getElementById('cleanTgl').addEventListener('change',e=>{ S.mode=e.target.checked?'clean':'raw'; renderLog(); });
+document.getElementById('toggleSide').addEventListener('click',e=>{ S.side=!S.side; document.getElementById('side').classList.toggle('off',!S.side); e.currentTarget.classList.toggle('on',S.side); });
+const lv=document.getElementById('minlvl');
+lv.innerHTML=LEVEL_OPTS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+lv.addEventListener('change',e=>{ S.minLvl=e.target.value; renderLog(); });
+document.addEventListener('keydown',e=>{
+  if(e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==='l'){ e.preventDefault(); S.mode=S.mode==='clean'?'raw':'clean'; syncMode(); renderLog(); }
+  if(e.ctrlKey&&!e.shiftKey&&e.key.toLowerCase()==='f'){ e.preventDefault(); document.getElementById('q').focus(); }
+});
+renderBody(); renderLog();
+</script>
+</body>
+</html>

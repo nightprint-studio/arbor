@@ -21,7 +21,7 @@
    */
   import { onMount, onDestroy, untrack } from 'svelte';
   import {
-    FolderTree, ListTree, AlertTriangle,
+    FolderTree, ListTree,
     TerminalSquare, Hammer, 
     Library, Play, ListTodo, 
     TextCursorInput, Beaker, Bug, Braces, 
@@ -187,6 +187,7 @@
   import { workspacesStore } from '$lib/stores/bennu/workspaces.svelte';
   import { isJavaFile, isJspFile, isLspFile, isMarkdownFile, isSpringConfigFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuLogViewStore } from '$lib/stores/bennu/log-view.svelte';
   import BennuI18nPanel from './BennuI18nPanel.svelte';
   import { isI18nBundle } from './i18n/bundle-path';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
@@ -1335,7 +1336,6 @@
       active: bennuUiStore.bottomPanel === 'run',
       onclick: () => bennuUiStore.toggleBottom('run'),
     },
-    { id: 'problems', tooltip: 'Problems', shortcut: 'Alt+6',   icon: AlertTriangle,  active: bennuUiStore.bottomPanel === 'problems', onclick: () => bennuUiStore.toggleBottom('problems') },
     { id: 'todos',    tooltip: 'TODO', shortcut: 'Alt+7',       icon: ListTodo,       active: bennuUiStore.bottomPanel === 'todos',    onclick: () => bennuUiStore.toggleBottom('todos') },
     // Only inside a git repository: outside one the panel could only say so. The dot is the
     // "something to commit" cue; the count is in the tooltip, where a number has room to be read.
@@ -2197,6 +2197,12 @@
       { id: 'newworkspace', title: 'New workspace…', icon: 'FolderTree',
         action: () => run(async () => { await workspacesStore.create('New workspace'); bennuUiStore.openWorkspaceManager(); }), when: true },
       { id: 'projectcfg', title: 'Project Configuration…', icon: 'SlidersHorizontal', action: () => run(() => bennuUiStore.openProjectConfig()), when: !!projectStore.project },
+      { id: 'logclean', title: 'Console: toggle clean view', icon: 'Eye', shortcut: 'Ctrl+Shift+L',
+        action: () => run(() => bennuLogViewStore.setClean(!bennuLogViewStore.settings.clean)), when: true },
+      { id: 'loglevelall', title: 'Console: show all levels', icon: 'Eye',
+        action: () => run(() => bennuLogViewStore.patch({ min_level: 'trace' })), when: bennuLogViewStore.settings.min_level !== 'trace' },
+      { id: 'loglevelwarn', title: 'Console: show only warnings and errors', icon: 'AlertTriangle',
+        action: () => run(() => bennuLogViewStore.patch({ min_level: 'warn' })), when: bennuLogViewStore.settings.min_level !== 'warn' },
       { id: 'tomcatcfg', title: 'Tomcat hot-swap…', icon: 'Server', action: () => run(() => bennuUiStore.openTomcatConfig()), when: !!projectStore.project && javaTools },
       { id: 'indexinspector', title: 'Index inspector…', icon: 'Box', action: () => run(() => bennuUiStore.openIndexInspector()), when: !!projectStore.project && javaTools },
       { id: 'reindex', title: 'Rebuild index', icon: 'RotateCw',
@@ -2347,6 +2353,12 @@
   }
   /** @returns true when the key was consumed by the switcher. */
   function handleSwitcherKey(e: KeyboardEvent): boolean {
+    // The console's clean view, from wherever focus is.
+    if (matchesBinding(e, keybindingsStore.getBinding('console_clean_view'))) {
+      e.preventDefault();
+      bennuLogViewStore.setClean(!bennuLogViewStore.settings.clean);
+      return true;
+    }
     // "Go to project…" — a modal with its own input, so it opens from here and not mid-switch.
     if (!projectSwitcherStore.open && matchesBinding(e, keybindingsStore.getBinding('goto_project'))) {
       e.preventDefault();

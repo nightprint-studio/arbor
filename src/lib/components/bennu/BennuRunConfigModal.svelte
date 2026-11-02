@@ -61,6 +61,8 @@
   import BennuCargoRunForm from './BennuCargoRunForm.svelte';
   import BennuScriptRunForm from './BennuScriptRunForm.svelte';
   import BennuAttachRunForm from './BennuAttachRunForm.svelte';
+  import BennuClasspathScopeField from './BennuClasspathScopeField.svelte';
+  import BennuTomcatRunForm from './BennuTomcatRunForm.svelte';
   import BennuRunEnvField from './BennuRunEnvField.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -419,8 +421,8 @@
 
 <Modal
   {onClose}
-  width="820px"
-  height="600px"
+  width={selected?.kind === 'tomcat' ? '1160px' : '820px'}
+  height={selected?.kind === 'tomcat' ? '700px' : '600px'}
   padBody={false}
   ariaLabel="Bennu Run Configurations"
 >
@@ -642,6 +644,12 @@
             <BennuCargoRunForm config={selected} {patch} />
           {:else if selected.kind === 'attach'}
             <BennuAttachRunForm config={selected} {patch} />
+          {:else if selected.kind === 'tomcat'}
+            <!-- Keyed by the configuration: the form holds what it learned about the outside world
+                 (installations, ports, stored passwords) for ONE configuration. -->
+            {#key selected.id}
+              <BennuTomcatRunForm config={selected} {patch} root={project?.root ?? ''} {moduleOptions} {isMultiModule} />
+            {/key}
           {:else if selected.kind === 'script'}
             <!-- Same bargain as cargo above: a script has no module, no classpath and no VM
                  arguments, so an inline arm would be a form of fields that never apply. -->
@@ -778,25 +786,7 @@
             summary={`${selected.classpathScope || 'every scope'}${selected.debugSuspend ? ' · suspend on debug' : ''}`}
           >
             {#snippet icon()}<Bug size={12} />{/snippet}
-          <!-- `runtime` is what `mvn spring-boot:run` and a packaged application see, and it is
-               the default because the alternative is a launch that quietly differs from
-               production. The other choices exist because the exceptions are real — a launcher
-               that wants a test-scoped H2 is a legitimate thing to want. -->
-          <FormField
-            label="Classpath"
-            hint="Which Maven scopes the launch sees. Editing and completion always see every scope — this is only the run."
-          >
-            <Select
-              value={selected.classpathScope}
-              options={[
-                { value: 'runtime', label: 'Runtime — what mvn spring-boot:run sees' },
-                { value: 'compile', label: 'Compile' },
-                { value: 'test', label: 'Test — adds the test-scoped dependencies' },
-                { value: '', label: 'Every scope — the same classpath the editor indexes' },
-              ]}
-              onchange={(v) => patch({ classpathScope: v })}
-            />
-          </FormField>
+          <BennuClasspathScopeField config={selected} {patch} />
 
           <!-- Off by default and per-configuration, because it is the only way to stop in
                start-up code AND it means every 🐞 launch of this configuration begins frozen.

@@ -167,6 +167,7 @@ members = [
     "crates/products/bennu/build/pomedit",
     "crates/products/bennu/build/maven",
     "crates/products/bennu/build/toolconf",
+    "crates/products/bennu/build/tomcat",
     "crates/products/bennu/editing/refactor",
     "crates/products/bennu/assistant",
     # What a Cargo workspace IS, read off its manifests: the crate graph, the manifest

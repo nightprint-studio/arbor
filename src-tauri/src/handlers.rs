@@ -87,12 +87,11 @@ macro_rules! invoke_handlers {
             $crate::window::explorer::explorer_clip_set,
             $crate::window::explorer::explorer_clip_get,
             $crate::window::explorer::explorer_clip_clear,
-            $crate::window::explorer::get_drag_overlay_text,
-            $crate::window::explorer::ensure_drag_overlay,
-            $crate::window::explorer::drag_overlay_show,
-            $crate::window::explorer::drag_overlay_move,
-            $crate::window::explorer::drag_overlay_hide,
-            $crate::window::explorer::explorer_drop_dispatch,
+            $crate::window::explorer::explorer_drag_set,
+            $crate::window::explorer::explorer_drag_get,
+            $crate::window::explorer::explorer_drag_clear,
+            $crate::window::explorer::drag_icon_path,
+            $crate::window::explorer::drag_icon_write,
             // Dedicated merula (music live-coding) window
             $crate::window::merula::open_merula_window,
             // Dedicated Tyto (screen recorder) window + in-window Snip selector

@@ -520,6 +520,75 @@ pub struct BennuConfig {
     /// A table: it stays at the end with the others.
     #[serde(default)]
     pub profiler_tools: ProfilerToolsConfig,
+    /// How the console draws the output of what Bennu runs. See [`LogViewConfig`].
+    ///
+    /// A table: it stays at the end with the others.
+    #[serde(default)]
+    pub log_view: LogViewConfig,
+}
+
+/// How the console draws program output.
+///
+/// **Purely presentational.** The buffer is never touched, so copy, save, search and the assistant
+/// all still see the text the program wrote; this only decides what is drawn of it. The values of
+/// the column fields are the frontend's own words (`time`/`rel`/`hide`, …) and are kept as strings
+/// so a new choice there needs no change here.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct LogViewConfig {
+    /// The clean view is on. Off draws every line as the program wrote it.
+    pub clean: bool,
+    /// `time` | `hide`.
+    pub time: String,
+    /// `text` | `letter` | `hide`.
+    pub level: String,
+    /// `hide` | `short` | `full`.
+    pub thread: String,
+    /// `abbr` | `last` | `full` | `hide`.
+    pub logger: String,
+    /// Lowest level shown: `trace` … `error`.
+    pub min_level: String,
+    /// Collapse identical consecutive lines into one with a count.
+    pub dedupe: bool,
+    /// Fold the framework frames of a stack trace.
+    pub fold_frames: bool,
+    /// Packages that count as the user's code on top of the ones read from the project's sources.
+    pub extra_own_packages: Vec<String>,
+    /// Rules, applied top to bottom.
+    pub rules: Vec<LogViewRule>,
+}
+
+impl Default for LogViewConfig {
+    fn default() -> Self {
+        Self {
+            clean: false,
+            time: "time".into(),
+            level: "text".into(),
+            thread: "hide".into(),
+            logger: "abbr".into(),
+            min_level: "trace".into(),
+            dedupe: true,
+            fold_frames: true,
+            extra_own_packages: Vec::new(),
+            rules: Vec::new(),
+        }
+    }
+}
+
+/// One console rule: lines whose `field` matches are hidden, dimmed or highlighted.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct LogViewRule {
+    pub on: bool,
+    /// `logger` | `message` | `thread` | `level`.
+    pub field: String,
+    /// `starts` | `contains` | `equals` | `regex`.
+    pub op: String,
+    pub value: String,
+    /// `hide` | `dim` | `highlight`.
+    pub action: String,
+    /// CSS colour for `highlight`.
+    pub color: String,
 }
 
 /// Where the profiler's external tools are, when the user says so.
@@ -1014,6 +1083,7 @@ impl Default for BennuConfig {
             flc_layer_habits: true,
             spell_check_roots: Vec::new(),
             html_scripts_allowed: Vec::new(),
+            log_view: LogViewConfig::default(),
             maven_auto_download: true,
             markdown_live_preview: true,
             history_diff_split: true,

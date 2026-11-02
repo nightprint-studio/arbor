@@ -1818,7 +1818,7 @@ fn spawn_sitta_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
         move |topic, payload| {
             // Sitta has no push events yet (Onda 1). When the git-awareness wave
             // lands (fs_git status/branch events), scope these to the explorer
-            // windows (`window::explorer::is_explorer_label`) instead of the global
+            // windows (the `explorer` / `explorer-N` labels) instead of the global
             // app bus — there can be several `explorer-N` windows, and the launcher
             // / Corvus windows don't want the explorer's telemetry.
             forward_backend_event(&app_for_events, "sitta", topic, payload);

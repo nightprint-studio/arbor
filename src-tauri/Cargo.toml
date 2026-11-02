@@ -108,6 +108,9 @@ tauri-plugin-notification = "2.3.3"
 # always on; debug only with the `deep-link-dev` Cargo feature).
 tauri-plugin-deep-link        = "2"
 tauri-plugin-single-instance  = { version = "2", features = ["deep-link"] }
+# OS-native drag of real files out of an explorer window to other applications
+# (`startDrag` on the JS side, `drag:default` in the explorer capability).
+tauri-plugin-drag             = "2"
 # OS-global hotkey (Ctrl+Shift+E) that opens the dedicated File Explorer
 # window — see `explorer_window.rs`. Desktop-only plugin; the app is
 # desktop-only so no extra cfg gating is needed.

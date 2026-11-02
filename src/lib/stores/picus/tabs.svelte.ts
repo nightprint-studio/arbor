@@ -38,6 +38,7 @@ function createTabsStore() {
   ]);
   let activeId = $state<string>(GENERATE_TAB_ID);
   let querySeq = 0;
+  let renamingId = $state<string | null>(null);
 
   const active = $derived(tabs.find((t) => t.id === activeId) ?? null);
 
@@ -266,6 +267,31 @@ function createTabsStore() {
       if (!tab) return;
       tab.connectionId = connectionId;
       tab.dialect = connectionsStore.byId(connectionId)?.dialect;
+    },
+
+    /** The tab whose title is being edited in the strip, if any. */
+    get renamingId() { return renamingId; },
+
+    /** Only free scripts carry a name of the user's choosing — a table or a file is named by what it is. */
+    isRenamable(tab: PicusTab | null | undefined): boolean {
+      return tab?.kind === 'query';
+    },
+
+    startRename(id: string) {
+      const tab = tabs.find((t) => t.id === id);
+      if (!this.isRenamable(tab)) return;
+      activeId = id;
+      renamingId = id;
+    },
+
+    cancelRename() { renamingId = null; },
+
+    /** Commit a new title. Blank is ignored: a tab with no name is not a tab one can find. */
+    rename(id: string, title: string) {
+      renamingId = null;
+      const tab = tabs.find((t) => t.id === id);
+      const next = title.trim();
+      if (tab && this.isRenamable(tab) && next) tab.title = next;
     },
 
     markDirty(id: string, dirty: boolean) {

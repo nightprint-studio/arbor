@@ -29,6 +29,7 @@
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import DataGrid, { type DataGridColumn } from '$lib/components/shared/ui/DataGrid.svelte';
+  import { columnKeyMarks } from '$lib/components/picus/panels/column-keys';
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
   import { sqlLanguage } from '../picus-sql-language';
   import { tooltip } from '$lib/actions/tooltip';
@@ -157,6 +158,7 @@
       hint: c.type,
       type: /NUMBER|INT|NUMERIC|DECIMAL/i.test(c.type) ? 'number' : 'text',
       width: 190,
+      marks: columnKeyMarks(relation, c.name),
     })),
   );
 

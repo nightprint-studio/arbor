@@ -98,7 +98,7 @@ const EVT_BUILD_OUTPUT: &str = "arbor://bennu/build-output";
 /// The build finished — carries `ok` + the parsed diagnostic count.
 const EVT_BUILD_DONE: &str = "arbor://bennu/build-done";
 /// A line of run (java) output.
-const EVT_RUN_OUTPUT: &str = "arbor://bennu/run-output";
+pub(crate) const EVT_RUN_OUTPUT: &str = "arbor://bennu/run-output";
 /// The run process exited — carries the exit code.
 const EVT_RUN_EXIT: &str = "arbor://bennu/run-exit";
 
@@ -934,7 +934,7 @@ fn classpath_form(base: &Path, classpath: &str, major: u32) -> ClasspathForm {
 /// matters, and the two differ whenever the exact level isn't installed. `jdk_status` resolves
 /// it the same way the classpath tier does, so a project declaring 21 on a machine that only
 /// has 17 is read as 17 — still an argument file, and still correct.
-fn launching_jdk_major(root: &str) -> u32 {
+pub(crate) fn launching_jdk_major(root: &str) -> u32 {
     let level = project_jdk_level(root);
     bennu_classpath::prelude::jdk_status(&level)
         .resolved_major
@@ -1016,12 +1016,12 @@ pub(crate) fn forget_build_stamp(root: &str) {
 // ── run classpath ──────────────────────────────────────────────────────────────
 
 /// A launch classpath, and what is worth saying about it in the run's console.
-struct RunClasspath {
+pub(crate) struct RunClasspath {
     /// OS-separated, ready for `-cp`.
-    classpath: String,
+    pub(crate) classpath: String,
     /// Entries Maven named and could not find, or a resolve Maven reported errors on. The launch
     /// goes ahead — an optional library missing need not matter — and the console says so first.
-    warnings: Vec<String>,
+    pub(crate) warnings: Vec<String>,
 }
 
 /// The run classpath for a launch in `module` (`None` = the root module). `Err` when the dependencies
@@ -1045,7 +1045,7 @@ struct RunClasspath {
 /// Either way a jar that IS a reactor module's artifact is swapped for that module's classes
 /// ([`reactor::substitute_sibling_artifacts`]): a copy frozen at the last `package` holds the
 /// classes of sources that have since been edited, renamed or deleted.
-fn run_classpath(
+pub(crate) fn run_classpath(
     root: &Path,
     module: Option<&str>,
     java_home: Option<&Path>,
@@ -1757,7 +1757,7 @@ fn javac_program(java_home: Option<&Path>) -> String {
 }
 
 /// The `java` program under `JAVA_HOME/bin`, else `java` on `PATH`.
-fn java_program(java_home: Option<&Path>) -> String {
+pub(crate) fn java_program(java_home: Option<&Path>) -> String {
     bin_under(java_home, "java").unwrap_or_else(|| "java".to_string())
 }
 

@@ -72,6 +72,9 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
             |_ctx, request| crate::plugin_assets::handle(request),
         )
         .plugin(tauri_plugin_opener::init())
+        // A drag that leaves an explorer window for another application: the OS carries the real
+        // files, which the app's own mouse-event drag cannot do.
+        .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_notification::init())
         // OS-global shortcuts — the dedicated File Explorer window (Ctrl+Shift+E)
         // and the Tyto screen recorder (Ctrl+Shift+R). The handler reacts on
@@ -107,7 +110,7 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
         .manage(AppState::new())
         .manage(crate::window::explorer::PendingReveals::default())
         .manage(crate::window::explorer::ExplorerClipboard::default())
-        .manage(crate::window::explorer::DragOverlayText::default())
+        .manage(crate::window::explorer::ExplorerDrag::default())
         .setup(run)
         .on_window_event(crate::window::events::handle)
         // macOS system menu bar: the frontend publishes its title-bar menu with

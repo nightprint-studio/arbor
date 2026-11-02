@@ -643,6 +643,28 @@ impl SemanticEngine {
             &live.project_types,
         )?;
 
+        // A call is filed under the type it was WRITTEN against: `service.run()` on an interface-typed
+        // receiver is a use of the interface's method, and nothing under the implementation's. Find
+        // usages from the implementing method then reported a method nobody calls. The override
+        // family is the same set a rename carries, so the two never disagree about what is "this
+        // method".
+        if let DeclKey::Method { owner, name } = result.target.clone() {
+            let family = crate::rename::override_family(&*self.resolver, &live.subtypes, &owner, &name);
+            let mut seen: HashSet<(String, usize)> =
+                result.usages.iter().map(|u| (u.file.clone(), u.start)).collect();
+            for member in family.iter().filter(|m| **m != owner) {
+                let key = DeclKey::Method { owner: member.clone(), name: name.clone() };
+                for usage in live.index.usages_of(&key) {
+                    if seen.insert((usage.file.clone(), usage.start)) {
+                        result.usages.push(usage.clone());
+                    }
+                }
+            }
+            result
+                .usages
+                .sort_by(|a, b| a.file.cmp(&b.file).then(a.start.cmp(&b.start)));
+        }
+
         // A field's generated accessors are the field under another name, and on a class whose
         // accessors Lombok writes they are the ONLY way the field is used from outside — so without
         // this, find-usages on such a field reports a field nobody touches. The getter cannot be

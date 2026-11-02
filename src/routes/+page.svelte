@@ -23,7 +23,6 @@
   //  • picus[-N]         → the SQL studio (databases + SQL script repository).
   //  • garrulus[-N]      → the notes vault (markdown + cross-machine sync).
   //  • workspace         → the tabbed container hosting several products.
-  //  • drag-overlay      → only the cross-window drag ghost.
   // Unknown labels fall back to the Git AppShell.
   //
   // The shell is loaded with a DYNAMIC import, not a static one, so each window
@@ -36,7 +35,6 @@
   try { label = getCurrentWindow().label; } catch { /* non-Tauri / SSR */ }
 
   const loadShell = (): Promise<{ default: Component }> => {
-    if (label === 'drag-overlay') return import('$lib/components/shared/DragOverlay.svelte');
     if (label === 'explorer' || label.startsWith('explorer-')) return import('$lib/components/sitta/ExplorerWindow.svelte');
     if (label === 'merula' || label.startsWith('merula-')) return import('$lib/components/merula/MerulaWindow.svelte');
     if (label === 'tyto-hud') return import('$lib/components/tyto/RecordingHud.svelte');
@@ -53,10 +51,10 @@
   let Shell = $state<Component | null>(null);
   loadShell().then((m) => { Shell = m.default; });
 
-  // Chromeless surfaces owned by another window: the recording HUD and the drag
-  // ghost. They get no window-level chrome of their own — no switcher, and they
-  // never appear in one either (the shell's `SurfaceKind::Overlay`).
-  const OVERLAY_LABELS = ['drag-overlay', 'tyto-hud'];
+  // Chromeless surfaces owned by another window: the recording HUD. It gets no
+  // window-level chrome of its own — no switcher, and it never appears in one
+  // either (the shell's `SurfaceKind::Overlay`).
+  const OVERLAY_LABELS = ['tyto-hud'];
   const IS_OVERLAY = OVERLAY_LABELS.includes(label);
 
   // Cross-product overlays (window switcher, credentials dialog) ride alongside
@@ -71,11 +69,9 @@
   // Anti-white-flash: every launcher/product window is built HIDDEN by the shell and
   // revealed only once painted — an opaque WebView2 window flashes its white default
   // page during load otherwise. Signal readiness after the shell mounts + two frames
-  // (so the first real frame is on screen). Excluded — these own their reveal timing:
-  //  • drag-overlay   — shown/hidden per-drag, never a persistent reveal.
-  const OWNS_REVEAL = label === 'drag-overlay';
+  // (so the first real frame is on screen).
   $effect(() => {
-    if (!Shell || OWNS_REVEAL) return;
+    if (!Shell) return;
     requestAnimationFrame(() => requestAnimationFrame(() => void signalWindowReady().catch(() => {})));
   });
 

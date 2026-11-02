@@ -28,15 +28,34 @@
    *
    * A consequence worth knowing: a select-all copies the lines that are *rendered*, not the
    * whole buffer. Anything that needs the entire transcript has to read it from the store.
+   *
+   * ## The clean view
+   *
+   * The virtualiser is handed **entries** rather than lines: `buildView` (see `console/log-view.ts`)
+   * turns the buffer into the rows to draw — columns dropped or shortened, lines hidden or dimmed
+   * by rules, runs of framework frames folded into one row, repeats counted. A row therefore knows
+   * its place in the *buffer* (`entry.index`), which is what the assistant button, the row menu and
+   * a copy use; the buffer itself is never edited.
    */
   import VirtualTextView from '$lib/components/shared/ui/VirtualTextView.svelte';
   import LogLine from '$lib/components/shared/ui/LogLine.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
+  import FilterInput from '$lib/components/shared/ui/FilterInput.svelte';
+  import Select from '$lib/components/shared/ui/Select.svelte';
   import type { RunLogLine } from '$lib/stores/bennu/run.svelte';
   import { openLogLink } from './log-link';
   import { copyToClipboard } from '$lib/utils/clipboard';
-  import { Sparkles } from 'lucide-svelte';
+  import { Sparkles, Eye, PanelRight } from 'lucide-svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import { findStackTraces, tracePrompt } from './assistant/assistant-trace';
   import { askAssistant } from './assistant/assistant-launch';
+  import { bennuLogViewStore as logView } from '$lib/stores/bennu/log-view.svelte';
+  import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
+  import { buildView, entryText, ruleFromLine, type LogViewRule, type RuleAction } from './console/log-view';
+  import BennuLogViewSettings from './console/BennuLogViewSettings.svelte';
 
   /** A SQL statement in the log was pressed: copy it, and say so — the click has no other visible effect. */
   function copySql(sql: string) {
@@ -54,16 +73,96 @@
 
   let { lines, emptyMessage = 'No output.', class: klass = '' }: Props = $props();
 
+  /** The buffer's own text — what the assistant and a copy are given, whatever the view draws. */
+  const original = $derived(lines.map((l) => l.text));
+
+  // ── the clean view ──────────────────────────────────────────────────────────
+  // Everything below changes what is DRAWN. `lines` is never edited; see `console/log-view.ts`.
+  const view = $derived(logView.settings);
+  let query = $state('');
+  let sideOpen = $state(false);
+  const openFolds = new SvelteSet<number>();
+  const openHidden = new SvelteSet<number>();
+
+  const entries = $derived(
+    buildView(lines, { settings: view, own: logView.own, query, openFolds, openHidden }),
+  );
   /** The virtualiser takes plain strings; the interpreted line is looked up by index in the
    *  row snippet, so nothing is copied but the text. */
-  const texts = $derived(lines.map((l) => l.text));
+  const texts = $derived(entries.map(entryText));
+  const hiddenCount = $derived(entries.reduce((n, e) => (e.kind === 'hidden' && !e.open ? n + e.count : n), 0));
+
+  $effect(() => {
+    void logView.load();
+    void logView.detect(projectStore.project?.root);
+  });
+
+  const LEVEL_OPTIONS = [
+    { value: 'trace', label: 'All levels' }, { value: 'debug', label: 'Debug and above' },
+    { value: 'info', label: 'Info and above' }, { value: 'warn', label: 'Warnings and errors' },
+    { value: 'error', label: 'Errors only' },
+  ];
+
+  /** A fold or a hidden run was pressed: open it, or close it again. */
+  function toggleRun(e: { kind: 'fold' | 'hidden'; key: number }) {
+    const set = e.kind === 'fold' ? openFolds : openHidden;
+    if (!set.delete(e.key)) set.add(e.key);
+  }
+
+  // ── a rule from a line ──────────────────────────────────────────────────────
+  /** Make a rule from the line under the pointer, and say so with a way back. */
+  function addRuleFrom(index: number, how: 'logger' | 'package' | 'thread', action: RuleAction) {
+    const rule = ruleFromLine(lines[index], how, action);
+    if (!rule) return;
+    logView.addRule(rule);
+    if (!view.clean) logView.setClean(true);
+    const verb = { hide: 'Hiding', dim: 'Dimming', highlight: 'Highlighting' }[action];
+    toastStore.show(`${verb} ${rule.field} ${rule.value}`, 'info', 5000, {
+      label: 'Undo',
+      onClick: () => undoRule(rule),
+    });
+  }
+  function undoRule(rule: LogViewRule) {
+    const i = logView.settings.rules.findIndex((r) => r.field === rule.field && r.value === rule.value && r.action === rule.action);
+    if (i >= 0) logView.removeRule(i);
+  }
+
+  function rowMenu(index: number): MenuItem[] {
+    const l = lines[index];
+    const has = (how: 'logger' | 'thread') => !!ruleFromLine(l, how, 'hide');
+    return [
+      { id: 'hide-logger', label: 'Hide this logger', disabled: !has('logger') },
+      { id: 'hide-package', label: 'Hide everything from its package', disabled: !has('logger') },
+      { id: 'dim-logger', label: 'Dim this logger', disabled: !has('logger') },
+      { id: 'hl-logger', label: 'Highlight this logger', disabled: !has('logger') },
+      { id: 'hide-thread', label: 'Hide this thread', disabled: !has('thread') },
+      { id: 's', label: '', separator: true },
+      { id: 'copy', label: 'Copy the original line' },
+    ];
+  }
+  function onContextMenu(e: MouseEvent) {
+    const cell = (e.target as HTMLElement).closest<HTMLElement>('[data-entry]');
+    if (!cell) return;
+    const index = Number(cell.dataset.entry);
+    e.preventDefault();
+    bennuContextMenuStore.show(e.clientX, e.clientY, rowMenu(index), (id) => {
+      switch (id) {
+        case 'hide-logger': return addRuleFrom(index, 'logger', 'hide');
+        case 'hide-package': return addRuleFrom(index, 'package', 'hide');
+        case 'dim-logger': return addRuleFrom(index, 'logger', 'dim');
+        case 'hl-logger': return addRuleFrom(index, 'logger', 'highlight');
+        case 'hide-thread': return addRuleFrom(index, 'thread', 'hide');
+        case 'copy': return void copyToClipboard(lines[index].text, { successToast: 'Line copied' });
+      }
+    });
+  }
 
   // The stack traces in the buffer, by the line each starts on: that line gets the assistant's button.
-  const traces = $derived(new Map(findStackTraces(texts).map((t) => [t.head, t])));
+  const traces = $derived(new Map(findStackTraces(original).map((t) => [t.head, t])));
 
   function askAboutTrace(index: number) {
     const trace = traces.get(index);
-    if (trace) void askAssistant(tracePrompt(texts, trace));
+    if (trace) void askAssistant(tracePrompt(original, trace));
   }
 
   /**
@@ -100,44 +199,105 @@
    * amber ones is readable at a glance in a way neither red nor grey alone is.
    */
   function rowClass(_text: string, index: number): string {
-    const l = lines[index];
+    const e = entries[index];
+    if (!e) return '';
+    // A fold or a hidden run: a marker, not a line of the program.
+    if (e.kind !== 'line') return 'bc-run';
+    const l = lines[e.index];
     if (!l) return '';
+    const dim = e.dim ? ' bc-dim' : '';
     // These two are ours, not the program's, and never carried a level: what you typed, and our
     // own status lines.
-    if (l.stream === 'in' || l.stream === 'meta') return `stream-${l.stream}`;
+    if (l.stream === 'in' || l.stream === 'meta') return `stream-${l.stream}${dim}`;
     // No class at all when nothing said anything: the row's own colour is the neutral body one,
     // and inventing a `stream-out` class for it would be a name that claims the stream decided.
-    return l.level ? `level-${l.level}` : '';
+    return (l.level ? `level-${l.level}` : '') + dim;
   }
 </script>
 
-<!-- Off-layout, and the same type as a row: what it measures is what a row will be, including
-     whatever the user has done to the font scale. -->
-<span class="bc-probe" bind:clientHeight={rowH} aria-hidden="true">0</span>
+<div class="bc-root">
+  <div class="bc-bar">
+    <IconButton
+      tooltip="Clean view — hides the columns, lines and stack frames you chose not to read"
+      shortcut="Ctrl+Shift+L"
+      active={view.clean}
+      onclick={() => logView.setClean(!view.clean)}
+    ><Eye size={14} /></IconButton>
+    <Select
+      size="sm"
+      value={view.min_level}
+      options={LEVEL_OPTIONS}
+      highlight={view.min_level !== 'trace'}
+      onchange={(v) => logView.patch({ min_level: v as typeof view.min_level })}
+    />
+    <div class="bc-filter"><FilterInput bind:value={query} placeholder="Filter lines…" ariaLabel="Filter the output" /></div>
+    <span class="bc-sp"></span>
+    {#if hiddenCount}<span class="bc-hidden">{hiddenCount} line{hiddenCount > 1 ? 's' : ''} hidden</span>{/if}
+    <IconButton tooltip="Log view settings" active={sideOpen} onclick={() => (sideOpen = !sideOpen)}><PanelRight size={14} /></IconButton>
+  </div>
 
-<VirtualTextView
-  class="bc {klass}"
-  lines={texts}
-  lineHeight={rowH || 17}
-  bind:follow
-  {rowClass}
-  {emptyMessage}
->
-  {#snippet line({ index })}
-    {@const l = lines[index]}
-    <!-- No whitespace between the caret and the line: the row is `pre`, and a newline in the
-         template would arrive on the page as a space the program never printed. -->
-    {#if l}{#if l.stream === 'in'}<span class="bc-caret">&gt;</span>{/if}<LogLine
-        text={l.text}
-        pieces={l.pieces}
-        level={l.level}
-        onopen={openLogLink}
-        onsql={copySql}
-      />{#if traces.has(index)}<button type="button" class="bc-ai" title="Ask Imber to find the cause and fix it" onclick={() => askAboutTrace(index)}><Sparkles size={10} />Fix with Imber</button>{/if}{/if}
-  {/snippet}
-</VirtualTextView>
+  <div class="bc-body">
+    <!-- Off-layout, and the same type as a row: what it measures is what a row will be, including
+         whatever the user has done to the font scale. -->
+    <span class="bc-probe" bind:clientHeight={rowH} aria-hidden="true">0</span>
+
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="bc-main" oncontextmenu={onContextMenu}>
+      <VirtualTextView
+        class="bc {klass}"
+        lines={texts}
+        lineHeight={rowH || 17}
+        bind:follow
+        {rowClass}
+        {emptyMessage}
+      >
+        {#snippet line({ index })}
+          {@const e = entries[index]}
+          <!-- No whitespace between the caret and the line: the row is `pre`, and a newline in the
+               template would arrive on the page as a space the program never printed. -->
+          {#if e?.kind === 'line'}{@const l = lines[e.index]}{#if l}<span class="bc-cell" data-entry={e.index} style:--hl={e.color} class:bc-hl={!!e.color}>{#if l.stream === 'in'}<span class="bc-caret">&gt;</span>{/if}<LogLine
+              text={e.text}
+              pieces={e.pieces}
+              level={l.level}
+              onopen={openLogLink}
+              onsql={copySql}
+            />{#if e.count > 1}<span class="bc-rep" title="{e.count} identical lines">×{e.count}</span>{/if}{#if traces.has(e.index)}<button type="button" class="bc-ai" title="Ask Imber to find the cause and fix it" onclick={() => askAboutTrace(e.index)}><Sparkles size={10} />Fix with Imber</button>{/if}</span>{/if}
+          {:else if e}<button type="button" class="bc-mark" onclick={() => toggleRun(e)}>{texts[index]}</button>{/if}
+        {/snippet}
+      </VirtualTextView>
+    </div>
+
+    {#if sideOpen}<BennuLogViewSettings />{/if}
+  </div>
+</div>
 
 <style>
+  /* Takes the place the bare viewport used to have in its parent, whichever way that parent lays out. */
+  .bc-root { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+  .bc-body { flex: 1; min-height: 0; display: flex; }
+  .bc-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .bc-bar {
+    display: flex; align-items: center; gap: 6px; flex: none; padding: 3px 8px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .bc-filter { width: 190px; }
+  .bc-sp { flex: 1; }
+  .bc-hidden { color: var(--text-muted); font-size: var(--font-size-xs); }
+  /* The rest of the row is the cell's, so a highlight spans the line and not just its text. */
+  .bc-cell { flex: 1 0 auto; }
+  .bc-hl { background: color-mix(in srgb, var(--hl) 16%, transparent); box-shadow: inset 3px 0 0 var(--hl); margin-left: -12px; padding-left: 12px; }
+  .bc-rep {
+    margin-left: 8px; padding: 0 6px; font-family: var(--font-ui); font-size: 10px; line-height: 16px;
+    color: var(--text-muted); border: 1px solid var(--border-subtle); border-radius: 99px;
+  }
+  /* A fold or a run of hidden lines: quiet, and clearly pressable. */
+  .bc-mark {
+    padding: 0; background: none; border: none; font: inherit; color: var(--text-muted); cursor: pointer;
+  }
+  .bc-mark:hover, .bc-mark:focus-visible { color: var(--accent); }
+  :global(.vtv.bc .vtv-row.bc-run) { padding-left: 28px; }
+  :global(.vtv.bc .vtv-row.bc-dim) { opacity: 0.45; }
+
   .bc-probe {
     position: absolute;
     top: 0;

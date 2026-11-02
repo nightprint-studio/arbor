@@ -1176,6 +1176,12 @@ fn qualify_action(name: &str, namespace: Option<&String>) -> String {
 /// The value of attribute `attr` in a single tag's text (`<result name="input" …>` → `input`).
 /// Quote-aware, case-insensitive on the attribute name. `None` when absent.
 fn tag_attr(tag: &str, attr: &str) -> Option<String> {
+    tag_attr_span(tag, attr).map(|(s, e)| tag[s..e].to_string())
+}
+
+/// Byte span of the value of attribute `attr` **within** `tag` (quotes excluded) — the same lookup
+/// as [`tag_attr`], for a caller that needs to know whether the caret is inside the value.
+fn tag_attr_span(tag: &str, attr: &str) -> Option<(usize, usize)> {
     let lower = tag.to_ascii_lowercase();
     let mut from = 0;
     while let Some(rel) = lower[from..].find(attr) {
@@ -1201,7 +1207,7 @@ fn tag_attr(tag: &str, attr: &str) -> Option<String> {
                 while k < tag.len() && b[k] != q {
                     k += 1;
                 }
-                return Some(tag[vs..k].to_string());
+                return Some((vs, k));
             }
         }
         from = at + attr.len();
@@ -1319,6 +1325,90 @@ fn struts_result_target_at(
         return None;
     }
     None
+}
+
+/// Go-to from a struts `<action>` tag under the caret: `method="…"` lands on that method of the
+/// action class (or of a project superclass that declares it), `name="…"` on the action class itself.
+/// `class="…"` is not handled here — the editor already resolves it as a class reference.
+/// `None` when the caret is on neither value or the class is not a readable project class.
+#[arbor_rpc::handler]
+fn bennu_struts_action_target(
+    _ctx: &BennuState,
+    args: PropertyTargetArgs,
+) -> Result<Option<DeclarationTarget>, String> {
+    if is_validation(&args.file) || !args.file.to_ascii_lowercase().ends_with(".xml") {
+        return Ok(None);
+    }
+    Ok(struts_action_target_at(IndexService::global(), &args.file, &args.source, args.offset))
+}
+
+fn struts_action_target_at(
+    svc: &IndexService,
+    file: &str,
+    source: &str,
+    offset: usize,
+) -> Option<DeclarationTarget> {
+    let tag_start = source.get(..offset)?.rfind('<')?;
+    let tag_end = tag_start + source[tag_start..].find('>')?;
+    if offset > tag_end {
+        return None;
+    }
+    let tag = &source[tag_start..=tag_end];
+    let after_name = tag.get("<action".len()..)?;
+    if !tag.to_ascii_lowercase().starts_with("<action")
+        || !after_name.starts_with(|c: char| c.is_whitespace() || c == '>' || c == '/')
+    {
+        return None;
+    }
+    let caret_in = |attr: &str| {
+        tag_attr_span(tag, attr)
+            .filter(|(s, e)| offset >= tag_start + s && offset <= tag_start + e)
+            .map(|(s, e)| tag[s..e].trim().to_string())
+    };
+    let on_method = caret_in("method");
+    if on_method.is_none() && caret_in("name").is_none() {
+        return None;
+    }
+
+    // The class as written is an FQCN or a Spring bean id; a bean id resolves to its implementation.
+    let class_ref = tag_attr(tag, "class")?.trim().to_string();
+    let chain = [class_ref.clone()]
+        .into_iter()
+        .chain(svc.bean_class(file, &class_ref))
+        .map(|fqcn| (class_chain(svc, &fqcn), fqcn))
+        .find(|(chain, _)| !chain.is_empty());
+    let (chain, fqcn) = chain?;
+    let simple = fqcn.rsplit(['.', '$']).next().unwrap_or(&fqcn).to_string();
+
+    if let Some(method) = on_method {
+        if !is_plain_identifier(&method) {
+            return None;
+        }
+        return chain.iter().find_map(|(path, src)| {
+            let (start, end) = crate::action_props::find_method_member(src, &method)?;
+            let (line, col) = line_col(src, start);
+            Some(DeclarationTarget {
+                file: path.clone(),
+                start,
+                end,
+                line: line as u32,
+                col: col as u32,
+                label: format!("method `{method}` on `{simple}`"),
+            })
+        });
+    }
+
+    let (path, src) = chain.first()?;
+    let start = src.find(&format!("class {simple}")).map_or(0, |at| at + "class ".len());
+    let (line, col) = line_col(src, start);
+    Some(DeclarationTarget {
+        file: path.clone(),
+        start,
+        end: start + simple.len(),
+        line: line as u32,
+        col: col as u32,
+        label: format!("action class `{simple}`"),
+    })
 }
 
 /// Conservative lint over a struts config buffer's `<result>` targets: a JSP path that resolves to no

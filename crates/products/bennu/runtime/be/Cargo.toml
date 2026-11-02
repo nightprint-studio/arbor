@@ -182,6 +182,9 @@ bennu-sheet = { path = "../../formats/sheet" }
 # The build-tool config files with a documented vocabulary behind them — `lombok.config` and
 # `junit-platform.properties`. An extension, registered below with the rest.
 bennu-toolconf = { path = "../../build/toolconf" }
+# Running on Apache Tomcat: the release catalogue, the generated CATALINA_BASE, the context.xml and the
+# JVM command line — the pure half of `tomcat_run`, tested without a process or a network.
+bennu-tomcat = { path = "../../build/tomcat" }
 # The refactorings that are pure source transforms — extract method / variable / constant, inline
 # variable / method. Its own crate for the reason `bennu-intentions` is: there is no test runner in
 # front of the editor, so a transform that cannot be unit-tested cannot be trusted.

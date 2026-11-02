@@ -122,6 +122,7 @@
     actionPropertyTarget as ipcActionPropertyTarget,
     actionPropertyLint as ipcActionPropertyLint,
     strutsResultTarget as ipcStrutsResultTarget,
+    strutsActionTarget as ipcStrutsActionTarget,
     strutsResultLint as ipcStrutsResultLint,
     decompiledSource as ipcDecompiledSource,
     downloadSources as ipcDownloadSources,
@@ -4417,6 +4418,18 @@
     return true;
   }
 
+  /** Try **Struts `<action>`** go-to in a config XML — `method="…"` opens that method on the action
+   *  class, `name="…"` opens the class. Resolves via `bennu_struts_action_target`; a caret on
+   *  anything else resolves to null → false. */
+  async function tryGoToStrutsAction(offset: number): Promise<boolean> {
+    const path = activePath;
+    if (!path || !editorComp || !path.toLowerCase().endsWith('.xml')) return false;
+    const t = await ipcStrutsActionTarget(path, editorComp.getValue(), offset).catch(() => null);
+    if (!t) return false;
+    openDefinitionFile(t.file, t.start);
+    return true;
+  }
+
   /** Ctrl+B inside a string that names a type — `@ConditionalOnClass(name = "…")`.
    *
    *  Follows what the backend **coloured**: `classRefSpans` is exactly the set of strings
@@ -4736,6 +4749,8 @@
     // 1c-ter. Struts config XML: a `<result>` body — a JSP path (open it) or an OGNL `${prop}` (jump
     //     to the owning action's property). Offset-classified; a non-result token is a no-op.
     if (offset != null && (await tryGoToStrutsResult(offset))) return;
+    // 1c-quater. Struts config XML: `<action method="…">` → that method, `<action name="…">` → the class.
+    if (offset != null && (await tryGoToStrutsAction(offset))) return;
     // 1d. Config XML (`struts.xml`/`spring-*.xml`/`tiles.xml`): a `class="…"` value — an FQCN
     //     or a Spring bean id — go to the Java class it names.
     if (action && (await tryGoToXmlClass(action))) return;

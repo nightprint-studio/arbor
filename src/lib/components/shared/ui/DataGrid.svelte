@@ -1,5 +1,15 @@
 <script lang="ts" module>
-  import type { Snippet } from 'svelte';
+  import type { Component, Snippet } from 'svelte';
+
+  /** A small icon in a column header that says something about the column (a key, a link…). */
+  export interface DataGridMark {
+    /** Any icon component taking `size` and `color`-by-`currentColor` (lucide fits). */
+    icon: Component<any>;
+    /** What the icon means — read in the header tooltip and by screen readers. */
+    label: string;
+    /** Any CSS colour, typically a `var(--…)`. Defaults to the muted text colour. */
+    color?: string;
+  }
 
   /** A grid column. `type` only drives alignment + sort comparison. */
   export interface DataGridColumn {
@@ -39,6 +49,8 @@
     muted?: boolean;
     /** Tooltip for the header cell, when the label alone does not say enough. */
     title?: string;
+    /** Icons drawn before the label — what kind of column this is (primary key, foreign key…). */
+    marks?: DataGridMark[];
   }
 
   /** One cell. `null` is a genuine null and renders differently from `''`. */
@@ -285,6 +297,12 @@
   // ── Sorting ───────────────────────────────────────────────────────────────
   let sortColumn = $state<number | null>(null);
   let sortDir = $state<SortDirection>('asc');
+
+  /** The header tooltip: the consumer's title, then what each mark icon means. */
+  function headerTooltip(col: DataGridColumn): string | undefined {
+    const parts = [col.title, ...(col.marks ?? []).map((m) => m.label)].filter(Boolean);
+    return parts.length ? parts.join(' · ') : undefined;
+  }
 
   function cycleSort(index: number) {
     if (sortColumn !== index) { sortColumn = index; sortDir = 'asc'; return; }
@@ -676,8 +694,18 @@
         class:dg-accented={!!col.accent}
         class:dg-provisional={!!col.accent && col.accentProvisional}
         style:--dg-accent={col.accent}
-        use:tooltip={col.title ?? (windowed ? partialNotice : undefined)}
+        use:tooltip={headerTooltip(col) ?? (windowed ? partialNotice : undefined)}
       >
+        {#if col.marks?.length}
+          <span class="dg-marks">
+            {#each col.marks as mark}
+              {@const Icon = mark.icon}
+              <span class="dg-mark" style:color={mark.color} role="img" aria-label={mark.label}>
+                <Icon size={11} />
+              </span>
+            {/each}
+          </span>
+        {/if}
         {#if sortable}
           <!-- One tooltip, on the cell, covering the whole header including the
                label and the resize handle. The button used to carry a duplicate: a
@@ -1008,6 +1036,8 @@
      on hover and on focus. */
   .dg-sort:disabled { cursor: default; color: var(--text-disabled); }
   .dg-th-label { overflow: hidden; text-overflow: ellipsis; }
+  .dg-marks { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+  .dg-mark { display: inline-flex; color: var(--text-muted); }
   .dg-sort-mark { font-size: var(--font-size-3xs); color: var(--accent); }
   .dg-th-hint {
     font-family: var(--font-code);

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imber su JetBrains AI</title>
+<style>
+  :root {
+    --bg-base:#1e1f22; --bg-elevated:#2b2d30; --bg-overlay:#35373b; --border:#3d3f43;
+    --text:#dfe1e5; --text-2:#aeb1b8; --text-3:#7d8087;
+    --accent:#6c9cff; --accent-bg:rgba(108,156,255,.14);
+    --ok:#5fb878; --warn:#e0a84a; --err:#e06c6c; --radius:8px;
+    --code:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box }
+  body { margin:0; background:#16171a; color:var(--text); font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+  .wrap { max-width:1040px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:22px; margin:0 0 4px } h2 { font-size:16px; margin:40px 0 4px } h3 { font-size:13px; margin:0 0 6px; color:var(--text-2) }
+  .lead { color:var(--text-2); margin:0 0 16px; max-width:70ch }
+  .note { color:var(--text-3); font-size:12px; margin:8px 0 0; max-width:80ch }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 10px; align-items:center }
+  .controls span { color:var(--text-3); font-size:12px }
+  .seg { display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden }
+  .seg button { background:transparent; color:var(--text-2); border:0; padding:5px 11px; font:inherit; font-size:12px; cursor:pointer }
+  .seg button[aria-pressed="true"] { background:var(--accent-bg); color:var(--accent) }
+
+  /* app frame */
+  .app { background:var(--bg-elevated); border:1px solid var(--border); border-radius:10px; padding:6px; }
+  .modal { display:grid; grid-template-columns:210px 1fr; gap:6px; min-height:300px }
+  .nav, .page { background:var(--bg-base); border-radius:var(--radius); }
+  .nav { padding:8px 6px; font-size:12.5px }
+  .grp { color:var(--text-3); font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; padding:8px 8px 3px }
+  .it { display:flex; align-items:center; gap:7px; padding:4px 8px; border-radius:5px; color:var(--text-2) }
+  .it.child { margin-left:16px }
+  .it.on { background:var(--accent-bg); color:var(--text) }
+  .it .dot { margin-left:auto; width:7px; height:7px; border-radius:50% }
+  .ico { width:12px; height:12px; border-radius:3px; background:var(--text-3); opacity:.5; flex:none }
+  .page { padding:14px 16px 18px; overflow:hidden }
+  .page h4 { margin:0 0 2px; font-size:16px } .page .sub { color:var(--text-3); font-size:12px; margin:0 0 12px }
+  .card { background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius); margin:0 0 10px }
+  .card-title { font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3); padding:9px 14px 4px }
+  .row { display:flex; justify-content:space-between; gap:18px; align-items:center; padding:9px 14px; border-top:1px solid var(--border) }
+  .row:first-of-type { border-top:0 }
+  .row .l b { font-weight:500; display:block } .row .l span { color:var(--text-3); font-size:12px; display:block; max-width:52ch }
+  .cards { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:6px 14px 12px }
+  .opt { border:1px solid var(--border); border-radius:var(--radius); padding:9px 11px; cursor:pointer; background:var(--bg-base); text-align:left; color:var(--text); font:inherit }
+  .opt b { display:block; font-weight:500 } .opt span { color:var(--text-3); font-size:12px }
+  .opt[aria-pressed="true"] { border-color:var(--accent); background:var(--accent-bg) }
+  .callout { margin:6px 14px 10px; padding:9px 12px; border-radius:6px; font-size:12.5px; border:1px solid; color:var(--text-2) }
+  .callout b { color:var(--text); display:block; margin-bottom:2px }
+  .callout.info { border-color:rgba(108,156,255,.35); background:rgba(108,156,255,.08) }
+  .callout.warn { border-color:rgba(224,168,74,.4); background:rgba(224,168,74,.08) }
+  .callout.err { border-color:rgba(224,108,108,.4); background:rgba(224,108,108,.08) }
+  .btn { background:var(--bg-overlay); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:4px 10px; font:inherit; font-size:12px; cursor:pointer }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#0c1220 }
+  .btn.ghost { background:transparent }
+  .badge { font-size:11px; padding:1px 7px; border-radius:99px; border:1px solid; white-space:nowrap }
+  .badge.ok { color:var(--ok); border-color:rgba(95,184,120,.5) } .badge.no { color:var(--text-3); border-color:var(--border) }
+  .badge.warn { color:var(--warn); border-color:rgba(224,168,74,.5) } .badge.err { color:var(--err); border-color:rgba(224,108,108,.5) }
+  .mono { font-family:var(--code); font-size:12px; color:var(--text-2) }
+  .meter { height:6px; border-radius:3px; background:var(--bg-overlay); overflow:hidden; width:200px } .meter i { display:block; height:100%; background:var(--accent) }
+  .hide { display:none !important }
+
+  /* panel mock */
+  .panel { max-width:420px; background:var(--bg-base); border-radius:var(--radius); padding:10px; font-size:12.5px }
+  .msg { background:var(--bg-elevated); border-radius:6px; padding:8px 10px; margin:8px 0; color:var(--text-2) }
+  .composer { border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:10px; background:var(--bg-elevated) }
+  .composer .tools { display:flex; gap:6px; margin-top:8px; align-items:center; flex-wrap:wrap }
+  .chip { font-size:11px; padding:2px 8px; border-radius:99px; background:var(--bg-overlay); color:var(--text-2); border:1px solid var(--border) }
+  .chip.jb { color:#e8a6ff; border-color:rgba(232,166,255,.4) }
+  .two { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; align-items:start }
+  table { border-collapse:collapse; width:100%; font-size:13px } td,th { text-align:left; padding:6px 8px; border-top:1px solid var(--border); vertical-align:top } th { color:var(--text-3); font-weight:500; border-top:0 }
+  code { font-family:var(--code); font-size:12px; background:var(--bg-elevated); padding:1px 5px; border-radius:4px }
+  ul { margin:6px 0; padding-left:20px } li { margin:3px 0 }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Imber su JetBrains AI (via Central)</h1>
+  <p class="lead">Proposta UI. Claude con chiave API resta com'è; si aggiunge un secondo provider che passa dal proxy locale di Central. I mock sotto sono interattivi: cambia provider e stato di Central.</p>
+
+  <div class="controls">
+    <span>Provider</span>
+    <div class="seg" id="seg-provider">
+      <button data-v="key" aria-pressed="false">Chiave API</button>
+      <button data-v="jb" aria-pressed="true">JetBrains AI</button>
+    </div>
+    <span>Stato Central</span>
+    <div class="seg" id="seg-state">
+      <button data-v="ready" aria-pressed="true">Pronto</button>
+      <button data-v="login" aria-pressed="false">Non loggato</button>
+      <button data-v="missing" aria-pressed="false">Non installato</button>
+    </div>
+  </div>
+
+  <h2>1. Settings › Imber (pagina Connection)</h2>
+  <p class="lead">La sidebar non cambia struttura: la pagina «Imber» è già la pagina della connessione, quindi resta lì. Cambia il contenuto, e la voce di nav guadagna un pallino di stato quando il provider è JetBrains.</p>
+
+  <div class="app"><div class="modal">
+    <div class="nav">
+      <div class="grp">Editor</div>
+      <div class="it"><i class="ico"></i>Editor</div>
+      <div class="grp">Imber</div>
+      <div class="it on"><i class="ico"></i>Imber <i class="dot" id="navdot"></i></div>
+      <div class="it child"><i class="ico"></i>Conversations</div>
+      <div class="it child"><i class="ico"></i>Access</div>
+      <div class="it child"><i class="ico"></i>Tools and skills</div>
+      <div class="it child"><i class="ico"></i>Models and cost</div>
+      <div class="it"><i class="ico"></i>Voice</div>
+    </div>
+    <div class="page">
+      <h4>Imber</h4>
+      <p class="sub">Il provider che usa per raggiungere il modello. Le altre impostazioni sono nelle pagine sotto.</p>
+
+      <div class="card">
+        <div class="card-title">Provider</div>
+        <div class="cards" id="provider-cards">
+          <button class="opt" data-v="key" aria-pressed="false"><b>Anthropic · chiave API</b><span>La tua chiave, fatturata da Anthropic. Prezzi per token.</span></button>
+          <button class="opt" data-v="jb" aria-pressed="true"><b>JetBrains AI · Central</b><span>La licenza JetBrains AI che hai già. Crediti, nessuna chiave.</span></button>
+        </div>
+      </div>
+
+      <!-- Chiave API: card esistente, invariata -->
+      <div class="card hide" id="card-key">
+        <div class="card-title">Connection</div>
+        <div class="callout info"><b>Your key stays on this machine</b>The key lives in a vault of its own and never in a config file.</div>
+        <div class="row"><div class="l"><b>API key</b><span>Your Anthropic API key. Stored once, in the vault.</span></div>
+          <div><span class="badge no">Not set</span></div></div>
+      </div>
+
+      <!-- JetBrains -->
+      <div id="card-jb">
+        <div class="card">
+          <div class="card-title">Che cos'è Central</div>
+          <div class="callout info"><b>JetBrains Central CLI — un proxy locale</b>
+            Gira sul tuo computer, aggiunge il login JetBrains alle richieste di Imber e le inoltra alla piattaforma AI di JetBrains.
+            Usi i modelli inclusi nella tua licenza e non serve una chiave Anthropic. Il consumo scala dai crediti JetBrains AI. È in EAP: può cambiare.
+            <br><a class="mono" href="#" style="color:var(--accent)">Guida all'installazione ↗</a></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Stato</div>
+          <div class="row"><div class="l"><b>Central CLI</b><span class="mono" id="s-bin"></span></div><div id="b-bin"></div></div>
+          <div class="row"><div class="l"><b>Accesso JetBrains</b><span id="s-login"></span></div><div id="b-login"></div></div>
+          <div class="row"><div class="l"><b>Proxy locale</b><span class="mono" id="s-proxy"></span></div><div id="b-proxy"></div></div>
+          <div class="row"><div class="l"><b>Crediti</b><span id="s-credits"></span></div><div id="b-credits"></div></div>
+          <div class="row"><div class="l"><b>Verifica</b><span>Invia una richiesta minima e controlla che risponda.</span></div>
+            <div><button class="btn primary" id="btn-check">Verifica connessione</button></div></div>
+        </div>
+        <div class="callout warn" id="hint-fix" style="margin:0 0 10px"></div>
+      </div>
+      <p class="note">Nessun download automatico: Imber rileva <code>central</code> nel PATH e legge porta e secret da <code>~/.jetbrains-central/config.json</code>. Il secret non viene mai mostrato, loggato né salvato altrove.</p>
+    </div>
+  </div></div>
+
+  <h2>2. Settings › Models and cost</h2>
+  <p class="lead">Con JetBrains AI i prezzi in dollari e i limiti in euro non hanno senso: il costo è in crediti. La pagina mostra solo ciò che è vero.</p>
+  <div class="app"><div class="modal" style="grid-template-columns:1fr">
+    <div class="page">
+      <h4>Models and cost</h4>
+      <p class="sub" id="cost-sub"></p>
+      <div id="cost-key">
+        <div class="card"><div class="card-title">Models and prices</div>
+          <div class="row"><div class="l"><b>Price list</b><span>Modelli built-in con i prezzi per token.</span></div><div><button class="btn">Create a price file</button></div></div></div>
+        <div class="card"><div class="card-title">Spending limits</div>
+          <div class="row"><div class="l"><b>Per conversation</b><span>The most one conversation may cost.</span></div><span class="mono">€ 5</span></div>
+          <div class="row"><div class="l"><b>Per day</b><span>From midnight.</span></div><span class="mono">€ 20</span></div></div>
+      </div>
+      <div id="cost-jb" class="hide">
+        <div class="card"><div class="card-title">Modelli offerti da JetBrains AI</div>
+          <div class="row"><div class="l"><b>Claude Sonnet 5.5</b><span>Il modello Anthropic raggiunto via Central.</span></div><span class="badge ok">disponibile</span></div>
+          <div class="row"><div class="l"><b>Claude Opus 5.5</b><span>Dipende dal piano.</span></div><span class="badge warn">non nel tuo piano</span></div>
+          <div class="row"><div class="l"><b>Modelli OpenAI / Google</b><span>Raggiungibili da Central, non da Imber (parla solo il formato Anthropic).</span></div><span class="badge no">non supportato</span></div>
+        </div>
+        <div class="card"><div class="card-title">Crediti</div>
+          <div class="callout info"><b>I limiti in euro non si applicano</b>Con JetBrains AI il limite è quello del tuo piano. Imber lo legge da Central e ti avvisa prima di esaurirlo.</div>
+          <div class="row"><div class="l"><b>Consumo del periodo</b><span>Letto da <span class="mono">central limit</span></span></div>
+            <div style="display:flex;gap:10px;align-items:center"><div class="meter"><i style="width:38%"></i></div><span class="mono">38 / 100</span></div></div>
+          <div class="row"><div class="l"><b>Avvisa da</b><span>Il composer segnala il limite quando il consumo lo raggiunge.</span></div><span class="mono">80 %</span></div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <h2>3. Pannello Imber</h2>
+  <p class="lead">Il provider è sempre visibile, ma discreto: un chip accanto al modello. Se Central non risponde, l'errore dice cosa fare e offre l'uscita verso la chiave.</p>
+  <div class="two">
+    <div>
+      <h3>Conversazione normale</h3>
+      <div class="panel">
+        <div class="msg">Spiegami cosa fa <code>OrderService.close()</code></div>
+        <div class="msg" style="background:transparent">…</div>
+        <div class="composer">
+          <div style="color:var(--text-3)">Chiedi a Imber…</div>
+          <div class="tools"><span class="chip">Sonnet 5.5</span><span class="chip jb" id="chip-provider">JetBrains AI</span><span class="chip">Effort: high</span>
+            <span class="chip" style="margin-left:auto" id="chip-cost">12 crediti</span></div>
+        </div>
+      </div>
+      <p class="note">Il costo accanto al composer segue il provider: € con la chiave, crediti con JetBrains. Il dialogo «Confirm costly changes» mostra crediti stimati invece dei dollari.</p>
+    </div>
+    <div>
+      <h3>Central non raggiungibile</h3>
+      <div class="panel">
+        <div class="msg">Spiegami cosa fa <code>OrderService.close()</code></div>
+        <div class="callout err" style="margin:8px 0 0"><b>Central non risponde</b>
+          Il proxy locale non è raggiungibile su 127.0.0.1:19516. Avvia <code>central</code> oppure controlla il login.
+          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+            <button class="btn primary">Verifica connessione</button>
+            <button class="btn">Apri le impostazioni</button>
+            <button class="btn ghost">Usa la chiave API</button></div></div>
+        <div class="composer"><div style="color:var(--text-3)">Chiedi a Imber…</div></div>
+      </div>
+      <p class="note">«Usa la chiave API» cambia provider per questa conversazione; non tocca il default nelle settings.</p>
+    </div>
+  </div>
+
+  <h2>4. Il resto</h2>
+  <table>
+    <tr><th>Superficie</th><th>Cambio</th></tr>
+    <tr><td>Command Palette</td><td><code>Imber: Switch provider</code>, <code>Imber: Check JetBrains connection</code>, <code>Imber: Open Central guide</code>.</td></tr>
+    <tr><td>Settings › Conversations</td><td>Model, effort e cache da 1 h restano. Se il gateway rifiuta un parametro (lo dirà lo spike), il controllo si disabilita con una nota «non disponibile con JetBrains AI».</td></tr>
+    <tr><td>Sidebar del progetto (albero file)</td><td>Nessun cambio. Il provider non riguarda il progetto.</td></tr>
+    <tr><td>Docs</td><td>La pagina <code>docs/imber/Settings</code> descrive i due provider e il prerequisito Central.</td></tr>
+    <tr><td>Changelog</td><td>«Added: Imber can use your JetBrains AI license through Central».</td></tr>
+    <tr><td>Shortcut</td><td>Nessuna: è una scelta che si fa di rado. La palette basta.</td></tr>
+  </table>
+  <p class="note">Widget usati: tutti shared già in uso nella pagina attuale (<code>RadioGroup</code> con <code>appearance="card"</code>, <code>Callout</code>, <code>FormRow</code>, <code>Badge</code>, <code>Button</code>, <code>Dropdown</code>). Servirebbe solo una piccola riga di stato riusabile, se non esiste già in <code>shared/ui</code>.</p>
+</div>
+
+<script>
+  const $ = (s) => document.querySelector(s), $$ = (s) => [...document.querySelectorAll(s)];
+  const st = { provider:'jb', state:'ready' };
+  const B = (k, t) => `<span class="badge ${k}">${t}</span>`;
+  const STATES = {
+    ready:   { bin:['ok','Installato'], binTxt:'central 0.9.2 · C:\\Users\\…\\central.exe', login:['ok','Connesso'], loginTxt:'Licenza JetBrains AI · account personale',
+               proxy:['ok','In ascolto'], proxyTxt:'127.0.0.1:19516 · /health 200 OK', credits:['ok','38 / 100'], creditsTxt:'Letti da central limit', dot:'var(--ok)', hint:null },
+    login:   { bin:['ok','Installato'], binTxt:'central 0.9.2', login:['warn','Accesso richiesto'], loginTxt:'Nessun account collegato.',
+               proxy:['no','Fermo'], proxyTxt:'Si avvia dopo il login', credits:['no','—'], creditsTxt:'—', dot:'var(--warn)',
+               hint:'<b>Serve il login</b>Esegui <code>central</code> in un terminale e accedi con il tuo account JetBrains. Poi torna qui e premi «Verifica connessione».' },
+    missing: { bin:['err','Non trovato'], binTxt:'<code>central</code> non è nel PATH', login:['no','—'], loginTxt:'—',
+               proxy:['no','—'], proxyTxt:'—', credits:['no','—'], creditsTxt:'—', dot:'var(--err)',
+               hint:'<b>Central non è installato</b>Imber non lo installa da solo. Segui la guida, poi premi «Verifica connessione». <button class="btn" style="margin-left:6px">Apri la guida ↗</button>' },
+  };
+  function render() {
+    const jb = st.provider === 'jb', S = STATES[st.state];
+    $$('#seg-provider button, #provider-cards .opt').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === st.provider)));
+    $$('#seg-state button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === st.state)));
+    $('#card-key').classList.toggle('hide', jb); $('#card-jb').classList.toggle('hide', !jb);
+    $('#cost-key').classList.toggle('hide', jb); $('#cost-jb').classList.toggle('hide', !jb);
+    $('#cost-sub').textContent = jb ? 'I modelli che JetBrains AI mette a disposizione e il tuo consumo di crediti.' : 'I modelli con i loro prezzi, e i limiti su quanto può spendere.';
+    $('#chip-provider').textContent = jb ? 'JetBrains AI' : 'Anthropic API';
+    $('#chip-provider').className = 'chip' + (jb ? ' jb' : '');
+    $('#chip-cost').textContent = jb ? '12 crediti' : '€ 0,09';
+    const dot = $('#navdot'); dot.style.background = jb ? S.dot : 'transparent';
+    $('#s-bin').innerHTML = S.binTxt; $('#b-bin').innerHTML = B(...S.bin);
+    $('#s-login').textContent = S.loginTxt; $('#b-login').innerHTML = B(...S.login);
+    $('#s-proxy').textContent = S.proxyTxt; $('#b-proxy').innerHTML = B(...S.proxy);
+    $('#s-credits').textContent = S.creditsTxt; $('#b-credits').innerHTML = B(...S.credits);
+    const h = $('#hint-fix'); h.classList.toggle('hide', !S.hint); h.innerHTML = S.hint || '';
+    $('#btn-check').disabled = st.state === 'missing';
+  }
+  $$('#seg-provider button, #provider-cards .opt').forEach(b => b.onclick = () => { st.provider = b.dataset.v; render(); });
+  $$('#seg-state button').forEach(b => b.onclick = () => { st.state = b.dataset.v; render(); });
+  render();
+</script>
+</body>
+</html>

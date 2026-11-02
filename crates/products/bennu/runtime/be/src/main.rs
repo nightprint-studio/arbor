@@ -507,6 +507,7 @@ mod run_config;
 // Main-class discovery (run-config editor's picker): `bennu_main_classes` — a fresh
 // `.java` scan for types declaring `public static void main(String[])`.
 mod main_classes;
+mod log_view;
 // Framework extensions (`bennu-ext` + `bennu-spring` + `bennu-jpa`): `bennu_ext_*` (highlights /
 // diagnostics / gutter / navigate / hover / completion / inline hint / catalog / overview) plus the
 // few framework-specific settings verbs. Capability-gated and lazy — a project no extension applies
@@ -523,6 +524,9 @@ mod plugin_rpc;
 // `bennu_detect_tomcat` (validate a Tomcat root + resolve the deployed context) + `bennu_hotswap_jsp`
 // (copy one/all JSPs into the exploded webapp so Jasper recompiles them — no redeploy/restart).
 mod tomcat;
+// Running a web module ON Tomcat — `bennu_run_tomcat` (generated CATALINA_BASE + context.xml, started through the
+// ordinary run machinery), plus the installs/download/scan/ports/secrets the Tomcat run-config form asks.
+mod tomcat_run;
 // Unit tests (`bennu-test`): `bennu_discover_tests` (what in the project IS a test) +
 // `bennu_run_tests` / `bennu_cancel_tests` (run a scope of them through Maven, streaming
 // per-class results as Surefire writes its reports). Shares the build's single-run lock —

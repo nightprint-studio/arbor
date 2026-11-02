@@ -16,7 +16,7 @@ pub use crate::contract::{
     InheritedMember, InheritedSource, JdkInfo, MainClassEntry, ProjectInfo, ProjectKind,
     ProjectValidationResult,
     AddParameterPreview, RenameApplyResult, RenameEdit, RenameFileEdits, RenameFileMove, RenamePreview, RunConfig, RunConfigSet, RunHandle, SnippetStop, SpellHit,
-    SpellStatus,
+    SpellStatus, TomcatResource, TomcatRunConfig,
     TodoItem, TreeNode, UsageHit, UsagesResult, ValidationContext, WriteResult,
 };
 // The severity strings a `Diagnostic` carries, as a module so a call site reads
