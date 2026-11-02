@@ -366,6 +366,9 @@ pub struct RecentProject {
     pub name: String,
     /// Unix seconds of the last open. Sorting key.
     pub opened_at: u64,
+    /// Kept at the top of the welcome page and never pushed out of the history by newer entries.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// Launcher (Canopy) preferences.

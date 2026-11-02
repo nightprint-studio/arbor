@@ -31,6 +31,7 @@
   import TytoCountdown from './TytoCountdown.svelte';
   import { recorderStore, type TargetKind } from '$lib/stores/tyto/recorder.svelte';
   import { tytoUiStore } from '$lib/stores/tyto/ui.svelte';
+  import { chord, dispatchKeymap, type KeyRule } from '$lib/utils/keymap';
 
   let libraryWidth = $state(360);
 
@@ -106,40 +107,56 @@
     }
   }
 
-  function onKeyDown(e: KeyboardEvent) {
-    const mod = e.ctrlKey || e.metaKey;
-    const key = e.key.toLowerCase();
+  // Evaluated top to bottom, first hit wins (see `utils/keymap.ts`). Every rule
+  // prevents the default, as the hand-written cascade did.
+  // Help toggles — available even with a panel open (F1 toggles docs closed), so they are
+  // dispatched before the modal gate in `onKeyDown`.
+  const helpRules: KeyRule[] = [
+    { id: 'toggle_docs',    match: chord({ key: 'F1', shift: false }), run: () => tytoUiStore.toggleDocs() },
+    { id: 'open_shortcuts', match: chord({ key: 'F1', shift: true }),  run: () => tytoUiStore.openShortcuts() },
+  ];
 
+  const keyRules: KeyRule[] = [
+    // Ctrl+Shift+C enters the in-window Snip-style selector (frozen backdrop + toolbar).
+    { id: 'snip_selector',   match: chord({ mod: true, shift: true,  key: 'c' }), run: () => void recorderStore.enterSelection('rect') },
+    { id: 'open_settings',   match: chord({ mod: true, shift: false, key: ',' }), run: () => tytoUiStore.openSettings() },
+    { id: 'toggle_library',  match: chord({ mod: true, shift: true,  key: 'b' }), run: () => tytoUiStore.toggleLibrary() },
+    { id: 'reveal_output',   match: chord({ mod: true, shift: true,  key: 'o' }), run: () => void recorderStore.revealOutputFolder() },
+    { id: 'cycle_source',    match: chord({ mod: true, shift: true,  key: 's' }), run: () => cycleSource() },
+    { id: 'screen_region',   match: chord({ mod: true, shift: true,  key: 'd' }), run: () => void recorderStore.openScreenRegion() },
+    // Direct source select — e.code so Shift+digit is layout-robust (Shift+1 = '!' on
+    // some layouts), and distinct from the shift-less Ctrl+1/2 mode switches.
+    { id: 'source_monitor',  match: chord({ mod: true, shift: true, code: 'Digit1' }), run: () => recorderStore.setTargetKind('monitor') },
+    { id: 'source_window',   match: chord({ mod: true, shift: true, code: 'Digit2' }), run: () => recorderStore.setTargetKind('window') },
+    { id: 'source_region',   match: chord({ mod: true, shift: true, code: 'Digit3' }), run: () => recorderStore.setTargetKind('region') },
+    {
+      id: 'toggle_system_audio',
+      match: chord({ mod: true, shift: true, key: 'a' }),
+      run: () => { if (recorderStore.mode === 'record') recorderStore.toggleSystemAudio(); },
+    },
+    // Video ↔ frame sequence. The two produce very different files from the same
+    // gesture, so the switch deserves to be reachable without leaving the keyboard.
+    {
+      id: 'toggle_record_output',
+      match: chord({ mod: true, shift: true, key: 'f' }),
+      run: () => recorderStore.setRecordOutput(recorderStore.recordOutput === 'frames' ? 'video' : 'frames'),
+    },
+    { id: 'mode_record',     match: chord({ mod: true, shift: false, key: '1' }), run: () => recorderStore.setMode('record') },
+    { id: 'mode_screenshot', match: chord({ mod: true, shift: false, key: '2' }), run: () => recorderStore.setMode('screenshot') },
+    { id: 'primary_capture', match: chord({ mod: true, key: 'enter' }),           run: () => primaryCapture() },
+  ];
+
+  function onKeyDown(e: KeyboardEvent) {
     // The in-window selector / countdown own the keyboard while up (their own Esc / Enter /
     // method keys) — don't let the shell's shortcuts fire behind them.
     if (recorderStore.selecting || recorderStore.countingDown) return;
 
-    // Help toggles — available even with a panel open (F1 toggles docs closed).
-    if (e.key === 'F1' && !e.shiftKey) { tytoUiStore.toggleDocs(); e.preventDefault(); return; }
-    if (e.key === 'F1' && e.shiftKey)  { tytoUiStore.openShortcuts(); e.preventDefault(); return; }
+    if (dispatchKeymap(e, helpRules)) return;
 
     // Behind a modal, let the dialog own the keyboard (its own Esc, Tab, …).
     if (tytoUiStore.anyModalOpen) return;
 
-    // Ctrl+Shift+C enters the in-window Snip-style selector (frozen backdrop + toolbar).
-    if (mod && e.shiftKey && key === 'c')      { void recorderStore.enterSelection('rect'); e.preventDefault(); return; }
-    if (mod && !e.shiftKey && key === ',')     { tytoUiStore.openSettings(); e.preventDefault(); return; }
-    if (mod && e.shiftKey && key === 'b')      { tytoUiStore.toggleLibrary(); e.preventDefault(); return; }
-    if (mod && e.shiftKey && key === 'o')      { void recorderStore.revealOutputFolder(); e.preventDefault(); return; }
-    if (mod && e.shiftKey && key === 's')      { cycleSource(); e.preventDefault(); return; }
-    if (mod && e.shiftKey && key === 'd')      { void recorderStore.openScreenRegion(); e.preventDefault(); return; }
-    // Direct source select — e.code so Shift+digit is layout-robust (Shift+1 = '!' on
-    // some layouts), and distinct from the shift-less Ctrl+1/2 mode switches.
-    if (mod && e.shiftKey && e.code === 'Digit1') { recorderStore.setTargetKind('monitor'); e.preventDefault(); return; }
-    if (mod && e.shiftKey && e.code === 'Digit2') { recorderStore.setTargetKind('window');  e.preventDefault(); return; }
-    if (mod && e.shiftKey && e.code === 'Digit3') { recorderStore.setTargetKind('region');   e.preventDefault(); return; }
-    if (mod && e.shiftKey && key === 'a')      { if (recorderStore.mode === 'record') recorderStore.toggleSystemAudio(); e.preventDefault(); return; }
-    // Video ↔ frame sequence. The two produce very different files from the same
-    // gesture, so the switch deserves to be reachable without leaving the keyboard.
-    if (mod && e.shiftKey && key === 'f')      { recorderStore.setRecordOutput(recorderStore.recordOutput === 'frames' ? 'video' : 'frames'); e.preventDefault(); return; }
-    if (mod && !e.shiftKey && key === '1')     { recorderStore.setMode('record'); e.preventDefault(); return; }
-    if (mod && !e.shiftKey && key === '2')     { recorderStore.setMode('screenshot'); e.preventDefault(); return; }
-    if (mod && key === 'enter')                { primaryCapture(); e.preventDefault(); return; }
+    dispatchKeymap(e, keyRules);
   }
 </script>
 

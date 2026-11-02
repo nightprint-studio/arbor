@@ -466,7 +466,14 @@
 
   // Canopy asking for a specific project: open it. Once on mount for a request
   // parked before this window existed, then on every later request.
-  onMount(() => onOpenIntent('bennu', (path) => { void projectStore.openProject(path); }));
+  //
+  // With a project already open this ADDS to the workspace — `addProject` just switches when the
+  // project is already a member — instead of `openProject`, which replaces the workspace and drops
+  // every open tab: a "continue where you left off" that closed what you left off was the bug.
+  onMount(() => onOpenIntent('bennu', (path) => {
+    if (projectStore.project && !projectStore.isDemo) void projectStore.addProject(path);
+    else void projectStore.openProject(path);
+  }));
 
   /**
    * Follow the debugger: whenever the selected frame changes, open its file at its line.

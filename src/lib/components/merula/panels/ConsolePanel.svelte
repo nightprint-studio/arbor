@@ -3,11 +3,13 @@
    * Console — engine + eval logs. Emission is gated to the titlebar threshold
    * (the design's "gating all'emissione"); on top of that the toolbar offers a
    * **text search** (Ctrl+F focuses it) and **per-level filter chips** (e.g.
-   * isolate warn/error). Click a warn/error line to "jump to span" (mocked).
+   * isolate warn/error). Log lines carry no source span, so they are not clickable.
    */
-  import { Terminal, ArrowDownToLine, Search, X, Trash2 } from 'lucide-svelte';
+  import { Terminal, ArrowDownToLine, Trash2 } from 'lucide-svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import FilterInput from '$lib/components/shared/ui/FilterInput.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { merulaStore, levelsAtOrAbove, LOG_LEVELS } from '../merula-store.svelte';
   import { configStore } from '../stores/config.svelte';
@@ -34,7 +36,6 @@
   });
 
   function toggleLevel(l: string) { levelOn = { ...levelOn, [l]: !levelOn[l] }; }
-  function clearSearch() { query = ''; searchEl?.focus(); }
   function scrollToBottom() { if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight; }
 </script>
 
@@ -43,17 +44,13 @@
     {#snippet icon()}<Terminal size={13} />{/snippet}
     {#snippet children()}<span class="con-meta">{visible.length}/{logStore.count}</span>{/snippet}
     {#snippet actions()}
-      <button class="ps-btn" onclick={scrollToBottom} use:tooltip={'Scroll to bottom'} aria-label="Scroll to bottom"><ArrowDownToLine size={13} /></button>
-      <button class="ps-btn" onclick={() => logStore.clear()} use:tooltip={'Clear console'} aria-label="Clear console"><Trash2 size={13} /></button>
+      <IconButton tooltip="Scroll to bottom" onclick={scrollToBottom}><ArrowDownToLine size={13} /></IconButton>
+      <IconButton tooltip="Clear console" onclick={() => logStore.clear()}><Trash2 size={13} /></IconButton>
     {/snippet}
   </BottomPanelHeader>
 
   <div class="con-toolbar">
-    <div class="con-search">
-      <Search size={12} />
-      <input bind:this={searchEl} bind:value={query} placeholder="Search… (Ctrl+F)" spellcheck="false" />
-      {#if query}<button class="con-clear" onclick={clearSearch} aria-label="Clear search"><X size={11} /></button>{/if}
-    </div>
+    <FilterInput bind:value={query} bind:element={searchEl} placeholder="Search… (Ctrl+F)" />
     <div class="con-levels">
       {#each LOG_LEVELS as l (l)}
         {@const gated = !emitted.has(l)}
@@ -75,16 +72,7 @@
       <EmptyState message={query ? `No log lines match “${query}”.` : 'No log lines for the current filter.'} />
     {:else}
       {#each visible as l (l.id)}
-        {@const clickable = l.level === 'warn' || l.level === 'error'}
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div
-          class="con-line"
-          class:clickable
-          role={clickable ? 'button' : undefined}
-          tabindex={clickable ? 0 : undefined}
-          onclick={() => { /* TODO: jump to span */ }}
-          onkeydown={(e) => { if (clickable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); /* TODO: jump to span */ } }}
-        >
+        <div class="con-line">
           <span class="con-level lvl-{l.level}">{l.level}</span>
           <span class="con-text">{l.message}</span>
         </div>
@@ -103,25 +91,6 @@
     padding: 5px 10px; flex-shrink: 0;
     border-bottom: 1px solid var(--border-subtle);
   }
-  .con-search {
-    flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
-    height: 24px; padding: 0 7px;
-    background: var(--bg-input); border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md); color: var(--text-muted);
-  }
-  .con-search:focus-within { border-color: var(--border-focus); }
-  .con-search input {
-    flex: 1; min-width: 0; background: transparent; border: none; outline: none;
-    color: var(--text-primary); font-family: var(--font-ui-sans); font-size: var(--font-size-sm);
-  }
-  .con-search input::placeholder { color: var(--text-disabled); }
-  .con-clear {
-    display: flex; align-items: center; justify-content: center;
-    width: 16px; height: 16px; flex-shrink: 0;
-    background: transparent; border: none; border-radius: 50%;
-    color: var(--text-muted); cursor: pointer;
-  }
-  .con-clear:hover { background: var(--bg-hover); color: var(--text-primary); }
 
   .con-levels { display: flex; gap: 3px; flex-shrink: 0; }
   .lvl-chip {
@@ -146,8 +115,6 @@
     display: flex; align-items: baseline; gap: 8px;
     padding: 1px 12px; font-size: var(--font-size-xs); line-height: 1.6; white-space: nowrap;
   }
-  .con-line.clickable { cursor: pointer; }
-  .con-line.clickable:hover { background: var(--bg-hover); }
   .con-level { width: 42px; flex-shrink: 0; font-weight: 600; text-transform: uppercase; font-size: var(--font-size-3xs); }
   .con-text { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
 

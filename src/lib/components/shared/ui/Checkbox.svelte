@@ -8,6 +8,8 @@
    * either checked or not); it is a display state set on the DOM node, so it has to be applied
    * imperatively rather than as an attribute.
    */
+  import type { Snippet } from 'svelte';
+
   interface Props {
     checked: boolean;
     /** Show the "some, not all" bar instead of a tick. Ignored while `checked` is true. */
@@ -15,7 +17,20 @@
     disabled?: boolean;
     /** Inline label rendered to the right of the box. */
     label?: string;
+    /** Rich label (`<code>`, `<strong>`…) for when a plain string is not enough. Rendered after
+     *  `label` if both are given; supply `ariaLabel` when only this is set and the text alone is
+     *  not a good name. */
+    children?: Snippet;
     ariaLabel?: string;
+    /** Native tooltip on the whole control. */
+    title?: string;
+    /** For a checkbox inside a clickable row: keeps the click and the key press from reaching
+     *  the row's own handler, which would otherwise toggle / select it at the same time. */
+    stopPropagation?: boolean;
+    /** Label font: `sm` is 12px (default), `xs` the 11px token, `2xs` the 10px one (dense rows). */
+    labelSize?: '2xs' | 'xs' | 'sm';
+    /** Label colour: `secondary` (default) or the quieter `muted`. */
+    labelTone?: 'secondary' | 'muted';
     /** Fired with the new value on user interaction. */
     onchange?: (value: boolean) => void;
   }
@@ -25,7 +40,12 @@
     indeterminate = false,
     disabled = false,
     label,
+    children,
     ariaLabel,
+    title,
+    stopPropagation = false,
+    labelSize = 'sm',
+    labelTone = 'secondary',
     onchange,
   }: Props = $props();
 
@@ -38,7 +58,15 @@
   });
 </script>
 
-<label class="cb" class:disabled>
+<!-- The handlers only stop propagation; the label itself stays a passive wrapper. -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+<label
+  class="cb"
+  class:disabled
+  {title}
+  onclick={stopPropagation ? (e) => e.stopPropagation() : undefined}
+  onkeydown={stopPropagation ? (e) => e.stopPropagation() : undefined}
+>
   <input
     bind:this={el}
     type="checkbox"
@@ -47,7 +75,9 @@
     aria-label={ariaLabel ?? label}
     onchange={() => onchange?.(checked)}
   />
-  {#if label}<span class="cb-label">{label}</span>{/if}
+  {#if label || children}
+    <span class="cb-label" class:lbl-2xs={labelSize === '2xs'} class:lbl-xs={labelSize === 'xs'} class:lbl-muted={labelTone === 'muted'}>{label}{#if children}{@render children()}{/if}</span>
+  {/if}
 </label>
 
 <style>
@@ -69,7 +99,10 @@
     width: 14px;
     height: 14px;
     flex: none;
-    border: 1px solid var(--border-strong);
+    /* `--border-strong` is not a theme token (ChipBar and PianoKeyboard fall back the same way):
+       without the fallback the whole border declaration is invalid and an unchecked box vanishes
+       against a --bg-base panel. */
+    border: 1px solid var(--border-strong, var(--border));
     border-radius: 3px;
     background: var(--bg-base);
     display: grid;
@@ -112,4 +145,7 @@
     font-size: 12px;
     color: var(--text-secondary);
   }
+  .cb-label.lbl-2xs { font-size: var(--font-size-2xs); }
+  .cb-label.lbl-xs { font-size: var(--font-size-xs); }
+  .cb-label.lbl-muted { color: var(--text-muted); }
 </style>

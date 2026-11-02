@@ -12,7 +12,8 @@
 //! * a varargs parameter that is not the last one (`varargs.must.be.last`);
 //! * a field, method or statement outside any type (`class, interface, enum, or record expected`).
 //!
-//! All of them are errors at every language level, so none consults the project's Java version.
+//! All of them are errors at every language level but the last, which Java 25 made legal (a compact
+//! source file); that one is the only rule that consults the file's level.
 
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
@@ -22,6 +23,14 @@ use crate::support::nodes::{modifier_keywords, text};
 
 /// Every grammar-gap error in the pre-collected node slice.
 pub fn grammar_gap_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
+    grammar_gap_errors_at(nodes, source, None)
+}
+
+/// [`grammar_gap_errors_nodes`] for a file compiled at `java_major`. Only one rule reads the level: a
+/// member or statement outside any type is a **compact source file** from Java 25 (JEP 512) — the file
+/// is an implicit class, `void main()` its entry — and an error below it.
+pub fn grammar_gap_errors_at(nodes: &[Node], source: &str, java_major: Option<u32>) -> Vec<Diagnostic> {
+    let compact_ok = java_major.is_some_and(|m| m >= 25);
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
@@ -29,9 +38,15 @@ pub fn grammar_gap_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
             "identifier" => keyword_as_name(n, bytes, &mut out),
             "local_variable_declaration" => {
                 local_modifier(n, bytes, &mut out);
-                stray_at_top_level(n, &mut out);
+                if !compact_ok {
+                    stray_at_top_level(n, &mut out);
+                }
             }
-            "field_declaration" | "method_declaration" => stray_at_top_level(n, &mut out),
+            "field_declaration" | "method_declaration" => {
+                if !compact_ok {
+                    stray_at_top_level(n, &mut out);
+                }
+            }
             "if_statement" => {
                 for field in ["consequence", "alternative"] {
                     if let Some(body) = n.child_by_field_name(field) {
@@ -118,6 +133,17 @@ fn varargs_not_last(params: Node, out: &mut Vec<Diagnostic>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_compact_source_file_is_legal_from_java_25_only() {
+        let src = "String greeting = \"hi\";\n\nvoid main() {\n    System.out.println(greeting);\n}\n";
+        let tree = bennu_java::prelude::parse_java(src).unwrap();
+        let nodes = crate::engine::check::collect_nodes(tree.root_node());
+        let codes = |level: Option<u32>| grammar_gap_errors_at(&nodes, src, level).into_iter().map(|d| d.code).collect::<Vec<_>>();
+        assert_eq!(codes(Some(25)), Vec::<String>::new());
+        assert_eq!(codes(Some(21)).len(), 2);
+        assert_eq!(codes(None).len(), 2);
+    }
 
     fn run(src: &str) -> Vec<String> {
         let tree = bennu_java::prelude::parse_java(src).unwrap();

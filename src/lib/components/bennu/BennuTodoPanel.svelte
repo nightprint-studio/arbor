@@ -11,6 +11,7 @@
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -98,16 +99,9 @@
   >
     {#snippet icon()}<ListTodo size={13} />{/snippet}
     {#snippet actions()}
-      <button
-        class="ps-btn"
-        type="button"
-        use:tooltip={'Refresh'}
-        aria-label="Refresh TODOs"
-        disabled={loading}
-        onclick={() => void refresh()}
-      >
+      <IconButton tooltip="Refresh" disabled={loading} onclick={() => void refresh()}>
         <RefreshCw size={13} />
-      </button>
+      </IconButton>
     {/snippet}
   </BottomPanelHeader>
 

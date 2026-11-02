@@ -43,6 +43,7 @@
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import TypePill from '$lib/components/shared/internal/TypePill.svelte';
   import ConfirmModal from '../shared/ConfirmModal.svelte';
+  import PromptModal from '../shared/PromptModal.svelte';
   import FileExplorerModal from '../sitta/FileExplorerModal.svelte';
   import { type MenuItem } from '../shared/ContextMenu.svelte';
   import { type RowSnippetCtx } from '../shared/ui/Tree.svelte';
@@ -913,9 +914,13 @@
       actionError = (e as any)?.message ?? String(e);
     }
   }
-  async function addMapEntryAction(parent: TNode): Promise<void> {
-    const keyRaw = window.prompt('Map key (RON syntax, e.g. "foo" or 42):');
-    if (!keyRaw) return;
+  // Text prompts (replace window.prompt): one modal at a time, the target node rides along.
+  let textPrompt = $state<{ kind: 'map-key' | 'field-name'; node: TNode } | null>(null);
+
+  function addMapEntryAction(parent: TNode): void {
+    textPrompt = { kind: 'map-key', node: parent };
+  }
+  async function commitMapEntry(parent: TNode, keyRaw: string): Promise<void> {
     const valTy = itemTypeOf(parent);
     const valText = valTy ? defaultRonText(valTy) : '()';
     try {
@@ -1299,25 +1304,8 @@
       case 'move-up':        await moveAction(node, -1);                break;
       case 'move-down':      await moveAction(node, +1);                break;
       case 'add-item':       await addItemAction(node);                 break;
-      case 'add-map-entry':  await addMapEntryAction(node);             break;
-      case 'add-field-prompt': {
-        const name = window.prompt('New field name:');
-        if (name) {
-          let defaultText = '()';
-          if (studioSchema.schema) {
-            const ty = studioSchema.typeAtPath(node.path);
-            if (ty && ty.kind === 'named') {
-              const def = studioSchema.schema.types[ty.path];
-              if (def && def.kind === 'struct') {
-                const f = def.fields.find(f => f.name === name);
-                if (f) defaultText = defaultRonText(f.ty);
-              }
-            }
-          }
-          await addFieldAction(node, name, defaultText);
-        }
-        break;
-      }
+      case 'add-map-entry':  addMapEntryAction(node);                    break;
+      case 'add-field-prompt': textPrompt = { kind: 'field-name', node }; break;
       default: {
         if (id.startsWith('add-field:')) {
           const fname = id.slice('add-field:'.length);
@@ -1328,6 +1316,21 @@
         }
       }
     }
+  }
+
+  async function commitFieldByName(node: TNode, name: string): Promise<void> {
+    let defaultText = '()';
+    if (studioSchema.schema) {
+      const ty = studioSchema.typeAtPath(node.path);
+      if (ty && ty.kind === 'named') {
+        const def = studioSchema.schema.types[ty.path];
+        if (def && def.kind === 'struct') {
+          const f = def.fields.find(f => f.name === name);
+          if (f) defaultText = defaultRonText(f.ty);
+        }
+      }
+    }
+    await addFieldAction(node, name, defaultText);
   }
 
   // ── Rename + Bulk-edit pipelines ──────────────────────────────────────
@@ -2292,6 +2295,21 @@
     </StudioXrefPicker>
   {/snippet}
 </StudioModal>
+
+{#if textPrompt}
+  <PromptModal
+    title={textPrompt.kind === 'map-key' ? 'Add map entry' : 'Add field'}
+    label={textPrompt.kind === 'map-key' ? 'Map key (RON syntax, e.g. "foo" or 42):' : 'New field name:'}
+    confirmLabel="Add"
+    onCancel={() => textPrompt = null}
+    onConfirm={(value) => {
+      const p = textPrompt;
+      textPrompt = null;
+      if (!p) return;
+      void (p.kind === 'map-key' ? commitMapEntry(p.node, value) : commitFieldByName(p.node, value));
+    }}
+  />
+{/if}
 
 {#if pendingAction === 'format'}
   <ConfirmModal

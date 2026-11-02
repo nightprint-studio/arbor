@@ -17,6 +17,7 @@
   import Modal from '../shared/Modal.svelte';
   import Alert from '../shared/ui/Alert.svelte';
   import Button from '../shared/ui/Button.svelte';
+  import Checkbox from '../shared/ui/Checkbox.svelte';
   import StudioTextPane from './StudioTextPane.svelte';
   import FileExplorerModal from '../sitta/FileExplorerModal.svelte';
   import {
@@ -131,10 +132,11 @@
   <div class="scv-body">
     {#if mode === 'properties-to-yaml'}
       <div class="scv-toolbar">
-        <label class="scv-toggle">
-          <input type="checkbox" bind:checked={stringsOnly} onchange={() => void runConvert()} />
-          <span>Strings only — disable best-effort type inference (every value stays a quoted string)</span>
-        </label>
+        <Checkbox
+          bind:checked={stringsOnly}
+          onchange={() => void runConvert()}
+          label="Strings only — disable best-effort type inference (every value stays a quoted string)"
+        />
       </div>
     {/if}
 
@@ -212,12 +214,6 @@
     padding: 8px 14px 0 14px;
     font-size: var(--font-size-xs);
     color: var(--text-secondary);
-  }
-  .scv-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
   }
   .scv-alert-wrap { padding: 0 12px; }
   .scv-warnings ul {

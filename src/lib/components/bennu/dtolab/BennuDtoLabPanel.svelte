@@ -10,6 +10,7 @@
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuDtoLabStore as lab, type DtoLabTab } from '$lib/stores/bennu/dtolab.svelte';
@@ -39,16 +40,9 @@
       />
     {/if}
     {#snippet actions()}
-      <button
-        class="ps-btn"
-        type="button"
-        use:tooltip={'Read the class again'}
-        aria-label="Read the class again"
-        disabled={!lab.origin || lab.opening}
-        onclick={() => lab.reload()}
-      >
+      <IconButton tooltip="Read the class again" disabled={!lab.origin || lab.opening} onclick={() => lab.reload()}>
         <RefreshCw size={13} />
-      </button>
+      </IconButton>
     {/snippet}
   </BottomPanelHeader>
 

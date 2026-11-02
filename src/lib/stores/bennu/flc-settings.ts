@@ -29,6 +29,16 @@ export interface FlcSettings {
   learnKeepText: boolean;
   /** With `learn`: a notification each time a correction is counted. For debugging; off. */
   learnNotify: boolean;
+  /** Suggest the variable name after a type (`Order ▌` → `order`). */
+  layerNames: boolean;
+  /** Suggest the rest of a line the project most often wrote after the same words. */
+  layerNgram: boolean;
+  /** Suggest the arguments of a `new` the project always writes the same way. Off by default. */
+  layerCreation: boolean;
+  /** Suggest the call before the comma again, in a list that repeats itself. Off by default. */
+  layerEcho: boolean;
+  /** Suggest the usual arguments and variables of a call. */
+  layerHabits: boolean;
   /** Remember what Bennu learned about each project on disk. */
   profileProject: boolean;
   /** Carry what it learned from one project to another. */
@@ -51,6 +61,11 @@ export const FLC_DEFAULTS: Readonly<FlcSettings> = {
   ignoreCommentedCode: false,
   learnKeepText: false,
   learnNotify: false,
+  layerNames: true,
+  layerNgram: true,
+  layerCreation: false,
+  layerEcho: false,
+  layerHabits: true,
   profileProject: true,
   profileGlobal: true,
 };
@@ -58,7 +73,7 @@ export const FLC_DEFAULTS: Readonly<FlcSettings> = {
 /** The keys of the persisted config this group owns — what `flcToConfig` writes. */
 export type FlcConfigFields = Pick<
   BennuConfig,
-  'flc_enabled' | 'flc_model_dir' | 'flc_min_confidence' | 'flc_logs' | 'flc_alternatives' | 'flc_check' | 'flc_feedback' | 'flc_learn' | 'flc_ignore_commented_code' | 'flc_learn_keep_text' | 'flc_learn_notify' | 'flc_profile_project' | 'flc_profile_global'
+  'flc_enabled' | 'flc_model_dir' | 'flc_min_confidence' | 'flc_logs' | 'flc_alternatives' | 'flc_check' | 'flc_feedback' | 'flc_learn' | 'flc_ignore_commented_code' | 'flc_learn_keep_text' | 'flc_learn_notify' | 'flc_layer_names' | 'flc_layer_ngram' | 'flc_layer_creation' | 'flc_layer_echo' | 'flc_layer_habits' | 'flc_profile_project' | 'flc_profile_global'
 >;
 
 /** A threshold the backend would accept: a whole number inside the range the stepper offers. A hand-edited
@@ -82,6 +97,11 @@ export function flcFromConfig(cfg: Partial<FlcConfigFields>): FlcSettings {
     ignoreCommentedCode: cfg.flc_ignore_commented_code ?? FLC_DEFAULTS.ignoreCommentedCode,
     learnKeepText: cfg.flc_learn_keep_text ?? FLC_DEFAULTS.learnKeepText,
     learnNotify: cfg.flc_learn_notify ?? FLC_DEFAULTS.learnNotify,
+    layerNames: cfg.flc_layer_names ?? FLC_DEFAULTS.layerNames,
+    layerNgram: cfg.flc_layer_ngram ?? FLC_DEFAULTS.layerNgram,
+    layerCreation: cfg.flc_layer_creation ?? FLC_DEFAULTS.layerCreation,
+    layerEcho: cfg.flc_layer_echo ?? FLC_DEFAULTS.layerEcho,
+    layerHabits: cfg.flc_layer_habits ?? FLC_DEFAULTS.layerHabits,
     profileProject: cfg.flc_profile_project ?? FLC_DEFAULTS.profileProject,
     profileGlobal: cfg.flc_profile_global ?? FLC_DEFAULTS.profileGlobal,
   };
@@ -101,6 +121,11 @@ export function flcToConfig(settings: FlcSettings): FlcConfigFields {
     flc_ignore_commented_code: settings.ignoreCommentedCode,
     flc_learn_keep_text: settings.learn && settings.learnKeepText,
     flc_learn_notify: settings.learn && settings.learnNotify,
+    flc_layer_names: settings.layerNames,
+    flc_layer_ngram: settings.layerNgram,
+    flc_layer_creation: settings.layerCreation,
+    flc_layer_echo: settings.layerEcho,
+    flc_layer_habits: settings.layerHabits,
     flc_profile_project: settings.profileProject,
     flc_profile_global: settings.profileGlobal,
   };

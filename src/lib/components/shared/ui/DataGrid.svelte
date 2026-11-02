@@ -813,6 +813,9 @@
       <div class="dg-spacer" style:height={`${totalH}px`}>
         <div class="dg-window" style:transform={`translateY(${offsetY}px)`}>
           {#each slice as entry, i (entry.index)}
+            <!-- Keyboard selection/activation is handled once on the grid body (`onKeyDown`), so rows
+                 need no key handler of their own: the click only serves pointer users. -->
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
             <div
               class="dg-row"
               class:dg-alt={striped(start + i)}

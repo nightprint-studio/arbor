@@ -8,6 +8,7 @@
   import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
   import Modal from './../shared/Modal.svelte';
   import ModalHeader from './../shared/ModalHeader.svelte';
+  import ModalFooter from './../shared/ModalFooter.svelte';
   import Button from './../shared/ui/Button.svelte';
   import RadioGroup from './../shared/ui/RadioGroup.svelte';
   import Toggle from './../shared/ui/Toggle.svelte';
@@ -119,8 +120,11 @@
     }
   }
 
+  // Same condition as the primary button, so the shortcut can't apply a plan that isn't ready.
+  const canApply = $derived(!applying && !loading && !!plan?.available);
+
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !applying) apply();
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canApply) apply();
   }
 </script>
 
@@ -245,15 +249,17 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="secondary" onclick={onClose} disabled={applying}>Cancel</Button>
-    <Button
-      variant="primary"
-      onclick={apply}
-      disabled={applying || loading || !plan?.available}
-      loading={applying}
-    >
-      {applying ? 'Applying…' : (selectedCount ? `Apply ${selectedCount}` : 'Apply')}
-    </Button>
+    <ModalFooter hint="to apply">
+      <Button variant="secondary" onclick={onClose} disabled={applying}>Cancel</Button>
+      <Button
+        variant="primary"
+        onclick={apply}
+        disabled={!canApply}
+        loading={applying}
+      >
+        {applying ? 'Applying…' : (selectedCount ? `Apply ${selectedCount}` : 'Apply')}
+      </Button>
+    </ModalFooter>
   {/snippet}
 </Modal>
 

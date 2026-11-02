@@ -48,7 +48,8 @@
   <div class="dll-body">
     {#if status === 'loading'}
       <div class="dll-loading">
-        <Spinner size="xl" />
+        <!-- delay={0}: the spinner is the modal's only visual, a 250ms gap would show an empty dialog -->
+        <Spinner size="xl" delay={0} />
         <span class="dll-caption">Fetching from the remote provider…</span>
       </div>
     {:else}

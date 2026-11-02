@@ -22,6 +22,7 @@
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import ProgressBar from '$lib/components/shared/ui/ProgressBar.svelte';
@@ -250,8 +251,7 @@
 <PanelShell title="Sound bank" count={soundsStore.instruments.length}>
   {#snippet icon()}<Music4 size={13} />{/snippet}
   {#snippet actions()}
-    <button class="ps-btn" use:tooltip={'Refresh sound list'} aria-label="Refresh sound list"
-            onclick={() => soundsStore.refresh()}><RefreshCw size={13} /></button>
+    <IconButton tooltip="Refresh sound list" onclick={() => soundsStore.refresh()}><RefreshCw size={13} /></IconButton>
   {/snippet}
 
   {#if !soundsStore.loaded && slowLoad}

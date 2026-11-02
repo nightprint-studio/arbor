@@ -88,6 +88,7 @@
   import { resultEditStore } from '$lib/stores/picus/result-edit.svelte';
   import { picusSettingsStore } from '$lib/stores/picus/settings.svelte';
   import { picusContextMenuStore } from '$lib/stores/picus/contextmenu.svelte';
+  import { chord, DECLINE, dispatchKeymap, isMod, type KeyRule } from '$lib/utils/keymap';
 
   let sidebarWidth = $state(280);
   /** Width of the right tool panel. Session-only UI state, like the sidebar's. */
@@ -513,48 +514,49 @@
   );
 
   // ── Keyboard ────────────────────────────────────────────────────────────────
-  function onKeyDown(e: KeyboardEvent) {
-    const mod = e.ctrlKey || e.metaKey;
-    const key = e.key.toLowerCase();
+  // The table is evaluated top to bottom and the first hit wins (`utils/keymap.ts`), so
+  // the ORDER below is the precedence the old `if` cascade had — do not sort it. A
+  // modifier left out of a `chord` is "don't care", not "must be off": that mirrors what
+  // each original condition did and is why Ctrl+Shift+K and Ctrl+K are different rules.
+  // Every rule prevents the default after running, as the cascade did.
 
-    // Help toggles work even with a panel open (F1 closes the docs again).
-    if (e.key === 'F1' && !e.shiftKey) { picusUiStore.toggleDocs(); e.preventDefault(); return; }
-    if (e.key === 'F1' && e.shiftKey) { picusUiStore.openShortcuts(); e.preventDefault(); return; }
+  // Help toggles work even with a panel open (F1 closes the docs again), so they are
+  // dispatched before the dialog gate in `onKeyDown`.
+  const helpRules: KeyRule[] = [
+    { id: 'toggle_docs',    match: chord({ key: 'F1', shift: false }), run: () => picusUiStore.toggleDocs() },
+    { id: 'open_shortcuts', match: chord({ key: 'F1', shift: true }),  run: () => picusUiStore.openShortcuts() },
+  ];
 
-    // Behind a dialog, let it own the keyboard (its own Esc, Tab, Enter).
-    if (picusUiStore.anyModalOpen || confirmWrite) {
-      if (mod && key === 'k' && !picusUiStore.anyModalOpen) { picusUiStore.togglePalette(); e.preventDefault(); }
-      return;
-    }
-
-    if (mod && key === 'k') { picusUiStore.togglePalette(); e.preventDefault(); return; }
+  const keyRules: KeyRule[] = [
+    // `shift: false` so Ctrl+Shift+K reaches `analyze` below instead of opening the palette.
+    { id: 'toggle_palette', match: chord({ mod: true, shift: false, key: 'k' }), run: () => picusUiStore.togglePalette() },
     // Go to a script, an object or a connection by typing part of its name.
     // `O` and not IntelliJ's `N` because Ctrl+Shift+N already opens a connection
     // here, and silently moving a binding somebody has in their fingers is worse
     // than taking the second-best letter.
-    if (mod && e.shiftKey && key === 'o') { picusUiStore.openNavigate(); e.preventDefault(); return; }
-    if (mod && key === ',') { picusUiStore.openSettings(); e.preventDefault(); return; }
-    if (mod && key === 'b' && !e.shiftKey) { picusUiStore.toggleSidebar(); e.preventDefault(); return; }
-    if (mod && key === 'j') { picusUiStore.toggleBottom(); e.preventDefault(); return; }
+    { id: 'navigate', match: chord({ mod: true, shift: true, key: 'o' }), run: () => picusUiStore.openNavigate() },
+    { id: 'settings', match: chord({ mod: true, key: ',' }), run: () => picusUiStore.openSettings() },
+    { id: 'toggle_sidebar', match: chord({ mod: true, shift: false, key: 'b' }), run: () => picusUiStore.toggleSidebar() },
+    { id: 'toggle_bottom', match: chord({ mod: true, key: 'j' }), run: () => picusUiStore.toggleBottom() },
     // The syntax tree of the open document. `Y` because every other letter near
     // "tree"/"AST" is taken here, and it is the one IntelliJ's PSI viewer plugin
     // uses for the same panel.
-    if (mod && e.shiftKey && key === 'y') { picusUiStore.selectTool('ast'); e.preventDefault(); return; }
+    { id: 'tool_ast', match: chord({ mod: true, shift: true, key: 'y' }), run: () => picusUiStore.selectTool('ast') },
     // Structural search and replace over the REPOSITORY. `R` for replace; it is a
     // tab rather than a dialog because a migration is refined over minutes, not
     // typed once.
-    if (mod && e.shiftKey && key === 'r') { picusTabsStore.openRestructure(); e.preventDefault(); return; }
+    { id: 'restructure_repo', match: chord({ mod: true, shift: true, key: 'r' }), run: () => picusTabsStore.openRestructure() },
     // …and the same pattern language over the open document only. `M` is what
     // IntelliJ binds structural replace to, and this is the half that behaves like
     // IntelliJ's: a panel beside the editor, applied to the buffer, undone with
     // Ctrl+Z.
-    if (mod && e.shiftKey && key === 'm') { picusUiStore.selectTool('restructure'); e.preventDefault(); return; }
+    { id: 'tool_restructure', match: chord({ mod: true, shift: true, key: 'm' }), run: () => picusUiStore.selectTool('restructure') },
 
     // Sections — e.code so the digits survive non-US layouts.
-    if (mod && !e.shiftKey && e.code === 'Digit1') { picusUiStore.selectSection('connections'); e.preventDefault(); return; }
-    if (mod && !e.shiftKey && e.code === 'Digit2') { picusUiStore.selectSection('scripts'); e.preventDefault(); return; }
-    if (mod && !e.shiftKey && e.code === 'Digit3') { picusUiStore.selectSection('generate'); e.preventDefault(); return; }
-    if (mod && !e.shiftKey && e.code === 'Digit4') { picusUiStore.selectSection('inventory'); e.preventDefault(); return; }
+    { id: 'section_connections', match: chord({ mod: true, shift: false, code: 'Digit1' }), run: () => picusUiStore.selectSection('connections') },
+    { id: 'section_scripts',     match: chord({ mod: true, shift: false, code: 'Digit2' }), run: () => picusUiStore.selectSection('scripts') },
+    { id: 'section_generate',    match: chord({ mod: true, shift: false, code: 'Digit3' }), run: () => picusUiStore.selectSection('generate') },
+    { id: 'section_inventory',   match: chord({ mod: true, shift: false, code: 'Digit4' }), run: () => picusUiStore.selectSection('inventory') },
 
     // Tabs.
     // Find and replace in the document in front. Routed to the editor rather than
@@ -565,124 +567,147 @@
     // `Ctrl+H` is the same panel. CodeMirror's search panel already carries the
     // replace row, so two keys for one panel is not two features — it is the two
     // places different people's fingers go.
-    if (mod && !e.shiftKey && (key === 'f' || key === 'h')) {
-      const target = picusEditorStore.active;
-      if (target) {
+    //
+    // With no editor in front the rule DECLINES: nothing is prevented and the
+    // event goes on down the table, exactly as the old nested `if (target)` fell through.
+    {
+      id: 'find_in_editor',
+      match: chord({ mod: true, shift: false, key: ['f', 'h'] }),
+      run: () => {
+        const target = picusEditorStore.active;
+        if (!target) return DECLINE;
         target.openSearch();
-        e.preventDefault();
-        return;
-      }
-    }
-
-    if (mod && key === 'tab') { picusTabsStore.cycle(e.shiftKey ? -1 : 1); e.preventDefault(); return; }
-    if (mod && key === 'w' && !e.shiftKey) { if (tab) picusTabsStore.close(tab.id); e.preventDefault(); return; }
-    if (mod && key === 't') { picusTabsStore.openQuery(); e.preventDefault(); return; }
+      },
+    },
+    { id: 'cycle_tab', match: chord({ mod: true, key: 'tab' }), run: (e) => picusTabsStore.cycle(e.shiftKey ? -1 : 1) },
+    // The default is prevented even with no tab open: Ctrl+W must never reach the WebView.
+    { id: 'close_tab', match: chord({ mod: true, shift: false, key: 'w' }), run: () => { if (tab) picusTabsStore.close(tab.id); } },
+    { id: 'new_query_tab', match: chord({ mod: true, key: 't' }), run: () => picusTabsStore.openQuery() },
 
     // Database. The TAB's connection, never the sidebar's selection: a query tab
     // can be bound to another database than the one highlighted in the sidebar, and
     // the bar above the editor names the former. Running a statement — or
     // cancelling one — against a connection the user is not looking at is the worst
     // kind of wrong, so the keyboard resolves it exactly as the buttons do.
-    if (mod && key === 'enter') {
-      runActiveQuery(e.shiftKey ? 'buffer' : 'statement');
-      e.preventDefault();
-      return;
-    }
-    if (mod && e.shiftKey && key === 'c') {
-      const conn = picusTabsStore.activeConnection;
-      if (tab && conn) void queryStore.cancel(tab.id, conn.id);
-      e.preventDefault();
-      return;
-    }
-    if (mod && e.shiftKey && key === 'd') { connectionsStore.cycle(1); e.preventDefault(); return; }
-    if (mod && e.shiftKey && key === 'n') { picusUiStore.openConnectionEditor(null); e.preventDefault(); return; }
-    if (e.key === 'F4' && !mod && !e.shiftKey && !e.altKey) {
+    { id: 'run_query', match: chord({ mod: true, key: 'enter' }), run: (e) => runActiveQuery(e.shiftKey ? 'buffer' : 'statement') },
+    {
+      id: 'cancel_query',
+      match: chord({ mod: true, shift: true, key: 'c' }),
+      run: () => {
+        const conn = picusTabsStore.activeConnection;
+        if (tab && conn) void queryStore.cancel(tab.id, conn.id);
+      },
+    },
+    { id: 'cycle_connection', match: chord({ mod: true, shift: true, key: 'd' }), run: () => connectionsStore.cycle(1) },
+    { id: 'new_connection',   match: chord({ mod: true, shift: true, key: 'n' }), run: () => picusUiStore.openConnectionEditor(null) },
+    {
+      id: 'edit_connection',
+      match: chord({ key: 'F4', mod: false, shift: false, alt: false }),
       // Nothing selected means nothing to edit — silently, because the palette
       // and the sidebar both already say there is no connection.
-      if (connectionsStore.activeId) picusUiStore.openConnectionEditor(connectionsStore.activeId);
-      e.preventDefault();
-      return;
-    }
+      run: () => { if (connectionsStore.activeId) picusUiStore.openConnectionEditor(connectionsStore.activeId); },
+    },
 
     // Scripts on disk. F5 is the universal "re-read", and Picus has a genuine use
     // for it: files change under the tool constantly (a colleague's pull, an
     // external editor), and the tree is a snapshot until asked otherwise.
-    if (e.key === 'F5' && !mod && !e.shiftKey && !e.altKey) {
-      if (picusProjectStore.attached) void picusProjectStore.refresh();
-      e.preventDefault();
-      return;
-    }
+    {
+      id: 'refresh_scripts',
+      match: chord({ key: 'F5', mod: false, shift: false, alt: false }),
+      run: () => { if (picusProjectStore.attached) void picusProjectStore.refresh(); },
+    },
     // Saying what a folder is — the step that makes a repository work at all when
     // its engine sits several levels down and nothing in the name gives it away.
-    if (mod && e.shiftKey && key === 'f') {
-      if (picusProjectStore.folderCount) picusUiStore.openFolderClassify();
-      else toastStore.show('No repository is attached — there is no folder to classify.', 'warning');
-      e.preventDefault();
-      return;
-    }
+    {
+      id: 'classify_folder',
+      match: chord({ mod: true, shift: true, key: 'f' }),
+      run: () => {
+        if (picusProjectStore.folderCount) picusUiStore.openFolderClassify();
+        else toastStore.show('No repository is attached — there is no folder to classify.', 'warning');
+      },
+    },
     // …and the same for ONE script, which is the exception the folder dialog
     // cannot express. F6 rather than another Ctrl+Shift letter: every mnemonic
     // one is taken in this window or reserved by Arbor's OS-global accelerators,
     // and the repository verbs already read as a run of function keys — F5
     // re-reads, F6 classifies a script, F8 walks the findings.
-    if (e.key === 'F6' && !mod && !e.shiftKey && !e.altKey) {
-      if (picusProjectStore.fileCount) picusUiStore.openFileClassify();
-      else toastStore.show('No repository is attached — there is no script to classify.', 'warning');
-      e.preventDefault();
-      return;
-    }
+    {
+      id: 'classify_file',
+      match: chord({ key: 'F6', mod: false, shift: false, alt: false }),
+      run: () => {
+        if (picusProjectStore.fileCount) picusUiStore.openFileClassify();
+        else toastStore.show('No repository is attached — there is no script to classify.', 'warning');
+      },
+    },
 
     // Generation.
-    if (mod && !e.shiftKey && key === 'g') { generate(); e.preventDefault(); return; }
-    if (mod && e.shiftKey && key === 'w') { void requestWrite(); e.preventDefault(); return; }
-    if (e.altKey && e.code === 'Digit1') { dmlStore.setSource('form'); picusTabsStore.openGenerate(); e.preventDefault(); return; }
-    if (e.altKey && e.code === 'Digit2') { dmlStore.setSource('paste'); picusTabsStore.openGenerate(); e.preventDefault(); return; }
-    if (e.altKey && e.code === 'Digit3') { dmlStore.setSource('csv'); picusTabsStore.openGenerate(); e.preventDefault(); return; }
-    if (e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-      const list = dmlStore.enabledTargets;
-      if (list.length) {
+    { id: 'generate', match: chord({ mod: true, shift: false, key: 'g' }), run: () => generate() },
+    { id: 'write_files', match: chord({ mod: true, shift: true, key: 'w' }), run: () => void requestWrite() },
+    { id: 'source_form',  match: chord({ alt: true, code: 'Digit1' }), run: () => { dmlStore.setSource('form');  picusTabsStore.openGenerate(); } },
+    { id: 'source_paste', match: chord({ alt: true, code: 'Digit2' }), run: () => { dmlStore.setSource('paste'); picusTabsStore.openGenerate(); } },
+    { id: 'source_csv',   match: chord({ alt: true, code: 'Digit3' }), run: () => { dmlStore.setSource('csv');   picusTabsStore.openGenerate(); } },
+    {
+      id: 'cycle_preview_target',
+      match: chord({ alt: true, key: ['ArrowRight', 'ArrowLeft'] }),
+      run: (e) => {
+        const list = dmlStore.enabledTargets;
+        if (!list.length) return;
         const i = list.findIndex((t) => t.id === dmlStore.previewTargetId);
         const next = (i + (e.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length;
         dmlStore.setPreviewTarget(list[next].id);
-      }
-      e.preventDefault();
-      return;
-    }
+      },
+    },
 
-    // Write the result grid's pending cell edits. Only when there ARE any: `Ctrl+S`
+    // Write the result grid's pending cell edits. Only when there ARE any (`when`): `Ctrl+S`
     // with nothing pending must not become a keystroke that quietly does something
     // else, and it is the one binding in this window that writes to a database.
-    if (mod && !e.shiftKey && key === 's' && resultEditStore.dirty) {
-      picusUiStore.showBottom('results');
-      void resultEditStore.storeActive();
-      e.preventDefault();
-      return;
-    }
+    {
+      id: 'store_cell_edits',
+      match: chord({ mod: true, shift: false, key: 's' }),
+      when: () => resultEditStore.dirty,
+      run: () => {
+        picusUiStore.showBottom('results');
+        void resultEditStore.storeActive();
+      },
+    },
     // …and the script in front of you. Two writes on one key, told apart by what
     // is actually pending: a grid with dirty cells is the case above, an open file
     // is this one, and they cannot both be true — a result grid belongs to a query
     // tab and a script to a file tab.
-    if (mod && !e.shiftKey && key === 's' && tab?.kind === 'file' && tab.file) {
-      void saveOpenScript(tab.file);
-      e.preventDefault();
-      return;
-    }
+    {
+      id: 'save_script',
+      match: chord({ mod: true, shift: false, key: 's' }),
+      when: () => tab?.kind === 'file' && !!tab.file,
+      run: () => { if (tab?.file) void saveOpenScript(tab.file); },
+    },
 
     // Consistency.
-    if (mod && e.shiftKey && key === 'k') {
-      picusUiStore.showBottom('consistency');
-      void picusProjectStore.analyze();
-      e.preventDefault();
-      return;
-    }
+    {
+      id: 'analyze',
+      match: chord({ mod: true, shift: true, key: 'k' }),
+      run: () => {
+        picusUiStore.showBottom('consistency');
+        void picusProjectStore.analyze();
+      },
+    },
     // F8 / Shift+F8 walk the report and open each finding where it lives — the
     // pair the shortcuts reference has always listed, now that findings have a
     // file and a line to go to.
-    if (e.key === 'F8' && !mod && !e.altKey) {
-      stepFinding(e.shiftKey ? -1 : 1);
-      e.preventDefault();
+    { id: 'step_finding', match: chord({ key: 'F8', mod: false, alt: false }), run: (e) => stepFinding(e.shiftKey ? -1 : 1) },
+  ];
+
+  function onKeyDown(e: KeyboardEvent) {
+    if (dispatchKeymap(e, helpRules)) return;
+
+    // Behind a dialog, let it own the keyboard (its own Esc, Tab, Enter). Only the
+    // palette toggle gets through, and only while the write confirmation — not a
+    // full dialog — is what is up.
+    if (picusUiStore.anyModalOpen || confirmWrite) {
+      if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === 'k' && !picusUiStore.anyModalOpen) { picusUiStore.togglePalette(); e.preventDefault(); }
       return;
     }
+
+    dispatchKeymap(e, keyRules);
   }
 
   /**

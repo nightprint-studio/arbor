@@ -18,6 +18,7 @@
   import { getRepoConfig } from '$lib/ipc/config';
   import type { Issue, IssueFilters, IssueFilterOptions, IssueStatus } from '$lib/types/corvus/issues';
   import { tooltip } from '$lib/actions/tooltip';
+  import { listNav } from '$lib/components/shared/ui/list-nav';
 
   let {
     onSelect,
@@ -268,7 +269,7 @@
     </ModalHeader>
   {/snippet}
 
-  <div class="tpm-shell">
+  <div class="tpm-shell" use:listNav={{ fromInput: '.tpm-search', onEscapeFromTop: () => queryEl?.focus() }}>
   <!-- ── Search bar ── -->
   <div class="tpm-search-wrap">
     <Search size={12} class="tpm-search-icon" />
@@ -506,7 +507,7 @@
       <ul class="tpm-list" role="list">
         {#each sortedIssues as issue (issue.id)}
           <li>
-            <button class="tpm-item" onclick={() => onSelect(issue)} use:tooltip={issue.title}>
+            <button class="tpm-item" data-list-item onclick={() => onSelect(issue)} use:tooltip={issue.title}>
               <span class="tpm-status-icon" use:tooltip={issue.status.name}>
                 <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                 {@html statusIcon(issue.status.statusType, issue.status.color)}

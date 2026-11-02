@@ -77,6 +77,7 @@ fn profile_real_project() {
             file_stem,
             expected_package: None,
             java_major: Some(5),
+            jdk_major: None,
             classpath_complete: false,
         };
         let t = Instant::now();
@@ -162,6 +163,7 @@ fn profile_diag_cache() {
                         .map(str::to_string),
                     expected_package: None,
                     java_major: Some(5),
+                    jdk_major: None,
                     classpath_complete: false,
                 };
                 let own = source_hash(src);
@@ -196,6 +198,7 @@ fn profile_diag_cache() {
                 .map(str::to_string),
             expected_package: None,
             java_major: Some(5),
+            jdk_major: None,
             classpath_complete: false,
         };
         let own = source_hash(src);

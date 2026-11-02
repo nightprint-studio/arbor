@@ -183,6 +183,7 @@ fn run_case(dir: &Path, jdk: &dyn MemberIndex) -> Vec<Finding> {
             // Each case is a whole self-contained project compiled against a real JDK — the same
             // condition the gate exists to detect. Leaving it false silences the import checks and
             // scores their misses as gaps that are really the harness lying about the classpath.
+            jdk_major: None,
             classpath_complete: true,
         };
         let diags = check_file_resolved(text, &ctx, &resolver, true);
@@ -296,6 +297,7 @@ fn dump_case(dir: &Path, jdk: &dyn MemberIndex) {
             file_stem: path.file_stem().map(|s| s.to_string_lossy().into_owned()),
             expected_package: None,
             java_major: None,
+            jdk_major: None,
             classpath_complete: true,
         };
         let starts = line_starts(text);

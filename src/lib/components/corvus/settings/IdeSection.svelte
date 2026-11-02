@@ -5,6 +5,7 @@
   import { worktreeStore } from '$lib/stores/corvus/worktree.svelte';
   import { getIdeConfig, setIdeConfig, startIdeDetection } from '$lib/ipc/corvus/worktree';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import type { IdeConfig, IdeEntry } from '$lib/types/corvus/git';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
@@ -122,9 +123,24 @@
     addOpen = false;
   }
 
+  // The entry only leaves the draft config (persisted on Save), so Undo just puts it back
+  // at its old position and restores the default if it was the default.
   function removeCustomIde(id: string) {
+    const index = config.custom_ides.findIndex(e => e.id === id);
+    if (index < 0) return;
+    const removed = config.custom_ides[index];
+    const wasDefault = config.default_ide === id;
     config = { ...config, custom_ides: config.custom_ides.filter(e => e.id !== id) };
-    if (config.default_ide === id) config = { ...config, default_ide: 'vscode' };
+    if (wasDefault) config = { ...config, default_ide: 'vscode' };
+    toastStore.show(`${removed.name} removed`, 'info', 5000, {
+      label: 'Undo',
+      onClick: () => {
+        if (config.custom_ides.some(e => e.id === removed.id)) return;
+        const list = [...config.custom_ides];
+        list.splice(Math.min(index, list.length), 0, removed);
+        config = { ...config, custom_ides: list, ...(wasDefault ? { default_ide: removed.id } : {}) };
+      },
+    });
   }
 
   function setDefault(id: string) {

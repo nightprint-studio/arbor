@@ -100,7 +100,8 @@
         {#if status === 'completed'}
           <Check size={Math.round(indicatorPx * 0.65)} strokeWidth={3} />
         {:else if status === 'active'}
-          <Spinner size={spinnerSize} variant="spin" />
+          <!-- delay={0}: the step's state indicator must never render as an empty circle -->
+          <Spinner size={spinnerSize} variant="spin" delay={0} />
         {:else if status === 'error'}
           <XIcon size={Math.round(indicatorPx * 0.65)} strokeWidth={3} />
         {:else if status === 'skipped'}

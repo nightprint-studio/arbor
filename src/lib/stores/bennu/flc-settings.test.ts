@@ -15,7 +15,7 @@ describe('flc settings', () => {
   });
 
   it('round-trips through the config', () => {
-    const s = { enabled: true, modelDir: '/models/flc', minConfidence: 70, logs: false, alternatives: true, check: false, feedback: false, learn: true, ignoreCommentedCode: true, learnKeepText: true, learnNotify: true, profileProject: false, profileGlobal: false };
+    const s = { enabled: true, modelDir: '/models/flc', minConfidence: 70, logs: false, alternatives: true, check: false, feedback: false, learn: true, ignoreCommentedCode: true, learnKeepText: true, learnNotify: true, layerNames: false, layerNgram: false, layerCreation: true, layerEcho: true, layerHabits: true, profileProject: false, profileGlobal: false };
     expect(flcFromConfig(flcToConfig(s))).toEqual(s);
   });
 

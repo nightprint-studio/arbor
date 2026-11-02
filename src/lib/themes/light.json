@@ -16,7 +16,7 @@
     "--text-primary":     "#1a1b1e",
     "--text-secondary":   "#52576a",
     "--text-disabled":    "#a8adb8",
-    "--text-muted":       "#7a7f90",
+    "--text-muted":       "#6a6e7f",
     "--text-on-accent":   "#ffffff",
     "--accent":           "#2563eb",
     "--accent-hover":     "#1d4ed8",

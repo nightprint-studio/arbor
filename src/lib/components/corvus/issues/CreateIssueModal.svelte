@@ -7,6 +7,7 @@
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
+  import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -104,7 +105,7 @@
   ];
 
   async function submit() {
-    if (!title.trim() || !teamId) return;
+    if (!title.trim() || !teamId || saving) return;
     saving = true; error = '';
     try {
       await issuesStore.createIssue({
@@ -152,6 +153,10 @@
         class="desc-input"
         placeholder="Add description… (optional)"
         bind:value={description}
+        onkeydown={(e) => {
+          // Enter stays a newline here; only Ctrl/Cmd+Enter submits.
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit(); }
+        }}
       ></textarea>
     </div>
 
@@ -387,10 +392,12 @@
   {/if}
 
   {#snippet footer()}
-    <Button variant="secondary" onclick={onClose}>Cancel</Button>
-    <Button variant="primary" onclick={submit} disabled={saving || !title.trim() || !teamId} loading={saving}>
-      {saving ? 'Creating…' : 'Create Issue'}
-    </Button>
+    <ModalFooter hint="to create">
+      <Button variant="secondary" onclick={onClose}>Cancel</Button>
+      <Button variant="primary" onclick={submit} disabled={saving || !title.trim() || !teamId} loading={saving}>
+        {saving ? 'Creating…' : 'Create Issue'}
+      </Button>
+    </ModalFooter>
   {/snippet}
 </Modal>
 

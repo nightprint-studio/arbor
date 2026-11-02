@@ -33,6 +33,7 @@
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { Maximize2, Minus, Plus, Scan } from 'lucide-svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { fsPathsSize } from '$lib/ipc/fs';
   import { baseName } from '$lib/utils/paths';
@@ -131,11 +132,9 @@
       aria-pressed={zoom === 100}
       onclick={() => (zoom = 100)}
     ><Maximize2 size={13} /></button>
-    <button class="iv-btn" type="button" use:tooltip={{ content: 'Zoom out', shortcut: '-' }}
-      aria-label="Zoom out" onclick={() => step(-1)}><Minus size={13} /></button>
+    <IconButton tooltip="Zoom out" shortcut="-" size={22} onclick={() => step(-1)}><Minus size={13} /></IconButton>
     <span class="iv-zoom">{zoom === null ? 'fit' : `${zoom}%`}</span>
-    <button class="iv-btn" type="button" use:tooltip={{ content: 'Zoom in', shortcut: '+' }}
-      aria-label="Zoom in" onclick={() => step(1)}><Plus size={13} /></button>
+    <IconButton tooltip="Zoom in" shortcut="+" size={22} onclick={() => step(1)}><Plus size={13} /></IconButton>
   </div>
 
   <!-- The scroller takes the keyboard so +/−/0/F work without a click on a button first. No role:

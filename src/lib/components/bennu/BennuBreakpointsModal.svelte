@@ -27,6 +27,7 @@
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
+  import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
@@ -334,22 +335,20 @@
                always; a caught one is ordinary control flow in any framework that uses
                exceptions for flow, and asking for those under Spring stops thousands of times
                before `main`. -->
-          <label class="bm-check">
-            <input
-              type="checkbox"
+          <span class="bm-checks">
+            <Checkbox
               checked={exc.uncaught}
-              onchange={(e) => patchException(i, { uncaught: e.currentTarget.checked })}
+              label="Uncaught"
+              labelSize="2xs"
+              onchange={(v) => patchException(i, { uncaught: v })}
             />
-            Uncaught
-          </label>
-          <label class="bm-check">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={exc.caught}
-              onchange={(e) => patchException(i, { caught: e.currentTarget.checked })}
+              label="Caught"
+              labelSize="2xs"
+              onchange={(v) => patchException(i, { caught: v })}
             />
-            Caught
-          </label>
+          </span>
           <button
             class="bm-x"
             type="button"
@@ -415,7 +414,7 @@
   }
   .bm-row:hover { background: var(--bg-hover); }
   /* Disabled reads as disabled, so the list never has to be read twice to find what is armed. */
-  .bm-row.off .bm-where, .bm-row.off .bm-exc,
+  .bm-row.off .bm-exc,
   .bm-bp.off .bm-where { color: var(--text-disabled); }
 
   /* One breakpoint: the location row, then its condition. Separated by a hairline rather than by
@@ -463,11 +462,9 @@
     color: var(--text-muted); font-size: var(--font-size-2xs); font-style: italic;
   }
 
-  .bm-check {
-    display: flex; align-items: center; gap: 4px;
-    color: var(--text-secondary); font-size: var(--font-size-2xs); cursor: pointer;
-    white-space: nowrap;
-  }
+  /* No box of its own: the two checkboxes stay flex children of the row. The wrapper exists
+     so the sibling rule below can still tell "the x right after the checkboxes". */
+  .bm-checks { display: contents; }
   .bm-x {
     margin-left: auto; flex: 0 0 auto;
     display: inline-flex; align-items: center; justify-content: center;
@@ -476,7 +473,7 @@
     color: var(--text-muted); cursor: pointer;
   }
   .bm-x:hover { background: var(--bg-hover); color: var(--error); }
-  .bm-check + .bm-x { margin-left: 0; }
+  .bm-checks + .bm-x { margin-left: 0; }
 
   .bm-add { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
   .bm-add :global(.input-wrap) { flex: 1; min-width: 0; }

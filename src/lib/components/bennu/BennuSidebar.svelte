@@ -32,6 +32,7 @@
   import type { RowSnippetCtx, TreeController } from '$lib/components/shared/ui/Tree.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
@@ -1065,27 +1066,26 @@
          own, so the button and the right-click cannot offer different things. -->
     <Dropdown items={newDropdownItems(defaultNewDir())} position="fixed" direction="down" width="200px">
       {#snippet trigger({ open, toggle })}
-        <button class="ps-btn" class:ps-btn-active={open} type="button" onclick={toggle}
-          disabled={!projectStore.project} use:tooltip={'New…'} aria-label="New"
-          aria-haspopup="menu" aria-expanded={open}>
+        <IconButton tooltip="New…" active={open} ariaHasPopup ariaExpanded={open}
+          disabled={!projectStore.project} onclick={toggle}>
           <Plus size={14} />
-        </button>
+        </IconButton>
       {/snippet}
     </Dropdown>
-    <button class="ps-btn" type="button" onclick={revealActive} disabled={!projectStore.activeFilePath} use:tooltip={'Select opened file'} aria-label="Select opened file">
+    <IconButton tooltip="Select opened file" onclick={revealActive} disabled={!projectStore.activeFilePath}>
       <Crosshair size={14} />
-    </button>
-    <button class="ps-btn" type="button" onclick={collapseAll} use:tooltip={'Collapse all'} aria-label="Collapse all">
+    </IconButton>
+    <IconButton tooltip="Collapse all" onclick={collapseAll}>
       <ChevronsDownUp size={14} />
-    </button>
-    <button class="ps-btn" type="button" onclick={expandAll} use:tooltip={'Expand all'} aria-label="Expand all">
+    </IconButton>
+    <IconButton tooltip="Expand all" onclick={expandAll}>
       <ChevronsUpDown size={14} />
-    </button>
+    </IconButton>
     <Dropdown items={optionsMenu} position="fixed" direction="down" width="200px">
       {#snippet trigger({ open, toggle })}
-        <button class="ps-btn" class:ps-btn-active={open} type="button" onclick={toggle} use:tooltip={'Options'} aria-label="Project options" aria-haspopup="menu" aria-expanded={open}>
+        <IconButton tooltip="Options" active={open} ariaHasPopup ariaExpanded={open} onclick={toggle}>
           <MoreVertical size={14} />
-        </button>
+        </IconButton>
       {/snippet}
     </Dropdown>
   {/snippet}
@@ -1178,9 +1178,10 @@
         {#snippet iconStart()}<FolderPlus size={14} />{/snippet}
         New project…
       </Button>
-      <button class="bs-empty-action" type="button" onclick={() => (pickerOpen = true)}>
-        <FolderOpen size={14} /> Open project…
-      </button>
+      <Button variant="outline" size="sm" onclick={() => (pickerOpen = true)}>
+        {#snippet iconStart()}<FolderOpen size={14} />{/snippet}
+        Open project…
+      </Button>
     </div>
   {/if}
 </PanelShell>
@@ -1281,15 +1282,6 @@
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 10px; min-height: 0; padding: 12px;
   }
-  .bs-empty-action {
-    display: inline-flex; align-items: center; gap: 6px;
-    height: 28px; padding: 0 12px;
-    background: var(--bg-input); border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md); color: var(--text-secondary);
-    font-size: var(--font-size-sm); cursor: pointer;
-    transition: border-color var(--transition-fast), color var(--transition-fast);
-  }
-  .bs-empty-action:hover { border-color: var(--border-focus, var(--accent)); color: var(--text-primary); }
 
   /* The project tree reads a step larger than the app's default list size — it is the panel
      you scan continuously, and at 12px a package row is a lot of small text.

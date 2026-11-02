@@ -21,7 +21,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Tree, { type RowSnippetCtx } from '$lib/components/shared/ui/Tree.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuHierarchyStore, type HierarchyRow } from '$lib/stores/bennu/hierarchy.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -111,16 +111,13 @@
       {#if subject}<span class="hier-subject">{subject}</span>{/if}
     {/snippet}
     {#snippet actions()}
-      <button
-        class="ps-btn"
-        type="button"
-        use:tooltip={'Re-ask every open level'}
-        aria-label="Refresh hierarchy"
+      <IconButton
+        tooltip="Re-ask every open level"
         disabled={bennuHierarchyStore.loading || rows.length === 0}
         onclick={() => void bennuHierarchyStore.refresh()}
       >
         <RefreshCw size={13} />
-      </button>
+      </IconButton>
     {/snippet}
   </BottomPanelHeader>
 

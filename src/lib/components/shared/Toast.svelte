@@ -2,7 +2,7 @@
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-svelte';
-  import type { Toast } from '$lib/feedback/stores/toasts.svelte';
+  import { toastStore, type Toast } from '$lib/feedback/stores/toasts.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -12,12 +12,28 @@
 
   const icons = { success: CheckCircle2, error: AlertCircle, warning: AlertTriangle, info: Info };
   const Icon = $derived(icons[toast.kind]);
+
+  // Auto-dismiss is paused while the pointer is over the toast or focus is
+  // inside it, and resumes only when both are gone.
+  let hovered = false;
+  let focused = false;
+  function syncPause() {
+    if (hovered || focused) toastStore.pause(toast.id);
+    else toastStore.resume(toast.id);
+  }
 </script>
 
 <div
   class="toast toast-{toast.kind}"
-  role="alert"
-  aria-live="polite"
+  role={toast.kind === 'error' ? 'alert' : 'status'}
+  onmouseenter={() => { hovered = true; syncPause(); }}
+  onmouseleave={() => { hovered = false; syncPause(); }}
+  onfocusin={() => { focused = true; syncPause(); }}
+  onfocusout={(e) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    focused = false;
+    syncPause();
+  }}
   in:fly|global={{ x: 360, duration: animStore.dPanel, easing: cubicOut }}
   out:fly|global={{ x: 360, duration: animStore.dPanel, easing: cubicOut, opacity: 0 }}
 >

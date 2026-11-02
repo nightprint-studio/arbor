@@ -7,11 +7,12 @@
   import { diffStore } from '$lib/stores/corvus/diff.svelte';
   import { stashRename } from '$lib/ipc/corvus/branch';
   import { getCommitDiff } from '$lib/ipc/corvus/diff';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import InlineEdit from '$lib/components/shared/ui/InlineEdit.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { applyStashAction, popStashAction, dropStashAction } from '$lib/utils/stash-actions';
-  import { tooltip } from '$lib/actions/tooltip';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
 
   let {
     stashes,
@@ -44,9 +45,19 @@
     await popStashAction(tab.id, stash, onRefresh);
   }
 
-  async function drop(stash: StashEntry, e?: MouseEvent) {
+  // A dropped stash cannot be recovered, so it is confirmed first.
+  let dropPending = $state<StashEntry | null>(null);
+
+  function drop(stash: StashEntry, e?: MouseEvent) {
     e?.stopPropagation();
     if (!tab) return;
+    dropPending = stash;
+  }
+
+  async function confirmDrop() {
+    const stash = dropPending;
+    dropPending = null;
+    if (!tab || !stash) return;
     await dropStashAction(tab.id, stash, onRefresh);
   }
 
@@ -159,18 +170,18 @@
 
       {#if renamingIndex !== stash.index}
         <div class="stash-actions">
-          <button class="action-btn" use:tooltip={'Apply stash'} onclick={(e) => apply(stash, e)}>
+          <IconButton size={20} hoverBg="overlay" tooltip="Apply stash" onclick={(e) => apply(stash, e)}>
             <Play size={10} />
-          </button>
-          <button class="action-btn" use:tooltip={'Pop stash'} onclick={(e) => pop(stash, e)}>
+          </IconButton>
+          <IconButton size={20} hoverBg="overlay" tooltip="Pop stash" onclick={(e) => pop(stash, e)}>
             <CornerDownLeft size={10} />
-          </button>
-          <button class="action-btn" use:tooltip={'Rename stash'} onclick={(e) => { e.stopPropagation(); startRename(stash); }}>
+          </IconButton>
+          <IconButton size={20} hoverBg="overlay" tooltip="Rename stash" onclick={(e) => { e.stopPropagation(); startRename(stash); }}>
             <Pencil size={10} />
-          </button>
-          <button class="action-btn danger" use:tooltip={'Drop stash'} onclick={(e) => drop(stash, e)}>
+          </IconButton>
+          <IconButton size={20} variant="danger" tooltip="Drop stash" onclick={(e) => drop(stash, e)}>
             <Trash2 size={10} />
-          </button>
+          </IconButton>
         </div>
       {/if}
     </div>
@@ -186,6 +197,18 @@
     items={ctxItems}
     onSelect={handleCtxSelect}
     onClose={() => ctxMenu = null}
+  />
+{/if}
+
+{#if dropPending}
+  <ConfirmModal
+    title="Drop stash"
+    message={`Drop stash "${dropPending.message}"?`}
+    detail="This cannot be undone."
+    variant="danger"
+    confirmLabel="Drop"
+    onConfirm={confirmDrop}
+    onCancel={() => (dropPending = null)}
   />
 {/if}
 
@@ -243,20 +266,4 @@
     transition: opacity var(--transition-fast);
     flex-shrink: 0;
   }
-
-  .action-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px; height: 20px;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .action-btn:hover { background: var(--bg-overlay); color: var(--text-primary); }
-  .action-btn.danger:hover { color: var(--error); background: var(--error-subtle); }
-
 </style>

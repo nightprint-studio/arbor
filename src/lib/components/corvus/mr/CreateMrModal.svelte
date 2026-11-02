@@ -14,6 +14,7 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import BranchSelect from '$lib/components/shared/internal/BranchSelect.svelte';
 
   let { onClose, onCreated, currentBranch = '', initialTargetBranch = '', initialTitle = '' }: {
@@ -155,7 +156,7 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit();
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !submitting) submit();
   }
 </script>
 
@@ -305,10 +306,12 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="secondary" onclick={onClose} disabled={submitting}>Cancel</Button>
-    <Button variant="primary" onclick={submit} disabled={!canSubmit || submitting} loading={submitting}>
-      {isDraft ? 'Create draft' : 'Create PR'}
-    </Button>
+    <ModalFooter hint="to create">
+      <Button variant="secondary" onclick={onClose} disabled={submitting}>Cancel</Button>
+      <Button variant="primary" onclick={submit} disabled={!canSubmit || submitting} loading={submitting}>
+        {isDraft ? 'Create draft' : 'Create PR'}
+      </Button>
+    </ModalFooter>
   {/snippet}
 </Modal>
 

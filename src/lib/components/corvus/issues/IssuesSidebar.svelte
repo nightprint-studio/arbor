@@ -21,6 +21,7 @@
   import CreateIssueModal from './CreateIssueModal.svelte';
   import IssueContextMenu from './IssueContextMenu.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { listNav } from '$lib/components/shared/ui/list-nav';
 
   // Self-describing issue-tracker descriptors — drive the generic connection
   // card (compact variant) shown in the no-token setup state. The sidebar no
@@ -646,12 +647,13 @@
       </div>
 
     {:else}
-      <ul class="is-list" role="list">
+      <ul class="is-list" role="list" use:listNav>
         {#each issuesStore.sortedIssues as issue (issue.id)}
           <li>
             <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
             <button
               class="is-item"
+              data-list-item
               onclick={() => issuesStore.selectAndLoadIssue(issue)}
               oncontextmenu={(e) => onIssueContextMenu(e, issue)}
               use:tooltip={issue.title}

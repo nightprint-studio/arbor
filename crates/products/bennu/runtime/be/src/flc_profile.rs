@@ -354,6 +354,11 @@ fn bennu_flc_forget(_ctx: &BennuState) -> Result<(), String> {
     crate::flc_sequence::clear();
     crate::flc_member_args::clear();
     crate::flc_created::clear();
+    crate::flc_ngram::clear();
+    crate::flc_catch::clear();
+    crate::flc_lambda::clear();
+    crate::flc_assert::clear();
+    crate::flc_next::clear();
     crate::flc_format::clear();
     crate::flc::forget_scans();
     let mut st = lock();

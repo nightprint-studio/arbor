@@ -7,6 +7,7 @@
   import type { CommitNote } from '$lib/types/corvus/git';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   let {
@@ -279,22 +280,22 @@
               </div>
 
               <div class="note-actions">
-                <button
-                  class="icon-btn"
-                  use:tooltip={'Refresh remote status'}
+                <IconButton
+                  size={22}
+                  tooltip="Refresh remote status"
                   onclick={() => refreshRemoteStatus(note.namespace)}
                   disabled={checkingRemote.has(note.namespace)}
                 >
                   <RefreshCw size={11} />
-                </button>
+                </IconButton>
                 {#if editingNs !== note.namespace}
-                  <button class="icon-btn" use:tooltip={'Edit'} onclick={() => startEdit(note)}>
+                  <IconButton size={22} tooltip="Edit" onclick={() => startEdit(note)}>
                     <Pencil size={11} />
-                  </button>
+                  </IconButton>
                 {/if}
-                <button class="icon-btn danger" use:tooltip={'Delete'} onclick={() => deleteNote(note.namespace)} disabled={saving}>
+                <IconButton size={22} variant="danger" tooltip="Delete" onclick={() => deleteNote(note.namespace)} disabled={saving}>
                   <Trash2 size={11} />
-                </button>
+                </IconButton>
               </div>
             </div>
 
@@ -525,21 +526,6 @@
     transition: opacity var(--transition-fast);
   }
   .note-item:hover .note-actions { opacity: 1; }
-  .icon-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px; height: 22px;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    color: var(--text-muted);
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .icon-btn.danger:hover { color: var(--error, #e05252); }
-  .icon-btn:disabled { opacity: 0.35; cursor: default; }
 
   /* Content */
   .note-content-wrap {

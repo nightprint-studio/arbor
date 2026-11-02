@@ -20,8 +20,8 @@
     onCancel: () => void;
   } = $props();
 
-  const title = $derived(scope === 'remote' ? 'Elimina tag su origin' : 'Elimina tag locale');
-  const buttonLabel = $derived(scope === 'remote' ? 'Elimina locale + origin' : 'Elimina localmente');
+  const title = $derived(scope === 'remote' ? 'Delete tag on origin' : 'Delete local tag');
+  const buttonLabel = $derived(scope === 'remote' ? 'Delete local + origin' : 'Delete locally');
 </script>
 
 <Modal onClose={onCancel} ariaLabel={title}>
@@ -35,29 +35,28 @@
 
     {#if scope === 'remote'}
       <p class="message">
-        Stai per eliminare il tag <strong>{tagName}</strong> sia in locale
-        <em>sia su</em> <code>origin</code>.
+        You are about to delete the tag <strong>{tagName}</strong> both locally
+        <em>and on</em> <code>origin</code>.
       </p>
       <p class="irreversible">
-        L'azione è <strong>irreversibile</strong>: il tag verrà rimosso dal remote
-        e non potrà essere recuperato a meno che qualcun altro non lo abbia ancora
-        in locale. Eventuali release o build agganciati a questo tag potrebbero
-        diventare irraggiungibili.
+        This is <strong>irreversible</strong>: the tag is removed from the remote and cannot
+        be recovered unless someone else still has it locally. Releases or builds
+        pinned to this tag may become unreachable.
       </p>
     {:else}
       <p class="message">
-        Stai per eliminare il tag <strong>{tagName}</strong> dal repository locale.
+        You are about to delete the tag <strong>{tagName}</strong> from the local repository.
       </p>
       <p class="irreversible">
-        Il tag continuerà a esistere sul remote (se vi è stato pushato) e tornerà
-        al prossimo <code>fetch --tags</code>. Per rimuoverlo definitivamente usa
-        <em>Elimina locale + origin</em>.
+        The tag still exists on the remote (if it was pushed) and comes back on the next
+        <code>fetch --tags</code>. To remove it for good use
+        <em>Delete local + origin</em>.
       </p>
     {/if}
   </div>
 
   {#snippet footer()}
-    <Button variant="ghost" onclick={onCancel}>Annulla</Button>
+    <Button variant="ghost" onclick={onCancel}>Cancel</Button>
     {#if scope === 'remote'}
       <Button variant="primary" color="var(--error)" onclick={onConfirm}>{buttonLabel}</Button>
     {:else}

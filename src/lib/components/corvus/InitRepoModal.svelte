@@ -6,6 +6,7 @@
     Check, Loader, BookOpen, UserCircle, X,
   } from 'lucide-svelte';
   import Button from '../shared/ui/Button.svelte';
+  import Checkbox from '../shared/ui/Checkbox.svelte';
   import Modal from '../shared/Modal.svelte';
   import ModalHeader from '../shared/ModalHeader.svelte';
   import Dropdown from '../shared/ui/Dropdown.svelte';
@@ -278,10 +279,7 @@
             Initial commit
           </div>
 
-          <label class="checkbox-row">
-            <input type="checkbox" bind:checked={initialCommit} />
-            <span>Create initial commit after init</span>
-          </label>
+          <Checkbox bind:checked={initialCommit} label="Create initial commit after init" />
 
           {#if initialCommit}
             <FormField label="Commit message">
@@ -314,10 +312,9 @@
             Generated files
           </div>
 
-          <label class="checkbox-row">
-            <input type="checkbox" bind:checked={readme} />
-            <span>Create <code>README.md</code> with project name and description</span>
-          </label>
+          <Checkbox bind:checked={readme}>
+            Create <code>README.md</code> with project name and description
+          </Checkbox>
 
           <FormField label=".gitignore template">
             <div class="select-wrapper">
@@ -502,15 +499,12 @@
 
           {#if provider !== 'none'}
             <div class="push-section">
-              <label class="checkbox-row">
-                <input type="checkbox" bind:checked={pushInitial} disabled={!initialCommit} />
-                <span>
-                  Push initial commit to <code>origin</code> after init
-                  {#if !initialCommit}
-                    <span class="optional">(requires an initial commit)</span>
-                  {/if}
-                </span>
-              </label>
+              <Checkbox bind:checked={pushInitial} disabled={!initialCommit}>
+                Push initial commit to <code>origin</code> after init
+                {#if !initialCommit}
+                  <span class="optional">(requires an initial commit)</span>
+                {/if}
+              </Checkbox>
               {#if initialCommit && pushInitial}
                 <div class="info-note">
                   <Info size={11} />
@@ -709,23 +703,6 @@
     background: var(--accent-subtle);
     border-color: var(--accent);
     color: var(--accent);
-  }
-
-  /* ── Checkbox ── */
-  .checkbox-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    cursor: pointer;
-    user-select: none;
-  }
-  .checkbox-row input[type="checkbox"] {
-    accent-color: var(--accent);
-    width: 14px;
-    height: 14px;
-    flex-shrink: 0;
   }
 
   /* ── Files preview ── */

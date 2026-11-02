@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EditorState, type TransactionSpec } from '@codemirror/state';
-import { acceptInlineCompletion, dismissInlineCompletion, inlineCompletion, inlineOutcomes, inlineSuggestionField, setInlineSuggestion } from './inline-completion';
+import { acceptInlineCompletion, acceptInlineCompletionLine, dismissInlineCompletion, inlineCompletion, inlineOutcomes, inlineSuggestionField, setInlineSuggestion } from './inline-completion';
 
 /** A state with the ghost-text field, holding `text` and a proposal drawn after it. */
 function drawn(proposal: string, meta?: unknown) {
@@ -79,5 +79,58 @@ describe('inline completion outcomes', () => {
   it('reports nothing for a transaction that leaves the proposal alone', () => {
     const state = drawn('a, b)', 'n');
     expect(told(state, { effects: [] })).toEqual([]);
+  });
+});
+
+describe('accepting a block one line at a time', () => {
+  const fake = (initial: EditorState) => {
+    const view = {
+      state: initial,
+      dispatch(spec: TransactionSpec) { view.state = view.state.update(spec).state; },
+      plugin: () => null,
+    };
+    return view;
+  };
+  const block = 'a, b) {\n    this.a = a;\n    this.b = b;\n}';
+
+  it('takes a line with its break and keeps the rest drawn from where the caret lands', () => {
+    const v = fake(drawn(block));
+    expect(acceptInlineCompletionLine(v as never)).toBe(true);
+    expect(v.state.doc.toString()).toBe('foo(a, b) {\n');
+    expect(v.state.selection.main.head).toBe(12);
+    const left = v.state.field(inlineSuggestionField);
+    expect(left?.text).toBe('    this.a = a;\n    this.b = b;\n}');
+    expect(left?.pos).toBe(12);
+    expect(acceptInlineCompletionLine(v as never)).toBe(true);
+    expect(acceptInlineCompletionLine(v as never)).toBe(true);
+    expect(v.state.doc.toString()).toBe('foo(a, b) {\n    this.a = a;\n    this.b = b;\n');
+    // the last line has no break: the line key leaves it to Tab
+    expect(acceptInlineCompletionLine(v as never)).toBe(false);
+    expect(acceptInlineCompletion(v as never)).toBe(true);
+    expect(v.state.doc.toString().endsWith('}')).toBe(true);
+  });
+
+  it('leaves a one-line proposal to Tab', () => {
+    const v = fake(drawn('a, b)'));
+    expect(acceptInlineCompletionLine(v as never)).toBe(false);
+    expect(v.state.doc.toString()).toBe('foo(');
+  });
+
+  it('overwrites the closer the editor added when the block carries its own', () => {
+    const base = EditorState.create({ doc: 'foo()', selection: { anchor: 4 }, extensions: [inlineCompletion({ source: () => null })] });
+    const state = base.update({ effects: setInlineSuggestion({ text: 'a) {\n}', replace: { from: 4, to: 5 }, hideReplaced: true }, 4) }).state;
+    const v = fake(state);
+    expect(acceptInlineCompletionLine(v as never)).toBe(true);
+    expect(v.state.doc.toString()).toBe('foo(a) {\n');
+    expect(acceptInlineCompletion(v as never)).toBe(true);
+    expect(v.state.doc.toString()).toBe('foo(a) {\n}');
+  });
+
+  it('replaces what was typed before the caret when the block is the whole declaration', () => {
+    const base = EditorState.create({ doc: '    toString', selection: { anchor: 12 }, extensions: [inlineCompletion({ source: () => null })] });
+    const state = base.update({ effects: setInlineSuggestion({ text: '@Override\n    public String toString() {\n    }', replace: { from: 4, to: 12 }, hideReplaced: true }, 12) }).state;
+    const v = fake(state);
+    expect(acceptInlineCompletion(v as never)).toBe(true);
+    expect(v.state.doc.toString()).toBe('    @Override\n    public String toString() {\n    }');
   });
 });

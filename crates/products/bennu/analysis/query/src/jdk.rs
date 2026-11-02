@@ -34,7 +34,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 
 use bennu_classpath::prelude::ClassSource;
 use bennu_classpath::prelude::{ClassMembers, MemberIndex, SourceMemberIndex};
@@ -49,9 +49,6 @@ const FLUSH_EVERY: usize = 128;
 struct Inner {
     /// The parse-on-miss source (re-reads bytecode only for entries not yet memoized).
     source: SourceMemberIndex<Box<dyn ClassSource>>,
-    /// Memoized lookups: `Some(members)` for a resolved class, `None` for a definitive miss (the
-    /// class is absent from this JDK). Both are authoritative — a `None` is a real "not here".
-    memo: HashMap<String, Option<ClassMembers>>,
     /// Fresh entries added since the last flush (drives the coarse write threshold).
     unsaved: usize,
 }
@@ -59,6 +56,17 @@ struct Inner {
 /// A mutex-serialized, `Send + Sync`, persistent lazy JDK member index over a boxed classpath source.
 pub struct JdkMemberIndex {
     inner: Mutex<Inner>,
+    /// Memoized lookups: `Some(members)` for a resolved class, `None` for a definitive miss (the
+    /// class is absent from this JDK). Both are authoritative — a `None` is a real "not here".
+    ///
+    /// Behind its own `RwLock`, apart from the source's `Mutex`: a lookup that the memo answers (almost all
+    /// of them once the JDK is warm) takes only a read lock, so threads sweeping a project in parallel
+    /// no longer queue on one lock to clone a table. The write lock is taken only under `inner`, and
+    /// `inner` is always taken before the memo — one order everywhere, so no cycle.
+    memo: RwLock<HashMap<String, Option<ClassMembers>>>,
+    /// Does this package exist in the JDK — remembered for the session (the JDK is immutable). Asked for every class a project
+    /// names, and before it took the source's lock each time; a class in a package that is not there is a miss without a lookup.
+    packages: RwLock<HashMap<String, Option<bool>>>,
     /// Where the memo is persisted, or `None` for an in-memory-only index (empty / test resolvers).
     path: Option<PathBuf>,
 }
@@ -78,15 +86,14 @@ impl JdkMemberIndex {
     /// rather than measured — see `ClassMembers::heap_estimate` — and behind the same lock every
     /// lookup takes, so it is asked for on demand and never on a timer.
     pub fn memory_estimate(&self) -> (usize, usize) {
-        let Ok(guard) = self.inner.lock() else { return (0, 0) };
+        let Ok(memo) = self.memo.read() else { return (0, 0) };
         let slot = std::mem::size_of::<String>() + std::mem::size_of::<Option<ClassMembers>>() + 1;
-        let bytes = guard.memo.capacity() * slot
-            + guard
-                .memo
+        let bytes = memo.capacity() * slot
+            + memo
                 .iter()
                 .map(|(key, members)| key.capacity() + members.as_ref().map_or(0, ClassMembers::heap_estimate))
                 .sum::<usize>();
-        (guard.memo.len(), bytes)
+        (memo.len(), bytes)
     }
 
     /// The archive `binary_name` came out of — see `ClassSource::origin`.
@@ -109,10 +116,10 @@ impl JdkMemberIndex {
     /// the memo. The lock is taken per class, so a lookup from the editor waits for one decode and
     /// not for the sweep.
     pub fn members_unmemoized(&self, binary_name: &str) -> Option<ClassMembers> {
-        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(hit) = guard.memo.get(binary_name) {
+        if let Some(hit) = self.memo.read().unwrap_or_else(|p| p.into_inner()).get(binary_name) {
             return hit.clone();
         }
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         guard.source.members_of(binary_name)
     }
 
@@ -122,9 +129,10 @@ impl JdkMemberIndex {
         Self {
             inner: Mutex::new(Inner {
                 source: SourceMemberIndex::new(source),
-                memo: HashMap::new(),
                 unsaved: 0,
             }),
+            memo: RwLock::new(HashMap::new()),
+            packages: RwLock::new(HashMap::new()),
             path: None,
         }
     }
@@ -137,9 +145,10 @@ impl JdkMemberIndex {
         Self {
             inner: Mutex::new(Inner {
                 source: SourceMemberIndex::new(source),
-                memo,
                 unsaved: 0,
             }),
+            memo: RwLock::new(memo),
+            packages: RwLock::new(HashMap::new()),
             path: Some(path),
         }
     }
@@ -154,7 +163,7 @@ impl JdkMemberIndex {
                 return;
             }
             g.unsaved = 0;
-            positive_snapshot(&g.memo)
+            positive_snapshot(&self.memo.read().unwrap_or_else(|p| p.into_inner()))
         };
         write_memo(path, &snapshot);
     }
@@ -173,11 +182,28 @@ impl MemberIndex for JdkMemberIndex {
     }
 
     fn package_exists(&self, package: &str) -> Option<bool> {
-        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        guard.source.package_exists(package)
+        if let Some(hit) = self.packages.read().unwrap_or_else(|p| p.into_inner()).get(package) {
+            return *hit;
+        }
+        let found = self.inner.lock().unwrap_or_else(|p| p.into_inner()).source.package_exists(package);
+        self.packages.write().unwrap_or_else(|p| p.into_inner()).insert(package.to_string(), found);
+        found
     }
 
     fn members_of(&self, binary_name: &str) -> Option<ClassMembers> {
+        // The common case first, on a read lock only: memoized (resolved OR definitive miss) — no source touch, and
+        // concurrent lookups do not wait for each other.
+        if let Some(hit) = self.memo.read().unwrap_or_else(|p| p.into_inner()).get(binary_name) {
+            return hit.clone();
+        }
+        // A class in a package the JDK does not have cannot be in it: answered from the (remembered) package question, without
+        // a lookup in the image under the source's lock. Most definitive misses of a project that depends on libraries are these.
+        if let Some((package, _)) = binary_name.rsplit_once('/') {
+            if self.package_exists(package) == Some(false) {
+                self.memo.write().unwrap_or_else(|p| p.into_inner()).insert(binary_name.to_string(), None);
+                return None;
+            }
+        }
         // A flush snapshot is taken under the lock but written after releasing it, so the disk I/O
         // never blocks a concurrent lookup.
         let (result, flush_snapshot) = {
@@ -185,13 +211,14 @@ impl MemberIndex for JdkMemberIndex {
             // immutable, so we take the inner guard and keep serving.
             let mut g = self.inner.lock().unwrap_or_else(|p| p.into_inner());
 
-            if let Some(hit) = g.memo.get(binary_name) {
-                return hit.clone(); // memoized (resolved OR definitive miss) — no source touch
+            // another thread may have decoded it while this one waited for the source
+            if let Some(hit) = self.memo.read().unwrap_or_else(|p| p.into_inner()).get(binary_name) {
+                return hit.clone();
             }
 
             let parsed = g.source.members_of(binary_name);
             let resolved = parsed.is_some();
-            g.memo.insert(binary_name.to_string(), parsed.clone());
+            self.memo.write().unwrap_or_else(|p| p.into_inner()).insert(binary_name.to_string(), parsed.clone());
 
             // Only a RESOLVED JDK class drives persistence. A miss is memoized in-memory but is
             // (overwhelmingly) a dependency type, not JDK — persisting misses grew the shared file
@@ -201,7 +228,7 @@ impl MemberIndex for JdkMemberIndex {
                 g.unsaved += 1;
                 if self.path.is_some() && g.unsaved >= FLUSH_EVERY {
                     g.unsaved = 0;
-                    Some(positive_snapshot(&g.memo))
+                    Some(positive_snapshot(&self.memo.read().unwrap_or_else(|p| p.into_inner())))
                 } else {
                     None
                 }
@@ -249,7 +276,10 @@ fn write_memo(path: &Path, memo: &HashMap<String, Option<ClassMembers>>) {
     let Ok(bytes) = serde_json::to_vec(memo) else {
         return;
     };
-    let tmp = path.with_extension("json.tmp");
+    // unique per write: a dependency jar's block is shared, so two projects (or two processes) can be writing the same file at once
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.{}.{n}.tmp", std::process::id()));
     if std::fs::write(&tmp, &bytes).is_ok() {
         let _ = std::fs::rename(&tmp, path);
     }
@@ -278,6 +308,39 @@ mod tests {
                 .or_insert(0) += 1;
             Ok(None)
         }
+    }
+
+    /// Lists one JDK class, so the index knows which packages exist; counts the bytes it is asked for.
+    struct ListedSource {
+        asked: Arc<StdMutex<Vec<String>>>,
+    }
+
+    impl ClassSource for ListedSource {
+        fn class_bytes(&self, binary_name: &str) -> Result<Option<Vec<u8>>, String> {
+            self.asked.lock().unwrap().push(binary_name.to_string());
+            Ok(None)
+        }
+
+        fn class_names(&self) -> Vec<String> {
+            vec!["java/util/List".to_string()]
+        }
+    }
+
+    #[test]
+    fn a_class_in_a_package_the_jdk_lacks_is_a_miss_without_a_lookup() {
+        let asked = Arc::new(StdMutex::new(Vec::new()));
+        let idx = JdkMemberIndex::new(Box::new(ListedSource { asked: asked.clone() }));
+        // no such package: answered from the package question, the image is not asked about the class
+        assert!(idx.members_of("org/springframework/web/Thing").is_none());
+        assert!(idx.members_of("org/springframework/web/Thing").is_none());
+        assert!(asked.lock().unwrap().is_empty());
+        // a package it has: the class is looked up (once, then remembered)
+        assert!(idx.members_of("java/util/Nope").is_none());
+        assert!(idx.members_of("java/util/Nope").is_none());
+        assert_eq!(*asked.lock().unwrap(), vec!["java/util/Nope".to_string()]);
+        // a class in the default package has no package to ask about: it is looked up
+        assert!(idx.members_of("Plain").is_none());
+        assert_eq!(asked.lock().unwrap().len(), 2);
     }
 
     #[test]

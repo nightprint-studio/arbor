@@ -19,6 +19,7 @@
    * Composed of shared widgets only — Modal/Header/Footer, Checkbox, Input, Button, EmptyState,
    * Spinner, Badge.
    */
+  import { untrack } from 'svelte';
   import { Check, Wand2 } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -50,7 +51,8 @@
   const keyOf = (m: OverridableMember) => `${m.declaring_type}#${m.signature}`;
 
   // Abstract ones start ticked — see the component docs.
-  let picked = $state(new Set(members.filter((m) => m.is_abstract).map(keyOf)));
+  // Intentional one-shot capture: the initial ticks are a starting point the user then edits.
+  let picked = $state(new Set(untrack(() => members).filter((m) => m.is_abstract).map(keyOf)));
   let filter = $state('');
   let cursor = $state(0);
 
@@ -133,10 +135,12 @@
 </script>
 
 <Modal width="640px" height="560px" {onClose}>
-  <ModalHeader {onClose}>
-    <Wand2 size={14} />
-    <span class="modal-title">Implement / override methods</span>
-  </ModalHeader>
+  {#snippet header()}
+    <ModalHeader {onClose}>
+      <Wand2 size={14} />
+      <span class="modal-title">Implement / override methods</span>
+    </ModalHeader>
+  {/snippet}
 
   <div class="ov-body" onkeydown={onKeydown} role="presentation">
     <Input

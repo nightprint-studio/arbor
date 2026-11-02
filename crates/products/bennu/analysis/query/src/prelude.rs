@@ -49,7 +49,8 @@ pub use crate::completion::split_prefix as split_completion_prefix;
 // The resolver + the `Send + Sync` JDK member-index wrapper it composes, plus the two-tier
 // classpath index (JDK + optional per-project dependency tier) the completion/validation resolver
 // runs over.
-pub use crate::classpath_index::ClasspathIndex;
+pub use crate::classpath_index::{ClasspathIndex, DepInput, DepTier};
+pub use crate::shared_jars::{block_path, JarBlocks};
 pub use crate::jdk::JdkMemberIndex;
 pub use crate::resolver::{convert_members, IndexResolver, ProjectView};
 

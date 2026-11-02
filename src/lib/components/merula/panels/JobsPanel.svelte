@@ -20,6 +20,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import LogStream from '$lib/components/shared/ui/LogStream.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import type { JobInfo } from '$lib/feedback/types/jobs';
@@ -105,9 +106,9 @@
     <!-- ── Output drill-in ─────────────────────────────────────────────────── -->
     <BottomPanelHeader title={activeJob.name} onClose={() => merulaStore.toggleBottom('jobs')}>
       {#snippet icon()}
-        <button class="ps-btn" use:tooltip={'Back to jobs'} onclick={backToList} aria-label="Back to jobs">
+        <IconButton tooltip="Back to jobs" onclick={backToList}>
           <ChevronLeft size={14} />
-        </button>
+        </IconButton>
       {/snippet}
       {#snippet children()}
         <span class="job-sep"></span>
@@ -159,10 +160,9 @@
       {/snippet}
       {#snippet actions()}
         {#if jobsStore.finishedCount > 0}
-          <button class="ps-btn" onclick={() => jobsStore.clearFinished()}
-            use:tooltip={'Clear finished'} aria-label="Clear finished jobs">
+          <IconButton tooltip="Clear finished" onclick={() => jobsStore.clearFinished()}>
             <Trash2 size={13} />
-          </button>
+          </IconButton>
         {/if}
       {/snippet}
     </BottomPanelHeader>

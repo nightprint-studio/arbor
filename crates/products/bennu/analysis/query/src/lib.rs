@@ -52,6 +52,7 @@ pub mod picked;
 pub mod prelude;
 pub mod rank;
 pub mod resolver;
+pub mod shared_jars;
 // Completion for a bare identifier: what the scope at the caret binds.
 pub mod scope_completion;
 pub mod source;

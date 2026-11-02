@@ -450,6 +450,40 @@ fn cut_repetition(text: &str) -> String {
     text.to_string()
 }
 
+/// Shortest and longest repeating unit, in characters, that counts as a loop. Under six it is punctuation and short numbers
+/// (`0, 0, 0`, `))))`), which real code repeats; over eighty the line is not a line any more.
+const LOOP_UNIT: std::ops::RangeInclusive<usize> = 6..=80;
+
+/// Where to cut a loop that the first copy of ends at `at`: the copy may begin mid-expression, so the cut backs up to the
+/// last place a piece of code is whole — after a closing bracket, a quote or a `;` — and only then to the end of a word.
+fn loop_end(c: &[char], at: usize) -> usize {
+    let whole = |k: usize| k > 0 && matches!(c[k - 1], ')' | ']' | '}' | '"' | '\'' | ';');
+    (1..=at).rev().find(|&k| whole(k)).or_else(|| (1..=at).rev().find(|&k| c[k - 1].is_alphanumeric() && c.get(k).is_none_or(|n| !n.is_alphanumeric()))).unwrap_or(at)
+}
+
+/// A model that loops, in the general case: some stretch of the text written three times in a row
+/// (`; rel="2023"; rel="2023"; rel="2023"`, ` || i <= 'Z' || i <= 'Z' || i <= 'Z'`, ` + " " + str + " " + str + " " + str`).
+/// The text is cut after the first copy: that one is what the model meant, the rest is it failing to stop.
+pub fn cut_loop(text: &str) -> String {
+    let c: Vec<char> = text.chars().collect();
+    let n = c.len();
+    // earliest loop wins; for that start the shortest unit, so `ab` is not read as `abab`
+    for start in 0..n {
+        for unit in LOOP_UNIT {
+            if start + 3 * unit > n {
+                break;
+            }
+            if c[start..start + unit] == c[start + unit..start + 2 * unit] && c[start..start + unit] == c[start + 2 * unit..start + 3 * unit] {
+                // a unit that is only blanks and punctuation is a rule or a row of dashes, not a loop of words
+                if c[start..start + unit].iter().any(|ch| ch.is_alphanumeric()) {
+                    return c[..loop_end(&c, start + unit)].iter().collect::<String>().trim_end().to_string();
+                }
+            }
+        }
+    }
+    text.to_string()
+}
+
 /// A ternary the model wrote out of nothing: `cond ? a : b` as the continuation of a call chain.
 fn is_ternary(text: &str) -> bool {
     let t = text.trim_start();
@@ -474,7 +508,7 @@ fn wants_space(prefix: &str, last: char, first: char) -> bool {
 /// `known(word)` says whether the file or the project has that name: a local, a field, a method, an imported type.
 /// A line that names something nobody has is the model inventing, and an invented name is worse than no ghost text.
 pub fn vet(prefix: &str, text: &str, known: &dyn Fn(&str) -> bool) -> Option<String> {
-    let mut text = cut_repeated_element(prefix, &cut_repetition(text.trim_end()));
+    let mut text = cut_repeated_element(prefix, &cut_repetition(&cut_loop(text.trim_end())));
     if text.trim().is_empty() || is_ternary(&text) || declaration_in_expression(prefix, &text) {
         return None;
     }
@@ -643,5 +677,53 @@ mod tests {
         assert_eq!(vet("        ", "Order found = find();", &k).as_deref(), Some("Order found = find();"));
         assert_eq!(vet("        orders.forEach(", "o -> o.touch());", &k).as_deref(), Some("o -> o.touch());"));
         assert_eq!(vet("        for (", "Order o : orders) {", &k).as_deref(), Some("Order o : orders) {"));
+    }
+
+    #[test]
+    fn a_stretch_written_three_times_is_cut_after_its_first_copy() {
+        assert_eq!(
+            cut_loop("\"\\\"\" + sunsetDate + \">; rel=\\\"2023\\\"; rel=\\\"2023\\\"; rel=\\\"2023\\\"; rel"),
+            "\"\\\"\" + sunsetDate + \">; rel=\\\"2023\\\""
+        );
+        assert_eq!(cut_loop("<= 'Z' || i <= 'Z' || i <= 'Z' || i <= 'Z' || i"), "<= 'Z'");
+        // the copy may begin anywhere in the unit; the cut lands where a piece is whole, here after the first `" "`
+        assert_eq!(cut_loop("str, delimiters) + \" \" + str + \" \" + str + \" \" + str + \" \""), "str, delimiters) + \" \"");
+    }
+
+    #[test]
+    fn real_repetition_is_left_alone() {
+        for ok in ["0, 0, 0, 0, 0, 0", "foo(a, b) + bar(c, d)", "))))));", "-----------------------", "a.b().c().d().e()", "\"x\" + \"y\" + \"z\""] {
+            assert_eq!(cut_loop(ok), ok);
+        }
+        // twice is a pattern in code, three times is the model not stopping
+        assert_eq!(cut_loop("rel=\"2023\"; rel=\"2023\""), "rel=\"2023\"; rel=\"2023\"");
+    }
+
+    /// A probe, not a test: `FLC_LOOP_PROBE=<dump.tsv> cargo test -p bennu-flc --lib probe_loops -- --ignored --nocapture`
+    /// on a `FLC_DUMP` of the lab's evaluator (suggestion in column 6, expected text in column 7). Numbers only.
+    #[test]
+    #[ignore]
+    fn probe_loops() {
+        let Ok(path) = std::env::var("FLC_LOOP_PROBE") else { return };
+        let share = |got: &str, want: &str| {
+            let total = want.chars().count().max(1);
+            got.chars().zip(want.chars()).take_while(|(a, b)| a == b).count() as f32 / total as f32
+        };
+        let (mut n, mut looped, mut before, mut after, mut hit_before, mut hit_after) = (0usize, 0usize, 0f32, 0f32, 0usize, 0usize);
+        for line in std::fs::read_to_string(path).unwrap().lines() {
+            let c: Vec<&str> = line.split('\t').collect();
+            if c.len() < 7 { continue }
+            n += 1;
+            let cut = cut_loop(c[5]);
+            if cut != c[5] {
+                looped += 1;
+                before += share(c[5], c[6]);
+                after += share(&cut, c[6]);
+                hit_before += usize::from(c[5] == c[6]);
+                hit_after += usize::from(cut == c[6]);
+            }
+        }
+        println!("suggestions {n}, with a loop {looped} ({:.1}%); on those: exact {hit_before} -> {hit_after}, prefix share {:.2} -> {:.2}",
+            100.0 * looped as f32 / n.max(1) as f32, before / looped.max(1) as f32, after / looped.max(1) as f32);
     }
 }

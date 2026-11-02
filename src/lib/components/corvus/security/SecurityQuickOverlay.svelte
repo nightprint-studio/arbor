@@ -22,6 +22,7 @@
   import { SEVERITY_META, formatMedianAge } from '$lib/components/shared/internal/security/severity-meta';
   import RiskScoreGauge from './RiskScoreGauge.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import Popover from '$lib/components/shared/ui/Popover.svelte';
 
   const tabId   = $derived(tabsStore.activeTabId);
   const summary = $derived(securityStore.summary);
@@ -63,9 +64,9 @@
 
 </script>
 
-<button type="button" aria-label="Close overlay" class="overlay-backdrop" onclick={close}></button>
-
-<div class="overlay-panel security-overlay" role="dialog" aria-label="Security summary">
+<!-- Anchored to the LEFT of the footer: the security trigger sits on the left of
+     the StatusBar, so the panel slides up from there to stay connected to it. -->
+<Popover label="Security summary" align="start" onclose={close}>
   <div class="overlay-header">
     <span class="overlay-title">
       <ShieldAlert size={13} />
@@ -150,24 +151,9 @@
       </button>
     {/if}
   </div>
-</div>
+</Popover>
 
 <style>
-  .security-overlay {
-    /* Anchor to the LEFT of the footer instead of inheriting the default
-       `right: 12px` from `.overlay-panel` — the security trigger now sits
-       on the left side of the StatusBar, so the overlay should slide up
-       from there to stay visually connected to its origin. */
-    right: auto;
-    left: 12px;
-
-    width: 320px;
-    max-height: 460px;
-    background: var(--bg-base);
-    border-color: var(--border);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
-  }
-
   .overlay-title {
     display: inline-flex;
     align-items: center;

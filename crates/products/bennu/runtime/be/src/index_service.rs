@@ -490,6 +490,25 @@ const JDK_INDEX_SCHEMA: u32 = 2;
 /// the RESOLVED JDK (home + major) — not the requested version — so every project that resolves to
 /// the same JDK reuses one memo, two different JDKs never share, and a schema change invalidates old
 /// memos. `None` when no JDK resolves (the index then stays in-memory, re-parsing as today).
+/// The project's dependency jars as one block per jar under `bennu_data_dir()/jar-index`, shared by every project that depends on
+/// the same jar — what one project decoded of a library the next reads back.
+///
+/// The combined source is dropped first: it holds every jar open, and a second set beside it is what ran a 150-jar project out of
+/// file descriptors. With nothing to open as a block the combined source is kept, as it was.
+fn shared_dep_input(
+    jars: &[String],
+    source: Box<dyn bennu_classpath::prelude::ClassSource>,
+    memo_path: PathBuf,
+) -> bennu_query::prelude::DepInput {
+    use bennu_query::prelude::{DepInput, JarBlocks};
+    if jars.is_empty() {
+        return DepInput::Source(source, memo_path);
+    }
+    drop(source);
+    let paths: Vec<PathBuf> = jars.iter().map(PathBuf::from).collect();
+    DepInput::Blocks(JarBlocks::open(&paths, &arbor_core::prelude::bennu_data_dir().join("jar-index")))
+}
+
 fn jdk_index_path(jdk_version: &str) -> Option<PathBuf> {
     let status = bennu_classpath::prelude::jdk_status(jdk_version);
     let home = status.resolved_home?;
@@ -656,12 +675,48 @@ pub fn module_jdk(root: &Path, file: &Path) -> Option<ModuleJdk> {
                 });
             }
             // A pom that declares nothing inherits from the one above it — keep walking.
+        } else if let Some(info) = gradle_module_level(dir).filter(|i| major_of(&i.version).is_some()) {
+            return Some(ModuleJdk {
+                module: dir
+                    .strip_prefix(root)
+                    .ok()
+                    .map(|rel| rel.display().to_string())
+                    .filter(|rel| !rel.is_empty())
+                    .unwrap_or_else(|| ".".to_string()),
+                major: major_of(&info.version),
+                version: info.version,
+                source: info.source,
+            });
         }
         if dir == root {
             return None;
         }
         dir = dir.parent()?;
     }
+}
+
+/// The Java level a Gradle build script in `dir` declares (`java { toolchain … }`, `sourceCompatibility`,
+/// `options.release`), the way a pom's is read for a Maven module. `None` without a script or a level.
+fn gradle_module_level(dir: &Path) -> Option<bennu_proto::prelude::JdkInfo> {
+    let script = ["build.gradle", "build.gradle.kts"].iter().map(|f| dir.join(f)).find(|p| p.is_file())?;
+    let text = std::fs::read(&script).map(|b| String::from_utf8_lossy(&b).into_owned()).ok()?;
+    let none = std::collections::BTreeMap::new();
+    let info = bennu_gradle::prelude::BuildInfo::parse(
+        &text,
+        &bennu_gradle::prelude::Env { properties: &none, inherited: &none, catalogs: &[] },
+    );
+    info.java.map(|level| bennu_proto::prelude::JdkInfo { version: level.version, source: format!("gradle {}", level.source) })
+}
+
+/// The language level `file` is compiled at: the one its folder pins (`src/main/java24` → 24), else its
+/// module's (pom or Gradle script), else the project's.
+///
+/// A multi-release module keeps the code for each newer Java in its own `javaNN` folder, and those files
+/// are compiled at that level whatever the module targets — see [`bennu_check::prelude::source_set_level`].
+fn file_level(root: &Path, file: &Path, project: Option<u32>) -> Option<u32> {
+    bennu_check::prelude::source_set_level(file)
+        .or_else(|| module_jdk(root, file).and_then(|m| m.major))
+        .or(project)
 }
 
 /// The level in force for a build-unit DIRECTORY, asked without an owning project.
@@ -697,7 +752,7 @@ fn major_of(version: &str) -> Option<u32> {
 /// The level in force for `file`: its module's when its pom declares one, else the project's — the same
 /// answer the status bar and the version-gated checks give.
 fn level_of_file(slot: &ProjectSlot, file: &str) -> Option<u32> {
-    module_jdk(&slot.root, Path::new(file)).and_then(|m| m.major).or_else(|| major_of(&slot.jdk_version))
+    file_level(&slot.root, Path::new(file), major_of(&slot.jdk_version))
 }
 
 /// A postfix site in a Java buffer and what deciding a template there needs — see
@@ -1678,6 +1733,8 @@ impl IndexService {
             });
             // what you picked most often in this place comes next, below a habit that leads
             crate::flc_choices::lift(file, src, offset, &mut items);
+            // at a call argument the rows are reordered by the offline-fitted ranker (`flc_rank`), behind the same switch
+            crate::flc_rank::rerank(self, file, src, offset, case, &mut items);
         }
         items
     }
@@ -1961,6 +2018,7 @@ impl IndexService {
                 file_stem,
                 expected_package,
                 java_major: None,
+                jdk_major: None,
                 classpath_complete: false,
             };
             let mut diags = bennu_check::prelude::check_file(source, &ctx);
@@ -1983,9 +2041,9 @@ impl IndexService {
             // construction, but "does this syntax exist yet" is a question about the file in front
             // of you. Reading the project's level for every file reported records as a syntax error
             // in the module that legitimately has them. Falls back to the project's.
-            java_major: module_jdk(&slot.root, path)
-                .and_then(|m| m.major)
-                .or(status.requested_major),
+            java_major: file_level(&slot.root, path, status.requested_major),
+            // What the resolver actually reads: a file at a level above it may use a newer `java.*`.
+            jdk_major: status.resolved_major,
             // Asked of the RESOLVER, not of the resolved-jar list. The two disagree for as long as
             // it takes to build the dependency tier — and for good when that build fails — and in
             // that window "complete" makes the unresolved-import check adjudicate every
@@ -2096,7 +2154,7 @@ impl IndexService {
             let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
             slots.get(&PathBuf::from(root)).map(Arc::clone)
         };
-        let (provider, jdk_available, classpath_complete, requested_major) = match slot {
+        let (provider, jdk_available, classpath_complete, requested_major, jdk_major) = match slot {
             Some(slot) => {
                 let status = bennu_classpath::prelude::jdk_status(&slot.jdk_version);
                 let provider = {
@@ -2107,12 +2165,12 @@ impl IndexService {
                 // single-file path documents: the jar list and the resolver's tier are written at
                 // different moments, and believing the list marks every library import red.
                 let complete = provider.has_dependency_tier();
-                (provider, status.any_installed, complete, status.requested_major)
+                (provider, status.any_installed, complete, status.requested_major, status.resolved_major)
             }
             // No project owns this root — validate pure-AST over an empty provider, no caching.
-            None => (Arc::new(NativeJavaProvider::new()), false, false, None),
+            None => (Arc::new(NativeJavaProvider::new()), false, false, None, None),
         };
-        validate_files_parallel(&provider, jdk_available, classpath_complete, requested_major, files, cache, on_progress)
+        validate_files_parallel(&provider, jdk_available, classpath_complete, requested_major, jdk_major, Path::new(root), files, cache, on_progress)
     }
 
     /// Request cancellation of the currently-running whole-project validation sweep (the FE's Cancel
@@ -4447,6 +4505,8 @@ fn validate_files_parallel(
     jdk_available: bool,
     classpath_complete: bool,
     requested_major: Option<u32>,
+    jdk_major: Option<u32>,
+    root: &Path,
     files: &[(PathBuf, String)],
     cache: &bennu_intel::prelude::DiagCache,
     on_progress: &(dyn Fn(usize, usize) + Sync),
@@ -4469,7 +4529,9 @@ fn validate_files_parallel(
         let ctx = bennu_check::prelude::FileContext {
             file_stem: path.file_stem().and_then(|s| s.to_str()).map(str::to_string),
             expected_package: path.parent().and_then(bennu_java::prelude::infer_package),
-            java_major: requested_major,
+            // Per file, as the single-file path does: a module's own level, a `javaNN` folder's.
+            java_major: file_level(root, path, requested_major),
+            jdk_major,
             classpath_complete,
         };
         let own = bennu_intel::prelude::source_hash(source);
@@ -4775,7 +4837,8 @@ fn build_dependency_tier(
             // NOT recorded on the slot yet — see the swap below. The jar list is what
             // `classpath_complete` is derived from, and publishing it here would say "we can see the
             // whole classpath" while the resolver still cannot see any of it.
-            Some((d.jars, d.source, d.memo_path))
+            let input = shared_dep_input(&d.jars, d.source, d.memo_path);
+            Some((d.jars, input))
         }
         // A Maven project with no dependency tier is NOT a benign degradation: every library type in
         // it reads as "cannot resolve", which looks like thousands of unrelated errors. Say so once,
@@ -4795,14 +4858,14 @@ fn build_dependency_tier(
 
     // A project with no dependency tier keeps stage 1's provider: rebuilding an identical one would
     // cost a second JDK enumeration to arrive at the same object.
-    if let Some((jars, source, memo_path)) = deps {
+    if let Some((jars, input)) = deps {
         // Derived from stage 1 wherever stage 1 exists: same decoded JDK, same enumeration, one
         // more tier. A full rebuild would open the JVM image and all 150 jars a second time while
         // the first set is still held — which is how this ran the process out of file descriptors.
         // The `for_project` fallback is for the case where stage 1 itself failed to build.
         let stage1 = { Arc::clone(&slot.provider.read().unwrap_or_else(|p| p.into_inner())) };
         let built = stage1
-            .with_dependency_tier(index_dir, jdk_version, pairs, source, memo_path)
+            .with_dependency_tier(index_dir, jdk_version, pairs, input)
             .unwrap_or_else(|| {
                 eprintln!(
                     "bennu-be: no JDK tier to share for {} — building the dependency provider from \
@@ -5987,6 +6050,35 @@ mod tests {
         let extracted = data.join("library").join("spring-core-6.1.0.jar").join("org/springframework/Foo.java");
         assert_eq!(library_view_of(&extracted.to_string_lossy()).as_deref(), Some("spring-core-6.1.0.jar"));
         assert_eq!(library_view_of("/home/u/proj/src/main/java/Foo.java"), None);
+    }
+
+    /// A module on 17 with a `src/main/java22` folder: the folder's files are 22, the rest 17 — for a
+    /// Maven module and a Gradle one alike, and the project's level only where nothing else says.
+    #[test]
+    fn a_file_is_at_its_source_folders_level_then_its_modules_then_the_projects() {
+        let dir = std::env::temp_dir().join(format!("arbor-levels-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let maven = dir.join("maven-mod");
+        let gradle = dir.join("gradle-mod");
+        let bare = dir.join("bare");
+        for d in [&maven, &gradle, &bare] {
+            std::fs::create_dir_all(d.join("src/main/java/p")).unwrap();
+            std::fs::create_dir_all(d.join("src/main/java22/p")).unwrap();
+        }
+        std::fs::write(
+            maven.join("pom.xml"),
+            "<project><properties><maven.compiler.release>17</maven.compiler.release></properties></project>",
+        )
+        .unwrap();
+        std::fs::write(gradle.join("build.gradle"), "sourceCompatibility = '11'\n").unwrap();
+        let level = |m: &Path, sub: &str| file_level(&dir, &m.join(sub), Some(21));
+        assert_eq!(level(&maven, "src/main/java/p/A.java"), Some(17));
+        assert_eq!(level(&maven, "src/main/java22/p/A.java"), Some(22));
+        assert_eq!(level(&gradle, "src/main/java/p/A.java"), Some(11));
+        assert_eq!(level(&gradle, "src/main/java22/p/A.java"), Some(22));
+        // Nothing declared: the project's.
+        assert_eq!(level(&bare, "src/main/java/p/A.java"), Some(21));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -17,12 +17,14 @@
   import TytoCapturePreview from '../TytoCapturePreview.svelte';
   import TytoThumb from '../TytoThumb.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { listNav } from '$lib/components/shared/ui/list-nav';
   import { animStore } from '$lib/stores/animations.svelte';
   import { recorderStore, formatDuration } from '$lib/stores/tyto/recorder.svelte';
   import { formatBytes, formatAgo } from '$lib/utils/format';
 
   let query = $state('');
   let clearConfirmOpen = $state(false);
+  let removeConfirmId = $state<string | null>(null);
   let editingId = $state<string | null>(null);
   let previewId = $state<string | null>(null);
 
@@ -62,7 +64,7 @@
   }
 </script>
 
-<div class="library">
+<div class="library" use:listNav={{ fromInput: '.lib-filter input' }}>
   <header class="lib-header">
     <span class="lib-title">Library</span>
     <div class="lib-stats">
@@ -102,7 +104,7 @@
           animate:flip={{ duration: animStore.dPanel, easing: cubicOut }}
           in:fly={{ y: -10, duration: animStore.dBase, easing: cubicOut }}
         >
-          <button class="cap-thumb" onclick={() => (previewId = cap.id)} use:tooltip={'View'} aria-label={`View ${cap.name}`}>
+          <button class="cap-thumb" data-list-item onclick={() => (previewId = cap.id)} use:tooltip={'View'} aria-label={`View ${cap.name}`}>
             {#if cap.poster}
               <!-- A frame sequence is a directory, so it ships its own poster frame. -->
               <img class="cap-thumb-img" src={convertFileSrc(cap.poster)} alt={cap.name} loading="lazy" />
@@ -155,7 +157,7 @@
                 ><Grid2x2 size={14} /></button>
               {/if}
               <button type="button" class="cap-act" use:tooltip={'Reveal in folder'} aria-label="Reveal in folder" onclick={() => reveal(cap.id)}><FolderOpen size={14} /></button>
-              <button type="button" class="cap-act danger" use:tooltip={'Delete'} aria-label="Delete capture" onclick={() => remove(cap.id)}><Trash2 size={14} /></button>
+              <button type="button" class="cap-act danger" use:tooltip={'Delete'} aria-label="Delete capture" onclick={() => (removeConfirmId = cap.id)}><Trash2 size={14} /></button>
             </div>
           {/if}
         </div>
@@ -181,8 +183,24 @@
     capture={previewCapture}
     onClose={() => (previewId = null)}
     onReveal={() => reveal(previewCapture.id)}
-    onDelete={() => remove(previewCapture.id)}
+    onDelete={() => (removeConfirmId = previewCapture.id)}
   />
+{/if}
+
+{#if removeConfirmId}
+  {@const target = captures.find((c) => c.id === removeConfirmId)}
+  {#if target}
+    <ConfirmModal
+      title="Delete capture"
+      message={`Permanently delete "${target.name}"?`}
+      detail="The files are removed from disk. This cannot be undone."
+      variant="danger"
+      confirmLabel="Delete"
+      zIndex="var(--z-menu)"
+      onConfirm={() => { remove(target.id); removeConfirmId = null; }}
+      onCancel={() => (removeConfirmId = null)}
+    />
+  {/if}
 {/if}
 
 <style>
@@ -279,7 +297,8 @@
   .cap-meta :global(svg) { flex-shrink: 0; }
 
   .cap-actions { display: flex; gap: 1px; opacity: 0; transition: opacity var(--transition-fast); flex-shrink: 0; }
-  .cap:hover .cap-actions { opacity: 1; }
+  /* focus-within: a keyboard user tabbing/arrowing onto a row must see its actions, not guess at them. */
+  .cap:hover .cap-actions, .cap:focus-within .cap-actions { opacity: 1; }
   .cap-act {
     display: flex; align-items: center; justify-content: center;
     width: 26px; height: 26px; border: none; border-radius: var(--radius-sm);

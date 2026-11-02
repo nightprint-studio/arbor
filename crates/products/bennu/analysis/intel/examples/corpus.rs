@@ -74,7 +74,9 @@ fn main() {
         let ctx = FileContext {
             file_stem: path.file_stem().map(|s| s.to_string_lossy().to_string()),
             expected_package: None,
-            java_major: Some(21),
+            // `src/main/java24` is compiled at 24 whatever the module targets; the JDK read here is 21.
+            java_major: Some(bennu_check::prelude::source_set_level(path).unwrap_or(21)),
+            jdk_major: Some(21),
             classpath_complete: false,
         };
         for d in check_file_resolved(text, &ctx, &resolver, true) {

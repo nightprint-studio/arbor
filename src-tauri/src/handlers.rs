@@ -146,6 +146,7 @@ macro_rules! invoke_handlers {
             $crate::commands::recents_commands::record_recent_project,
             $crate::commands::recents_commands::list_recent_projects,
             $crate::commands::recents_commands::forget_recent_project,
+            $crate::commands::recents_commands::pin_recent_project,
             $crate::commands::recents_commands::set_open_intent,
             $crate::commands::recents_commands::take_open_intent,
             // Launcher window (JetBrains-Toolbox-like home screen)

@@ -42,6 +42,7 @@
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
@@ -623,14 +624,12 @@
                 >
                   {#if expanded}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}
                 </button>
-                <input
-                  type="checkbox"
-                  class="be-check"
-                  aria-label="Toggle all sites in this file"
+                <Checkbox
+                  stopPropagation
+                  ariaLabel="Toggle all sites in this file"
                   checked={fst === 'all'}
                   indeterminate={fst === 'some'}
                   disabled={fst === 'forced_skip'}
-                  onclick={(e) => e.stopPropagation()}
                   onchange={() => toggleFile(node.group)}
                 />
                 <FileText size={13} class="be-file-icon" />
@@ -643,13 +642,11 @@
                 {@const s = node.site}
                 {@const skip = skipped.has(siteKey(s))}
                 <span class="be-chev be-chev-spacer"></span>
-                <input
-                  type="checkbox"
-                  class="be-check"
-                  aria-label={skip ? 'Include this site' : 'Skip this site'}
+                <Checkbox
+                  stopPropagation
+                  ariaLabel={skip ? 'Include this site' : 'Skip this site'}
                   checked={!skip && !s.will_skip}
                   disabled={s.will_skip}
-                  onclick={(e) => e.stopPropagation()}
                   onchange={() => toggleSite(s)}
                 />
                 <span class="be-kind-chip-sm">{s.kind}</span>
@@ -967,13 +964,6 @@
   }
   .be-chev:hover { color: var(--text-primary); }
   .be-chev-spacer { cursor: default; pointer-events: none; }
-
-  .be-check {
-    margin: 0; flex-shrink: 0;
-    accent-color: var(--accent);
-    cursor: pointer;
-  }
-  .be-check:disabled { cursor: not-allowed; opacity: 0.4; }
 
   .be-file-name {
     color: var(--text-primary);

@@ -11,7 +11,7 @@
    * screen: remounting would re-run the whole product boot on every tab switch,
    * and the user expects a tab to be exactly where they left it.
    */
-  import type { Component } from 'svelte';
+  import { untrack, type Component } from 'svelte';
   import { surfaceStore, type SurfaceId } from '$lib/stores/surfaces.svelte';
   import SurfaceBoot from './SurfaceBoot.svelte';
 
@@ -33,7 +33,8 @@
   };
 
   let Shell = $state<Component | null>(null);
-  LOADERS[id]().then((m) => { Shell = m.default; });
+  // The surface id is fixed for the life of a host: the loader runs once, at mount.
+  LOADERS[untrack(() => id)]().then((m) => { Shell = m.default; });
 </script>
 
 <!-- `display: none` rather than an `{#if}`: the shell stays mounted (and its

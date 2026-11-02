@@ -80,6 +80,12 @@ export interface InlineCompletion {
   /** The range accepting overwrites. Defaults to an insertion at the caret. */
   replace?: { from: number; to: number };
   /**
+   * Hide the text `replace` covers while the proposal is shown, so the screen reads as it will once accepted — a block
+   * whose own text includes the closer the editor already added (`Order(|)` → `Order(a, b) { … }`) would otherwise show
+   * that closer after the block. Off by default: a rewrite is clearer with the shorthand it consumes still in view.
+   */
+  hideReplaced?: boolean;
+  /**
    * Whatever the source wants handed back when it is told what became of this proposal (see
    * {@link InlineCompletionOutcomeHandler}). Opaque here: it is never read, only returned.
    */
@@ -135,6 +141,8 @@ interface Suggestion {
   to: number;
   /** What accepting writes. */
   insert: string;
+  /** Whether the text in `from..to` is hidden while this is drawn (see `InlineCompletion.hideReplaced`). */
+  hide?: boolean;
   /**
    * Display only — the rendering of a completion row that is currently selected, not a proposal of
    * this module's own. Tab belongs to the popup, so accepting is refused and Esc is left to close
@@ -176,6 +184,7 @@ function normalise(answer: string | InlineCompletion, pos: number): Suggestion |
     from,
     to,
     insert: proposal.insert ?? proposal.text,
+    hide: proposal.hideReplaced && to > from,
     meta: proposal.meta,
   };
 }
@@ -264,9 +273,11 @@ const suggestionField = StateField.define<Suggestion | null>({
   provide: (field) =>
     EditorView.decorations.from(field, (value): DecorationSet => {
       if (!value) return Decoration.none;
-      return Decoration.set([
-        Decoration.widget({ widget: new GhostWidget(value.text, !value.continues && !value.preview), side: 1 }).range(value.pos),
-      ]);
+      const widget = new GhostWidget(value.text, !value.continues && !value.preview);
+      if (!(value.hide && value.to > value.from)) return Decoration.set([Decoration.widget({ widget, side: 1 }).range(value.pos)]);
+      // what accepting overwrites is hidden, and the ghost stands where it began: a widget inside a hidden range is not drawn
+      const at = Math.min(value.from, value.pos);
+      return Decoration.set([Decoration.widget({ widget, side: at < value.pos ? -1 : 1 }).range(at), Decoration.replace({}).range(value.from, value.to)], true);
     }),
 });
 
@@ -290,6 +301,32 @@ export const acceptInlineCompletion: Command = (view) => {
     effects: [
       setSuggestion.of(null),
       trackAccepted.of({ from: current.from, to: current.from + current.insert.length, ghost: current.insert, meta: current.meta }),
+    ],
+    annotations: outcomeNote.of('accepted'),
+    userEvent: 'input.complete',
+  });
+  return true;
+};
+
+/**
+ * Take the first line of a multi-line proposal and keep the rest drawn: `Mod-→`, for a block one wants line by line. The
+ * line's own break comes with it, so the caret lands where the next line starts and what is left is shown from there. `false`
+ * when the proposal is a single line (Tab takes that) or is not an insertion of its own text, so the key keeps its usual move.
+ */
+export const acceptInlineCompletionLine: Command = (view) => {
+  const current = view.state.field(suggestionField, false);
+  if (!current || current.preview || current.insert !== current.text) return false;
+  const brk = current.text.indexOf('\n');
+  if (brk < 0) return false;
+  const head = current.text.slice(0, brk + 1);
+  const rest = current.text.slice(brk + 1);
+  const pos = current.from + head.length;
+  view.dispatch({
+    changes: { from: current.from, to: current.to, insert: head },
+    selection: { anchor: pos },
+    effects: [
+      setSuggestion.of(rest ? { ...current, text: rest, insert: rest, pos, from: pos, to: pos, hide: false, continues: true } : null),
+      trackAccepted.of({ from: current.from, to: pos, ghost: head, meta: current.meta }),
     ],
     annotations: outcomeNote.of('accepted'),
     userEvent: 'input.complete',

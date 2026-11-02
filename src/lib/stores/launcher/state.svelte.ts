@@ -12,7 +12,7 @@ import { fetchInstalledVersions, fetchLatestVersions } from '$lib/components/lau
 import { closeProductWindow, listRunningProducts, onProductState } from '$lib/ipc/app';
 import { getLauncherConfig, setLauncherCloseToTray } from '$lib/ipc/config';
 import {
-  listRecentProjects, forgetRecentProject, type RecentProject,
+  listRecentProjects, forgetRecentProject, pinRecentProject, type RecentProject,
 } from '$lib/ipc/recents';
 import { windowModeStore } from '$lib/stores/window-mode.svelte';
 import { openProduct, openProjectIn, restartProduct } from '$lib/utils/open-product';
@@ -76,6 +76,12 @@ function createLauncherState() {
 
     /** Open a recent: its product, started ON that project. */
     openRecent(r: RecentProject) { return openProjectIn(r.product, r.path); },
+
+    /** Pin or unpin a recent. Shown at once; put back if it cannot be saved. */
+    async pinRecent(r: RecentProject, pinned: boolean) {
+      recents = recents.map((x) => (x.product === r.product && x.path === r.path ? { ...x, pinned } : x));
+      try { await pinRecentProject(r.product, r.path, pinned); } catch { await loadRecents(); }
+    },
 
     async forgetRecent(r: RecentProject) {
       recents = recents.filter((x) => !(x.product === r.product && x.path === r.path));

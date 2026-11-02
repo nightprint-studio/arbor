@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bennu · Genera bean (mockup v2)</title>
+<style>
+  :root {
+    --bg: #0d1117; --canvas: #161b22; --inset: #010409; --overlay: #1c2128;
+    --border: #30363d; --border-muted: #21262d;
+    --fg: #e6edf3; --fg-muted: #8b949e; --fg-subtle: #6e7681;
+    --blue: #58a6ff; --blue-bg: rgba(56,139,253,.13);
+    --green: #3fb950; --green-bg: rgba(46,160,67,.14); --btn-green: #238636; --btn-green-h: #2ea043;
+    --red: #f85149; --yellow: #d29922; --yellow-bg: rgba(187,128,9,.15);
+    --purple: #d2a8ff; --orange: #ffa657; --cyan: #79c0ff; --lred: #ff7b72;
+    --radius: 6px; --radius-lg: 12px; --foot: 57px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, "Segoe UI", "Inter", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--sans); }
+  button, input, select { font: inherit; color: inherit; }
+
+  /* fake editor behind the dialog */
+  .editor { position: fixed; inset: 0; padding: 56px 0 0 40px; font: 13px/20px var(--mono); color: var(--fg-subtle); overflow: hidden; }
+  .editor .tab { position: fixed; top: 0; left: 0; right: 0; height: 40px; background: var(--canvas); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding-left: 16px; font: 13px var(--sans); color: var(--fg-muted); gap: 8px; }
+  .editor .tab b { color: var(--fg); font-weight: 500; }
+  .editor .k { color: var(--lred); } .editor .a { color: var(--orange); } .editor .t { color: var(--orange); }
+  .scrim { position: fixed; inset: 0; background: rgba(1,4,9,.72); }
+
+  .modal { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; }
+  .dialog { position: relative; width: min(1180px, 100%); height: min(720px, 100%); background: var(--canvas); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    box-shadow: 0 24px 80px rgba(1,4,9,.85); display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+
+  header { display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .seg { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 2px; gap: 2px; }
+  .seg button { background: none; border: 0; padding: 3px 12px; border-radius: 4px; color: var(--fg-muted); cursor: pointer; font-size: 13px; }
+  .seg button:hover { color: var(--fg); }
+  .seg button[aria-selected="true"] { background: var(--overlay); color: var(--fg); box-shadow: inset 0 0 0 1px var(--border); }
+  .seg button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+  .seg kbd { margin-left: 6px; }
+  header .spacer { flex: 1; }
+  .mock { font-size: 11px; color: var(--yellow); background: var(--yellow-bg); border: 1px solid rgba(187,128,9,.4); padding: 2px 8px; border-radius: 999px; }
+
+  .body { display: grid; grid-template-columns: minmax(400px, .9fr) minmax(420px, 1.1fr); min-height: 0; }
+  .form { overflow: auto; padding: 16px 18px 20px; border-right: 1px solid var(--border); min-height: 0; }
+  h2 { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-subtle); margin: 18px 0 8px; font-weight: 600; }
+  h2:first-child { margin-top: 0; }
+
+  .detected { display: flex; flex-wrap: wrap; gap: 5px 12px; font-size: 12px; color: var(--fg-muted); margin-bottom: 4px; }
+  .detected span::before { content: "✓ "; color: var(--green); } .detected span.no::before { content: "– "; color: var(--fg-subtle); } .detected span.no { color: var(--fg-subtle); }
+
+  /* scenario cards: native radios, so ↑↓←→ work for free */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .card { position: relative; display: block; padding: 10px 12px 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); cursor: pointer; min-height: 78px; }
+  .card:hover { border-color: var(--fg-subtle); }
+  .card input { position: absolute; opacity: 0; }
+  .card b { display: block; font-weight: 600; font-size: 13.5px; padding-right: 20px; }
+  .card small { display: block; color: var(--fg-muted); font-size: 12px; line-height: 1.4; margin-top: 2px; }
+  .card .tag { display: inline-block; margin-top: 6px; font: 11px var(--mono); color: var(--fg-subtle); }
+  .card:has(input:checked) { border-color: var(--blue); background: var(--blue-bg); }
+  .card:has(input:checked)::after { content: "✓"; position: absolute; right: 10px; top: 8px; color: var(--blue); font-weight: 700; }
+  .card:has(input:focus-visible) { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .card:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+  .card .need { display: block; color: var(--yellow); font-size: 11.5px; margin-top: 4px; }
+
+  /* option pills */
+  .group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .group > em { font-style: normal; font-size: 12px; color: var(--fg-muted); min-width: 92px; }
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg-muted); font-size: 12.5px; cursor: pointer; user-select: none; }
+  .pill:hover { border-color: var(--fg-subtle); color: var(--fg); }
+  .pill input { position: absolute; opacity: 0; }
+  .pill:has(input:checked) { color: var(--green); border-color: rgba(63,185,80,.5); background: var(--green-bg); }
+  .pill:has(input:checked)::before { content: "✓"; font-size: 11px; }
+  .pill:has(input:focus-visible) { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .pill small { color: var(--fg-subtle); font-size: 11px; }
+  .warn { font-size: 12px; color: var(--yellow); margin: 2px 0 0; }
+
+  /* inputs */
+  input[type="text"], select { width: 100%; min-width: 0; background: var(--inset); color: var(--fg); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 9px; font: 13px var(--mono); }
+  select { font-family: var(--sans); font-size: 12.5px; padding: 5px 6px; }
+  input[type="text"]:focus, select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(56,139,253,.3); }
+  input[disabled] { color: var(--fg-subtle); }
+  .x { background: none; border: none; color: var(--fg-subtle); cursor: pointer; border-radius: var(--radius); height: 28px; } .x:hover { color: var(--red); background: var(--overlay); }
+  .x:focus-visible { outline: 2px solid var(--blue); }
+  .ghostbtn { background: none; border: 1px dashed var(--border); color: var(--fg-muted); border-radius: var(--radius); padding: 4px 11px; font: 12.5px var(--sans); cursor: pointer; }
+  .ghostbtn:hover { color: var(--fg); border-color: var(--fg-subtle); } .ghostbtn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .hint { font-size: 12px; color: var(--fg-subtle); margin-left: 8px; } .hint kbd { font-size: 10.5px; }
+
+  /* rules */
+  .rules { display: grid; gap: 6px; }
+  .rule { display: grid; grid-template-columns: 82px 1fr 156px 28px; gap: 6px; align-items: center; }
+  .rule.locked { opacity: .62; }
+  .rule.locked code { font: 12.5px var(--mono); color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
+  .auto { font-size: 11px; color: var(--fg-subtle); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; text-align: center; justify-self: start; }
+  .acc-static { font: 12.5px var(--mono); color: var(--fg-muted); }
+  .cb { position: relative; }
+  .cover { margin-top: 10px; font-size: 12.5px; color: var(--fg-muted); }
+  .cover b { color: var(--fg); font-weight: 600; } .cover .ok { color: var(--green); } .cover .bad { color: var(--yellow); }
+  .cover summary { cursor: pointer; } .cover ul { margin: 6px 0 0; padding: 0; list-style: none; font: 12px/1.7 var(--mono); color: var(--fg-muted); }
+
+  /* issuers */
+  .issuers { display: grid; gap: 8px; }
+  .iss { display: grid; grid-template-columns: 120px 1fr 28px; grid-template-areas: "pre uri x" "aud claim claim"; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
+  .iss .pre { grid-area: pre; } .iss .uri { grid-area: uri; } .iss .x { grid-area: x; } .iss .aud { grid-area: aud; } .iss .claim { grid-area: claim; }
+  .iss .row2 { display: contents; }
+  .lbl { font-size: 11px; color: var(--fg-subtle); }
+
+  /* endpoint popup (global, fixed so the scrolling form can't clip it) */
+  #pop { position: fixed; z-index: 60; background: var(--overlay); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(1,4,9,.7); overflow: auto; padding: 4px 0; }
+  #pop[hidden] { display: none; }
+  #pop .sec { padding: 6px 12px 3px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-subtle); font-weight: 600; }
+  #pop .ctrl { padding: 5px 12px 1px; font-size: 11.5px; color: var(--fg-muted); }
+  #pop .ctrl em { font-style: normal; color: var(--fg-subtle); }
+  #pop [role=option] { display: flex; align-items: center; gap: 8px; padding: 3px 12px; font: 12.5px var(--mono); cursor: pointer; }
+  #pop [role=option][aria-selected="true"] { background: var(--blue-bg); box-shadow: inset 2px 0 0 var(--blue); }
+  #pop [role=option] .n { margin-left: auto; font: 11px var(--sans); color: var(--fg-subtle); }
+  #pop .none { padding: 10px 12px; color: var(--fg-muted); font-size: 12.5px; }
+  .m { font: 600 10px var(--mono); width: 42px; text-align: center; border-radius: 4px; padding: 1px 0; flex: none; }
+  .m.GET { color: var(--green); background: rgba(63,185,80,.14); } .m.POST { color: var(--cyan); background: rgba(56,139,253,.16); }
+  .m.DELETE { color: var(--red); background: rgba(248,81,73,.14); } .m.PUT, .m.PATCH { color: var(--orange); background: rgba(255,166,87,.14); }
+  .m.ALL { color: var(--fg-subtle); background: var(--border-muted); }
+
+  /* preview */
+  .preview { background: var(--inset); display: grid; grid-template-rows: auto 1fr auto; min-height: 0; }
+  .ptabs { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--border-muted); font-size: 12px; color: var(--fg-muted); background: transparent; border-left: 0; border-right: 0; border-top: 0; text-align: left; width: 100%; }
+  .ptabs b { color: var(--fg); font-weight: 500; font-family: var(--mono); }
+  .ptabs .grow { flex: 1; } .ptabs .chev { display: none; }
+  .code { overflow: auto; padding: 10px 0; font: 12.5px/20px var(--mono); min-height: 0; }
+  .ln { display: grid; grid-template-columns: 38px 1fr; white-space: pre; background: var(--green-bg); box-shadow: inset 3px 0 0 var(--green); }
+  .ln i { font-style: normal; color: var(--green); text-align: right; padding-right: 12px; user-select: none; }
+  .ln.blank { background: none; box-shadow: none; }
+  .imports { padding: 8px 14px; border-top: 1px solid var(--border-muted); font-size: 12px; color: var(--fg-muted); max-height: 160px; overflow: auto; }
+  .imports summary { cursor: pointer; } .imports code { display: block; font: 11.5px/18px var(--mono); margin-top: 6px; white-space: pre; }
+  .side { padding: 8px 14px 10px; border-top: 1px solid var(--border-muted); font-size: 12px; color: var(--fg-muted); }
+  .side ul { margin: 4px 0 0; padding: 0; list-style: none; } .side li::before { content: "＋ "; color: var(--green); } .side code { font: 11.5px var(--mono); color: var(--cyan); }
+  .c { color: #8b949e; font-style: italic; } .s { color: #a5d6ff; } .a { color: var(--orange); } .k { color: var(--lred); } .t { color: var(--orange); }
+
+  footer { position: relative; z-index: 3; display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--border); background: var(--canvas); min-height: var(--foot); }
+  footer .where { color: var(--fg-muted); font-size: 12.5px; min-width: 0; } footer .where code { font: 12px var(--mono); color: var(--fg); }
+  footer .spacer { flex: 1; }
+  .btn { font: 500 13px var(--sans); padding: 5px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--overlay); cursor: pointer; display: inline-flex; gap: 8px; align-items: center; white-space: nowrap; }
+  .btn:hover { border-color: var(--fg-subtle); }
+  .btn.primary { background: var(--btn-green); border-color: rgba(240,246,252,.1); color: #fff; } .btn.primary:hover { background: var(--btn-green-h); }
+  .btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  kbd { font: 11px var(--mono); padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; color: var(--fg-muted); background: var(--bg); }
+  .btn.primary kbd { background: rgba(0,0,0,.2); border-color: rgba(255,255,255,.25); color: #fff; }
+
+  .toast { position: fixed; left: 50%; bottom: 80px; transform: translate(-50%, 20px); background: var(--overlay); border: 1px solid var(--green); padding: 8px 14px; border-radius: var(--radius); opacity: 0; transition: .2s; pointer-events: none; z-index: 90; }
+  .toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+  /* phone / narrow: full-screen dialog, preview becomes a bottom sheet whose header is the handle */
+  @media (max-width: 860px) {
+    .modal { padding: 0; } .dialog { height: 100%; border-radius: 0; border: 0; }
+    .body { grid-template-columns: 1fr; }
+    .form { border-right: 0; padding-bottom: 70px; }
+    .preview { position: absolute; left: 0; right: 0; bottom: var(--foot); height: 72%; z-index: 2; border-top: 1px solid var(--border); box-shadow: 0 -10px 30px rgba(1,4,9,.6); transform: translateY(calc(100% - 41px)); transition: transform .22s ease; }
+    .preview.open { transform: none; }
+    .ptabs { cursor: pointer; } .ptabs .chev { display: inline; transition: transform .2s; } .preview.open .chev { transform: rotate(180deg); }
+    .cards { grid-template-columns: 1fr; } .card { min-height: 0; }
+    .rule { grid-template-columns: 82px 1fr 28px; grid-template-areas: "path path path" "meth acc x"; }
+    .rule .cb { grid-area: path; } .rule .meth, .rule .auto { grid-area: meth; } .rule .acc { grid-area: acc; } .rule .x { grid-area: x; }
+    .rule.locked { grid-template-areas: "meth code code"; } .rule.locked code { grid-area: code; }
+    .group > em { min-width: 100%; }
+    footer .where { display: none; } footer .btn kbd { display: none; } header .mock { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="editor" aria-hidden="true">
+  <div class="tab"><b>SecurityConfig.java</b> · com.acme.shop.config</div>
+<pre style="margin:0"><span class="k">package</span> com.acme.shop.config;
+
+<span class="k">import</span> org.springframework.context.annotation.*;
+
+<span class="a">@Configuration</span>
+<span class="a">@EnableWebSecurity</span>
+<span class="k">public class</span> <span class="t">SecurityConfig</span> {
+
+
+}</pre>
+</div>
+<div class="scrim"></div>
+
+<div class="modal">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="ttl" tabindex="-1">
+    <header>
+      <h1 id="ttl">Genera bean</h1>
+      <div class="seg" role="tablist" aria-label="Ricetta" id="recipes">
+        <button role="tab" data-r="security">Security<kbd>Alt 1</kbd></button>
+        <button role="tab" data-r="converter">Hibernate<kbd>Alt 2</kbd></button>
+        <button role="tab" data-r="jackson">Jackson<kbd>Alt 3</kbd></button>
+      </div>
+      <span class="spacer"></span>
+      <span class="mock">mockup v2 · non collegato a Bennu</span>
+    </header>
+
+    <div class="body">
+      <section class="form" id="form" aria-label="Opzioni"></section>
+      <section class="preview" id="preview" aria-label="Anteprima">
+        <button class="ptabs" type="button" id="phandle" aria-expanded="false" aria-controls="code"><span>Anteprima</span><b id="pfile"></b><span class="grow"></span><span id="pcount"></span><span class="chev" aria-hidden="true">▲</span></button>
+        <div class="code" id="code" tabindex="0" aria-label="Codice generato"></div>
+        <div id="pextra"></div>
+      </section>
+    </div>
+
+    <footer>
+      <span class="where" id="where"></span>
+      <span class="spacer"></span>
+      <button class="btn" type="button" id="cancel">Annulla <kbd>Esc</kbd></button>
+      <button class="btn primary" type="button" id="ok">Inserisci <kbd>Ctrl</kbd><kbd>↵</kbd></button>
+    </footer>
+  </div>
+</div>
+
+<div id="pop" role="listbox" hidden></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+/* ============ data the real feature would read from the Bennu index ============ */
+// controllers found in the app: root = class-level mapping, eps = method-level mappings
+const ENDPOINTS = [
+  { ctrl: 'AuthController',   root: '/auth',       eps: [['POST', '/auth/login'], ['POST', '/auth/refresh']] },
+  { ctrl: 'PublicController', root: '/public',     eps: [['GET', '/public/catalog'], ['GET', '/public/catalog/{sku}']] },
+  { ctrl: 'UserController',   root: '/api/users',  eps: [['GET', '/api/users'], ['GET', '/api/users/{id}'], ['POST', '/api/users'], ['DELETE', '/api/users/{id}']] },
+  { ctrl: 'OrderController',  root: '/api/orders', eps: [['GET', '/api/orders'], ['GET', '/api/orders/{id}'], ['POST', '/api/orders'], ['POST', '/api/orders/{id}/cancel']] },
+  { ctrl: 'AdminController',  root: '/admin',      eps: [['GET', '/admin/stats'], ['POST', '/admin/reindex']] },
+];
+const ALL_EPS = ENDPOINTS.flatMap(c => c.eps.map(([m, p]) => ({ method: m, path: p, ctrl: c.ctrl })));
+const PRESETS = {
+  Keycloak: { iss: 'https://sso.acme.com/realms/shop', claim: 'realm_access.roles' },
+  Auth0:    { iss: 'https://acme.eu.auth0.com/', claim: 'permissions' },
+  Okta:     { iss: 'https://acme.okta.com/oauth2/default', claim: 'groups' },
+  'Azure AD': { iss: 'https://login.microsoftonline.com/{tenant}/v2.0', claim: 'roles' },
+  Custom:   { iss: '', claim: 'roles' },
+};
+const ACCESS = ['permitAll()', 'authenticated()', 'denyAll()', 'hasRole("ADMIN")', 'hasRole("USER")', 'hasAuthority("SCOPE_read")'];
+const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+/* ============ state ============ */
+const S = {
+  recipe: 'security',
+  security: {
+    scenario: 'jwt', swagger: true, health: true, cors: true, csrf: false, devUser: false,
+    issuers: [{ p: 'Keycloak', iss: PRESETS.Keycloak.iss, aud: 'shop-api', claim: PRESETS.Keycloak.claim }],
+    rules: [
+      { method: '', path: '/public/**', access: 'permitAll()' },
+      { method: '', path: '/auth/**', access: 'permitAll()' },
+      { method: 'POST', path: '/api/orders/{id}/cancel', access: 'hasRole("ADMIN")' },
+      { method: '', path: '/admin/**', access: 'hasRole("ADMIN")' },
+    ],
+    any: 'authenticated()',
+  },
+  converter: { scenario: 'LocalDate', auto: true, nullsafe: true },
+  jackson: { scenario: 'both', type: 'Money', module: false },
+};
+
+/* ============ helpers ============ */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const narrow = () => matchMedia('(max-width: 860px)').matches;
+
+function pathRegex(p) {
+  const base = p.endsWith('/**') ? p.slice(0, -3) : p, open = p.endsWith('/**');
+  const re = base.replace(/[.+^$()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\{[^}]+\}/g, '[^/]+');
+  return new RegExp('^' + re + (open ? '(?:/.*)?' : '') + '$');
+}
+function coverage(s) {
+  const rules = s.rules.filter(r => r.path.trim()).map(r => ({ ...r, re: pathRegex(r.path.trim()) }));
+  const uncovered = ALL_EPS.filter(e => { const concrete = e.path.replace(/\{[^}]+\}/g, 'x'); return !rules.some(r => (!r.method || r.method === e.method) && r.re.test(concrete)); });
+  return { total: ALL_EPS.length, uncovered };
+}
+
+/* ============ widgets ============ */
+const card = (v, cur, title, desc, tag, off, need) => `<label class="card"><input type="radio" name="scenario" value="${v}" ${cur === v ? 'checked' : ''} ${off ? 'disabled' : ''}>
+  <b>${title}</b><small>${desc}</small>${tag ? `<span class="tag">${tag}</span>` : ''}${need ? `<span class="need">${need}</span>` : ''}</label>`;
+const pill = (key, label, on, sub) => `<label class="pill"><input type="checkbox" data-k="${key}" ${on ? 'checked' : ''}>${label}${sub ? ` <small>${sub}</small>` : ''}</label>`;
+
+/* ============ recipes ============ */
+const R = {};
+
+R.security = {
+  sub: 'Spring Security 6.2.3',
+  where: () => 'Inserisce in <code>SecurityConfig.java</code> alla riga <code>8</code> (caret)',
+  file: () => 'SecurityConfig.java',
+  detected: `<span>Spring Security 6.2.3</span><span>springdoc-openapi 2.5</span><span>actuator</span><span>oauth2-resource-server</span><span>PasswordEncoder · AppConfig.java:18</span><span class="no">oauth2-client</span><span class="no">UserDetailsService</span>`,
+  scenarios() {
+    const s = S.security, n = s.issuers.length;
+    return card('jwt', s.scenario, 'API con JWT', 'Resource server stateless, un solo issuer.', 'stateless · 1 issuer')
+      + card('multi', s.scenario, 'API multi-issuer', 'Più identity provider, ognuno con audience e ruoli suoi.', `stateless · ${Math.max(n, 2)} issuer`)
+      + card('form', s.scenario, 'Web con login a form', 'Sessione e pagina di login.', 'sessione · CSRF')
+      + card('webapi', s.scenario, 'Web e API insieme', 'Due catene: /api/** con JWT, il resto con login a form.', '2 SecurityFilterChain')
+      + card('oauth2', s.scenario, 'Login con provider', 'Google, GitHub, Keycloak…', '', true, 'manca spring-boot-starter-oauth2-client · aggiungi dipendenza');
+  },
+  options() {
+    const s = S.security, usesForm = s.scenario === 'form' || s.scenario === 'webapi';
+    return `<div class="group"><em>Rendi pubblici</em>${pill('swagger', 'Swagger UI', s.swagger, '/swagger-ui · /v3/api-docs')}${pill('health', 'Health', s.health, 'actuator')}</div>
+      <div class="group"><em>Inoltre</em>${pill('cors', 'CORS', s.cors)}${pill('csrf', 'CSRF', s.csrf)}${usesForm ? pill('devUser', 'Utente di sviluppo', s.devUser, 'in memoria') : ''}</div>
+      ${s.swagger ? '<p class="warn">Swagger pubblico in produzione di solito non è voluto: <a style="color:inherit">limita al profilo dev</a></p>' : ''}`;
+  },
+  sections() {
+    const s = S.security, wantsIss = s.scenario === 'jwt' || s.scenario === 'multi' || s.scenario === 'webapi';
+    let h = '';
+    if (wantsIss) {
+      h += `<h2>${s.scenario === 'multi' ? 'Issuer' : 'Issuer'}</h2><div class="issuers" id="issuers"></div>`;
+      if (s.scenario === 'multi') h += `<div style="margin-top:8px"><button type="button" class="ghostbtn" id="addiss">＋ Issuer</button><span class="hint">la lista è fissa: un token con un <code>iss</code> non elencato viene rifiutato</span></div>`;
+    }
+    h += `<h2>Percorsi</h2><div class="rules" id="rules"></div>
+      <div style="margin-top:8px"><button type="button" class="ghostbtn" id="addrule">＋ Regola</button><span class="hint"><kbd>↓</kbd> sul percorso elenca gli endpoint dell'app</span></div>
+      <div class="cover" id="cover"></div>`;
+    return h;
+  },
+  normalise() {
+    const s = S.security, d = { jwt: [false, true], multi: [false, true], form: [true, false], webapi: [true, true] }[s.scenario];
+    if (d) { s.csrf = d[0]; s.cors = d[1]; }
+    if (s.scenario === 'multi' && s.issuers.length < 2) s.issuers.push({ p: 'Auth0', iss: PRESETS.Auth0.iss, aud: 'shop-api', claim: PRESETS.Auth0.claim });
+    if (s.scenario !== 'multi' && s.issuers.length > 1) s.issuers.length = 1;
+  },
+  bind() {
+    const s = S.security;
+    const paintIss = () => {
+      const box = $('issuers'); if (!box) return;
+      box.innerHTML = s.issuers.map((r, i) => `<div class="iss" data-i="${i}">
+        <select class="pre" aria-label="Provider ${i + 1}">${Object.keys(PRESETS).map(p => `<option ${p === r.p ? 'selected' : ''}>${p}</option>`).join('')}</select>
+        <input type="text" class="uri" value="${esc(r.iss)}" placeholder="Issuer URI" aria-label="Issuer URI ${i + 1}">
+        ${s.scenario === 'multi' && s.issuers.length > 2 ? `<button class="x" type="button" data-del="${i}" aria-label="Rimuovi issuer">✕</button>` : '<span></span>'}
+        <input type="text" class="aud" value="${esc(r.aud)}" placeholder="Audience" aria-label="Audience ${i + 1}">
+        <input type="text" class="claim" value="${esc(r.claim)}" placeholder="Claim dei ruoli" aria-label="Claim dei ruoli ${i + 1}"></div>`).join('');
+    };
+    paintIss();
+    const ib = $('issuers');
+    if (ib) {
+      ib.addEventListener('input', e => { const i = e.target.closest('.iss').dataset.i, r = s.issuers[i];
+        if (e.target.classList.contains('uri')) r.iss = e.target.value; if (e.target.classList.contains('aud')) r.aud = e.target.value; if (e.target.classList.contains('claim')) r.claim = e.target.value; update(); });
+      ib.addEventListener('change', e => { if (!e.target.classList.contains('pre')) return; const row = e.target.closest('.iss'), r = s.issuers[row.dataset.i];
+        r.p = e.target.value; r.iss = PRESETS[r.p].iss; r.claim = PRESETS[r.p].claim; row.querySelector('.uri').value = r.iss; row.querySelector('.claim').value = r.claim; update(); });
+      ib.addEventListener('click', e => { const d = e.target.dataset.del; if (d != null) { s.issuers.splice(+d, 1); paintIss(); update(); } });
+    }
+    $('addiss')?.addEventListener('click', () => { s.issuers.push({ p: 'Okta', iss: PRESETS.Okta.iss, aud: 'shop-api', claim: PRESETS.Okta.claim }); paintIss(); update(); });
+
+    this.paintRules = () => {
+      const box = $('rules');
+      const locked = [];
+      if (s.swagger) locked.push(['Swagger', '/v3/api-docs/**, /swagger-ui/**, /swagger-ui.html']);
+      if (s.health) locked.push(['Health', 'EndpointRequest.to(HealthEndpoint)']);
+      box.innerHTML = locked.map(([why, what]) => `<div class="rule locked"><span class="auto meth">${why}</span><code>${what}</code><span class="acc acc-static">permitAll()</span><span></span></div>`).join('')
+        + s.rules.map((r, i) => `<div class="rule" data-i="${i}">
+          <select class="meth" aria-label="Metodo HTTP"><option value="">Tutti</option>${METHODS.map(m => `<option ${m === r.method ? 'selected' : ''}>${m}</option>`).join('')}</select>
+          <div class="cb"><input type="text" class="path" role="combobox" aria-autocomplete="list" aria-controls="pop" aria-expanded="false" autocomplete="off" spellcheck="false" value="${esc(r.path)}" placeholder="/percorso/**" aria-label="Percorso ${i + 1}"></div>
+          <select class="acc" aria-label="Accesso ${i + 1}">${ACCESS.map(a => `<option ${a === r.access ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select>
+          <button class="x" type="button" data-del="${i}" aria-label="Rimuovi regola">✕</button></div>`).join('')
+        + `<div class="rule"><span class="auto meth">resto</span><div class="cb"><input type="text" value="anyRequest()" disabled aria-label="Tutto il resto"></div>
+          <select class="acc" id="any" aria-label="Accesso al resto">${ACCESS.slice(0, 3).map(a => `<option ${a === s.any ? 'selected' : ''}>${a}</option>`).join('')}</select><span></span></div>`;
+    };
+    this.paintRules();
+    const rb = $('rules');
+    rb.addEventListener('input', e => { const row = e.target.closest('.rule'); if (!row || row.dataset.i == null) return; const r = s.rules[row.dataset.i];
+      if (e.target.classList.contains('path')) { r.path = e.target.value; cbOpen(e.target); } update(); });
+    rb.addEventListener('change', e => { const row = e.target.closest('.rule'); if (e.target.id === 'any') { s.any = e.target.value; return update(); } if (!row || row.dataset.i == null) return;
+      const r = s.rules[row.dataset.i]; if (e.target.classList.contains('meth')) r.method = e.target.value; if (e.target.classList.contains('acc')) r.access = e.target.value; update(); });
+    rb.addEventListener('click', e => { const d = e.target.dataset.del; if (d != null) { s.rules.splice(+d, 1); this.paintRules(); update(); } else if (e.target.classList.contains('path')) cbOpen(e.target, true); });
+    rb.addEventListener('keydown', e => { if (e.target.classList.contains('path')) cbKey(e); });
+    rb.addEventListener('focusout', e => { if (e.target.classList.contains('path')) setTimeout(() => { if (document.activeElement !== e.target) cbClose(); }, 0); });
+    $('addrule').addEventListener('click', () => { s.rules.push({ method: '', path: '', access: 'authenticated()' }); this.paintRules(); update(); rb.querySelectorAll('.path')[s.rules.length - 1].focus(); });
+    $('form').onscroll = cbClose;
+  },
+  refresh() {
+    const s = S.security, box = $('cover'); if (!box) return;
+    const c = coverage(s), n = c.uncovered.length;
+    box.innerHTML = `<b>${c.total}</b> endpoint nell'app · <span class="ok">${c.total - n} con una regola</span> · <span class="${n ? 'bad' : 'ok'}">${n} su <code>anyRequest().${esc(s.any)}</code></span>`
+      + (n ? `<details><summary>quali sono</summary><ul>${c.uncovered.map(e => `<li>${e.method} ${esc(e.path)} <span style="color:var(--fg-subtle)">· ${e.ctrl}</span></li>`).join('')}</ul></details>` : '');
+  },
+  gen() {
+    const s = S.security, L = [], multi = s.scenario === 'multi';
+    const rules = () => {
+      const r = [];
+      if (s.swagger) r.push('.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()');
+      if (s.health) r.push('.requestMatchers(EndpointRequest.to(HealthEndpoint.class)).permitAll()');
+      s.rules.filter(x => x.path.trim()).forEach(x => r.push(`.requestMatchers(${x.method ? `HttpMethod.${x.method}, ` : ''}"${x.path.trim()}").${x.access}`));
+      return r;
+    };
+    const tail = (lines, closing) => { lines[lines.length - 1] += closing; };
+    const jwtPart = () => multi ? '.oauth2ResourceServer(oauth2 -> oauth2.authenticationManagerResolver(issuerResolver()))' : '.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))';
+    const stateless = '.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))';
+    const chain = (name, { order, matcher, apiRules, auth }) => {
+      if (order) L.push(`@Order(${order})`);
+      L.push('@Bean', `public SecurityFilterChain ${name}(HttpSecurity http) throws Exception {`, '    http');
+      if (matcher) L.push(`        .securityMatcher("${matcher}")`);
+      L.push('        .authorizeHttpRequests(auth -> auth');
+      (apiRules || rules()).forEach(r => L.push('            ' + r));
+      L.push(`            .anyRequest().${apiRules ? 'authenticated()' : s.any})`);
+      auth.forEach(a => L.push('        ' + a));
+      if (s.cors) L.push('        .cors(Customizer.withDefaults())');
+      if (!s.csrf) L.push('        .csrf(csrf -> csrf.disable())');
+      tail(L, ';');
+      L.push('    return http.build();', '}');
+    };
+    if (s.scenario === 'jwt' || multi) chain('securityFilterChain', { auth: [jwtPart(), stateless] });
+    if (s.scenario === 'form') chain('securityFilterChain', { auth: ['.formLogin(Customizer.withDefaults())'] });
+    if (s.scenario === 'webapi') {
+      chain('apiChain', { order: 1, matcher: '/api/**', apiRules: [], auth: [jwtPart(), stateless] });
+      L.push(''); chain('webChain', { order: 2, auth: ['.formLogin(Customizer.withDefaults())'] });
+    }
+    if (s.devUser && (s.scenario === 'form' || s.scenario === 'webapi')) {
+      L.push('', '// development only: replace with a real user store', '@Bean', 'public UserDetailsService users(PasswordEncoder encoder) {',
+        '    return new InMemoryUserDetailsManager(', '        User.withUsername("admin").password(encoder.encode("change-me")).roles("ADMIN").build());', '}');
+    }
+    if (multi) {
+      L.push('', '@Bean', 'public AuthenticationManagerResolver<HttpServletRequest> issuerResolver() {', '    Map<String, AuthenticationManager> trusted = Map.of(');
+      s.issuers.forEach((r, i) => L.push(`        "${r.iss}", jwt("${r.iss}", "${r.aud}", "${r.claim}")${i < s.issuers.length - 1 ? ',' : ');'}`));
+      L.push('    return new JwtIssuerAuthenticationManagerResolver(trusted::get);', '}', '',
+        'private static AuthenticationManager jwt(String issuer, String audience, String rolesClaim) {',
+        '    NimbusJwtDecoder decoder = JwtDecoders.fromIssuerLocation(issuer);',
+        '    decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(',
+        '        JwtValidators.createDefaultWithIssuer(issuer),',
+        '        new JwtClaimValidator<List<String>>("aud", aud -> aud != null && aud.contains(audience))));',
+        '    JwtAuthenticationProvider provider = new JwtAuthenticationProvider(decoder);',
+        '    provider.setJwtAuthenticationConverter(rolesFrom(rolesClaim));',
+        '    return provider::authenticate;', '}', '',
+        '// walks a dotted claim path such as realm_access.roles',
+        'private static Converter<Jwt, AbstractAuthenticationToken> rolesFrom(String path) {',
+        '    return jwt -> {',
+        '        Object node = jwt.getClaims();',
+        '        for (String key : path.split("\\\\.")) {',
+        '            node = node instanceof Map<?, ?> map ? map.get(key) : null;',
+        '        }',
+        '        Collection<?> roles = node instanceof Collection<?> c ? c : List.of();',
+        '        return new JwtAuthenticationToken(jwt, roles.stream().map(r -> new SimpleGrantedAuthority("ROLE_" + r)).toList());',
+        '    };', '}');
+    }
+    return L;
+  },
+  imports() {
+    const s = S.security, I = ['org.springframework.context.annotation.Bean', 'org.springframework.security.config.Customizer',
+      'org.springframework.security.config.annotation.web.builders.HttpSecurity', 'org.springframework.security.web.SecurityFilterChain'];
+    if (s.health) I.push('org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest', 'org.springframework.boot.actuate.health.HealthEndpoint');
+    if (s.rules.some(r => r.method)) I.push('org.springframework.http.HttpMethod');
+    if (s.scenario !== 'form') I.push('org.springframework.security.config.http.SessionCreationPolicy');
+    if (s.scenario === 'webapi') I.push('org.springframework.core.annotation.Order');
+    if (s.devUser && (s.scenario === 'form' || s.scenario === 'webapi')) I.push('org.springframework.security.core.userdetails.User', 'org.springframework.security.core.userdetails.UserDetailsService', 'org.springframework.security.crypto.password.PasswordEncoder', 'org.springframework.security.provisioning.InMemoryUserDetailsManager');
+    if (s.scenario === 'multi') I.push('jakarta.servlet.http.HttpServletRequest', 'org.springframework.security.authentication.*', 'org.springframework.security.oauth2.core.*', 'org.springframework.security.oauth2.jwt.*', 'org.springframework.security.oauth2.server.resource.authentication.*', 'org.springframework.security.core.authority.SimpleGrantedAuthority', 'org.springframework.core.convert.converter.Converter', 'java.util.*');
+    return I;
+  },
+  side() {
+    const s = S.security;
+    if (s.scenario === 'jwt' || s.scenario === 'webapi') return [`<code>application.yml</code> · <code>spring.security.oauth2.resourceserver.jwt.issuer-uri: ${esc(s.issuers[0].iss || '…')}</code>`];
+    return [];
+  },
+};
+
+R.converter = {
+  sub: 'Hibernate 6.4',
+  pairs: {
+    LocalDate: { j: 'LocalDate', d: 'String', to: 'attribute.toString()', from: 'LocalDate.parse(dbData)', imp: ['java.time.LocalDate'], name: 'LocalDateStringConverter', hint: 'private LocalDate birthDate · Customer.java:31' },
+    Duration:  { j: 'Duration', d: 'Long', to: 'attribute.toMillis()', from: 'Duration.ofMillis(dbData)', imp: ['java.time.Duration'], name: 'DurationMillisConverter', hint: 'private Duration timeout · Policy.java:14' },
+    ListString:{ j: 'List<String>', d: 'String', to: 'String.join(",", attribute)', from: 'List.of(dbData.split(","))', imp: ['java.util.List'], name: 'StringListConverter', hint: 'private List<String> tags · Product.java:22' },
+  },
+  where() { return `Crea <code>${this.pairs[S.converter.scenario].name}.java</code> in <code>converter/</code>`; },
+  file() { return this.pairs[S.converter.scenario].name + '.java'; },
+  get detected() { return `<span>Hibernate 6.4</span><span>jakarta.persistence</span><span>campo sotto il caret: <code>${this.pairs[S.converter.scenario].hint}</code></span>`; },
+  scenarios() {
+    const c = S.converter;
+    return card('LocalDate', c.scenario, 'LocalDate → String', 'Formato ISO-8601, ordinabile.', 'AttributeConverter')
+      + card('Duration', c.scenario, 'Duration → Long', 'Millisecondi.', 'esiste già DurationMillisConverter')
+      + card('ListString', c.scenario, 'List&lt;String&gt; → String', 'Separatore virgola.', 'senza escape: attenzione ai valori con virgole');
+  },
+  options() { const c = S.converter; return `<div class="group"><em>Applica</em>${pill('auto', 'A tutti i campi di questo tipo', c.auto, 'autoApply')}${pill('nullsafe', 'Gestisci i null', c.nullsafe)}</div>`; },
+  sections() { return S.converter.scenario === 'Duration' ? '<h2>Già presente</h2><p class="warn" style="color:var(--fg-muted)">Esiste <code>DurationMillisConverter</code> in <code>converter/</code>. Genero comunque una copia o lo riuso?</p>' : ''; },
+  gen() {
+    const c = S.converter, p = this.pairs[c.scenario];
+    const nn = (e, x) => c.nullsafe ? `${x} == null ? null : ${e}` : e;
+    return [`@Converter(autoApply = ${c.auto})`, `public class ${p.name} implements AttributeConverter<${p.j}, ${p.d}> {`, '', '    @Override',
+      `    public ${p.d} convertToDatabaseColumn(${p.j} attribute) {`, `        return ${nn(p.to, 'attribute')};`, '    }', '', '    @Override',
+      `    public ${p.j} convertToEntityAttribute(${p.d} dbData) {`, `        return ${nn(p.from, 'dbData')};`, '    }', '}'];
+  },
+  imports() { return ['jakarta.persistence.AttributeConverter', 'jakarta.persistence.Converter', ...this.pairs[S.converter.scenario].imp]; },
+  side() { return S.converter.auto ? [] : ['<code>Customer.java</code> · <code>@Convert(converter = …)</code> sul campo']; },
+};
+
+R.jackson = {
+  sub: 'Jackson 2.17',
+  where() { return `Crea <code>${S.jackson.type}Json.java</code> in <code>config/</code>`; },
+  file() { return S.jackson.type + 'Json.java'; },
+  detected: `<span>Jackson 2.17</span><span>spring-boot-starter-json</span><span>Money · model/Money.java · amount, currency</span>`,
+  scenarios() {
+    const j = S.jackson;
+    return card('both', j.scenario, 'Serializer e deserializer', 'Round-trip completo del tipo.', 'JsonSerializer + JsonDeserializer')
+      + card('ser', j.scenario, 'Solo serializer', 'Il tipo si legge già com\'è.', 'JsonSerializer')
+      + card('de', j.scenario, 'Solo deserializer', 'Il tipo si scrive già com\'è.', 'JsonDeserializer');
+  },
+  options() { const j = S.jackson; return `<div class="group"><em>Registrazione</em>${pill('module', 'Bean Module esplicito', j.module, 'invece di @JsonComponent')}</div>`; },
+  sections() { const j = S.jackson; return `<h2>Tipo</h2><select id="jt" aria-label="Tipo"><option ${j.type === 'Money' ? 'selected' : ''}>Money</option><option ${j.type === 'PhoneNumber' ? 'selected' : ''}>PhoneNumber</option></select>`; },
+  bind() { $('jt').onchange = e => { S.jackson.type = e.target.value; update(); }; },
+  gen() {
+    const j = S.jackson, t = j.type, ser = j.scenario !== 'de', de = j.scenario !== 'ser';
+    const sBody = t === 'Money' ? ['gen.writeStartObject();', 'gen.writeNumberField("amount", value.getAmount());', 'gen.writeStringField("currency", value.getCurrency());', 'gen.writeEndObject();'] : ['gen.writeString(value.toE164());'];
+    const dBody = t === 'Money' ? ['JsonNode node = p.getCodec().readTree(p);', 'return new Money(node.get("amount").decimalValue(), node.get("currency").asText());'] : ['return PhoneNumber.parse(p.getValueAsString());'];
+    const inner = [];
+    if (ser) inner.push(`    public static class ${t}Serializer extends JsonSerializer<${t}> {`, '        @Override', `        public void serialize(${t} value, JsonGenerator gen, SerializerProvider serializers) throws IOException {`, ...sBody.map(x => '            ' + x), '        }', '    }', '');
+    if (de) inner.push(`    public static class ${t}Deserializer extends JsonDeserializer<${t}> {`, '        @Override', `        public ${t} deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {`, ...dBody.map(x => '            ' + x), '        }', '    }', '');
+    inner.pop();
+    if (!j.module) return ['@JsonComponent', `public class ${t}Json {`, '', ...inner, '}'];
+    return ['@Configuration', `public class ${t}Json {`, '', '    @Bean', `    public Module ${t[0].toLowerCase() + t.slice(1)}Module() {`, '        SimpleModule module = new SimpleModule();',
+      ...(ser ? [`        module.addSerializer(${t}.class, new ${t}Serializer());`] : []), ...(de ? [`        module.addDeserializer(${t}.class, new ${t}Deserializer());`] : []), '        return module;', '    }', '', ...inner, '}'];
+  },
+  imports() { const j = S.jackson, I = ['com.fasterxml.jackson.databind.*', 'java.io.IOException']; if (j.scenario !== 'de') I.push('com.fasterxml.jackson.core.JsonGenerator'); if (j.scenario !== 'ser') I.push('com.fasterxml.jackson.core.JsonParser'); I.push(j.module ? 'com.fasterxml.jackson.databind.module.SimpleModule' : 'org.springframework.boot.jackson.JsonComponent'); return I; },
+  side() { return []; },
+};
+
+/* ============ highlighting: one pass, so a keyword inside a string is not recoloured ============ */
+function hl(code) {
+  const re = /(\/\/[^\n]*)|("(?:[^"\\]|\\.)*")|(@[A-Za-z]+)|\b(public|private|class|return|new|null|implements|extends|throws|static|final|void|for|instanceof)\b|\b([A-Z][A-Za-z0-9_]*)\b/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(code))) {
+    out += esc(code.slice(last, m.index)).replace(/&quot;/g, '"');
+    out += `<span class="${m[1] ? 'c' : m[2] ? 's' : m[3] ? 'a' : m[4] ? 'k' : 't'}">${esc(m[0]).replace(/&quot;/g, '"')}</span>`; last = re.lastIndex;
+  }
+  return out + esc(code.slice(last)).replace(/&quot;/g, '"');
+}
+
+/* ============ endpoint combobox: one popup, shared by every path field ============ */
+const pop = $('pop');
+let cbInput = null, cbIndex = -1, cbFlat = [];
+function cbOpen(input, all = false) {
+  cbInput = input; input.setAttribute('aria-expanded', 'true');
+  // opened by click or ArrowDown the whole list shows; only typing filters it
+  const q = all ? '' : input.value.trim().toLowerCase(), has = (...xs) => !q || xs.some(x => x.toLowerCase().includes(q));
+  const roots = ENDPOINTS.filter(c => has(c.root, c.ctrl)), groups = ENDPOINTS.map(c => ({ ...c, eps: c.eps.filter(([m, p]) => has(p, m, c.ctrl)) })).filter(c => c.eps.length);
+  cbFlat = []; let h = '';
+  if (roots.length) { h += '<div class="sec" role="presentation">Radici</div>'; roots.forEach(c => { cbFlat.push({ path: c.root + '/**', method: '' }); h += opt(cbFlat.length - 1, 'ALL', c.root + '/**', `${c.ctrl} · ${c.eps.length}`); }); }
+  if (groups.length) { h += '<div class="sec" role="presentation">Endpoint</div>'; groups.forEach(c => { h += `<div class="ctrl" role="presentation">${c.ctrl}</div>`; c.eps.forEach(([m, p]) => { cbFlat.push({ path: p, method: m }); h += opt(cbFlat.length - 1, m, p, ''); }); }); }
+  if (!cbFlat.length) h = `<div class="none">Nessun endpoint corrisponde: il testo resta com'è.</div>`;
+  pop.innerHTML = h; cbIndex = -1; pop.hidden = false;
+  const r = input.getBoundingClientRect(), w = Math.min(Math.max(r.width, 360), innerWidth - 16), room = innerHeight - r.bottom - 12;
+  pop.style.width = w + 'px'; pop.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + 'px';
+  if (room < 200 && r.top > room) { pop.style.top = 'auto'; pop.style.bottom = (innerHeight - r.top + 4) + 'px'; pop.style.maxHeight = Math.min(340, r.top - 12) + 'px'; }
+  else { pop.style.bottom = 'auto'; pop.style.top = (r.bottom + 4) + 'px'; pop.style.maxHeight = Math.min(340, room) + 'px'; }
+}
+const opt = (i, m, path, n) => `<div role="option" id="o${i}" data-i="${i}" aria-selected="false"><span class="m ${m}">${m === 'ALL' ? 'tutti' : m}</span><span>${esc(path)}</span>${n ? `<span class="n">${esc(n)}</span>` : ''}</div>`;
+function cbClose() { if (cbInput) { cbInput.setAttribute('aria-expanded', 'false'); cbInput.removeAttribute('aria-activedescendant'); } cbInput = null; pop.hidden = true; }
+function cbMove(d) {
+  if (!cbFlat.length) return;
+  cbIndex = (cbIndex + d + cbFlat.length) % cbFlat.length;
+  pop.querySelectorAll('[role=option]').forEach(o => o.setAttribute('aria-selected', String(+o.dataset.i === cbIndex)));
+  const cur = $('o' + cbIndex); cur.scrollIntoView({ block: 'nearest' }); cbInput.setAttribute('aria-activedescendant', 'o' + cbIndex);
+}
+function cbPick(i) {
+  const pickItem = cbFlat[i], row = cbInput.closest('.rule'), r = S.security.rules[row.dataset.i];
+  r.path = pickItem.path; r.method = pickItem.method; cbInput.value = r.path; row.querySelector('.meth').value = r.method;
+  const input = cbInput; cbClose(); input.focus(); update();
+}
+function cbKey(e) {
+  if (e.key === 'ArrowDown') { e.preventDefault(); if (!cbInput) cbOpen(e.target, true); cbMove(1); }
+  else if (e.key === 'ArrowUp' && cbInput) { e.preventDefault(); cbMove(-1); }
+  else if (e.key === 'Enter' && cbInput && cbIndex >= 0 && !(e.ctrlKey || e.metaKey)) { e.preventDefault(); cbPick(cbIndex); }
+  else if (e.key === 'Escape' && cbInput) { e.preventDefault(); e.stopPropagation(); cbClose(); }
+  else if (e.key === 'Tab') cbClose();
+}
+pop.addEventListener('mousedown', e => { e.preventDefault(); const o = e.target.closest('[role=option]'); if (o) cbPick(+o.dataset.i); });
+
+/* ============ render ============ */
+function update() {
+  const r = R[S.recipe], lines = r.gen();
+  $('pfile').textContent = r.file(); $('where').innerHTML = r.where();
+  $('code').innerHTML = lines.map((l, i) => `<div class="ln ${l === '' ? 'blank' : ''}"><i>${8 + i}</i><span>${hl(l)}</span></div>`).join('');
+  $('pcount').textContent = `+${lines.length} righe`;
+  const imps = r.imports(), side = r.side();
+  $('pextra').innerHTML = `<details class="imports"><summary>${imps.length} import aggiunti automaticamente</summary><code>${imps.map(i => 'import ' + i + ';').join('\n')}</code></details>`
+    + (side.length ? `<div class="side">Modifiche collaterali<ul>${side.map(x => `<li>${x}</li>`).join('')}</ul></div>` : '');
+  r.refresh?.();
+}
+function renderForm() {
+  const r = R[S.recipe]; cbClose(); r.normalise?.();
+  $('form').innerHTML = `<div class="detected">${r.detected}</div><h2 id="sc">Scenario</h2><div class="cards" role="radiogroup" aria-labelledby="sc">${r.scenarios()}</div>
+    <h2>Opzioni</h2><div id="opts">${r.options()}</div>${r.sections()}`;
+  r.bind?.();
+  update();
+}
+function show(name, focus = true) {
+  S.recipe = name;
+  document.querySelectorAll('#recipes [role=tab]').forEach(b => { const on = b.dataset.r === name; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
+  renderForm();
+  if (focus) $('form').querySelector('input[name=scenario]:checked')?.focus();
+}
+$('form').addEventListener('change', e => {
+  const t = e.target, st = S[S.recipe];
+  if (t.name === 'scenario') { st.scenario = t.value; renderForm(); $('form').querySelector('input[name=scenario]:checked').focus(); return; }
+  if (t.dataset.k) { st[t.dataset.k] = t.checked; $('opts').innerHTML = R[S.recipe].options(); R[S.recipe].paintRules?.(); $('opts').querySelector(`[data-k=${t.dataset.k}]`)?.focus(); update(); }
+});
+
+/* ============ keyboard: Alt+1/2/3 recipe, ←→ in the tabs, Ctrl+Enter insert, Esc cancel ============ */
+const toast = msg => { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('on'), 1800); };
+const order = ['security', 'converter', 'jackson'];
+$('recipes').addEventListener('click', e => { const b = e.target.closest('[data-r]'); if (b) show(b.dataset.r); });
+$('recipes').addEventListener('keydown', e => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  e.preventDefault(); const i = (order.indexOf(S.recipe) + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length;
+  show(order[i], false); document.querySelector(`[data-r=${order[i]}]`).focus();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); toast(`Inserito: ${R[S.recipe].file()} (mockup)`); }
+  else if (e.key === 'Escape') toast('Annullato (mockup)');
+  else if (e.altKey && /^Digit[123]$/.test(e.code)) { e.preventDefault(); show(order[+e.code.slice(5) - 1]); }
+});
+$('ok').onclick = () => toast(`Inserito: ${R[S.recipe].file()} (mockup)`);
+$('cancel').onclick = () => toast('Annullato (mockup)');
+$('phandle').onclick = () => { if (!narrow()) return; const open = $('preview').classList.toggle('open'); $('phandle').setAttribute('aria-expanded', open); };
+
+show('security');
+</script>
+</body>
+</html>

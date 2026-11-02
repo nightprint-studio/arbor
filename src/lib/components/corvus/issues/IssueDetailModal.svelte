@@ -9,6 +9,7 @@
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { renderMarkdown, prepareImagesForPreview } from '$lib/utils/markdown';
   import { previewImages } from '$lib/actions/previewImages';
   import { htmlToText, installListAwareCopy } from '$lib/utils/html-to-text';
@@ -375,9 +376,9 @@
         <span class="modal-team">{liveIssue.team.name}</span>
       {/if}
       {#snippet actions()}
-        <button class="hdr-btn" onclick={openInBrowser} use:tooltip={'Open in tracker'}>
+        <IconButton size={22} tooltip="Open in tracker" onclick={openInBrowser}>
           <ExternalLink size={14} />
-        </button>
+        </IconButton>
       {/snippet}
     </ModalHeader>
   {/snippet}
@@ -856,13 +857,6 @@
     background: var(--bg-overlay); border: 1px solid var(--border-subtle);
     padding: 1px 6px; border-radius: var(--radius-sm);
   }
-  .hdr-btn {
-    display: flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; border: none; background: transparent;
-    color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .hdr-btn:hover { background: var(--bg-hover); color: var(--text-secondary); }
 
   /* ── Body layout ─────────────────────────────────────────────────────────── */
   .idm-body {

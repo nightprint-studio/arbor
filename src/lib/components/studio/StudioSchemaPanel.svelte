@@ -97,6 +97,7 @@
 <script lang="ts" generics="TKind extends string">
   import { BookOpen, FolderOpen, ChevronDown, Wand2, X, Link as LinkIcon } from 'lucide-svelte';
   import Spinner from '../shared/ui/Spinner.svelte';
+  import Button from '../shared/ui/Button.svelte';
   import Alert from '../shared/ui/Alert.svelte';
   import Dropdown, { type DropdownItem } from '../shared/ui/Dropdown.svelte';
   import FileExplorerModal from '../sitta/FileExplorerModal.svelte';
@@ -189,9 +190,10 @@
       {:else}
         <p class="ssp-hint">No schema loaded. Pick a source file to index types for the {formatId.toUpperCase()} format.</p>
       {/if}
-      <button class="ssp-btn" onclick={openPicker}>
-        <FolderOpen size={12} /> {pickerButtonLabel}
-      </button>
+      <Button variant="secondary" onclick={openPicker}>
+        {#snippet iconStart()}<FolderOpen size={12} />{/snippet}
+        {pickerButtonLabel}
+      </Button>
     {:else}
       <div class="ssp-meta">
         <div class="ssp-meta-row">
@@ -247,11 +249,11 @@
           {/snippet}
         </Dropdown>
         <div class="ssp-actions">
-          <button class="ssp-btn ssp-btn-primary" onclick={() => void onLoad()} disabled={schemaLoading || !schemaRootSel}>
-            {#if schemaLoading}<Spinner size="xs" color="currentColor" />{:else}<Wand2 size={11} />{/if}
+          <Button variant="primary" onclick={() => void onLoad()} disabled={schemaLoading || !schemaRootSel}>
+            {#snippet iconStart()}{#if schemaLoading}<Spinner size="xs" color="currentColor" />{:else}<Wand2 size={11} />{/if}{/snippet}
             Load schema
-          </button>
-          <button class="ssp-btn" onclick={openPicker}>Change file</button>
+          </Button>
+          <Button variant="secondary" onclick={openPicker}>Change file</Button>
         </div>
       {/if}
 
@@ -327,9 +329,10 @@
           {/if}
         </div>
 
-        <button class="ssp-btn ssp-btn-quiet" onclick={onClear}>
-          <X size={11} /> Clear schema
-        </button>
+        <Button variant="ghost" onclick={onClear}>
+          {#snippet iconStart()}<X size={11} />{/snippet}
+          Clear schema
+        </Button>
       {/if}
     {/if}
   </div>
@@ -430,41 +433,6 @@
   .ssp-root-trigger-open :global(.ssp-root-trigger-caret) { color: var(--accent); }
 
   .ssp-actions { display: flex; gap: 6px; }
-
-  .ssp-btn {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 6px 12px;
-    background: var(--bg-overlay);
-    color: var(--text-primary);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    font-size: var(--font-size-xs); cursor: pointer;
-    transition: background var(--transition-fast), border-color var(--transition-fast);
-  }
-  .ssp-btn:hover:not(:disabled) { background: var(--bg-base); border-color: var(--accent); }
-  .ssp-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-  .ssp-btn-primary {
-    background: var(--accent);
-    color: var(--bg-base);
-    border-color: var(--accent);
-  }
-  .ssp-btn-primary:hover:not(:disabled) {
-    background: var(--accent-strong, var(--accent));
-    filter: brightness(1.08);
-  }
-  /* Quiet variant — borderless, transparent. Used for low-stakes
-     terminal actions like "Clear schema" that shouldn't compete
-     with the primary buttons above for attention. */
-  .ssp-btn-quiet {
-    background: transparent;
-    border-color: transparent;
-    color: var(--text-muted);
-  }
-  .ssp-btn-quiet:hover:not(:disabled) {
-    background: var(--bg-overlay);
-    border-color: transparent;
-    color: var(--text-primary);
-  }
 
   .ssp-banner-wrap { margin: 6px 8px 0; }
 

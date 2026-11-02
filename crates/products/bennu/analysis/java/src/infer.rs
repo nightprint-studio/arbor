@@ -1908,6 +1908,11 @@ impl Ctx<'_> {
         if recv.dims > 0 && method_name == "clone" && args.is_empty() {
             return Some(recv.clone());
         }
+        // Every other method of an array is `Object`'s (JLS §10.7): `boolean[]` is not a class the resolver has members for, so
+        // `flags.getClass()` found nothing to read while `String[]` was luckier.
+        if recv.dims > 0 {
+            return self.method_return_with(&TypeRef::simple("java/lang/Object"), method_name, args, enclosing, explicit);
+        }
         // The receiver seen AS the type that DECLARES the method, carrying the arguments that
         // actually reach it. A method inherited from `Range<T>` and called on a `DoubleRange` must
         // be read against `Range<Double>`: substituting its `T` against the receiver's own list
@@ -2374,7 +2379,13 @@ impl Ctx<'_> {
             .filter(|m| arity_admits(m.params.len(), last_is_array(m), argc))
             .collect();
         if let Some(ret) = unique_return(&arity_ok) {
-            let picked = sole(&arity_ok).or_else(|| self.fixed_arity_over_varargs(&arity_ok, args, enclosing));
+            let mut picked = sole(&arity_ok).or_else(|| self.fixed_arity_over_varargs(&arity_ok, args, enclosing));
+            // The overloads agree on the return type, but it still names a variable of the method (`requireNonNull(T, String)` beside
+            // `requireNonNull(T, Supplier<String>)`): the variable is bound from the arguments, so the overload the arguments pick
+            // has to be known — a string literal is not a supplier.
+            if picked.is_none() && self.mentions_type_variable(&ret) {
+                picked = sole(&self.narrow_overloads(&arity_ok, args, enclosing));
+            }
             return Some((ret, picked));
         }
         if arity_ok.is_empty() {
@@ -2665,6 +2676,9 @@ impl Ctx<'_> {
         }
         // A single candidate isn't an overload → trust it.
         if let [only] = same_named.as_slice() {
+            if let Some(bound) = self.bound_by_arguments(only, args) {
+                return Some(bound);
+            }
             return self.resolve_type_text(&only.return_type_text);
         }
         let mut ret_text: Option<&str> = None;
@@ -2676,6 +2690,49 @@ impl Ctx<'_> {
             }
         }
         self.resolve_type_text(ret_text?)
+    }
+
+    /// The return type of a **generic method of this file** whose own variable an argument fixes: `static <T> T id(T x)` called with a
+    /// `String` is a `String`, and `static <T> T first(List<T> l)` called with a `List<String>` is too.
+    ///
+    /// The same two shapes `bind_method_type_vars` reads off a classpath method — a parameter that is the variable, and a parameter that
+    /// has it as its only type argument — and the same rule for everything else: no binding, no answer.
+    fn bound_by_arguments(&self, method: &crate::symbols::MethodDecl, args: &[Node]) -> Option<TypeRef> {
+        let vars: Vec<&str> = method.type_params.iter().filter_map(|p| p.split_whitespace().next()).collect();
+        let returned = method.return_type_text.trim();
+        let base = returned.trim_end_matches("[]");
+        let ret_var = vars.iter().copied().find(|v| *v == base);
+        if vars.is_empty() || (ret_var.is_none() && !vars.iter().any(|v| returned.contains(v))) {
+            return None;
+        }
+        let mut bindings: Vec<(String, TypeRef)> = Vec::new();
+        for (i, param) in method.params.iter().enumerate() {
+            let text = param.type_text.trim();
+            let Some(arg) = args.get(i) else { continue };
+            let bound = if let Some(v) = vars.iter().copied().find(|v| *v == text) {
+                self.infer_expr(arg, None).map(|t| (v.to_string(), boxed(t)))
+            } else if let Some((v, element)) = text.split_once('<').and_then(|(_, inner)| {
+                let inner = inner.trim_end_matches('>').trim();
+                vars.iter().copied().find(|v| *v == inner).map(|v| (v, ()))
+            }) {
+                let _ = element;
+                self.infer_expr(arg, None).filter(|t| t.type_args.len() == 1).map(|t| (v.to_string(), boxed(t.type_args[0].clone())))
+            } else {
+                None
+            };
+            match bound {
+                Some((var, ty)) if !bindings.iter().any(|(v, _)| *v == var) => bindings.push((var, ty)),
+                // two arguments for one variable that disagree are left open, as in `bind_method_type_vars`
+                Some((var, ty)) if bindings.iter().any(|(v, t)| *v == var && *t != ty) => return None,
+                _ => {}
+            }
+        }
+        let ret = match ret_var {
+            Some(v) => TypeRef::simple(v),
+            None => self.resolve_type_text(returned)?,
+        };
+        let out = apply_bindings(&ret, &bindings);
+        (!self.mentions_type_variable(&out)).then_some(out)
     }
 
     // ---- local scope resolution ----
@@ -4769,5 +4826,66 @@ mod ternary_tests {
     fn an_untypable_arm_makes_the_whole_thing_untyped() {
         let src = wrap("n < 0 ? \"/\" : unknown.thing()");
         assert_eq!(infer_call(&src, "n < 0 ? \"/\" : unknown.thing()", &no_resolver()), None);
+    }
+}
+
+#[cfg(test)]
+mod defect_repro_tests {
+    use super::test_support::*;
+    use super::*;
+    use std::collections::HashMap;
+
+    fn with_object() -> MapResolver {
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".to_string(), cm(vec![meth("getClass", "java/lang/Class", &[])]));
+        MapResolver { members, simple: HashMap::new() }
+    }
+
+    /// `array.getClass().getComponentType()` in Commons Lang: a `boolean[]` has no members of its own, so the call found nothing.
+    #[test]
+    fn a_method_called_on_an_array_of_primitives_is_the_objects() {
+        let src = "class A { void f() { boolean[] a = new boolean[1]; Object o = a.getClass().toString(); } }";
+        assert_eq!(infer_call(src, "a.getClass()", &with_object()).as_deref(), Some("java/lang/Class"));
+    }
+
+    /// `id(s)` and `first(names)` in a file's own generic methods: the variable is the method's, and the argument fixes it.
+    #[test]
+    fn a_generic_method_of_the_file_is_bound_by_its_arguments() {
+        let src = "import java.util.*;\nclass A {\n static <T> T id(T x) { return x; }\n static <T> T first(List<T> l) { return null; }\n \
+                   void f(String s, List<String> names) { Object a = id(s).trim(); Object b = first(names).trim(); }\n}";
+        let r = MapResolver { members: HashMap::new(), simple: HashMap::new() };
+        assert_eq!(infer_call(src, "id(s)", &r).as_deref(), Some("java/lang/String"));
+        assert_eq!(infer_call(src, "first(names)", &r).as_deref(), Some("java/lang/String"));
+    }
+}
+
+#[cfg(test)]
+mod overload_by_literal_tests {
+    use super::test_support::*;
+    use super::*;
+    use std::collections::HashMap;
+
+    /// `Objects.requireNonNull(s, "msg")`: `(T, String)` and `(T, Supplier<String>)` both take two arguments, and a string literal is
+    /// not a supplier.
+    #[test]
+    fn a_string_literal_picks_the_string_overload_over_a_supplier() {
+        let mut members = HashMap::new();
+        members.insert(
+            "java/util/Objects".to_string(),
+            cm(vec![
+                Member::method("requireNonNull", TypeRef::simple("T"), vec![TypeRef::simple("T")]),
+                Member::method("requireNonNull", TypeRef::simple("T"), vec![TypeRef::simple("T"), TypeRef::simple("java/lang/String")]),
+                Member::method("requireNonNull", TypeRef::simple("T"), vec![TypeRef::simple("T"), TypeRef::simple("java/util/function/Supplier")]),
+            ]),
+        );
+        members.insert("java/lang/Object".to_string(), crate::seam::ClassMembers { superclass: None, ..cm(vec![]) });
+        members.insert("java/lang/String".to_string(), cm(vec![]));
+        members.insert("java/util/function/Supplier".to_string(), cm(vec![]));
+        let mut simple = HashMap::new();
+        simple.insert("Objects".to_string(), "java/util/Objects".to_string());
+        simple.insert("String".to_string(), "java/lang/String".to_string());
+        let r = MapResolver { members, simple };
+        let src = "import java.util.Objects;\nclass A { void f(String s) { Object o = Objects.requireNonNull(s, \"msg\").trim(); } }";
+        assert_eq!(infer_call(src, "Objects.requireNonNull(s, \"msg\")", &r).as_deref(), Some("java/lang/String"));
     }
 }

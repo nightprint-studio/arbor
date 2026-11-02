@@ -5,6 +5,8 @@
   } from 'lucide-svelte';
   import JobRow from './JobRow.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
+  import Popover from '$lib/components/shared/ui/Popover.svelte';
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { uiStore }   from '$lib/stores/ui.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
@@ -96,9 +98,7 @@
   }
 </script>
 
-<button type="button" aria-label="Close overlay" class="overlay-backdrop" onclick={() => uiStore.setJobsOverlayOpen(false)}></button>
-
-<div class="overlay-panel jobs-overlay" role="dialog" aria-label="Background Jobs">
+<Popover label="Background Jobs" onclose={() => uiStore.setJobsOverlayOpen(false)}>
   <div class="overlay-header">
     <span class="overlay-title">Background Jobs</span>
     <div class="header-actions">
@@ -109,9 +109,9 @@
         onchange={(v) => jobsStore.setShowHidden(v)}
       />
       {#if jobsStore.finishedCount > 0}
-        <button class="clear-btn" onclick={() => jobsStore.clearFinished()} use:tooltip={'Clear finished jobs'} aria-label="Clear finished jobs">
+        <IconButton size={22} hoverBg="elevated" tooltip="Clear finished jobs" onclick={() => jobsStore.clearFinished()}>
           <Trash2 size={13} />
-        </button>
+        </IconButton>
       {/if}
       <button class="close-btn" onclick={() => uiStore.setJobsOverlayOpen(false)} use:tooltip={'Close'} aria-label="Close"></button>
     </div>
@@ -184,23 +184,11 @@
       {/each}
     </div>
   {/if}
-</div>
+</Popover>
 
 <style>
-  .jobs-overlay {
-    width: 320px;
-    max-height: 460px;
-    /* The overlay itself must be the flex+overflow container that caps the
-       list: without display:flex/column + overflow:hidden here the panel
-       just grows to fit its content and .job-list's flex:1/min-height:0
-       never has a bounded parent to scroll inside. */
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    background: var(--bg-base);
-    border-color: var(--border);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
-  }
+  /* The Popover panel is the flex+overflow container that caps the list, so
+     .job-list's flex:1/min-height:0 has a bounded parent to scroll inside. */
 
   /* Header stays fixed; only the list scrolls. */
   .overlay-header { flex-shrink: 0; }
@@ -210,22 +198,6 @@
     align-items: center;
     gap: 4px;
   }
-
-  .clear-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .clear-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
 
   .job-list {
     overflow-y: auto;

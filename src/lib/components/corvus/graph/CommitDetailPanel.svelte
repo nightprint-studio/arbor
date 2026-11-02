@@ -7,7 +7,9 @@
   import DiffViewer, { type DiffViewerApi } from '$lib/components/shared/internal/diff/DiffViewer.svelte';
   import DiffToolbar from '$lib/components/shared/internal/diff/DiffToolbar.svelte';
   import ResizablePanel from '../../shared/ui/ResizablePanel.svelte';
+  import IconButton from '../../shared/ui/IconButton.svelte';
   import { Archive, HardDriveDownload, GitCommit, GitCompareArrows, X, StickyNote, ChevronUp, ChevronDown, Play, CornerDownLeft, Trash2, Link2 } from 'lucide-svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
   import { applyStashAction, popStashAction, dropStashAction } from '$lib/utils/stash-actions';
   import BottomPanelHeader from '../../shared/ui/BottomPanelHeader.svelte';
@@ -88,7 +90,10 @@
     if (!tab || !stash) return;
     await popStashAction(tab.id, stash, () => graphStore.refresh());
   }
+  // A dropped stash cannot be recovered, so it is confirmed first.
+  let dropConfirmOpen = $state(false);
   async function dropStashHere() {
+    dropConfirmOpen = false;
     if (!tab || !stash) return;
     await dropStashAction(tab.id, stash, () => graphStore.refresh());
   }
@@ -265,15 +270,15 @@
                and the graph bubble's hover toolbar so the user has the same
                three buttons available wherever they arrived from. -->
           <div class="stash-toolbar">
-            <button class="stash-tb-btn" use:tooltip={'Apply stash'} onclick={applyStashHere}>
+            <IconButton size={22} tooltip="Apply stash" hoverBg="overlay" onclick={applyStashHere}>
               <Play size={12} />
-            </button>
-            <button class="stash-tb-btn" use:tooltip={'Pop stash'} onclick={popStashHere}>
+            </IconButton>
+            <IconButton size={22} tooltip="Pop stash" hoverBg="overlay" onclick={popStashHere}>
               <CornerDownLeft size={12} />
-            </button>
-            <button class="stash-tb-btn danger" use:tooltip={'Drop stash'} onclick={dropStashHere}>
+            </IconButton>
+            <IconButton size={22} tooltip="Drop stash" variant="danger" onclick={() => (dropConfirmOpen = true)}>
               <Trash2 size={12} />
-            </button>
+            </IconButton>
           </div>
         </div>
 
@@ -319,6 +324,18 @@
     commitOid={modalOid}
     shortOid={modalOid.slice(0, 7)}
     onClose={() => (notesModalOid = null)}
+  />
+{/if}
+
+{#if dropConfirmOpen && stash}
+  <ConfirmModal
+    title="Drop stash"
+    message={`Drop stash "${stash.message}"?`}
+    detail="This cannot be undone."
+    variant="danger"
+    confirmLabel="Drop"
+    onConfirm={dropStashHere}
+    onCancel={() => (dropConfirmOpen = false)}
   />
 {/if}
 
@@ -376,20 +393,6 @@
     gap: 2px;
     flex-shrink: 0;
   }
-  .stash-tb-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px; height: 22px;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .stash-tb-btn:hover { background: var(--bg-overlay); color: var(--text-primary); }
-  .stash-tb-btn.danger:hover { color: var(--error); background: var(--error-subtle); }
 
   .commit-info { flex: 1; min-width: 0; }
 

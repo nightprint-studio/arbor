@@ -88,7 +88,8 @@ fn creations(source: &str) -> Vec<(String, String)> {
         stack.extend(node.children(&mut cursor));
     }
     out.retain(|(name, _)| name.len() >= MIN_NAME && name.starts_with(|c: char| c.is_ascii_lowercase()) && is_ident(name));
-    out
+    // counted under the words of the name, not its spelling: `jaxbProcessor` and `jaxb_processor` are one name
+    out.into_iter().map(|(name, made)| (crate::flc_words::canon(&name), made)).collect()
 }
 
 pub(crate) fn add_file(file: &str, source: &str) {
@@ -129,6 +130,7 @@ pub(crate) fn clear() {
 
 /// The type this project creates under `name`, with the share of the sightings it holds and how many there were.
 fn dominant(name: &str) -> Option<(String, f32, u32)> {
+    let name = &crate::flc_words::canon(name);
     let h = lock();
     let row = h.table.get(name)?;
     let mut seen: Vec<(&String, u32)> = row.iter().filter(|(t, _)| !crate::learned_rules::hidden("created", name, t)).map(|(t, n)| (t, *n)).collect();
@@ -280,6 +282,17 @@ mod tests {
 
     fn forget(name: &str, times: usize) {
         (0..times).for_each(|i| remove_file(&format!("created/{name}{i}.java")));
+    }
+
+    #[test]
+    fn the_same_name_in_another_case_is_the_same_name() {
+        // three sightings in one style and two in the other: only together do they make a habit
+        for (i, spelled) in ["zzTmpBuf", "zz_tmp_buf", "zzTmpBuf", "zz_tmp_buf", "zzTmpBuf"].iter().enumerate() {
+            add_file(&format!("created/case{i}.java"), &method(&format!("        val {spelled} = new ZzTmpBuffer();")));
+        }
+        assert_eq!(suggest("        val zzTmpBuf = new Zz").expect("camel").text, "TmpBuffer();");
+        assert_eq!(suggest("        val zz_tmp_buf = new Zz").expect("snake").text, "TmpBuffer();");
+        (0..5).for_each(|i| remove_file(&format!("created/case{i}.java")));
     }
 
     #[test]

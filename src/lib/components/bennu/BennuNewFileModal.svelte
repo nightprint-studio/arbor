@@ -16,7 +16,7 @@
    *
    * Keyboard-first: the name auto-focuses; Esc cancels (Modal owns it); Enter / Ctrl+Enter create.
    */
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { FilePlus2 } from 'lucide-svelte';
   import IconifyIconView from '@iconify/svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -75,7 +75,7 @@
   // The caller decides which shape this opens in: "New › Java Class" (or "New › Rust File")
   // lands on a typed template, "New › File" on a plain one. Read once, at mount — it is the
   // starting point, not a binding.
-  let kind = $state<NewFileKind>(initialKind);
+  let kind = $state<NewFileKind>(untrack(() => initialKind));
   /** One of the user's templates, chosen instead of a kind. */
   let template = $state<string | null>(null);
   let name = $state('');

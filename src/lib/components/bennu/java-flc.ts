@@ -26,6 +26,15 @@ export const javaFlcSource = async (view: EditorView, pos: number): Promise<Inli
   const reply = await flcComplete(path, src, makeU16ToByte(src)(pos)).catch(() => null);
   if (!reply || !reply.text) return null;
   const meta: FlcMeta = { origin: reply.origin, confidence: reply.confidence, context: reply.context };
+  // a block written out from the class (a constructor, `toString`…) comes as the WHOLE declaration, from the first character of the line:
+  // accepting it replaces what has been typed there and the closers the editor added after the caret, and both are hidden while it is
+  // shown, so the screen reads as it will once written
+  if (reply.origin === 'derived') {
+    const lineStart = src.lastIndexOf('\n', pos - 1) + 1;
+    const from = lineStart + (/^[ \t]*/.exec(src.slice(lineStart, pos))?.[0].length ?? 0);
+    const closers = /^[ \t]*\)[ \t]*(\{[ \t]*\}?)?/.exec(src.slice(pos))?.[0].length ?? 0;
+    return { text: reply.text, replace: { from, to: pos + closers }, hideReplaced: true, meta };
+  }
   return { text: reply.text, meta };
 };
 

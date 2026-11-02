@@ -1312,8 +1312,7 @@ impl NativeJavaProvider {
         index_dir: &Path,
         jdk_version: &str,
         project_simple_names: &[(String, String)],
-        dep_source: Box<dyn ClassSource>,
-        dep_memo_path: PathBuf,
+        deps: bennu_query::prelude::DepInput,
     ) -> Option<Result<Self, String>> {
         use bennu_index::prelude::PersistedIndex;
 
@@ -1326,12 +1325,12 @@ impl NativeJavaProvider {
             // The JDK and project names are already in there; only the dependency ones are new.
             // `finalize` rebuilds the sorted axes from scratch, so re-running it is correct.
             let mut class_names = self.class_names.clone();
-            class_names.add_binaries(dep_source.class_names());
+            class_names.add_binaries(deps.class_names());
             class_names.finalize();
 
             let mut resolver = IndexResolver::new(
                 project,
-                ClasspathIndex::with_deps(Arc::clone(&jdk), dep_source, dep_memo_path),
+                ClasspathIndex::with_dep_input(Arc::clone(&jdk), deps),
             );
             for (simple, binary) in project_simple_names {
                 resolver.add_simple_hint(simple, binary);

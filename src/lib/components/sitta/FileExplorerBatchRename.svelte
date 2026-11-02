@@ -13,6 +13,7 @@
   import ModalHeader from '../shared/ModalHeader.svelte';
   import ModalFooter from '../shared/ModalFooter.svelte';
   import Button from '../shared/ui/Button.svelte';
+  import Checkbox from '../shared/ui/Checkbox.svelte';
   import { ArrowRight, AlertCircle } from 'lucide-svelte';
 
   let {
@@ -114,7 +115,7 @@
         </label>
       </div>
       <div class="br-row br-row-opts">
-        <label class="br-check"><input type="checkbox" bind:checked={extToo} /> Include extension</label>
+        <Checkbox bind:checked={extToo} label="Include extension" />
         <label class="br-field br-field-sm">
           <span class="br-label">Case</span>
           <select class="br-input" bind:value={caseMode}>
@@ -125,7 +126,7 @@
         </label>
       </div>
       <div class="br-row br-row-opts">
-        <label class="br-check"><input type="checkbox" bind:checked={seqOn} /> Number items</label>
+        <Checkbox bind:checked={seqOn} label="Number items" />
         {#if seqOn}
           <label class="br-field br-field-sm"><span class="br-label">Start</span><input class="br-input" type="number" min="0" bind:value={seqStart} /></label>
           <label class="br-field br-field-sm"><span class="br-label">Digits</span><input class="br-input" type="number" min="1" max="6" bind:value={seqPad} /></label>
@@ -171,7 +172,6 @@
   .br-input { background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font-ui-sans); font-size: var(--font-size-sm); padding: 5px 8px; outline: none; }
   .br-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px rgba(61,127,255,0.2); }
   .br-field-sm .br-input { width: 76px; }
-  .br-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--font-size-sm); color: var(--text-secondary); cursor: pointer; }
   .br-hint { font-size: var(--font-size-xs); color: var(--text-disabled); }
   .br-hint code { font-family: var(--font-code); background: var(--bg-hover); padding: 0 4px; border-radius: 3px; }
   .br-preview { flex: 1; overflow-y: auto; padding: 8px 16px; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }

@@ -53,6 +53,7 @@
 
 <script lang="ts">
   import Modal from '../shared/Modal.svelte';
+  import ModalHeader from '../shared/ModalHeader.svelte';
   import StateBlock from '../shared/ui/StateBlock.svelte';
   import Spinner from '../shared/ui/Spinner.svelte';
   import { BookOpen, Copy, AlertCircle, Link as LinkIcon } from 'lucide-svelte';
@@ -102,23 +103,25 @@
   ariaLabel="View implementation"
 >
   {#snippet header()}
-    <BookOpen size={14} class="vs-header-icon" />
-    <span class="vs-title">
-      {viewSource ? `${viewSource.name} · ${viewSource.kind}` : 'View implementation'}
-    </span>
-    {#if viewSource}
-      <span class="vs-meta" use:tooltip={viewSource.canonical_path}>{viewSource.canonical_path}</span>
-    {/if}
-    <div class="vs-spacer"></div>
-    {#if viewSource}
-      <button type="button" class="vs-action-btn"
-        onclick={copyAll}
-        use:tooltip={'Copy source'}
-      >
-        <Copy size={13} /> <span>Copy</span>
-      </button>
-    {/if}
-    <button class="close-btn" onclick={onClose} aria-label="Close" use:tooltip={'Close'}></button>
+    <ModalHeader {onClose}>
+      <BookOpen size={14} class="vs-header-icon" />
+      <span class="vs-title">
+        {viewSource ? `${viewSource.name} · ${viewSource.kind}` : 'View implementation'}
+      </span>
+      {#if viewSource}
+        <span class="vs-meta" use:tooltip={viewSource.canonical_path}>{viewSource.canonical_path}</span>
+      {/if}
+      {#snippet actions()}
+        {#if viewSource}
+          <button type="button" class="vs-action-btn"
+            onclick={copyAll}
+            use:tooltip={'Copy source'}
+          >
+            <Copy size={13} /> <span>Copy</span>
+          </button>
+        {/if}
+      {/snippet}
+    </ModalHeader>
   {/snippet}
 
   {#if busy}
@@ -160,7 +163,6 @@
     white-space: nowrap;
     max-width: 360px;
   }
-  .vs-spacer { flex: 1; }
   :global(.vs-header-icon) { color: var(--accent); flex-shrink: 0; }
 
   .vs-action-btn {

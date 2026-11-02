@@ -31,6 +31,7 @@
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import Tree, { type RowSnippetCtx } from '$lib/components/shared/ui/Tree.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -307,28 +308,24 @@
 <PanelShell {title} {count}>
   {#snippet icon()}<Braces size={13} />{/snippet}
   {#snippet actions()}
-    <button class="ps-btn" type="button" onclick={collapseAll} use:tooltip={'Collapse all'} aria-label="Collapse all">
+    <IconButton tooltip="Collapse all" onclick={collapseAll}>
       <ChevronsDownUp size={14} />
-    </button>
-    <button class="ps-btn" type="button" onclick={expandAll} use:tooltip={'Expand all'} aria-label="Expand all">
+    </IconButton>
+    <IconButton tooltip="Expand all" onclick={expandAll}>
       <ChevronsUpDown size={14} />
-    </button>
-    <button
-      class="ps-btn"
-      class:ps-btn-active={sortByName}
-      type="button"
+    </IconButton>
+    <IconButton
+      tooltip={sortByName ? 'Sorting by name' : 'Sort by name'}
+      active={sortByName}
       onclick={() => (sortByName = !sortByName)}
-      use:tooltip={sortByName ? 'Sorting by name' : 'Sort by name'}
-      aria-label="Sort by name"
-      aria-pressed={sortByName}
     >
       <ArrowDownAZ size={14} />
-    </button>
+    </IconButton>
     <Dropdown items={optionsMenu} position="fixed" direction="down" width="190px">
       {#snippet trigger({ open, toggle })}
-        <button class="ps-btn" class:ps-btn-active={open} type="button" onclick={toggle} use:tooltip={'Options'} aria-label="Structure options" aria-haspopup="menu" aria-expanded={open}>
+        <IconButton tooltip="Structure options" active={open} ariaHasPopup ariaExpanded={open} onclick={toggle}>
           <MoreVertical size={14} />
-        </button>
+        </IconButton>
       {/snippet}
     </Dropdown>
   {/snippet}

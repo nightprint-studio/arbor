@@ -11,6 +11,7 @@
    */
   import { Square, Unplug, Trash2, RotateCw, SlidersHorizontal } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
 
@@ -40,34 +41,22 @@
 {/if}
 <!-- Repeats THIS tab's run, into a new tab — so ⟳ on an old transcript reruns what that
      transcript was, which is the reason you were looking at it. -->
-<button
-  class="ps-btn"
-  type="button"
-  use:tooltip={'Rerun this'}
-  aria-label="Rerun this"
+<IconButton
+  tooltip="Rerun this"
   disabled={!bennuRunStore.canRerun || bennuRunStore.building}
   onclick={() => void bennuRunStore.rerunApp()}
 >
   <RotateCw size={13} />
-</button>
-<button
-  class="ps-btn"
-  type="button"
-  use:tooltip={'Edit run configurations'}
-  aria-label="Edit run configurations"
-  onclick={() => bennuUiStore.openRunConfig()}
->
+</IconButton>
+<IconButton tooltip="Edit run configurations" onclick={() => bennuUiStore.openRunConfig()}>
   <SlidersHorizontal size={13} />
-</button>
+</IconButton>
 <!-- Closes the finished runs. The live one stays: tidying the console is not a way to kill a
      program, and Stop is right there. -->
-<button
-  class="ps-btn"
-  type="button"
-  use:tooltip={'Close the finished runs'}
-  aria-label="Close the finished runs"
+<IconButton
+  tooltip="Close the finished runs"
   disabled={!bennuRunStore.tabs.some((t) => !t.live)}
   onclick={() => bennuRunStore.clearRun()}
 >
   <Trash2 size={13} />
-</button>
+</IconButton>

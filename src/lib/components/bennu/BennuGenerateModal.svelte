@@ -48,6 +48,7 @@
     type GenerateOptions,
     type JavaStyle,
   } from './java-generate';
+  import { untrack } from 'svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { generateStore } from '$lib/stores/bennu/generate.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -69,7 +70,8 @@
   } = $props();
 
   // ── Mode ──────────────────────────────────────────────────────────────────────
-  let mode = $state<GenerateMode>(initialMode);
+  // Intentional one-shot capture: the prop only preselects, the user then switches mode freely.
+  let mode = $state<GenerateMode>(untrack(() => initialMode));
   const MODE_OPTIONS = [
     { value: 'constructor',     label: 'Constructor' },
     { value: 'getters',         label: 'Getters' },

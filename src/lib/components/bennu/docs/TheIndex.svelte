@@ -36,6 +36,8 @@
 <dl class="meta-grid">
   <dt>Type names</dt>
   <dd>How many distinct class names completion can offer, counting the JDK's, every resolved jar's and your own. It tells <em>completion is not offering my library classes</em> from <em>the library classes were never loaded</em> — the same from the popup. A few thousand means the JDK alone answered; a project with jars runs to tens of thousands.</dd>
+  <dt>Libraries</dt>
+  <dd>What Bennu reads of a dependency jar is kept in a file of its own, named after the jar (group, artifact, version) in Bennu's data folder, and shared by every project that depends on that jar: the second project to use a library finds it already decoded. A jar rebuilt in place (a <code>SNAPSHOT</code>) starts a new file. Deleting the <code>jar-index</code> folder is safe; the files are read again from the jars.</dd>
   <dt>Rebuild</dt>
   <dd>When something looks stale or a class you know exists does not turn up: <strong>Rebuild</strong> there, or <em>Rebuild index</em> in the palette, invalidates the index and recomputes it. It re-scans the sources on disk and reads the JDK level and source encoding from the poms again — it does not compile; that is <kbd>Ctrl</kbd> + <kbd>F9</kbd>. A rebuild of a project that is not open says so rather than doing nothing.</dd>
 </dl>

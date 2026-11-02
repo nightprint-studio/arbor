@@ -10,6 +10,7 @@
   import Modal from '../../shared/Modal.svelte';
   import ModalHeader from '../../shared/ModalHeader.svelte';
   import Dropdown from '../../shared/ui/Dropdown.svelte';
+  import IconButton from '../../shared/ui/IconButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { fsWriteTextFile } from '$lib/ipc/fs';
@@ -619,7 +620,7 @@
         onkeydown={onSearchKeydown}
       />
       {#if query}
-        <button class="icon-btn" onclick={() => query = ''} aria-label="Clear"><X size={12} /></button>
+        <IconButton tooltip="Clear" onclick={() => query = ''}><X size={12} /></IconButton>
       {/if}
     </div>
 
@@ -673,8 +674,8 @@
                       </button>
                     {/snippet}
                   </Dropdown>
-                  <button class="icon-btn" onclick={() => openEditGroup(entry.group)} use:tooltip={'Edit group'}><Pencil size={12} /></button>
-                  <button class="icon-btn danger" onclick={() => askDeleteGroup(entry.group)} use:tooltip={'Delete group'}><Trash2 size={12} /></button>
+                  <IconButton tooltip="Edit group" onclick={() => openEditGroup(entry.group)}><Pencil size={12} /></IconButton>
+                  <IconButton variant="danger" tooltip="Delete group" onclick={() => askDeleteGroup(entry.group)}><Trash2 size={12} /></IconButton>
                 </div>
               </div>
               {#if !entry.group.collapsed}
@@ -821,7 +822,7 @@
             </button>
           {/snippet}
         </Dropdown>
-        <button class="icon-btn" onclick={() => startEditWs(ws.id)} use:tooltip={'Edit workspace'} disabled={ws.id === SCRATCH_ID}><Pencil size={12} /></button>
+        <IconButton tooltip="Edit workspace" onclick={() => startEditWs(ws.id)} disabled={ws.id === SCRATCH_ID}><Pencil size={12} /></IconButton>
         <!-- Export menu: clipboard (existing) + save-to-file (new). -->
         <Dropdown
           position="fixed"
@@ -838,7 +839,7 @@
             </button>
           {/snippet}
         </Dropdown>
-        <button class="icon-btn danger" onclick={() => askDeleteWs(ws)} disabled={ws.id === SCRATCH_ID} use:tooltip={'Delete workspace'}><Trash2 size={12} /></button>
+        <IconButton variant="danger" tooltip="Delete workspace" onclick={() => askDeleteWs(ws)} disabled={ws.id === SCRATCH_ID}><Trash2 size={12} /></IconButton>
         <Contribution point="arbor:workspace-row">
           {#snippet item({ payload, fire })}
             {@const p = payload as { icon?: string; label?: string; tooltip?: string; color?: string }}
@@ -991,21 +992,21 @@
                 {#if notCloned}
                   <RepoRelinkActions {entry} primaryAction="clone" onResolved={() => afterRelink(ws.id)} />
                   <div class="repo-actions">
-                    <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
-                    <button class="icon-btn danger" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
+                    <IconButton tooltip="Copy URL/path" onclick={() => copyUrl(entry)}><Copy size={11} /></IconButton>
+                    <IconButton variant="danger" tooltip="Remove from workspace" onclick={() => removeFromWorkspace(ws.id, entry.id)}><Trash2 size={11} /></IconButton>
                   </div>
                 {:else if relink}
                   <RepoRelinkActions {entry} onResolved={() => afterRelink(ws.id)} />
                   <div class="repo-actions">
-                    <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
-                    <button class="icon-btn danger" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
+                    <IconButton tooltip="Copy URL/path" onclick={() => copyUrl(entry)}><Copy size={11} /></IconButton>
+                    <IconButton variant="danger" tooltip="Remove from workspace" onclick={() => removeFromWorkspace(ws.id, entry.id)}><Trash2 size={11} /></IconButton>
                   </div>
                 {:else}
                   <div class="repo-actions">
-                    <button class="icon-btn" onclick={() => openRepoTab(entry, ws.id)} use:tooltip={'Open'}><ExternalLink size={11} /></button>
-                    <button class="icon-btn" onclick={(e) => openMovePopover(e, entry.id, ws.id)} use:tooltip={'Move to…'}><ArrowRightLeft size={11} /></button>
-                    <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
-                    <button class="icon-btn danger" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
+                    <IconButton tooltip="Open" onclick={() => openRepoTab(entry, ws.id)}><ExternalLink size={11} /></IconButton>
+                    <IconButton tooltip="Move to…" onclick={(e) => openMovePopover(e, entry.id, ws.id)}><ArrowRightLeft size={11} /></IconButton>
+                    <IconButton tooltip="Copy URL/path" onclick={() => copyUrl(entry)}><Copy size={11} /></IconButton>
+                    <IconButton variant="danger" tooltip="Remove from workspace" onclick={() => removeFromWorkspace(ws.id, entry.id)}><Trash2 size={11} /></IconButton>
                   </div>
                 {/if}
               </div>
@@ -1024,9 +1025,9 @@
                   <FolderSearch size={12} /> Locate…
                 </button>
                 <div class="repo-actions">
-                  <button class="icon-btn danger" onclick={() => removeFromWorkspace(ws.id, repoId)} use:tooltip={'Remove orphan from workspace'}>
+                  <IconButton variant="danger" tooltip="Remove orphan from workspace" onclick={() => removeFromWorkspace(ws.id, repoId)}>
                     <Trash2 size={11} />
-                  </button>
+                  </IconButton>
                 </div>
               </div>
             {/if}
@@ -1711,10 +1712,6 @@
   .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   /* Trigger highlighted while its dropdown menu is open. */
   .icon-btn.active { background: var(--bg-hover); color: var(--text-primary); }
-  /* Destructive actions (delete / remove): neutral at rest, red on hover so
-     the danger reads as severity, not decoration. Matches ConfirmModal's
-     danger variant that these buttons open. */
-  .icon-btn.danger:hover:not(:disabled) { background: var(--error-subtle); color: var(--error); }
   /* Dropdown trigger: icon + a small caret so the button reads as a menu,
      not a one-shot action. Auto width to fit the extra glyph. */
   .icon-btn.caret-btn {

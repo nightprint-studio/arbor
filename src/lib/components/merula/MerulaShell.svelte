@@ -321,6 +321,48 @@
     void merulaEngine.playSnippet(src, projectStore.project?.path);
   }
 
+  // What each `MERULA_BINDINGS` id does. The chords (and their order, which is the precedence)
+  // live in `merula-keybindings.ts`, the single table the shortcuts modal and the docs also read;
+  // this is only the id → verb half, so adding a binding is one row there and one row here.
+  const bindingActions: Record<string, () => void> = {
+    goto_line: () => editor?.openGoto(),
+    new_file: () => editor?.newFile(),
+    run_stop: () => void merulaEngine.toggleRun(projectStore.activeSource, projectStore.project?.path),
+    play_selection: () => void playSelectionOrFile(),
+    toggle_scratch: () => merulaStore.toggleBottom('scratch'),
+    toggle_launcher: () => merulaStore.toggleBottom('launcher'),
+    seek_to_start: () => { transportUiStore.setCursor(0); void merulaEngine.seekToStart(); },
+    seek_to_end: () => { transportUiStore.setCursor(arrangementStore.contentEnd); void merulaEngine.seekToEnd(arrangementStore.contentEnd); },
+    step_back: () => transportUiStore.stepBy(-configStore.skipStep, arrangementStore.contentEnd),
+    step_fwd: () => transportUiStore.stepBy(configStore.skipStep, arrangementStore.contentEnd),
+    play_from_cursor: () => transportUiStore.playFromCursor(),
+    toggle_loop: () => transportUiStore.toggleLoop(),
+    add_marker: () => transportUiStore.addMarker(transportUiStore.cursor),
+    toggle_metronome: () => transportUiStore.toggleMetronome(),
+    cycle_count_in: () => transportUiStore.cycleCountIn(),
+    command_palette: () => merulaStore.togglePalette(),
+    docs: () => merulaStore.toggleDocs(),
+    shortcuts: () => merulaStore.openShortcuts(),
+    settings: () => merulaStore.openSettings(),
+    zen: () => merulaStore.toggleZen(),
+    performance: () => merulaStore.togglePerformance(),
+    find: () => { if (editorScoped) editor?.openSearch(); else merulaStore.requestFind(); },
+    find_usages: () => merulaStore.requestFindUsages(),
+    format_document: () => editor?.formatDocument(),
+    find_method: () => editor?.openStructure(),
+    rename: () => editor?.startRename(),
+    extract: () => editor?.startExtract(),
+    inline: () => editor?.inlineSymbol(),
+    intentions: () => editor?.showIntentions(),
+    new_project: () => projectActions.newProject(),
+    open_project: () => projectActions.openProject(),
+    open_file: () => projectActions.openFile(),
+    save: () => projectActions.save(),
+    render_wav: () => projectActions.exportWav(),
+    import_audio: () => importActions.start(),
+    commit_overrides: () => mixerStore.commitAll(),
+  };
+
   function onKeyDown(e: KeyboardEvent) {
     if (!active) return;
     // Esc clears the loop region. Global (the loop is global state) but yields Esc
@@ -336,43 +378,9 @@
       if (b.scope === 'editor' && !editorScoped) continue;
       if (!matchesMerula(e, b)) continue;
       if (overlayOpen && !((b.id === 'command_palette' && merulaStore.paletteOpen) || (b.id === 'docs' && merulaStore.docsOpen))) return;
+      // Prevented even for an id with no action: a registered chord must never leak to the WebView.
       e.preventDefault();
-      if (b.id === 'goto_line') editor?.openGoto();
-      else if (b.id === 'new_file') editor?.newFile();
-      else if (b.id === 'run_stop') void merulaEngine.toggleRun(projectStore.activeSource, projectStore.project?.path);
-      else if (b.id === 'play_selection') playSelectionOrFile();
-      else if (b.id === 'toggle_scratch') merulaStore.toggleBottom('scratch');
-      else if (b.id === 'toggle_launcher') merulaStore.toggleBottom('launcher');
-      else if (b.id === 'seek_to_start') { transportUiStore.setCursor(0); void merulaEngine.seekToStart(); }
-      else if (b.id === 'seek_to_end') { transportUiStore.setCursor(arrangementStore.contentEnd); void merulaEngine.seekToEnd(arrangementStore.contentEnd); }
-      else if (b.id === 'step_back') transportUiStore.stepBy(-configStore.skipStep, arrangementStore.contentEnd);
-      else if (b.id === 'step_fwd')  transportUiStore.stepBy(configStore.skipStep, arrangementStore.contentEnd);
-      else if (b.id === 'play_from_cursor') transportUiStore.playFromCursor();
-      else if (b.id === 'toggle_loop') transportUiStore.toggleLoop();
-      else if (b.id === 'add_marker') transportUiStore.addMarker(transportUiStore.cursor);
-      else if (b.id === 'toggle_metronome') transportUiStore.toggleMetronome();
-      else if (b.id === 'cycle_count_in') transportUiStore.cycleCountIn();
-      else if (b.id === 'command_palette') merulaStore.togglePalette();
-      else if (b.id === 'docs') merulaStore.toggleDocs();
-      else if (b.id === 'shortcuts') merulaStore.openShortcuts();
-      else if (b.id === 'settings') merulaStore.openSettings();
-      else if (b.id === 'zen') merulaStore.toggleZen();
-      else if (b.id === 'performance') merulaStore.togglePerformance();
-      else if (b.id === 'find') { if (editorScoped) editor?.openSearch(); else merulaStore.requestFind(); }
-      else if (b.id === 'find_usages') merulaStore.requestFindUsages();
-      else if (b.id === 'format_document') editor?.formatDocument();
-      else if (b.id === 'find_method') editor?.openStructure();
-      else if (b.id === 'rename') editor?.startRename();
-      else if (b.id === 'extract') editor?.startExtract();
-      else if (b.id === 'inline') editor?.inlineSymbol();
-      else if (b.id === 'intentions') editor?.showIntentions();
-      else if (b.id === 'new_project') projectActions.newProject();
-      else if (b.id === 'open_project') projectActions.openProject();
-      else if (b.id === 'open_file') projectActions.openFile();
-      else if (b.id === 'save') projectActions.save();
-      else if (b.id === 'render_wav') projectActions.exportWav();
-      else if (b.id === 'import_audio') importActions.start();
-      else if (b.id === 'commit_overrides') mixerStore.commitAll();
+      bindingActions[b.id]?.();
       return;
     }
   }

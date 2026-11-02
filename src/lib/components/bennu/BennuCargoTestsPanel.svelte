@@ -25,6 +25,7 @@
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Tree, { type RowSnippetCtx, type TreeController } from '$lib/components/shared/ui/Tree.svelte';
   import BennuTestStatusIcon from './BennuTestStatusIcon.svelte';
   import RustTestIcon from './RustTestIcon.svelte';
@@ -94,41 +95,26 @@
         onclick={() => void store.stop()}
       ><Square size={12} /></button>
     {:else}
-      <button
-        class="ps-btn"
-        type="button"
+      <IconButton
+        tooltip="Run every test in the workspace"
+        shortcut="Ctrl+Shift+F5"
         disabled={!root}
-        use:tooltip={{ content: 'Run every test in the workspace', shortcut: 'Ctrl+Shift+F5' }}
-        aria-label="Run all tests"
         onclick={() => void store.runAll(root)}
-      ><Play size={13} /></button>
+      ><Play size={13} /></IconButton>
     {/if}
-    <button
-      class="ps-btn"
-      type="button"
+    <IconButton
+      tooltip="Re-scan for tests"
       disabled={!root || store.discovering}
-      use:tooltip={'Re-scan for tests'}
-      aria-label="Refresh"
       onclick={() => void store.discover(root, true)}
-    ><RefreshCw size={13} /></button>
+    ><RefreshCw size={13} /></IconButton>
     <!-- Fold the lot. In a workspace of twenty crates the default view is the only one you can
          read, and getting back to it after opening six modules was otherwise twelve clicks. -->
-    <button
-      class="ps-btn"
-      type="button"
-      disabled={rows.length === 0}
-      use:tooltip={'Collapse all'}
-      aria-label="Collapse all"
-      onclick={() => tree?.collapseAll()}
-    ><ChevronsDownUp size={13} /></button>
-    <button
-      class="ps-btn"
-      type="button"
-      disabled={rows.length === 0}
-      use:tooltip={'Expand all'}
-      aria-label="Expand all"
-      onclick={() => tree?.expandAll()}
-    ><ChevronsUpDown size={13} /></button>
+    <IconButton tooltip="Collapse all" disabled={rows.length === 0} onclick={() => tree?.collapseAll()}>
+      <ChevronsDownUp size={13} />
+    </IconButton>
+    <IconButton tooltip="Expand all" disabled={rows.length === 0} onclick={() => tree?.expandAll()}>
+      <ChevronsUpDown size={13} />
+    </IconButton>
   {/snippet}
 
   {#snippet children()}

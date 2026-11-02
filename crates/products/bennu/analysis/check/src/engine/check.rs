@@ -70,6 +70,11 @@ pub struct FileContext {
     /// The project's target major Java version (`8` for `1.8`) — drives the version-gated feature
     /// checks. `None` skips them.
     pub java_major: Option<u32>,
+    /// The major version of the JDK whose classes the resolver reads (`None` when unknown). When the
+    /// file's own level is HIGHER — a `src/main/java24` folder on a machine with JDK 21 — a `java.*`
+    /// type the resolver lacks may simply be newer than the JDK it can read, so the import checks stop
+    /// treating the JDK as authoritative for that file.
+    pub jdk_major: Option<u32>,
     /// Whether the project's dependency classpath is **known-complete** — the Maven/library jars were
     /// resolved, so a library import that DOESN'T resolve is a genuine "cannot resolve", not a gap in
     /// our knowledge. When `false` (no `pom` / Maven not resolved / dependency indexing off) the
@@ -79,6 +84,14 @@ pub struct FileContext {
     /// JDK-authoritative) unless this is `true`. `#[default]` = `false` (conservative: assume we can't
     /// see the whole classpath).
     pub classpath_complete: bool,
+}
+
+impl FileContext {
+    /// The file is compiled at a higher level than the JDK the resolver reads: both known, and the file's
+    /// the larger. See [`FileContext::jdk_major`].
+    pub fn jdk_is_behind(&self) -> bool {
+        matches!((self.java_major, self.jdk_major), (Some(file), Some(jdk)) if file > jdk)
+    }
 }
 
 /// Validate one Java `source` with the no-resolver checks and return the merged diagnostics, ordered
@@ -107,7 +120,7 @@ pub fn check_file_in(
     out.extend(crate::source::statements::invalid_statements_nodes(nodes, source));
     out.extend(crate::source::literals::literal_errors_nodes(nodes, source));
     out.extend(crate::decls::generic_override::generic_override_clash_nodes(nodes, source));
-    out.extend(crate::source::grammar_gaps::grammar_gap_errors_nodes(nodes, source));
+    out.extend(crate::source::grammar_gaps::grammar_gap_errors_at(nodes, source, ctx.java_major));
     out.extend(crate::annotation::target_dupes::target_dupe_errors_nodes(nodes, source));
     out.extend(crate::decls::enum_rules::enum_rule_errors_nodes(nodes, source));
     out.extend(crate::decls::legacy_nesting::legacy_nesting_errors_nodes(nodes, source, ctx.java_major));
@@ -116,7 +129,7 @@ pub fn check_file_in(
     out.extend(crate::flow::returns::lambda_body_errors_nodes(nodes, source));
     out.extend(crate::flow::definite::definite_assignment_errors_nodes(nodes, source));
     out.extend(crate::switching::switches::switch_yield_errors_nodes(nodes, source));
-    out.extend(crate::switching::switches::switch_selector_errors_nodes(nodes, source));
+    out.extend(crate::switching::switches::switch_selector_errors_at(nodes, source, ctx.java_major));
     out.extend(crate::switching::switches::constant_switch_exhaustiveness_nodes(nodes, source));
     out.extend(crate::decls::duplicates::duplicate_signatures_nodes(nodes, source));
     out.extend(crate::decls::lombok_ctor::lombok_constructor_clash_nodes(nodes, source));

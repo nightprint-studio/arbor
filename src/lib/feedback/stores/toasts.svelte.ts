@@ -40,6 +40,9 @@ function createToastStore() {
    *  can't remove a different toast (ids never repeat, but tracking keeps the
    *  store leak-free and lets `duration <= 0` mean "sticky, no auto-dismiss"). */
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Remaining auto-dismiss time + the moment the current timer started, so a
+   *  hover/focus pause can resume with what was left instead of restarting. */
+  const clocks = new Map<string, { remaining: number; startedAt: number }>();
 
   function cancelTimer(id: string): void {
     const t = timers.get(id);
@@ -47,6 +50,30 @@ function createToastStore() {
       clearTimeout(t);
       timers.delete(id);
     }
+  }
+
+  function startTimer(id: string, ms: number): void {
+    cancelTimer(id);
+    clocks.set(id, { remaining: ms, startedAt: Date.now() });
+    timers.set(id, setTimeout(() => {
+      timers.delete(id);
+      dismiss(id);
+    }, ms));
+  }
+
+  /** Freeze the auto-dismiss countdown (pointer over / focus inside the toast). */
+  function pause(id: string): void {
+    const clock = clocks.get(id);
+    if (!clock || !timers.has(id)) return;
+    cancelTimer(id);
+    clock.remaining = Math.max(0, clock.remaining - (Date.now() - clock.startedAt));
+  }
+
+  /** Resume a paused countdown with the time that was left. */
+  function resume(id: string): void {
+    const clock = clocks.get(id);
+    if (!clock || timers.has(id)) return;
+    startTimer(id, clock.remaining);
   }
 
   function show(
@@ -59,18 +86,15 @@ function createToastStore() {
     const actions = action ? (Array.isArray(action) ? action : [action]) : [];
     toasts.push({ id, kind, message, duration, addedAt: Date.now(), actions });
     // A non-positive duration is a sticky toast (dismissed only by the user or a
-    // click action) — don't schedule an immediate auto-dismiss.
-    if (duration > 0) {
-      timers.set(id, setTimeout(() => {
-        timers.delete(id);
-        dismiss(id);
-      }, duration));
-    }
+    // click action) — don't schedule an immediate auto-dismiss. Toasts that
+    // carry actions stay twice as long: there is something to read and click.
+    if (duration > 0) startTimer(id, actions.length > 0 ? duration * 2 : duration);
     return id;
   }
 
   function dismiss(id: string) {
     cancelTimer(id);
+    clocks.delete(id);
     const idx = toasts.findIndex(t => t.id === id);
     if (idx !== -1) toasts.splice(idx, 1);
   }
@@ -79,6 +103,8 @@ function createToastStore() {
     get toasts() { return toasts; },
     show,
     dismiss,
+    pause,
+    resume,
   };
 }
 

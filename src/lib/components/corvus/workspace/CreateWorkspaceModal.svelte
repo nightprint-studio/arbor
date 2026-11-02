@@ -10,6 +10,7 @@
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
+  import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -134,7 +135,12 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void save(); }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      if (saving) return;
+      // save() refocuses the name field when it is empty, as the shortcut did before the guard.
+      void save();
+    }
   }
 </script>
 
@@ -270,13 +276,15 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="secondary" onclick={onClose} type="button">Cancel</Button>
-    <Button variant="primary" onclick={save} disabled={!name.trim() || saving} loading={saving} type="button">
-      {#snippet iconStart()}
-        {#if editing}<Check size={13} />{:else}<Plus size={13} />{/if}
-      {/snippet}
-      {editing ? 'Save' : 'Create'}
-    </Button>
+    <ModalFooter hint={editing ? 'to save' : 'to create'}>
+      <Button variant="secondary" onclick={onClose} type="button">Cancel</Button>
+      <Button variant="primary" onclick={save} disabled={!name.trim() || saving} loading={saving} type="button">
+        {#snippet iconStart()}
+          {#if editing}<Check size={13} />{:else}<Plus size={13} />{/if}
+        {/snippet}
+        {editing ? 'Save' : 'Create'}
+      </Button>
+    </ModalFooter>
   {/snippet}
 </Modal>
 

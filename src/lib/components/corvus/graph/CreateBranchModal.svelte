@@ -1,6 +1,7 @@
 <script lang="ts">
   import Modal from '../../shared/Modal.svelte';
   import ModalHeader from '../../shared/ModalHeader.svelte';
+  import ModalFooter from '../../shared/ModalFooter.svelte';
   import Button from '../../shared/ui/Button.svelte';
   import FormField from '../../shared/ui/FormField.svelte';
   import Input from '../../shared/ui/Input.svelte';
@@ -93,8 +94,10 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="secondary" onclick={onClose}>Cancel</Button>
-    <Button variant="primary" onclick={() => onCreate(name.trim())} disabled={!name.trim()}>Create</Button>
+    <ModalFooter hint="to create">
+      <Button variant="secondary" onclick={onClose}>Cancel</Button>
+      <Button variant="primary" onclick={() => onCreate(name.trim())} disabled={!name.trim()}>Create</Button>
+    </ModalFooter>
   {/snippet}
 </Modal>
 

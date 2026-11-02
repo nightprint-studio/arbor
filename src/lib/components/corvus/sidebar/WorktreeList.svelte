@@ -11,6 +11,7 @@
   import { switchToWorktree } from '$lib/utils/worktree-switch';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
   import WorktreeInfoModal from './WorktreeInfoModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -433,9 +434,9 @@
 >
   {#snippet icon()}<Layers size={13} />{/snippet}
   {#snippet actions()}
-    <button class="add-btn" use:tooltip={'Add linked worktree'} onclick={() => addOpen = true}>
+    <IconButton size={20} variant="accent" tone="hover" tooltip="Add linked worktree" onclick={() => addOpen = true}>
       <Plus size={11} />
-    </button>
+    </IconButton>
   {/snippet}
 
   {#if worktreeStore.loading}
@@ -523,24 +524,6 @@
 {/if}
 
 <style>
-  /* "Add linked worktree" — hover-reveal handled by SidebarSection's
-     .section-actions wrapper. */
-  .add-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-    background: none;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: background 0.12s, color 0.12s;
-  }
-  .add-btn:hover { background: var(--bg-hover); color: var(--accent) !important; }
-
   .empty-msg {
     padding: 6px 16px;
     font-size: var(--font-size-xs);

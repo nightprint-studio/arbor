@@ -20,6 +20,7 @@
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -145,16 +146,9 @@
     <BottomPanelHeader title="Forms" onClose={() => bennuUiStore.closeBottom()}>
       {#snippet icon()}<TextCursorInput size={13} />{/snippet}
       {#snippet actions()}
-        <button
-          class="ps-btn"
-          type="button"
-          onclick={refresh}
-          disabled={!canRefresh()}
-          use:tooltip={'Refresh'}
-          aria-label="Refresh forms"
-        >
+        <IconButton tooltip="Refresh" onclick={refresh} disabled={!canRefresh()}>
           <RefreshCw size={13} />
-        </button>
+        </IconButton>
       {/snippet}
     </BottomPanelHeader>
     <div class="ff-dock">{@render body()}</div>
@@ -163,16 +157,9 @@
   <PanelShell title="Forms">
     {#snippet icon()}<TextCursorInput size={13} />{/snippet}
     {#snippet actions()}
-      <button
-        class="ps-btn"
-        type="button"
-        onclick={refresh}
-        disabled={!isJsp || loading}
-        use:tooltip={'Refresh'}
-        aria-label="Refresh forms"
-      >
+      <IconButton tooltip="Refresh" onclick={refresh} disabled={!isJsp || loading}>
         <RefreshCw size={14} />
-      </button>
+      </IconButton>
     {/snippet}
     {@render body()}
   </PanelShell>

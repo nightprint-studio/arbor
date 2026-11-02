@@ -95,8 +95,7 @@
   // Experimental: squash-merge ghost edges (reads setting each time the graph loads).
   // Default OFF — opt-in via Settings → Experimental.  See ExperimentalSection
   // for the rationale (slow API round-trip on rate-limited tokens / slow links).
-  const squashHintsEnabled = () =>
-    (localStorage.getItem('arbor:experimental:squash-merge-hints') ?? 'false') === 'true';
+  const squashHintsEnabled = () => graphConfigStore.squashMergeHints;
 
   // Track the last tab we auto-scrolled to HEAD for — prevents re-scrolling on
   // the same tab when the user has scrolled away manually.
@@ -803,14 +802,16 @@
       // initial open take 10s+ on repos with a configured remote provider.
       // They're applied to `mrHints` reactive state when the API responds;
       // ghostEdges re-derive automatically and the squash hints fade in.
-      if (squashHintsEnabled()) {
+      // Wait for the persisted setting so a cold start doesn't read the default.
+      void graphConfigStore.whenReady.then(() => {
+        if (!squashHintsEnabled()) return;
         cacheStore.loadMrHints(tabId)
           .then(hints => {
             // Drop late-arriving hints if the user has already switched tab.
             if (tabId === tabsStore.activeTabId) mrHints = hints;
           })
           .catch(() => { /* network failure is non-fatal — no ghost edges */ });
-      }
+      });
 
       // Status drives the WIP row (counts + merge/conflict badges) but the
       // graph itself doesn't need it. On big repos `get_status` enumerates the

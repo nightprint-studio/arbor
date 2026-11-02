@@ -57,3 +57,9 @@
   The last two, and the shape of the code below, are <strong>Smart suggestions</strong> in Settings → Completion: each is a switch, and a
   strength scales the learned ones. They only add to a score — nothing is hidden — and none can overrule the type the position wants.
 </p>
+<p>
+  At the start of a call argument the list is then reordered once more by a small model fitted offline on public code. It reads where the
+  list put each row, what kind of row it is, how recently this file used the name, how much the name echoes the parameter's own, and whether its
+  type is the parameter's. It only reorders: nothing is hidden or added, a habit that leads the list keeps its place, and it follows the same
+  switch as the learned picks. Nothing is learned on your machine by it.
+</p>

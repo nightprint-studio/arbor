@@ -206,6 +206,7 @@ fn run_dir(dir: &Path, wants: &[Expected], jdk: &dyn MemberIndex, trace: bool) -
             // classpath verdict would invent findings the golden file never claimed.
             expected_package: None,
             java_major: None,
+            jdk_major: None,
             classpath_complete: false,
         };
         let diags = check_file_resolved(text, &ctx, &resolver, true);

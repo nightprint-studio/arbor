@@ -78,9 +78,9 @@ pub(crate) fn per_body_diagnostics<'a>(subject: &Subject<'a, '_>, nodes: &[Node<
 /// The checks that answer about the file as a unit. `nodes` must be every node of the file.
 pub(crate) fn whole_file<'a>(run: &mut Run, subject: &Subject<'a, '_>, nodes: &[Node<'a>], infer: &InferCache) {
     let Subject { root, source, symbols, resolver, ctx } = *subject;
-    run.check("unresolved_imports", || crate::source::imports::unresolved_imports(root, source, resolver, ctx.classpath_complete));
+    run.check("unresolved_imports", || crate::source::imports::unresolved_imports_at(root, source, resolver, ctx.classpath_complete, ctx.jdk_is_behind()));
     run.check("import_ambiguity", || crate::source::import_ambiguity::import_ambiguity_errors_in(root, nodes, source, symbols, resolver, infer, ctx.classpath_complete));
-    run.check("unresolved_static_imports", || crate::source::imports::unresolved_static_imports(root, source, resolver, ctx.classpath_complete));
+    run.check("unresolved_static_imports", || crate::source::imports::unresolved_static_imports_at(root, source, resolver, ctx.classpath_complete, ctx.jdk_is_behind()));
     run.check("unresolved_types", || crate::typing::types::unresolved_types_in(nodes, source, symbols, resolver, ctx.classpath_complete));
     run.check("type_arg_arity", || crate::typing::type_arg_arity::type_arg_arity_errors_in(nodes, source, symbols, resolver));
     run.check("type_bounds", || crate::typing::bounds::bound_errors_in(nodes, source, symbols, resolver));

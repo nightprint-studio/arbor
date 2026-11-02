@@ -239,7 +239,7 @@ pub(crate) fn force_enabled(on: Option<bool>) {
 }
 
 /// `flc_feedback`, read from the config at most every [`SETTING_TTL`]: this runs on every completion.
-fn enabled() -> bool {
+pub(crate) fn enabled() -> bool {
     if FORCED.load(Ordering::Relaxed) {
         return FORCED_VALUE.load(Ordering::Relaxed);
     }

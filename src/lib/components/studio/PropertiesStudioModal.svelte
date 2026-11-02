@@ -258,7 +258,7 @@
     font-family: var(--font-code); font-size: var(--font-size-xs); margin: 6px 0 0; overflow: auto; white-space: pre-wrap;
   }
   .ps-errors-hint { color: var(--text-muted); font-size: var(--font-size-xs); margin: 6px 0 0; line-height: 1.5; }
-  .ps-errors-hint code, .ps-bindings-empty code, .ps-schema-hint code {
+  .ps-errors-hint code, .ps-schema-hint code {
     font-family: var(--font-code); font-size: var(--font-size-xs); padding: 1px 4px; border-radius: 3px;
     background: var(--bg-overlay); color: var(--text-primary);
   }

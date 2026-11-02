@@ -26,7 +26,11 @@
     "tauri:build": "yarn backends:release && yarn backends:stage && tauri build",
     "tauri:release": "yarn tauri:build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint:ui": "node scripts/lint-ui.mjs",
+    "gallery": "vite dev --config vite.gallery.config.js --port 1420",
+    "gallery:baseline": "node scripts/gallery-baseline.mjs",
+    "gallery:diff": "node scripts/gallery-diff.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",

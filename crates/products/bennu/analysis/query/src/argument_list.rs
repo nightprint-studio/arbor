@@ -300,7 +300,7 @@ mod tests {
     fn a_slot_that_nothing_fits_gets_a_value_that_compiles() {
         let overload = Overload { params: vec![(TypeRef::simple("z/Account"), Some("from".into())), (TypeRef::simple("z/Money"), Some("amount".into()))] };
         let names = |ty: &TypeRef| if ty.binary_name == "z/Account" { vec![cand("from", Origin::Parameter, 0)] } else { Vec::new() };
-        let holes = fill(&overload, &names, &|_| None, &|_| None).unwrap();
+        let holes = fill(&overload, 0, &[], &names, &|_| None, &|_| None).unwrap();
         assert_eq!(holes.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), ["from", "null"]);
         assert!(holes[1].confidence <= HOLE);
         // numbers, booleans and strings get their own zero
@@ -308,7 +308,7 @@ mod tests {
         assert_eq!(default_value(&TypeRef::simple("boolean")), "false");
         assert_eq!(default_value(&TypeRef::simple("java/lang/String")), "\"\"");
         assert_eq!(default_value(&TypeRef::simple("long")), "0L");
-        let with_constant = fill(&overload, &names, &|ty| (ty.binary_name == "z/Money").then(|| "Money.ZERO".to_string()), &|_| None).unwrap();
+        let with_constant = fill(&overload, 0, &[], &names, &|ty| (ty.binary_name == "z/Money").then(|| "Money.ZERO".to_string()), &|_| None).unwrap();
         assert_eq!(with_constant.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), ["from", "Money.ZERO"]);
     }
 
@@ -334,7 +334,7 @@ mod tests {
     fn the_hint_is_asked_for_each_slot_by_its_index() {
         let overload = Overload { params: vec![(TypeRef::simple("z/Account"), Some("a".into())), (TypeRef::simple("z/Account"), Some("b".into()))] };
         let names = |_: &TypeRef| vec![cand("x", Origin::Local, 1), cand("y", Origin::Local, 2)];
-        let filled = fill(&overload, &names, &|_| None, &|i| (i == 0).then(|| "y".to_string())).unwrap();
+        let filled = fill(&overload, 0, &[], &names, &|_| None, &|i| (i == 0).then(|| "y".to_string())).unwrap();
         assert_eq!(filled.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), ["y", "x"]);
     }
 }

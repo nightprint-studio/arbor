@@ -19,7 +19,8 @@
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
+  import Button from '$lib/components/shared/ui/Button.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import TerminalInstance from '$lib/components/shared/terminal/TerminalInstance.svelte';
   import { endSession } from '$lib/components/shared/terminal/session';
@@ -81,31 +82,20 @@
   <BottomPanelHeader title="Terminal" onClose={() => bennuUiStore.closeBottom()}>
     {#snippet icon()}<TerminalSquare size={13} />{/snippet}
     {#snippet actions()}
-      <button
-        class="ps-btn"
-        type="button"
-        use:tooltip={'New terminal'}
-        aria-label="New terminal"
-        disabled={creating}
-        onclick={() => void openTerminal()}
-      >
+      <IconButton tooltip="New terminal" disabled={creating} onclick={() => void openTerminal()}>
         <Plus size={13} />
-      </button>
+      </IconButton>
       <Dropdown items={shellItems} position="fixed" direction="down" width="220px">
         {#snippet trigger({ toggle, open })}
-          <button
-            class="ps-btn"
-            class:open
-            type="button"
-            use:tooltip={'Choose shell'}
-            aria-label="Choose shell"
-            aria-haspopup="menu"
-            aria-expanded={open}
+          <IconButton
+            tooltip="Choose shell"
+            ariaHasPopup
+            ariaExpanded={open}
             disabled={creating}
             onclick={() => { void terminalStore.ensureDetected(); toggle(); }}
           >
             <ChevronDown size={11} />
-          </button>
+          </IconButton>
         {/snippet}
       </Dropdown>
     {/snippet}
@@ -115,9 +105,10 @@
     <div class="tv-empty">
       <TerminalSquare size={26} />
       <p>No terminal open</p>
-      <button class="tv-open" onclick={() => openTerminal()} disabled={creating}>
-        <Plus size={12} /> New Terminal
-      </button>
+      <Button variant="secondary" onclick={() => openTerminal()} disabled={creating}>
+        {#snippet iconStart()}<Plus size={12} />{/snippet}
+        New Terminal
+      </Button>
     </div>
   {:else}
     {#if terminalStore.tabs.length > 1}
@@ -162,14 +153,4 @@
     height: 100%; gap: 10px;
     color: var(--text-disabled); font-size: var(--font-size-sm);
   }
-  .tv-open {
-    display: flex; align-items: center; gap: 5px;
-    padding: 6px 14px;
-    background: var(--bg-elevated); border: 1px solid var(--border);
-    border-radius: var(--radius-md); color: var(--text-secondary);
-    font-size: var(--font-size-sm); cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .tv-open:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
-  .tv-open:disabled { opacity: 0.5; cursor: default; }
 </style>

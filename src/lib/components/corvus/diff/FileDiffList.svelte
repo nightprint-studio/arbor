@@ -5,6 +5,7 @@
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import type { DiffFile } from '$lib/types/corvus/git';
   import { tooltip } from '$lib/actions/tooltip';
+  import { listNav, activateOnKey } from '$lib/components/shared/ui/list-nav';
   import { compactMiddleDirs } from '$lib/utils/file-tree/compact-middle-dirs';
 
   let { files }: { files: DiffFile[] } = $props();
@@ -143,16 +144,17 @@
     </div>
   </div>
 
-  <div class="list-body">
+  <div class="list-body" use:listNav>
     {#if viewMode === 'list'}
       {#each files as file (file.path)}
         <div
           class="file-item"
+          data-list-item
           class:selected={diffStore.selectedFile?.path === file.path}
           role="button"
           tabindex="0"
           onclick={() => diffStore.selectFile(file.path)}
-          onkeydown={(e) => e.key === 'Enter' && diffStore.selectFile(file.path)}
+          onkeydown={(e) => activateOnKey(e, () => diffStore.selectFile(file.path))}
           use:tooltip={file.path}
         >
           <span class="status-icon" style="color: {STATUS_COLOR[file.status] ?? 'var(--text-muted)'}">
@@ -191,6 +193,7 @@
             <!-- Directory -->
             <button
               class="tree-dir"
+              data-list-item
               style="padding-left: {8 + depth * 12}px"
               onclick={() => toggleDir(child.fullPath)}
             >
@@ -208,10 +211,11 @@
             {@const f = child.file}
             <div
               class="file-item tree-file"
+              data-list-item
               class:selected={diffStore.selectedFile?.path === f.path}
               style="padding-left: {8 + depth * 12 + 18}px"
               onclick={() => diffStore.selectFile(f.path)}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); diffStore.selectFile(f.path); } }}
+              onkeydown={(e) => activateOnKey(e, () => diffStore.selectFile(f.path))}
               use:tooltip={f.path}
               role="button"
               tabindex="0"

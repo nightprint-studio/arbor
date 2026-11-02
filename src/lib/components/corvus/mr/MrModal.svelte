@@ -19,6 +19,7 @@
   } from '$lib/ipc/corvus/mr';
   import { invalidateTabCache } from '$lib/ipc/corvus/cache-invalidate';
   import { setupTauriListeners } from '$lib/utils/tauri-listeners';
+  import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import ProgressStepper, { type Step as StepDef } from '$lib/components/shared/ui/ProgressStepper.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
@@ -42,6 +43,7 @@
   import { replaceEmojiShortcodes } from '$lib/utils/emoji';
   import { getMrConfig } from '$lib/ipc/config';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -874,22 +876,19 @@
   </div>
 
   <!-- ── Tabs ────────────────────────────────────────────────────────────── -->
-  <div class="tab-bar" role="tablist">
-    <button class="tab" class:ta={activeTab==='overview'} onclick={() => switchTab('overview')}>
-      <FileText size={12} /> Overview
-    </button>
-    <button class="tab" class:ta={activeTab==='ci'} onclick={() => switchTab('ci')}>
-      <Workflow size={12} /> CI
-      {#if ciRunCount > 0}<span class="tc">{ciRunCount}</span>{/if}
-    </button>
-    <button class="tab" class:ta={activeTab==='files'} onclick={() => switchTab('files')}>
-      <FileEdit size={12} /> Files
-      {#if files.length > 0}<span class="tc">{files.length}</span>{/if}
-    </button>
-    <button class="tab" class:ta={activeTab==='commits'} onclick={() => switchTab('commits')}>
-      <GitCommit size={12} /> Commits
-      {#if commits.length > 0}<span class="tc">{commits.length}</span>{/if}
-    </button>
+  <div class="tab-bar">
+    <Tabs
+      items={[
+        { id: 'overview', label: 'Overview', icon: FileText,  iconSize: 12 },
+        { id: 'ci',       label: 'CI',       icon: Workflow,  iconSize: 12, badge: ciRunCount > 0 ? ciRunCount : undefined },
+        { id: 'files',    label: 'Files',    icon: FileEdit,  iconSize: 12, badge: files.length > 0 ? files.length : undefined },
+        { id: 'commits',  label: 'Commits',  icon: GitCommit, iconSize: 12, badge: commits.length > 0 ? commits.length : undefined },
+      ]}
+      value={activeTab}
+      variant="underline"
+      size="md"
+      onSelect={(id) => switchTab(id as Tab)}
+    />
   </div>
 
   <!-- ── Content (fixed height, no resize) ──────────────────────────────── -->
@@ -1428,14 +1427,12 @@
     </div>
     <div class="ftr-right">
       {#if detailMr.state === 'open' && !detailMr.autoMergeEnabled && !hasConflicts && !mergeableChecking}
-        <label class="ftr-check" use:tooltip={'Squash all commits into one before merging'}>
-          <input type="checkbox" bind:checked={mergeSquash} />
-          <span>Squash</span>
-        </label>
-        <label class="ftr-check" use:tooltip={{ content: 'Delete source branch after merge', description: 'Removes both remote and local copy (keeps it when a worktree still uses it, or when switching to the target fails).' }}>
-          <input type="checkbox" bind:checked={mergeDelete} />
-          <span>Delete branch</span>
-        </label>
+        <span class="ftr-check" use:tooltip={'Squash all commits into one before merging'}>
+          <Checkbox bind:checked={mergeSquash} label="Squash" />
+        </span>
+        <span class="ftr-check" use:tooltip={{ content: 'Delete source branch after merge', description: 'Removes both remote and local copy (keeps it when a worktree still uses it, or when switching to the target fails).' }}>
+          <Checkbox bind:checked={mergeDelete} label="Delete branch" />
+        </span>
         <span class="ftr-div"></span>
       {/if}
       {#if detailMr.state === 'closed'}
@@ -1610,27 +1607,8 @@
   .lbl { font-size:var(--font-size-2xs);font-weight:600;padding:2px 7px;border-radius:99px;border:1px solid;white-space:nowrap; }
 
   /* ── Tab bar ──────────────────────────────────────────────────────────── */
-  .tab-bar {
-    display:flex;padding:0 12px;
-    flex-shrink:0;background:transparent;gap:2px;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .tab {
-    display:inline-flex;align-items:center;gap:5px;padding:7px 12px;
-    font-size:var(--font-size-sm);font-weight:500;color:var(--text-muted);
-    background:transparent;border:none;border-bottom:2px solid transparent;
-    cursor:pointer;font-family:var(--font-ui-sans);
-    transition:color var(--transition-fast),border-color var(--transition-fast);white-space:nowrap;
-  }
-  .tab:hover { color:var(--text-secondary); }
-  .ta { color:var(--accent)!important;border-bottom-color:var(--accent); }
-  .tc {
-    display:inline-flex;align-items:center;justify-content:center;
-    min-width:17px;height:15px;padding:0 4px;
-    background:var(--bg-elevated);border:1px solid var(--border-subtle);
-    border-radius:99px;font-size:var(--font-size-2xs);font-weight:600;color:var(--text-muted);
-  }
-  .ta .tc { background:color-mix(in srgb,var(--accent) 15%,transparent);border-color:color-mix(in srgb,var(--accent) 30%,transparent);color:var(--accent); }
+  /* Strip rendered by shared <Tabs variant="underline">; the wrapper only contributes the side padding. */
+  .tab-bar { padding:0 12px; flex-shrink:0; }
 
   /* ── Content area (fills remaining space, never resizes modal) ────────── */
   .content-area {
@@ -2177,9 +2155,7 @@
     border-radius: 999px;
   }
 
-  .ftr-check { display:flex;align-items:center;gap:5px;font-size:var(--font-size-xs);color:var(--text-muted);cursor:pointer;user-select:none;white-space:nowrap; }
-  .ftr-check:hover { color:var(--text-secondary); }
-  .ftr-check input { width:13px;height:13px;accent-color:var(--accent);cursor:pointer;flex-shrink:0; }
+  .ftr-check { display:flex;align-items:center;white-space:nowrap; }
   .ftr-div   { width:1px;height:18px;background:var(--border-subtle); }
 
   /* ── Buttons ──────────────────────────────────────────────────────────── */

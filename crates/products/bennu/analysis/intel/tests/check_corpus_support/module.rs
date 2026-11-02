@@ -195,6 +195,7 @@ fn validate_all(
             expected_package: package_of(&source.rel),
             java_major: Some(major),
             // JDK-only corpus: the classpath is exactly what javac compiled against.
+            jdk_major: None,
             classpath_complete: true,
         };
         let anchors = Anchors::new(&source.text);

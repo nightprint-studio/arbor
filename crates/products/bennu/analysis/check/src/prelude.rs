@@ -52,7 +52,7 @@ pub use crate::typing::types::unresolved_types;
 pub use crate::calls::undefined_var::undefined_var;
 pub use crate::calls::unresolved_call::unresolved_call;
 pub use crate::source::var_target::var_target_errors_nodes;
-pub use crate::source::version::version_errors;
+pub use crate::source::version::{source_set_level, version_errors};
 
 // The wire diagnostic the checks emit, re-exported so a consumer reaches it through this prelude.
 pub use bennu_proto::prelude::Diagnostic;

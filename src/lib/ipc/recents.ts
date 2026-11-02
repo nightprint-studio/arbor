@@ -18,6 +18,8 @@ export interface RecentProject {
   name:      string;
   /** Unix seconds of the last open. */
   opened_at: number;
+  /** Pinned to the top of the welcome page. */
+  pinned?:   boolean;
 }
 
 /** Record an open. Re-opening an entry moves it to the top rather than duplicating it. */
@@ -31,6 +33,10 @@ export const listRecentProjects = () =>
 /** Drop one entry — "remove from recents". */
 export const forgetRecentProject = (product: string, path: string) =>
   invoke<void>('forget_recent_project', { product, path });
+
+/** Pin or unpin one entry: a pinned project stays at the top of the welcome page. */
+export const pinRecentProject = (product: string, path: string, pinned: boolean) =>
+  invoke<void>('pin_recent_project', { product, path, pinned });
 
 /**
  * Park "open this project" for a product. Pair it with `openProduct`: the

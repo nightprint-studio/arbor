@@ -2,6 +2,7 @@
   import { UserCircle, AlertTriangle } from 'lucide-svelte';
   import Modal from '../shared/Modal.svelte';
   import ModalHeader from '../shared/ModalHeader.svelte';
+  import ModalFooter from '../shared/ModalFooter.svelte';
   import Button from '../shared/ui/Button.svelte';
   import FormField from '../shared/ui/FormField.svelte';
   import Input from '../shared/ui/Input.svelte';
@@ -90,10 +91,12 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="ghost" onclick={onCancel}>Cancel</Button>
-    <Button variant="primary" disabled={!canSave} loading={saving} onclick={save}>
-      Save &amp; commit
-    </Button>
+    <ModalFooter hint="to save">
+      <Button variant="ghost" onclick={onCancel}>Cancel</Button>
+      <Button variant="primary" disabled={!canSave} loading={saving} onclick={save}>
+        Save &amp; commit
+      </Button>
+    </ModalFooter>
   {/snippet}
 </Modal>
 

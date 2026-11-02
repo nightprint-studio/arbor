@@ -42,6 +42,7 @@
 
   import Modal from '$lib/components/shared/Modal.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
@@ -446,13 +447,11 @@
               >
                 {#if expanded}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}
               </button>
-              <input
-                type="checkbox"
-                class="rm-check"
-                aria-label="Toggle all sites in this file"
+              <Checkbox
+                stopPropagation
+                ariaLabel="Toggle all sites in this file"
                 checked={fst === 'all'}
                 indeterminate={fst === 'some'}
-                onclick={(e) => e.stopPropagation()}
                 onchange={() => toggleFile(node.group)}
               />
               <FileText size={13} class="rm-file-icon" />
@@ -464,12 +463,10 @@
             {:else}
               {@const skip = skipped.has(siteKey(node.site))}
               <span class="rm-chev rm-chev-spacer"></span>
-              <input
-                type="checkbox"
-                class="rm-check"
-                aria-label={skip ? 'Include this site' : 'Skip this site'}
+              <Checkbox
+                stopPropagation
+                ariaLabel={skip ? 'Include this site' : 'Skip this site'}
                 checked={!skip}
-                onclick={(e) => e.stopPropagation()}
                 onchange={() => toggleSite(node.site)}
               />
               <span class={`rm-scope rm-scope-${node.site.scope}`}>
@@ -667,13 +664,6 @@
   }
   .rm-chev:hover { color: var(--text-primary); }
   .rm-chev-spacer { cursor: default; pointer-events: none; }
-
-  .rm-check {
-    margin: 0;
-    flex-shrink: 0;
-    accent-color: var(--accent);
-    cursor: pointer;
-  }
 
   .rm-file-icon { color: var(--text-secondary); flex-shrink: 0; }
   .rm-file-name {

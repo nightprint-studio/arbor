@@ -14,7 +14,7 @@
   import { Hammer, Trash2 } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import BennuBuildPanel from './BennuBuildPanel.svelte';
   import BennuProblemsPanel from './BennuProblemsPanel.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -54,16 +54,9 @@
       {#if section === 'build'}
         <!-- No Stop here any more: what was being stopped is the launched PROGRAM, and it
              now has its own console with its own Stop. A build is not cancellable. -->
-        <button
-          class="ps-btn"
-          type="button"
-          use:tooltip={'Clear'}
-          aria-label="Clear build output"
-          disabled={bennuRunStore.active}
-          onclick={() => bennuRunStore.clear()}
-        >
+        <IconButton tooltip="Clear" disabled={bennuRunStore.active} onclick={() => bennuRunStore.clear()}>
           <Trash2 size={13} />
-        </button>
+        </IconButton>
       {/if}
     {/snippet}
   </BottomPanelHeader>

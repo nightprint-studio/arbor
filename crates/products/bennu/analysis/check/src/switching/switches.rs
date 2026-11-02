@@ -39,13 +39,23 @@ pub fn switch_selector_errors_in(root: Node, source: &str) -> Vec<Diagnostic> {
 
 /// Slice-driven core (shared pre-collected node list — one traversal across all pure-AST checks).
 pub fn switch_selector_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
+    switch_selector_errors_at(nodes, source, None)
+}
+
+/// [`switch_selector_errors_nodes`] for a file compiled at `java_major`. From Java 23 the primitive
+/// selectors `long`, `float`, `double` and `boolean` are a PREVIEW feature (JEP 455/488/507 — primitive
+/// patterns), so they are no longer reported: whether preview is switched on is the compiler flag
+/// `--enable-preview`, which Bennu does not read, and an error on code that compiles with it is worse
+/// than silence on code that does not.
+pub fn switch_selector_errors_at(nodes: &[Node], source: &str, java_major: Option<u32>) -> Vec<Diagnostic> {
+    let primitive_selectors = java_major.is_some_and(|m| m >= 23);
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
         if n.kind() == "switch_expression" {
             if let Some(cond) = n.child_by_field_name("condition") {
                 if let Some(ty) = selector_primitive(cond, bytes) {
-                    if FORBIDDEN_SELECTOR.contains(&ty) {
+                    if FORBIDDEN_SELECTOR.contains(&ty) && !primitive_selectors {
                         out.push(crate::engine::check_id::CheckId::IllegalSwitchSelector.at(
                             cond,
                             format!(
@@ -465,5 +475,15 @@ mod tests {
         assert!(sel("int i = 0; switch (i) { case \"a\": break; }").iter().any(|m| m.contains("string")));
         assert!(sel("byte b = 0; switch (b) { case -128: break; case 127: break; }").is_empty());
         assert!(sel("int i = 0; switch (i) { case 'a': break; }").is_empty());
+    }
+
+    #[test]
+    fn a_primitive_selector_is_a_preview_feature_from_java_23() {
+        let src = "class A { void m(long l) { switch (l) { case 1L -> { } default -> { } } } }";
+        let tree = bennu_java::prelude::parse_java(src).unwrap();
+        let nodes = crate::engine::check::collect_nodes(tree.root_node());
+        assert_eq!(switch_selector_errors_at(&nodes, src, Some(21)).len(), 1);
+        assert_eq!(switch_selector_errors_at(&nodes, src, None).len(), 1);
+        assert!(switch_selector_errors_at(&nodes, src, Some(23)).is_empty());
     }
 }

@@ -5,19 +5,15 @@
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
 
-  const SQUASH_HINTS_KEY = 'arbor:experimental:squash-merge-hints';
+  import { graphConfigStore } from '$lib/stores/corvus/graph_config.svelte';
 
-  let squashMergeHints = $state(
-    // Default OFF: even with the new background-loaded hints (graph renders
-    // before the API call returns) the network round-trip can take many
-    // seconds on slow links / rate-limited tokens.  Opt-in only.
-    (localStorage.getItem(SQUASH_HINTS_KEY) ?? 'false') === 'true'
-  );
+  // Default OFF: even with the background-loaded hints (graph renders before the
+  // API call returns) the network round-trip can take many seconds on slow links /
+  // rate-limited tokens.  Opt-in only.  Persisted in config.toml via the graph config.
+  // Read straight from the store (it may still be loading at mount); written only on user action,
+  // so mounting never overwrites a not-yet-migrated value.
+  const squashMergeHints = $derived(graphConfigStore.squashMergeHints);
   let squashExpanded = $state(false);
-
-  $effect(() => {
-    localStorage.setItem(SQUASH_HINTS_KEY, String(squashMergeHints));
-  });
 </script>
 
 <SectionHeader title="Experimental" description="Features in active testing that may rely on external services or behave unexpectedly in edge cases." />
@@ -30,7 +26,7 @@
         <span class="feat-title">Squash-merge ghost edges</span>
         <span class="feat-badge">API</span>
       </div>
-      <Toggle bind:checked={squashMergeHints} />
+      <Toggle checked={squashMergeHints} onchange={(v) => graphConfigStore.setSquashMergeHints(v)} />
     </div>
 
     <p class="feat-summary">

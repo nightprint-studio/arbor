@@ -32,8 +32,12 @@
 
   const root = $derived(projectStore.project?.root ?? null);
 
+  // Plain (non-reactive) on purpose: it only has to stop the auto-run below from firing again.
+  let scanned = false;
+
   async function scan() {
     if (!root || loading) return;
+    scanned = true;
     loading = true;
     added = false;
     expanded.clear();
@@ -46,9 +50,11 @@
     }
   }
 
-  // Auto-run once when the modal opens on a project.
+  // Auto-run once when the modal opens on a project. Keyed on `scanned`, not on `result`: a scan
+  // that fails (or answers null) leaves `result` empty, and re-running on that spun forever,
+  // toasting an error each time.
   $effect(() => {
-    if (root && !result && !loading) void scan();
+    if (root && !scanned && !loading) void scan();
   });
 
   function baseName(p: string): string {

@@ -1010,6 +1010,11 @@ mod tests {
         );
         assert_eq!(level("kotlin { jvmToolchain(17) }"), Some(("17".into(), "toolchain".into())));
         assert_eq!(level("tasks.withType(JavaCompile) { options.release = 11 }"), Some(("11".into(), "release".into())));
+        // The newest levels read like the old ones: nothing caps at the last LTS.
+        assert_eq!(level("java { sourceCompatibility = JavaVersion.VERSION_25 }"), Some(("25".into(), "sourceCompatibility".into())));
+        assert_eq!(level("java { toolchain { languageVersion.set(JavaLanguageVersion.of(24)) } }"), Some(("24".into(), "toolchain".into())));
+        assert_eq!(level("tasks.withType(JavaCompile) { options.release = 23 }"), Some(("23".into(), "release".into())));
+        assert_eq!(level("kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_22 } }").map(|l| l.0), Some("22".into()));
         assert_eq!(level("dependencies {}"), None);
     }
 

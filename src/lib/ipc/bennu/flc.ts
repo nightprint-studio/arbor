@@ -13,12 +13,12 @@ export type FlcContext = string;
 
 export interface FlcReply {
   context?: FlcContext;
-  /** The rest of the line; never contains a newline. */
+  /** The rest of the line; only a `derived` block (a constructor written from the fields) runs over several lines. */
   text: string;
   /** 0..1. For `log`, the share of the place's log calls the pattern holds. */
   confidence: number;
   /** Where it came from. */
-  origin: 'log' | 'project' | 'model' | 'name' | 'mapping' | 'arguments' | 'habit' | 'annotation' | 'similar' | 'echo' | 'sequence';
+  origin: 'log' | 'project' | 'model' | 'name' | 'mapping' | 'arguments' | 'habit' | 'annotation' | 'similar' | 'echo' | 'sequence' | 'derived' | 'ngram' | 'catch' | 'lambda' | 'assert' | 'next';
 }
 
 /** What is running, for the settings page. */

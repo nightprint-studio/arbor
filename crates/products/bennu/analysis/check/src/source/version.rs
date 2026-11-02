@@ -9,6 +9,24 @@
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+/// The language level a source folder pins, from its name: `src/main/java21/…` → `21`.
+///
+/// A multi-release project keeps what only compiles on a newer Java in a sibling folder named after the
+/// level — Spring Framework's `src/main/java21`, `src/main/java24`, the same for Maven's
+/// `maven-compiler-plugin` executions with their own `<release>` — and those files are compiled at THAT
+/// level, whatever the rest of the module targets. Judging them at the module's level reported `_`
+/// and `java.lang.classfile` as errors in files that compile.
+///
+/// Only the folder directly under `src/<set>/` counts, and only levels from 9 (the first release a jar
+/// could be multi-release for); `java` itself, and anything else (`javascript`, `java8x`), is not one.
+pub fn source_set_level(file: &std::path::Path) -> Option<u32> {
+    let parts: Vec<&str> = file.components().filter_map(|c| c.as_os_str().to_str()).collect();
+    parts.windows(3).find_map(|w| {
+        let digits = (w[0] == "src").then(|| w[2].strip_prefix("java"))??;
+        digits.parse::<u32>().ok().filter(|n| *n >= 9 && !digits.starts_with('0'))
+    })
+}
+
 /// Every feature-below-target-version error in `root`.
 pub fn version_errors(root: Node, source: &str, java_major: u32) -> Vec<Diagnostic> {
     version_errors_nodes(root, &crate::engine::check::collect_nodes(root), source, java_major)
@@ -109,10 +127,29 @@ fn feature_at(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
         // Java 22 (JEP 456): `_` as a pattern, a local, a catch or a lambda parameter. Below it `_`
         // is a reserved word (9+) and the file does not compile.
         "underscore_pattern" => Some(("Unnamed variables and patterns", 22)),
+        // An UNTYPED lambda parameter is a plain identifier to the grammar — `(a, _) -> a`, `_ -> 1` —
+        // and only its text says it is the unnamed one.
+        "identifier"
+            if n.utf8_text(bytes) == Ok("_")
+                && n.parent().is_some_and(|p| {
+                    p.kind() == "inferred_parameters" || (p.kind() == "lambda_expression" && p.child_by_field_name("parameters") == Some(n))
+                }) =>
+        {
+            Some(("Unnamed variables and patterns", 22))
+        }
         // `x instanceof String s` (JEP 394): the binding name is what makes it a pattern, and what
         // dates it. A record pattern is its own node, below.
         "instanceof_expression" if n.child_by_field_name("name").is_some() => {
-            Some(("`instanceof` patterns", 16))
+            // `x instanceof int i`: a primitive in a pattern (JEP 455/488/507), still a PREVIEW in 25.
+            if n.child_by_field_name("right").is_some_and(|t| is_primitive_type_node(t.kind())) {
+                Some(("Primitive type patterns (preview)", 23))
+            } else {
+                Some(("`instanceof` patterns", 16))
+            }
+        }
+        // `case int j ->`, `Point(double x, _)`: the same preview feature, in a `switch` or a record pattern.
+        "type_pattern" if n.named_child(0).is_some_and(|t| is_primitive_type_node(t.kind())) => {
+            Some(("Primitive type patterns (preview)", 23))
         }
         // `x instanceof Point(int a, int b)` (JEP 440). One inside a `case` label is dated by the label
         // already; a nested one by the outermost.
@@ -128,6 +165,11 @@ fn feature_at(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
         }
         _ => None,
     }
+}
+
+/// Whether a type node of the grammar is a primitive.
+fn is_primitive_type_node(kind: &str) -> bool {
+    matches!(kind, "integral_type" | "floating_point_type" | "boolean_type")
 }
 
 /// Whether a **statement** precedes the explicit constructor invocation `n` in its constructor body.
@@ -555,5 +597,78 @@ mod tests {
     fn a_call_to_a_method_named_yield_is_not_a_switch_yield() {
         let src = "class C { void yield(int x) {} void m() { yield(1); } }";
         assert!(at(src, 8).is_empty(), "{:?}", at(src, 8));
+    }
+}
+
+#[cfg(test)]
+mod source_set_tests {
+    use super::source_set_level;
+    use std::path::Path;
+
+    #[test]
+    fn a_folder_named_after_a_level_pins_it() {
+        let level = |p: &str| source_set_level(Path::new(p));
+        assert_eq!(level("/w/core/src/main/java21/org/acme/A.java"), Some(21));
+        assert_eq!(level("/w/core/src/main/java24/org/acme/A.java"), Some(24));
+        assert_eq!(level("/w/core/src/test/java9/A.java"), Some(9));
+        assert_eq!(level("/w/core/src/main/java/org/acme/A.java"), None);
+        assert_eq!(level("/w/core/src/main/java8/A.java"), None);
+        assert_eq!(level("/w/core/src/main/javascript/A.java"), None);
+        // Not under `src/<set>/`: a package that happens to be called `java21` is no source set.
+        assert_eq!(level("/w/core/src/main/java/org/java21/A.java"), None);
+    }
+}
+
+#[cfg(test)]
+mod newest_syntax_tests {
+    use super::*;
+
+    fn flagged(src: &str, level: u32) -> Vec<String> {
+        let tree = bennu_java::prelude::parse_java(src).expect("parses");
+        assert!(!tree.root_node().has_error(), "a syntax error in `{src}`");
+        version_errors(tree.root_node(), src, level).into_iter().map(|d| d.message).collect()
+    }
+
+    /// Each construct of Java 22–25 is parsed without a syntax error and dated by the release that made
+    /// it legal: nothing below it passes, nothing at or above it is reported.
+    #[test]
+    fn each_newer_construct_is_dated_by_its_release() {
+        let cases: [(&str, u32); 8] = [
+            ("class A { void m(java.util.List<String> xs) { for (var _ : xs) { } } }", 22),
+            ("class A { void m() { try { } catch (RuntimeException _) { } } }", 22),
+            ("class A { void m(Object o) { switch (o) { case Integer _ -> { } default -> { } } } }", 22),
+            ("class A { void m(Object o) { if (o instanceof int k) { } } }", 23),
+            ("class A { void m(int i) { switch (i) { case int j when j > 3 -> { } default -> { } } } }", 23),
+            ("import module java.base;\nclass A { }", 25),
+            ("class A { A(int n) { int d = n * 2; this(d, 0); } A(int a, int b) { } }", 25),
+            ("class A { void m() { java.util.function.BiFunction<Integer, Integer, Integer> f = (a, _) -> a; } }", 22),
+        ];
+        for (src, since) in cases {
+            assert!(!flagged(src, since - 1).is_empty(), "`{src}` should need Java {since}");
+            assert!(flagged(src, since).is_empty(), "`{src}` is legal at Java {since}: {:?}", flagged(src, since));
+            assert!(flagged(src, 25).is_empty(), "`{src}` is legal at Java 25");
+        }
+    }
+
+    /// `///` Markdown documentation comments (JEP 467, 23) are line comments to the grammar, and an
+    /// instance `main` (JEP 512) is an ordinary method: neither needs a version gate or a syntax error.
+    #[test]
+    fn markdown_doc_comments_and_an_instance_main_are_plain_java() {
+        let src = "/// Greets.\n///\n/// - [Hello]\nclass Hello { void main() { System.out.println(\"hi\"); } }";
+        assert!(flagged(src, 8).is_empty());
+    }
+
+    /// A module on 21 with a `src/main/java22` folder that uses `_`: the same text is an error in the
+    /// first folder and clean in the second, because the folder pins the level its files compile at.
+    #[test]
+    fn the_same_unnamed_variable_is_an_error_in_java_and_legal_in_java22() {
+        let src = "class A { void m(java.util.List<String> xs) { for (var _ : xs) { } } }";
+        let diags_in = |path: &str| {
+            let level = source_set_level(std::path::Path::new(path)).unwrap_or(21);
+            let ctx = crate::engine::check::FileContext { java_major: Some(level), jdk_major: Some(21), ..Default::default() };
+            crate::engine::check::check_file(src, &ctx).into_iter().map(|d| d.code).collect::<Vec<_>>()
+        };
+        assert_eq!(diags_in("/p/core/src/main/java/A.java"), ["feature-requires-newer-java"]);
+        assert!(diags_in("/p/core/src/main/java22/A.java").is_empty());
     }
 }

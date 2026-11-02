@@ -81,7 +81,6 @@
     line-height: 1.5;
     color: var(--text-muted);
   }
-  .env-lede code,
   .env-note code {
     font-family: var(--font-code);
     font-size: 11px;

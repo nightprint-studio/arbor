@@ -367,6 +367,16 @@ mod tests {
         assert_eq!(jdk.source, "override");
     }
 
+    /// The levels past the last LTS are read like any other: nothing in the ladder caps at 21.
+    #[test]
+    fn reads_the_newest_levels() {
+        for (key, level) in [("maven.compiler.release", "22"), ("maven.compiler.source", "24"), ("java.version", "25")] {
+            let p = pom::parse(&format!("<project><properties><{key}>{level}</{key}></properties></project>"));
+            let jdk = detect(Path::new(NO_TREE), &p, None).unwrap();
+            assert_eq!((jdk.version.as_str(), jdk.source.as_str()), (level, key));
+        }
+    }
+
     #[test]
     fn reads_maven_compiler_source() {
         let p = pom::parse(

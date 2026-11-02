@@ -60,6 +60,8 @@
   import { fade } from 'svelte/transition';
   import SearchBar from './SearchBar.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { highlightLabel } from '$lib/utils/text-search';
+  import { createFullTextSearch } from './settings-fulltext.svelte';
 
   let {
     groups,
@@ -67,16 +69,43 @@
     content,
     searchable = true,
     searchPlaceholder = 'Search settings…',
+    searchIndex,
   }: {
     groups: SettingsNavGroup[];
     active: string;
     content: Snippet;
     searchable?: boolean;
     searchPlaceholder?: string;
+    /**
+     * Opt-in full-text search. Renders ONE page by id, and is mounted off-screen (all pages, once, on
+     * the first keystroke) so the shell can index their text. With it the search matches page
+     * *content* rather than nav labels only, the nav narrows to the pages that contain the query
+     * (with per-group counts), hits are highlighted in the page showing, and F3 / Shift+F3 steps
+     * through them. Without it the search is the label filter it always was.
+     *
+     * The snippet must render a page the same way `content` does — it is the same component, just
+     * without the user looking at it, so give it inert callbacks rather than real side effects.
+     */
+    searchIndex?: Snippet<[string]>;
   } = $props();
 
   let query = $state('');
   let regex = $state(false);
+  let contentEl = $state<HTMLElement | null>(null);
+  let indexEl = $state<HTMLElement | null>(null);
+
+  // Inert unless `searchIndex` is passed: every effect and listener inside is gated on `enabled`.
+  const fts = createFullTextSearch({
+    enabled: () => !!searchIndex,
+    groups: () => groups,
+    query: () => query,
+    setQuery: (q) => { query = q; },
+    regex: () => regex,
+    active: () => active,
+    setActive: (id) => { active = id; },
+    contentEl: () => contentEl,
+    indexEl: () => indexEl,
+  });
 
   // null → no filter; 'invalid' → bad regex (match nothing); else a {test}.
   const matcher = $derived.by<RegExp | { test: (s: string) => boolean } | 'invalid' | null>(() => {
@@ -86,8 +115,9 @@
     const lower = t.toLowerCase();
     return { test: (s: string) => s.toLowerCase().includes(lower) };
   });
-  const regexInvalid = $derived(matcher === 'invalid');
-  const filtering = $derived(matcher !== null);
+  const fullText = $derived(!!searchIndex);
+  const regexInvalid = $derived(fullText ? fts.regexInvalid : matcher === 'invalid');
+  const filtering = $derived(fullText ? fts.searchActive : matcher !== null);
 
   function hit(s: string): boolean {
     return matcher != null && matcher !== 'invalid' ? matcher.test(s) : false;
@@ -102,7 +132,23 @@
     });
     return kept.length ? { ...item, children: kept } : null;
   }
+  /** Full-text mode: the pages the index says contain the query (label hits are folded into it). */
+  function visibleItemFullText(item: SettingsNavItem): SettingsNavItem | null {
+    if (fts.matchingIds.has(item.id)) return item;
+    const kept = (item.children ?? []).flatMap((c) => {
+      const k = visibleItemFullText(c);
+      return k ? [k] : [];
+    });
+    return kept.length ? { ...item, children: kept } : null;
+  }
   function visibleItems(g: SettingsNavGroup): SettingsNavItem[] {
+    if (fullText) {
+      if (!filtering) return g.items;
+      return g.items.flatMap((i) => {
+        const kept = visibleItemFullText(i);
+        return kept ? [kept] : [];
+      });
+    }
     if (!filtering || hit(g.label)) return g.items;
     return g.items.flatMap((i) => {
       const kept = visibleItem(i);
@@ -118,9 +164,10 @@
     return items.flatMap((i) => [i.id, ...idsOf(i.children ?? [])]);
   }
 
-  // Keep `active` pointing at something visible when a query hides it.
+  // Keep `active` pointing at something visible when a query hides it. (Full-text search moves
+  // `active` itself, once the index has answered — doing it here too would act on a stale answer.)
   $effect(() => {
-    if (!filtering) return;
+    if (!filtering || fullText) return;
     const ids = visibleGroups.flatMap((x) => idsOf(x.items));
     if (ids.length && !ids.includes(active)) active = ids[0];
   });
@@ -224,7 +271,11 @@
         aria-expanded={branch ? open : undefined}
       >
         {#if Icon}<Icon size={depth === 0 ? 13 : 12} />{/if}
-        <span class="nav-label">{item.label}</span>
+        {#if fullText && filtering && fts.labelMatchIds.has(item.id)}
+          <span class="nav-label">{@html highlightLabel(item.label, fts.compiledQuery)}</span>
+        {:else}
+          <span class="nav-label">{item.label}</span>
+        {/if}
         {#if active === item.id}<ChevronRight size={11} class="nav-arrow" />{/if}
       </button>
     </div>
@@ -242,9 +293,17 @@
   <nav class="nav" aria-label="Settings sections">
     {#if searchable}
       <div class="nav-search">
-        <SearchBar bind:query bind:regex {regexInvalid} showCounter={false}
-                   placeholder={searchPlaceholder} ariaLabel="Search settings"
-                   onClear={() => (query = '')} />
+        {#if fullText}
+          <SearchBar bind:query bind:regex {regexInvalid}
+                     current={fts.markCount > 0 ? fts.currentMark + 1 : 0} total={fts.markCount}
+                     placeholder={searchPlaceholder} ariaLabel="Search settings"
+                     oninput={fts.onInput} onClear={fts.clear}
+                     onNext={fts.next} onPrev={fts.prev} />
+        {:else}
+          <SearchBar bind:query bind:regex {regexInvalid} showCounter={false}
+                     placeholder={searchPlaceholder} ariaLabel="Search settings"
+                     onClear={() => (query = '')} />
+        {/if}
       </div>
     {/if}
 
@@ -253,17 +312,34 @@
     {/if}
 
     {#each visibleGroups as { group, items } (group.label)}
-      <div class="nav-group-label">{group.label}</div>
+      {#if fullText && filtering}
+        <div class="nav-group-label counted">
+          {group.label}
+          <span class="nav-group-count">{items.length}</span>
+        </div>
+      {:else}
+        <div class="nav-group-label">{group.label}</div>
+      {/if}
       {@render rows(items, ROW_PAD, 0, rootHasBranch)}
     {/each}
   </nav>
 
   {#key active}
-    <div class="content" in:fade={{ duration: animStore.dFast }}>
+    <div class="content" bind:this={contentEl} in:fade={{ duration: animStore.dFast }}>
       {@render content()}
     </div>
   {/key}
 </div>
+
+<!-- Hidden off-screen container: every page is mounted here once, on the first keystroke, so its
+     text can be indexed. -->
+{#if searchIndex && fts.extracting}
+  <div bind:this={indexEl} class="search-offscreen" aria-hidden="true">
+    {#each groups.flatMap((g) => idsOf(g.items)) as id (id)}
+      <div data-section={id}>{@render searchIndex(id)}</div>
+    {/each}
+  </div>
+{/if}
 
 <style>
   /* ── Shell ──────────────────────────────────────────────────────────
@@ -289,6 +365,36 @@
     font-size: var(--font-size-2xs); font-weight: 600; color: var(--text-disabled);
     text-transform: uppercase; letter-spacing: 0.7px; padding: 10px 14px 4px;
   }
+  /* Full-text search only: how many pages of the group survived the query. */
+  .nav-group-label.counted { display: flex; align-items: center; gap: 6px; }
+  .nav-group-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 16px; height: 13px; padding: 0 4px;
+    background: var(--accent-subtle); color: var(--accent);
+    font-size: var(--font-size-3xs); font-weight: 700; letter-spacing: 0;
+    border-radius: var(--radius-sm); text-transform: none;
+  }
+  /* The query, inside a nav label. */
+  .nav-label :global(mark) {
+    background: color-mix(in srgb, var(--accent) 35%, transparent);
+    color: inherit; border-radius: 2px; padding: 0 1px;
+  }
+  /* The query, inside the page showing (injected by the full-text search). */
+  :global(mark.settings-match) {
+    background: color-mix(in srgb, var(--warning, #e8a33d) 40%, transparent);
+    color: inherit; border-radius: 2px; padding: 0 1px;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning, #e8a33d) 30%, transparent);
+  }
+  :global(mark.settings-match.current) {
+    background: var(--warning, #e8a33d);
+    color: var(--bg-base);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning, #e8a33d) 50%, transparent);
+  }
+  .search-offscreen {
+    position: fixed; left: -9999px; top: -9999px;
+    visibility: hidden; pointer-events: none; width: 600px;
+  }
+
   /* The strip: what is tinted, hovered and indented. Inside it the twisty and the label are two
      controls, so the tint has to live on their parent or it would stop at the arrow. */
   .nav-row {
@@ -324,10 +430,6 @@
   .nav-twisty:hover { color: var(--text-primary); }
   .nav-row:hover .nav-twisty { color: var(--text-secondary); }
   .nav-twisty-gap { margin-right: 6px; }
-  .nav-icon { display: inline-flex; flex: none; }
-  /* The selected row speaks with one voice: its icon takes the accent like everything else in it,
-     whatever colour it wears at rest. */
-  .nav-row.active .nav-icon { color: var(--accent) !important; }
   /* The LABEL takes the free space — named, not "any span in the row". The tree put two more spans
      in here (the twisty, and the gap that stands in for it on a leaf), and a bare `span` selector
      handed each of them `flex: 1` too: they ate the width, pushed icon and label into the middle of

@@ -10,6 +10,7 @@
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import BrandIcon from '$lib/components/shared/internal/BrandIcon.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import Contribution from '$lib/components/corvus/Contribution.svelte';
@@ -23,6 +24,7 @@
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { listNav } from '$lib/components/shared/ui/list-nav';
 
   const CI_POLL_INTERVAL_MS = 10_000;
   import {
@@ -553,23 +555,13 @@
           <Play size={13} />
         </button>
 
-        <button
-          class="pipe-tb-btn"
-          use:tooltip={'Stop all running'}
-          disabled={!hasRunningLocal}
-          onclick={stopAllRunning}
-        >
+        <IconButton size={28} tooltip="Stop all running" disabled={!hasRunningLocal} onclick={stopAllRunning}>
           <Square size={13} />
-        </button>
+        </IconButton>
 
-        <button
-          class="pipe-tb-btn"
-          use:tooltip={'Resume last failed / paused / cancelled run'}
-          disabled={!hasResumableLocal}
-          onclick={resumeLastFailed}
-        >
+        <IconButton size={28} tooltip="Resume last failed / paused / cancelled run" disabled={!hasResumableLocal} onclick={resumeLastFailed}>
           <RotateCw size={13} />
-        </button>
+        </IconButton>
 
         <button
           class="pipe-tb-btn pipe-tb-danger"
@@ -670,7 +662,7 @@
               {/if}
             </div>
           {:else}
-            <div class="ci-run-list">
+            <div class="ci-run-list" use:listNav>
               {#each filteredLocalRuns as run (run.id)}
                 {@const steps = stepsCount(run)}
                 {@const terminal = isTerminalStatus(run.status)}
@@ -680,10 +672,14 @@
                 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
                 <div
                   class="ci-run-card"
+                  data-list-item
                   role="button"
                   tabindex="0"
                   onclick={() => openLocalRun(run)}
-                  onkeydown={(e) => e.key === 'Enter' && openLocalRun(run)}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') openLocalRun(run);
+                    else if (e.key === ' ' && e.target === e.currentTarget) { e.preventDefault(); openLocalRun(run); }
+                  }}
                   oncontextmenu={(e) => openRunContext(e, run)}
                 >
                   <!-- Left: status badge + duration -->
@@ -850,16 +846,20 @@
         </div>
 
       {:else}
-        <div class="ci-run-list">
+        <div class="ci-run-list" use:listNav>
           {#each ciRuns as run (run.id)}
             {@const StatusIcon = statusIcon(run.status)}
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <div
               class="ci-run-card"
+              data-list-item
               role="button"
               tabindex="0"
               onclick={() => { selectedCiRun = run; }}
-              onkeydown={(e) => e.key === 'Enter' && (selectedCiRun = run)}
+              onkeydown={(e) => {
+                if (e.key === 'Enter') selectedCiRun = run;
+                else if (e.key === ' ' && e.target === e.currentTarget) { e.preventDefault(); selectedCiRun = run; }
+              }}
               oncontextmenu={(e) => openCiContext(e, run)}
             >
               <!-- Left: status badge + duration -->

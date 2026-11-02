@@ -27,6 +27,7 @@
    * stray Ctrl+S to write back over a binary.
    */
   import { Type, ExternalLink, Lock } from 'lucide-svelte';
+  import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
@@ -229,10 +230,7 @@
             <input type="range" min="-4" max="12" step="0.5" bind:value={tracking} />
             <span class="fv-val">{tracking}px</span>
           </label>
-          <label class="fv-check">
-            <input type="checkbox" bind:checked={italic} />
-            <span>Italic</span>
-          </label>
+          <Checkbox bind:checked={italic} label="Italic" />
         </div>
 
         <div class="fv-preview" style={`${style} font-size: ${size}px;`}>{specimen}</div>
@@ -336,10 +334,6 @@
   }
   .fv-ctl input[type='range'] { width: 110px; }
   .fv-val { min-width: 38px; font-family: var(--font-code); color: var(--text-secondary); }
-  .fv-check {
-    display: inline-flex; align-items: center; gap: 5px;
-    font-size: var(--font-size-xs); color: var(--text-muted);
-  }
 
   /* The specimen. `bg-elevated` rather than the page, so a light face on a dark theme still
      sits on a surface rather than floating. */

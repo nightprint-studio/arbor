@@ -39,6 +39,7 @@
    *
    * Keyboard-first: the field auto-focuses, Enter creates, Esc cancels (Modal owns it).
    */
+  import { untrack } from 'svelte';
   import { FolderPlus, Package } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -74,7 +75,7 @@
   // Pre-filled with where you are, with a trailing dot so the common case — a child — is Enter
   // after one word, and the uncommon ones are a few Backspaces. Not `$derived`: this is the field's
   // starting value, and the user edits it.
-  let name = $state(currentPackage ? `${currentPackage}.` : '');
+  let name = $state(untrack(() => (currentPackage ? `${currentPackage}.` : '')));
   let busy = $state(false);
 
   /** The characters no filesystem takes. The separators are absent on purpose — they have

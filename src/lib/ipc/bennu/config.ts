@@ -152,6 +152,16 @@ export interface BennuConfig {
   flc_learn_keep_text: boolean;
   /** Debugging: a notification each time a correction is counted. */
   flc_learn_notify: boolean;
+  /** Suggest the variable name after a type (`Order ▌` → `order`). */
+  flc_layer_names: boolean;
+  /** Suggest the rest of a line the project most often wrote after the same words. */
+  flc_layer_ngram: boolean;
+  /** Suggest the arguments of a `new` the project always writes the same way. Off by default. */
+  flc_layer_creation: boolean;
+  /** Suggest the call before the comma again, in a list that repeats itself. Off by default. */
+  flc_layer_echo: boolean;
+  /** Suggest the usual arguments and variables of a call. */
+  flc_layer_habits: boolean;
   /** Keep what Bennu learned about each project (argument habits, annotation shapes, variable names) in the data folder. */
   flc_profile_project: boolean;
   /** Let one project's profile help another where that one has seen too little. */

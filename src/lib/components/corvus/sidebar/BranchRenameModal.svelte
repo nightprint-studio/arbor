@@ -9,6 +9,7 @@
   import { pushBranch } from '$lib/ipc/corvus/remote';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
+  import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
@@ -243,23 +244,25 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="secondary" onclick={onClose} disabled={renaming}>Cancel</Button>
-    <Button
-      variant={alsoRenameRemote ? 'danger' : 'primary'}
-      onclick={handleRename}
-      disabled={!canSubmit}
-      loading={renaming}
-      title={isUnchanged ? 'Enter a different name to rename' : undefined}
-    >
-      {#snippet iconStart()}
-        {#if alsoRenameRemote}
-          <ShieldAlert size={12} />
-        {:else}
-          <Pencil size={12} />
-        {/if}
-      {/snippet}
-      {renaming ? renamingLabel : alsoRenameRemote ? 'Rename + Delete Remote' : 'Rename'}
-    </Button>
+    <ModalFooter hint="to rename">
+      <Button variant="secondary" onclick={onClose} disabled={renaming}>Cancel</Button>
+      <Button
+        variant={alsoRenameRemote ? 'danger' : 'primary'}
+        onclick={handleRename}
+        disabled={!canSubmit}
+        loading={renaming}
+        title={isUnchanged ? 'Enter a different name to rename' : undefined}
+      >
+        {#snippet iconStart()}
+          {#if alsoRenameRemote}
+            <ShieldAlert size={12} />
+          {:else}
+            <Pencil size={12} />
+          {/if}
+        {/snippet}
+        {renaming ? renamingLabel : alsoRenameRemote ? 'Rename + Delete Remote' : 'Rename'}
+      </Button>
+    </ModalFooter>
   {/snippet}
 </Modal>
 

@@ -14,6 +14,7 @@
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import type { TerminalsConfig, TerminalEntry } from '$lib/types/terminal';
 
@@ -269,13 +270,13 @@
           {#if config.default_shell === entry.id}
             <span class="default-pill">default</span>
           {:else}
-            <button class="action-btn" onclick={() => setDefault(entry.id)} use:tooltip={'Set as default'}>
+            <IconButton size={22} tooltip="Set as default" onclick={() => setDefault(entry.id)}>
               <Check size={11} />
-            </button>
+            </IconButton>
           {/if}
-          <button class="action-btn danger" onclick={() => removeCustomShell(entry.id)} use:tooltip={'Remove'}>
+          <IconButton size={22} variant="danger" tooltip="Remove" onclick={() => removeCustomShell(entry.id)}>
             <Trash2 size={11} />
-          </button>
+          </IconButton>
         </div>
       </div>
     {/each}
@@ -421,16 +422,6 @@
     font-size: var(--font-size-2xs); font-weight: 600; padding: 1px 6px; border-radius: var(--radius-sm);
     background: var(--accent-subtle); color: var(--accent); text-transform: uppercase;
   }
-  .action-btn {
-    display: flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px;
-    background: none; border: none; border-radius: var(--radius-sm);
-    color: var(--text-muted); cursor: pointer;
-    transition: background 0.12s, color 0.12s;
-  }
-  .action-btn:hover         { background: var(--bg-hover); color: var(--text-primary); }
-  .action-btn.danger:hover  { color: var(--error); background: var(--error-subtle); }
-
   .empty-msg { padding: 12px 14px; font-size: var(--font-size-sm); color: var(--text-muted); font-style: italic; }
 
   .save-row { display: flex; justify-content: flex-end; padding-top: 4px; }

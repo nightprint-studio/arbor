@@ -12,6 +12,8 @@
   import FileTypeChart    from './FileTypeChart.svelte';
   import FileExplorerModal  from '$lib/components/sitta/FileExplorerModal.svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -113,14 +115,9 @@
             {/if}
           </div>
         {/if}
-        <button
-          class="icon-btn"
-          onclick={refresh}
-          disabled={loading}
-          use:tooltip={'Recompute stats'}
-        >
+        <IconButton size={22} tooltip="Recompute stats" onclick={refresh} disabled={loading}>
           <RefreshCw size={14} class={loading ? 'spin' : ''} />
-        </button>
+        </IconButton>
       {/snippet}
     </ModalHeader>
   {/snippet}
@@ -137,7 +134,7 @@
       <div class="error-full">
         <p>Failed to compute statistics:</p>
         <pre>{statsStore.error}</pre>
-        <button class="btn-primary" onclick={refresh}>Retry</button>
+        <Button variant="primary" size="lg" onclick={refresh}>Retry</Button>
       </div>
 
     {:else if stats}
@@ -500,12 +497,5 @@
     border-radius: var(--radius-sm); padding: 10px 14px;
     max-width: 480px; overflow-x: auto;
   }
-  .btn-primary {
-    padding: 7px 18px; background: var(--accent); color: var(--text-on-accent);
-    border: none; border-radius: var(--radius-sm);
-    font-size: var(--font-size-md); font-family: var(--font-ui-sans);
-    cursor: pointer; transition: background var(--transition-fast);
-  }
-  .btn-primary:hover { background: var(--accent-hover); }
 
 </style>

@@ -160,6 +160,8 @@
   }
 </script>
 
+<!-- The shortcuts are player-wide (they bubble from the inner controls), hence one handler on the group. -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class="player"
   role="group"

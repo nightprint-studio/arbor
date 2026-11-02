@@ -41,6 +41,9 @@
   let loading  = $state(false);
   let deleting = $state(false);
   let loaded   = $state(false);
+  // Set when a scan fails, so the auto-scan effect below does not retry (and toast) forever:
+  // a failed load leaves `loaded` false and `loading` false, which is exactly its trigger.
+  let failed   = $state(false);
 
   $effect(() => {
     if (headBranch && !target) target = headBranch;
@@ -48,6 +51,7 @@
 
   function setTarget(name: string) {
     target = name;
+    failed = false;
     loaded = false;
     merged = [];
     selected = new Set();
@@ -71,7 +75,7 @@
 
   // Auto-scan on open and on tab switch
   $effect(() => {
-    if (!loaded && !loading && target) {
+    if (!loaded && !loading && !failed && target) {
       activeTab; // track tab changes
       load();
     }
@@ -83,6 +87,7 @@
     merged   = [];
     selected = new Set();
     loaded   = false;
+    failed   = false;
   });
 
   async function load() {
@@ -97,6 +102,7 @@
       selected = new Set(result.map(b => b.name));
       loaded   = true;
     } catch (err) {
+      failed = true;
       uiStore.showToast(`${err}`, 'error');
     } finally {
       loading = false;
@@ -278,8 +284,10 @@
     </div>
   </div>
 
-  {#if loaded && merged.length > 0}
-    {#snippet footer()}
+  <!-- Declared at the top level of the Modal's children: a snippet inside an `{#if}` is scoped to
+       that block, so Modal never received it and the dialog had neither Cancel nor Delete. -->
+  {#snippet footer()}
+    {#if loaded && merged.length > 0}
       <div class="warning-hint">
         <AlertTriangle size={12} />
         {#if activeTab === 'remote'}
@@ -288,7 +296,9 @@
           <span>Deletion is permanent and cannot be undone.</span>
         {/if}
       </div>
-      <Button variant="secondary" onclick={onClose}>Cancel</Button>
+    {/if}
+    <Button variant="secondary" onclick={onClose}>Cancel</Button>
+    {#if loaded && merged.length > 0}
       <Button
         variant="danger"
         onclick={handleDelete}
@@ -300,8 +310,8 @@
         {/snippet}
         {deleting ? 'Deleting…' : `Delete ${selected.size > 0 ? `${selected.size} ` : ''}branch${selected.size !== 1 ? 'es' : ''}`}
       </Button>
-    {/snippet}
-  {/if}
+    {/if}
+  {/snippet}
 </Modal>
 
 <style>

@@ -12,6 +12,7 @@
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
+  import { untrack } from 'svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import MarkdownEditor from '$lib/components/shared/ui/MarkdownEditor.svelte';
   import MarkdownView from '$lib/components/shared/ui/MarkdownView.svelte';
@@ -23,7 +24,7 @@
   let { text, onClose }: { text: string; onClose: () => void } = $props();
 
   // A working copy: starts as the answer and is the user's from then on.
-  let draft = $state(text);
+  let draft = $state(untrack(() => text));
   let editing = $state(false);
   let picking = $state(false);
 

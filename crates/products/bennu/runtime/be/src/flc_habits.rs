@@ -711,6 +711,13 @@ impl Habits {
         let (_, top) = seen.first()?;
         let share = *top as f32 / total as f32;
         if (*top < MIN_SIGHTINGS || share < MIN_SHARE) && leading_group(&seen, total).is_none() {
+            // no single argument leads, but a few are the usual ones (`Foo.class`, `Bar.class`, `Baz.class` at the same place): they
+            // head the list, none of them preselected
+            let usual: Vec<(String, u32)> = seen.iter().filter(|(_, n)| *n >= MIN_SIGHTINGS).take(MAX_ROWS).cloned().collect();
+            let covered: u32 = usual.iter().map(|(_, n)| n).sum();
+            if usual.len() >= 2 && covered as f32 / total as f32 >= MIN_SHARE {
+                return Some(RowsPlan { callee, share, seen: usual });
+            }
             return None;
         }
         Some(RowsPlan { callee, share, seen: seen.into_iter().take(MAX_ROWS).collect() })
@@ -928,6 +935,24 @@ mod tests {
         // `filter(` has two usual arguments here, half and half: neither is the habit
         let src = file("        list.stream().filter(");
         assert!(h.suggest("New.java", &src, src.find("filter(").unwrap() + 7).is_none());
+    }
+
+    #[test]
+    fn several_usual_arguments_at_one_place_all_head_the_list_without_a_preselection() {
+        let mut h = Habits::default();
+        for i in 0..9 {
+            let class = ["Alpha", "Beta", "Gamma"][i % 3];
+            h.add_file(&format!("C{i}.java"), &file(&format!("        reg.add(name, {class}.class);")));
+        }
+        let src = file("        reg.add(name, ");
+        let at = src.find("add(name, ").unwrap() + "add(name, ".len();
+        let mut items = Vec::new();
+        h.rows("New.java", &src, at, MatchCase::default(), &mut items);
+        let labels: Vec<&str> = items.iter().map(|r| r.label.as_str()).collect();
+        for expected in ["Alpha.class", "Beta.class", "Gamma.class"] {
+            assert!(labels.contains(&expected), "{labels:?}");
+        }
+        assert!(items.iter().all(|r| !r.preselect), "none of three equal choices is the answer");
     }
 
     #[test]

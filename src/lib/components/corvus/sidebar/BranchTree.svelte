@@ -37,6 +37,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { listNav } from '$lib/components/shared/ui/list-nav';
   import { laneColor } from '$lib/utils/graph-renderer';
 
   let {
@@ -588,11 +589,12 @@
 
 {#if !groupingEnabled}
   <!-- ─── Flat list view (original layout) ─────────────────────── -->
-  <div class="branch-tree" role="list">
+  <div class="branch-tree" role="list" use:listNav>
     {#each branches as branch (branch.name)}
       {@const color = branchColor(branch.name)}
       <div
         class="branch-item"
+        data-list-item
         class:current={branch.is_head}
         class:selected={graphStore.highlightedBranchName === branch.name}
         data-bname={branch.name}
@@ -610,7 +612,10 @@
         }}
         role="button"
         tabindex="0"
-        onkeydown={(e) => e.key === 'Enter' && handleClick(branch)}
+        onkeydown={(e) => {
+          if (e.key === 'Enter') handleClick(branch);
+          else if (e.key === ' ' && e.target === e.currentTarget) { e.preventDefault(); handleClick(branch); }
+        }}
       >
         <span class="branch-icon" style="color: {color}">
           <GitBranch size={12} />

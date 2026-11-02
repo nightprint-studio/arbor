@@ -169,7 +169,7 @@ fn key_of(stmt: Node<'_>, source: &str) -> Option<String> {
         "expression_statement" => {
             let expr = stmt.named_child(0)?;
             match expr.kind() {
-                "method_invocation" => Some(format!("call:{}", text(expr.child_by_field_name("name")?)?)),
+                "method_invocation" => Some(format!("call:{}", crate::flc_words::canon(&text(expr.child_by_field_name("name")?)?))),
                 "assignment_expression" => Some("assign".to_string()),
                 _ => None,
             }
@@ -185,7 +185,7 @@ fn key_of(stmt: Node<'_>, source: &str) -> Option<String> {
                         let made = text(init.child_by_field_name("type")?)?;
                         Some(format!("decl:{}", made.split('<').next().unwrap_or(&made).trim()))
                     }
-                    "method_invocation" => Some(format!("init:{}", text(init.child_by_field_name("name")?)?)),
+                    "method_invocation" => Some(format!("init:{}", crate::flc_words::canon(&text(init.child_by_field_name("name")?)?))),
                     _ => None,
                 };
             }
@@ -262,6 +262,18 @@ mod tests {
         let (tracked, kinds) = tracked();
         let usable = report().iter().filter(|(_, rows)| rows.iter().map(|r| r.1).sum::<u32>() >= MIN_SIGHTINGS).count();
         println!("files {files}, pairs {pairs}, kinds {kinds} (files tracked {tracked}), kinds with >= {MIN_SIGHTINGS} sightings {usable}");
+    }
+
+    #[test]
+    fn a_statement_kind_is_the_same_in_every_case() {
+        // two files spell the call one way, two the other: the habit is only there when they count together
+        for (i, call) in ["opener.openStream();", "opener.open_stream();", "opener.openStream();", "opener.open_stream();"].iter().enumerate() {
+            add_file(&format!("seq/case{i}.java"), &method(&format!("        {call}\n        zzconsumer.take(x);\n        other();")));
+        }
+        let src = method("        opener.openStream();\n        ");
+        let got = suggest(&src, src.len() - "\n    }\n}\n".len()).expect("a sequel");
+        assert_eq!(got.text, "zzconsumer.take(");
+        (0..4).for_each(|i| remove_file(&format!("seq/case{i}.java")));
     }
 
     #[test]

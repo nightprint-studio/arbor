@@ -183,6 +183,25 @@ pub struct BennuConfig {
     /// and how often that has happened. Needs `flc_learn`. `false` by default.
     #[serde(default)]
     pub flc_learn_notify: bool,
+    /// **Names of declarations**: after a type, the variable name this project gives it (`Order ▌` → `order`).
+    /// `true` by default.
+    #[serde(default = "yes")]
+    pub flc_layer_names: bool,
+    /// **Lines copied from the project**: the rest of a line the project has most often written after the same last
+    /// words. `true` by default.
+    #[serde(default = "yes")]
+    pub flc_layer_ngram: bool,
+    /// **Creation arguments**: the arguments of a `new` the project always writes the same way. Off by default: on the
+    /// public benchmark it was useful to the person typing in under one case in ten.
+    #[serde(default)]
+    pub flc_layer_creation: bool,
+    /// **Repeated list items**: the call before the comma, again. Off by default, for the same reason.
+    #[serde(default)]
+    pub flc_layer_echo: bool,
+    /// **Usual arguments and variables**: the grey suggestion built from how the project fills a call. On by default: the
+    /// benchmark found it right as far as it writes in four cases out of ten, which its short suggestions hid.
+    #[serde(default = "yes")]
+    pub flc_layer_habits: bool,
     /// Absolute paths of the project roots the user has turned **spell-check** on for.
     ///
     /// A list of roots and not a switch, because that is the shape of the decision: spell-checking
@@ -988,6 +1007,11 @@ impl Default for BennuConfig {
             flc_ignore_commented_code: false,
             flc_learn_keep_text: false,
             flc_learn_notify: false,
+            flc_layer_names: true,
+            flc_layer_ngram: true,
+            flc_layer_creation: false,
+            flc_layer_echo: false,
+            flc_layer_habits: true,
             spell_check_roots: Vec::new(),
             html_scripts_allowed: Vec::new(),
             maven_auto_download: true,

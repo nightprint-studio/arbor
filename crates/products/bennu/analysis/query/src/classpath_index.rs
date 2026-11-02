@@ -18,9 +18,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bennu_classpath::prelude::{ClassMembers, ClassSource, MemberIndex};
+use bennu_classpath::prelude::{ClassAnnotations, ClassMembers, ClassSource, MemberIndex};
 
 use crate::jdk::JdkMemberIndex;
+use crate::shared_jars::JarBlocks;
 
 /// A JDK member tier + an optional dependency member tier, unified behind one
 /// [`MemberIndex`](bennu_classpath::prelude::MemberIndex) so the [`IndexResolver`](crate::resolver::IndexResolver)
@@ -35,7 +36,84 @@ pub struct ClasspathIndex {
     jdk: Arc<JdkMemberIndex>,
     /// The optional per-project dependency tier (persistent memo keyed by the project + jar set).
     /// `None` for a project with no resolvable dependencies.
-    deps: Option<JdkMemberIndex>,
+    deps: Option<DepTier>,
+}
+
+/// What a project's dependency jars were handed over as.
+pub enum DepInput {
+    /// One source over all the jars, with the memo file of this project alone.
+    Source(Box<dyn ClassSource>, PathBuf),
+    /// One block per jar, shared on disk by every project that depends on it.
+    Blocks(JarBlocks),
+}
+
+impl DepInput {
+    /// Every class name the jars hold.
+    pub fn class_names(&self) -> Vec<String> {
+        match self {
+            DepInput::Source(source, _) => source.class_names(),
+            DepInput::Blocks(blocks) => blocks.class_names(),
+        }
+    }
+}
+
+/// The dependency tier: one index over all the jars, or one block per jar.
+pub enum DepTier {
+    Single(JdkMemberIndex),
+    Blocks(JarBlocks),
+}
+
+impl DepTier {
+    pub fn memory_estimate(&self) -> (usize, usize) {
+        match self {
+            DepTier::Single(i) => i.memory_estimate(),
+            DepTier::Blocks(b) => b.memory_estimate(),
+        }
+    }
+
+    fn origin(&self, binary_name: &str) -> Option<PathBuf> {
+        match self {
+            DepTier::Single(i) => i.origin(binary_name),
+            DepTier::Blocks(b) => b.origin(binary_name),
+        }
+    }
+
+    fn members_unmemoized(&self, binary_name: &str) -> Option<ClassMembers> {
+        match self {
+            DepTier::Single(i) => i.members_unmemoized(binary_name),
+            DepTier::Blocks(b) => b.members_unmemoized(binary_name),
+        }
+    }
+
+    fn flush(&self) {
+        match self {
+            DepTier::Single(i) => i.flush(),
+            DepTier::Blocks(b) => b.flush(),
+        }
+    }
+}
+
+impl MemberIndex for DepTier {
+    fn members_of(&self, binary_name: &str) -> Option<ClassMembers> {
+        match self {
+            DepTier::Single(i) => i.members_of(binary_name),
+            DepTier::Blocks(b) => b.members_of(binary_name),
+        }
+    }
+
+    fn class_annotations(&self, binary_name: &str) -> Option<ClassAnnotations> {
+        match self {
+            DepTier::Single(i) => i.class_annotations(binary_name),
+            DepTier::Blocks(b) => b.class_annotations(binary_name),
+        }
+    }
+
+    fn package_exists(&self, package: &str) -> Option<bool> {
+        match self {
+            DepTier::Single(i) => i.package_exists(package),
+            DepTier::Blocks(b) => b.package_exists(package),
+        }
+    }
 }
 
 impl ClasspathIndex {
@@ -47,7 +125,7 @@ impl ClasspathIndex {
     }
 
     /// The dependency tier, when the project has one.
-    pub fn deps_tier(&self) -> Option<&JdkMemberIndex> {
+    pub fn deps_tier(&self) -> Option<&DepTier> {
         self.deps.as_ref()
     }
 
@@ -104,7 +182,18 @@ impl ClasspathIndex {
     ) -> Self {
         Self {
             jdk,
-            deps: Some(JdkMemberIndex::new(dep_source)),
+            deps: Some(DepTier::Single(JdkMemberIndex::new(dep_source))),
+        }
+    }
+
+    /// The same, from either way the jars can be handed over — see [`DepInput`].
+    ///
+    /// With [`DepInput::Blocks`] each jar keeps a block of its own on disk, shared by every project, so what one project decoded
+    /// of a library is read back by the next instead of decoded again.
+    pub fn with_dep_input(jdk: Arc<JdkMemberIndex>, input: DepInput) -> Self {
+        match input {
+            DepInput::Source(source, memo) => Self::with_deps(jdk, source, memo),
+            DepInput::Blocks(blocks) => Self { jdk, deps: Some(DepTier::Blocks(blocks)) },
         }
     }
 
@@ -189,7 +278,7 @@ mod tests {
         }));
         let idx = ClasspathIndex {
             jdk: Arc::new(jdk),
-            deps: Some(deps),
+            deps: Some(DepTier::Single(deps)),
         };
         // Neither tier has `p/Z`, and the one-class sources return empty (undecodable) bytes for their
         // own name → every lookup is a definitive miss. The point: composition never panics and a

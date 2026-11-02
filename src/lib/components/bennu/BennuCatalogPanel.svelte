@@ -39,11 +39,13 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import ExportButton, { type Rendition } from '$lib/components/shared/internal/ExportButton.svelte';
   import {
     EXPORT_EXTENSION, exportRows, type ExportColumn, type ExportFormat,
   } from '$lib/utils/tabular-export';
   import { tooltip } from '$lib/actions/tooltip';
+  import { listNav } from '$lib/components/shared/ui/list-nav';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { springStore } from '$lib/stores/bennu/spring.svelte';
@@ -322,16 +324,9 @@
         tooltip={`Take these ${spec.title.toLowerCase()} out of Arbor — to the clipboard, or to a file`}
         emptyTooltip="There is nothing here to export"
       />
-      <button
-        class="ps-btn"
-        type="button"
-        use:tooltip={'Rebuild the framework model'}
-        aria-label="Refresh"
-        disabled={loading}
-        onclick={refresh}
-      >
+      <IconButton tooltip="Rebuild the framework model" disabled={loading} onclick={refresh}>
         <RefreshCw size={13} />
-      </button>
+      </IconButton>
     {/snippet}
   </BottomPanelHeader>
 
@@ -367,10 +362,10 @@
       <EmptyState message={rows.length ? 'Nothing matches the filter.' : spec.empty} />
     </div>
   {:else}
-    <div class="list">
+    <div class="list" use:listNav>
       {#each groups as [key, items] (key)}
         {#if key}
-          <button class="grp" type="button" onclick={() => toggleGroup(key)}>
+          <button class="grp" data-list-item type="button" onclick={() => toggleGroup(key)}>
             {#if collapsed.has(key)}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}
             <span class="grp-name">{key}</span>
             <span class="grp-n">{items.length}</span>
@@ -396,6 +391,7 @@
                 <span class="badge {kindClass(r.kind)}">{r.kind}</span>
                 <button
                   class="row-main"
+                  data-list-item
                   class:openable={!!r.file}
                   type="button"
                   disabled={!r.file}
@@ -435,7 +431,7 @@
                          reason the row was expanded. It opens like the parent when it has one, and
                          stays plain text when it does not. -->
                     {#if c.file}
-                      <button class="child-name openable" type="button" onclick={() => open(c)}>
+                      <button class="child-name openable" data-list-item type="button" onclick={() => open(c)}>
                         {c.primary}
                       </button>
                     {:else}

@@ -5773,7 +5773,6 @@
 
   /* The one labelled button left in the toolbar: the JSP action binding, where WHICH action is
      bound is state rather than a verb and an icon cannot say `LoginAction`. */
-  .crumb-icon { color: var(--accent); flex-shrink: 0; margin-right: 2px; }
   .ed-tbtn {
     display: flex; align-items: center; gap: 5px;
     height: 20px; padding: 0 8px;

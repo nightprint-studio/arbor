@@ -12,6 +12,7 @@
   import { FileJson } from 'lucide-svelte';
   import Modal from '../shared/Modal.svelte';
   import Alert from '../shared/ui/Alert.svelte';
+  import Button from '../shared/ui/Button.svelte';
   import Studio from './Studio.svelte';
   import { INDENT_OPTIONS_WITH_8 } from './studio-footer-types';
   import { fmtBytes as fsFmtBytes } from './helpers';
@@ -243,8 +244,7 @@
             Text pane for raw edits.
           </div>
           <div class="js-jsonc-banner-actions">
-            <button type="button" class="js-jsonc-btn js-jsonc-btn-ghost"
-              onclick={() => jsonStudioStore.dismissStreamBanner()}>Dismiss</button>
+            <Button variant="outline" size="sm" onclick={() => jsonStudioStore.dismissStreamBanner()}>Dismiss</Button>
           </div>
         </div>
       </div>
@@ -261,10 +261,9 @@
             to read it.
           </div>
           <div class="js-jsonc-banner-actions">
-            <button type="button" class="js-jsonc-btn" onclick={() => void onSaveAsJsonc()}>Rename to .jsonc</button>
-            <button type="button" class="js-jsonc-btn" onclick={() => void onStripAndSave()}>Strip & save</button>
-            <button type="button" class="js-jsonc-btn js-jsonc-btn-ghost"
-              onclick={() => jsonStudioStore.dismissJsoncBanner()}>Dismiss</button>
+            <Button variant="secondary" size="sm" onclick={() => void onSaveAsJsonc()}>Rename to .jsonc</Button>
+            <Button variant="secondary" size="sm" onclick={() => void onStripAndSave()}>Strip & save</Button>
+            <Button variant="outline" size="sm" onclick={() => jsonStudioStore.dismissJsoncBanner()}>Dismiss</Button>
           </div>
         </div>
       </div>
@@ -336,7 +335,7 @@
             </button>
           </div>
           <div style="display: flex; justify-content: flex-end; padding-top: 4px;">
-            <button type="button" class="js-jsonc-btn js-jsonc-btn-ghost" onclick={() => jsoncSavePromptOpen = false}>Cancel</button>
+            <Button variant="outline" size="sm" onclick={() => jsoncSavePromptOpen = false}>Cancel</Button>
           </div>
         </div>
       </Modal>
@@ -360,7 +359,6 @@
     background: var(--bg-overlay); color: var(--text-primary); font-size: var(--font-size-xs); cursor: pointer;
   }
   .js-jsonc-btn:hover { background: var(--bg-hover); }
-  .js-jsonc-btn-ghost { background: transparent; }
 
   .js-errors-wrap { padding: 16px; height: 100%; overflow: auto; }
   .js-errors-body {

@@ -59,6 +59,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import BennuConsole from './BennuConsole.svelte';
@@ -590,24 +591,12 @@
             aria-label="Program input"
             onkeydown={onInputKeydown}
           />
-          <button
-            type="button"
-            class="rp-send"
-            use:tooltip={{ content: 'Send', shortcut: 'Enter' }}
-            aria-label="Send the line to the program"
-            onclick={send}
-          >
+          <IconButton tooltip="Send" shortcut="Enter" size={22} onclick={send}>
             <CornerDownLeft size={12} />
-          </button>
-          <button
-            type="button"
-            class="rp-send"
-            use:tooltip={{ content: 'Hide', shortcut: 'Esc' }}
-            aria-label="Hide the input line"
-            onclick={() => (inputOpen = false)}
-          >
+          </IconButton>
+          <IconButton tooltip="Hide" shortcut="Esc" size={22} onclick={() => (inputOpen = false)}>
             <ChevronDown size={12} />
-          </button>
+          </IconButton>
         </div>
       {:else}
         <!-- The collapsed state: one line saying the option is there, for the programs that
@@ -698,8 +687,6 @@
   .rp-pill[data-kind="busy"] { --pill: var(--accent); }
   .rp-text { font-weight: 500; }
   .rp-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-  .rp-dot.ok { background: var(--success); }
-  .rp-dot.bad { background: var(--error); }
   .rp-dot.paused { background: var(--warning); }
 
   /* The console, and — while the program is standing still — the stack and the values beside
@@ -741,14 +728,6 @@
     font-family: var(--font-code); font-size: var(--font-size-xs);
   }
   .rp-input input::placeholder { color: var(--text-disabled); font-family: var(--font-ui-sans); }
-  .rp-send {
-    display: flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; padding: 0;
-    background: none; border: none; border-radius: var(--radius-sm);
-    color: var(--text-muted); cursor: pointer;
-  }
-  .rp-send:hover { background: var(--bg-hover); color: var(--text-primary); }
-
   /* Collapsed: a third of the height of the field it opens, and quiet enough to be ignored
      by the runs that never need it. */
   .rp-input-strip {

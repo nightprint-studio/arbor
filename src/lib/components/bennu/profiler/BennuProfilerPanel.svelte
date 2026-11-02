@@ -7,6 +7,7 @@
    */
   import { Eye, EyeOff, Flame, FileUp, Gauge, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
@@ -26,6 +27,8 @@
   import { fmtMs } from './profiler-format';
 
   let picking = $state(false);
+  // Deleting a recording removes it from disk, so it is confirmed first.
+  let deleteConfirmOpen = $state(false);
 
   let lastRoot: string | null = null;
   $effect(() => {
@@ -92,7 +95,7 @@
       <IconButton tooltip="Refresh" size={22} onclick={() => { void store.loadDetect(); void store.refresh(); }}>
         <RefreshCw size={13} />
       </IconButton>
-      <IconButton tooltip="Delete this recording" size={22} variant="danger" disabled={!meta} onclick={() => meta && void store.remove(meta.id)}>
+      <IconButton tooltip="Delete this recording" size={22} variant="danger" disabled={!meta} onclick={() => (deleteConfirmOpen = true)}>
         <Trash2 size={13} />
       </IconButton>
     {/snippet}
@@ -140,6 +143,18 @@
     </div>
   {/if}
 </div>
+
+{#if deleteConfirmOpen && meta}
+  <ConfirmModal
+    title="Delete recording"
+    message={`Delete the recording "${meta.label}"?`}
+    detail="This cannot be undone."
+    variant="danger"
+    confirmLabel="Delete"
+    onConfirm={() => { const id = meta.id; deleteConfirmOpen = false; void store.remove(id); }}
+    onCancel={() => (deleteConfirmOpen = false)}
+  />
+{/if}
 
 {#if picking}
   <FileExplorerModal

@@ -279,6 +279,13 @@
   menu, so <kbd>Tab</kbd> cycles its items instead of leaving the menu.
 </p>
 
+<p class="hint">
+  Dialogs that end in a primary button (create branch, tag, workspace, pull request, issue…)
+  show <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to confirm next to their buttons; <kbd>Esc</kbd> cancels.
+  Lists in side panels (branches, pipeline runs, issues, changed files, problems) move with
+  <kbd>↑</kbd> / <kbd>↓</kbd> / <kbd>Home</kbd> / <kbd>End</kbd>.
+</p>
+
 <h2>Where shortcuts surface in the UI</h2>
 <p>Built-in shortcuts are rendered live next to the action wherever it appears:</p>
 <ul>

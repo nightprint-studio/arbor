@@ -62,18 +62,27 @@ impl Tally {
     }
 
     /// Share of suggestions taken and not touched: right as drawn.
+    ///
+    /// An [`Outcome::Undone`] is not in the count at all, here or in [`useful_rate`](Self::useful_rate): removing a whole
+    /// suggestion says the person went another way (a different method, a different builder step), not that the suggestion was
+    /// wrong, and the rates are what lower a kind of suggestion's confidence.
     pub fn as_drawn_rate(&self) -> Option<f32> {
-        self.rate(self.kept + self.reformatted + self.extended)
+        self.rate_without_undone(self.kept + self.reformatted + self.extended)
     }
 
-    /// Share whose beginning was taken and stood: right at least as far as it went.
+    /// Share whose beginning was taken and stood: right at least as far as it went. Undone ones are not counted either way.
     pub fn useful_rate(&self) -> Option<f32> {
-        self.rate(self.kept + self.reformatted + self.extended + self.shortened)
+        self.rate_without_undone(self.kept + self.reformatted + self.extended + self.shortened)
     }
 
     /// Share taken and then rewritten or removed: confidently wrong.
     pub fn corrected_rate(&self) -> Option<f32> {
         self.rate(self.replaced + self.undone)
+    }
+
+    fn rate_without_undone(&self, part: f32) -> Option<f32> {
+        let total = self.total() - self.undone;
+        (total >= MIN_SAMPLES).then(|| part / total)
     }
 
     fn rate(&self, part: f32) -> Option<f32> {
@@ -126,5 +135,22 @@ mod tests {
         let mut t = Tally { kept: 8.0, ..Tally::default() };
         t.age((HALF_LIFE_DAYS * DAY) as u64);
         assert!((t.kept - 4.0).abs() < 0.01, "{}", t.kept);
+    }
+    #[test]
+    fn an_undone_suggestion_is_not_a_penalty() {
+        let mut t = Tally::default();
+        for _ in 0..10 {
+            t.add(&Outcome::Kept, 100);
+        }
+        let before = t.useful_rate().unwrap();
+        for _ in 0..40 {
+            t.add(&Outcome::Undone, 100);
+        }
+        assert_eq!(t.useful_rate().unwrap(), before, "forty removals did not move the useful share");
+        assert_eq!(t.as_drawn_rate().unwrap(), 1.0);
+        assert!(t.corrected_rate().unwrap() > 0.5, "the page that shows the counters still tells them");
+        // an ignored one does count against it
+        t.add(&Outcome::Ignored, 100);
+        assert!(t.useful_rate().unwrap() < before);
     }
 }

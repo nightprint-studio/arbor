@@ -40,6 +40,7 @@
 <h2>Reading the program's output</h2>
 <p>
   Each launch keeps what the program prints under its session id, and <code>debug_output</code> reads it also after the program has exited. Without an id it reads the program <em>this conversation</em> launched last, so another conversation starting its own debug run never changes what Imber reads; the id that <code>debug_launch</code> printed selects a specific one. The last eight launches are kept.
+</p>
 
 <h2>The session belongs to the conversation</h2>
 <p>

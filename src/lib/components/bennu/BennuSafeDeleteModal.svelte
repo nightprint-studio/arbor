@@ -71,10 +71,12 @@
 </script>
 
 <Modal width="620px" height="480px" {onClose}>
-  <ModalHeader {onClose}>
-    <Trash2 size={14} />
-    <span class="modal-title">Safe delete</span>
-  </ModalHeader>
+  {#snippet header()}
+    <ModalHeader {onClose}>
+      <Trash2 size={14} />
+      <span class="modal-title">Safe delete</span>
+    </ModalHeader>
+  {/snippet}
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="sd" onkeydown={onKeydown}>

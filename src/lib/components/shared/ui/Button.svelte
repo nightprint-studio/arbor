@@ -4,12 +4,18 @@
   import { tooltip as tooltipAction } from '$lib/actions/tooltip';
   import type { TooltipInput } from '$lib/stores/tooltip.svelte';
 
-  type Variant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'icon' | 'tonal';
+  type Variant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'icon' | 'tonal' | 'link';
   type Size    = 'xs' | 'sm' | 'md' | 'lg';
 
   interface Props {
     variant?: Variant;
     size?: Size;
+    /** Corner radius override. Default (`'md'`) is the app-wide button radius for every size;
+     *  `'sm'` is for a compact button that sits beside other `--radius-sm` controls. */
+    radius?: 'sm' | 'md';
+    /** Border colour of the `outline` variant: `'default'` is `--border`, `'subtle'` is
+     *  `--border-subtle` for an outline button inside a bordered card. Ignored by other variants. */
+    borderTone?: 'default' | 'subtle';
     disabled?: boolean;
     loading?: boolean;
     block?: boolean;
@@ -62,6 +68,8 @@
   let {
     variant   = 'ghost',
     size      = 'md',
+    radius    = 'md',
+    borderTone = 'default',
     disabled  = false,
     loading   = false,
     block     = false,
@@ -143,6 +151,8 @@
   disabled={inert && !ariaInert}
   class="btn btn-{variant} sz-{size}"
   class:block
+  class:r-sm={radius === 'sm'}
+  class:bt-subtle={borderTone === 'subtle'}
   class:has-color={!!color}
   class:has-icon-color={!!iconColor}
   style={styleVars}
@@ -176,6 +186,24 @@
   .sz-sm { padding: 3px 9px;   font-size: var(--font-size-xs); gap: 5px; }
   .sz-md { padding: 5px 12px;  font-size: var(--font-size-sm); gap: 6px; }
   .sz-lg { padding: 7px 16px;  font-size: var(--font-size-md); gap: 8px; }
+
+  /* Radius override (the base radius comes from `.btn` in app.css). */
+  .btn.r-sm { border-radius: var(--radius-sm); }
+
+  /* Outline with the quieter border. */
+  .btn-outline.bt-subtle { border-color: var(--border-subtle); }
+
+  /* Link — accent text, no fill, no border, no padding; underlined only under the pointer.
+     For an action that reads as a reference inside a sentence or a row. */
+  .btn.btn-link {
+    padding: 0;
+    background: transparent;
+    border-color: transparent;
+    color: var(--accent);
+    text-underline-offset: 2px;
+  }
+  .btn.btn-link:hover:not(:disabled):not([aria-disabled='true']) { text-decoration: underline; }
+  .btn.btn-link.has-color { color: var(--btn-color); }
 
   /* Icon-only override — keep square regardless of size. */
   .btn-icon.sz-xs { width: 18px; height: 18px; padding: 0; }

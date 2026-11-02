@@ -31,6 +31,7 @@ export {
   inlineCompletion,
   type PreviewingCompletion,
   acceptInlineCompletion,
+  acceptInlineCompletionLine,
   dismissInlineCompletion,
   inlineCompletionActive,
   type InlineCompletionOutcomeKind,

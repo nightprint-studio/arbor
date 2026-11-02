@@ -92,9 +92,10 @@
             <div class="create">
               <input class="input" placeholder="Link name…" bind:value={newName} bind:this={newNameEl}
                 onkeydown={(e) => { if (e.key === 'Enter') confirmCreate(); }}/>
-              <button class="btn-primary" onclick={confirmCreate} disabled={busy}>
-                <Plus size={12}/> Create
-              </button>
+              <Button variant="primary" onclick={confirmCreate} disabled={busy}>
+                {#snippet iconStart()}<Plus size={12}/>{/snippet}
+                Create
+              </Button>
             </div>
           {/if}
         {/if}
@@ -151,15 +152,6 @@
   }
   .input:focus { border-color: var(--accent); }
 
-  .btn-primary {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 5px 12px; border-radius: 5px;
-    font-size: var(--font-size-sm); cursor: pointer;
-    border: 1px solid transparent; transition: background 0.12s;
-    background: var(--accent); color: var(--text-on-accent);
-  }
-  .btn-primary:hover { opacity: 0.88; }
-  .btn-primary:disabled { opacity: 0.5; pointer-events: none; }
 
   .error-msg {
     padding: 6px 10px;

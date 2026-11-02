@@ -11,6 +11,7 @@
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import SplitButton from '$lib/components/shared/ui/SplitButton.svelte';
+  import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import StatusList, { type StatusItem } from '$lib/components/shared/ui/StatusList.svelte';
 
   interface Props {
@@ -92,6 +93,9 @@
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
+      // Same gate as the split button, so the shortcut can't submit an invalid tag or double-fire.
+      if (submitting || scanning) return;
+      // submit() refocuses the name field (and toasts) when the tag is empty or invalid.
       void submit(false);
     }
   }
@@ -150,22 +154,24 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="ghost" onclick={onClose}>Cancel</Button>
-    <SplitButton
-      label={submitting ? 'Starting…' : 'Create tag'}
-      variant="primary"
-      direction="up"
-      disabled={!tagName.trim() || !tagValid || submitting || scanning}
-      options={[
-        { id: 'tag',       label: 'Create tag',         icon: Tag    },
-        { id: 'tag-push',  label: 'Create tag & push',  icon: Upload },
-      ]}
-      onclick={() => submit(false)}
-      onselect={(id) => {
-        if (id === 'tag')      void submit(false);
-        else if (id === 'tag-push') void submit(true);
-      }}
-    />
+    <ModalFooter hint="to create tag">
+      <Button variant="ghost" onclick={onClose}>Cancel</Button>
+      <SplitButton
+        label={submitting ? 'Starting…' : 'Create tag'}
+        variant="primary"
+        direction="up"
+        disabled={!tagName.trim() || !tagValid || submitting || scanning}
+        options={[
+          { id: 'tag',       label: 'Create tag',         icon: Tag    },
+          { id: 'tag-push',  label: 'Create tag & push',  icon: Upload },
+        ]}
+        onclick={() => submit(false)}
+        onselect={(id) => {
+          if (id === 'tag')      void submit(false);
+          else if (id === 'tag-push') void submit(true);
+        }}
+      />
+    </ModalFooter>
   {/snippet}
 </Modal>
 

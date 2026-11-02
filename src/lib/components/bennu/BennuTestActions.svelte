@@ -15,6 +15,7 @@
     RotateCw, Square, Trash2,
   } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import { activeTestRoot, activeTestStore, testsAreCargo } from '$lib/stores/bennu/test-runner.svelte';
   import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
 
@@ -30,36 +31,25 @@
   <button class="ps-btn ps-btn-danger" type="button" use:tooltip={'Stop'} aria-label="Stop the test run"
     onclick={() => void store.stop()}><Square size={12} /></button>
 {:else}
-  <button class="ps-btn" type="button" disabled={!root}
-    use:tooltip={{ content: 'Run all tests', shortcut: 'Ctrl+Shift+F5' }} aria-label="Run all tests"
-    onclick={() => void store.runAll(root)}><Play size={13} /></button>
-  <button class="ps-btn" type="button" disabled={!store.hasResults}
-    use:tooltip={{ content: 'Rerun', shortcut: 'Ctrl+F5' }} aria-label="Rerun the last test run"
-    onclick={() => void store.rerun()}><RotateCw size={13} /></button>
-  <button class="ps-btn" type="button" disabled={!store.hasFailures}
-    use:tooltip={'Rerun failed tests'} aria-label="Rerun failed tests"
-    onclick={() => void store.rerunFailed()}><ListRestart size={13} /></button>
+  <IconButton tooltip="Run all tests" shortcut="Ctrl+Shift+F5" disabled={!root}
+    onclick={() => void store.runAll(root)}><Play size={13} /></IconButton>
+  <IconButton tooltip="Rerun" shortcut="Ctrl+F5" disabled={!store.hasResults}
+    onclick={() => void store.rerun()}><RotateCw size={13} /></IconButton>
+  <IconButton tooltip="Rerun failed tests" disabled={!store.hasFailures}
+    onclick={() => void store.rerunFailed()}><ListRestart size={13} /></IconButton>
 {/if}
 {#if cargo}
-  <button
-    class="ps-btn"
-    class:ps-btn-active={bennuCargoTestStore.includeIgnored}
-    type="button"
-    use:tooltip={'Also run #[ignore]d tests'}
-    aria-label="Also run ignored tests"
-    aria-pressed={bennuCargoTestStore.includeIgnored}
+  <IconButton
+    tooltip="Also run #[ignore]d tests"
+    active={bennuCargoTestStore.includeIgnored}
     onclick={() => bennuCargoTestStore.setIncludeIgnored(!bennuCargoTestStore.includeIgnored)}
-  ><EyeOff size={13} /></button>
+  ><EyeOff size={13} /></IconButton>
 {/if}
-<button class="ps-btn" class:ps-btn-active={store.onlyFailed} type="button"
-  use:tooltip={'Show only failed'} aria-label="Show only failed" aria-pressed={store.onlyFailed}
-  onclick={() => store.setOnlyFailed(!store.onlyFailed)}><FilterIcon size={13} /></button>
-<button class="ps-btn" class:ps-btn-active={store.sortByTime} type="button"
-  use:tooltip={'Sort by duration'} aria-label="Sort by duration" aria-pressed={store.sortByTime}
-  onclick={() => store.setSortByTime(!store.sortByTime)}><Clock size={13} /></button>
-<button class="ps-btn" type="button" use:tooltip={'Collapse all'} aria-label="Collapse all"
-  onclick={() => store.collapseAll()}><ChevronsDownUp size={13} /></button>
-<button class="ps-btn" type="button" use:tooltip={'Expand all'} aria-label="Expand all"
-  onclick={() => store.expandAll()}><ChevronsUpDown size={13} /></button>
-<button class="ps-btn" type="button" disabled={store.running || !store.hasResults}
-  use:tooltip={'Clear'} aria-label="Clear results" onclick={() => store.clear()}><Trash2 size={13} /></button>
+<IconButton tooltip="Show only failed" active={store.onlyFailed}
+  onclick={() => store.setOnlyFailed(!store.onlyFailed)}><FilterIcon size={13} /></IconButton>
+<IconButton tooltip="Sort by duration" active={store.sortByTime}
+  onclick={() => store.setSortByTime(!store.sortByTime)}><Clock size={13} /></IconButton>
+<IconButton tooltip="Collapse all" onclick={() => store.collapseAll()}><ChevronsDownUp size={13} /></IconButton>
+<IconButton tooltip="Expand all" onclick={() => store.expandAll()}><ChevronsUpDown size={13} /></IconButton>
+<IconButton tooltip="Clear" disabled={store.running || !store.hasResults}
+  onclick={() => store.clear()}><Trash2 size={13} /></IconButton>

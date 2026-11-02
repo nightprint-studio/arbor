@@ -19,9 +19,27 @@ function createGraphConfigStore() {
   let _config = $state<GraphConfig>({ ...DEFAULTS });
   let _ready  = $state(false);
 
+  // Legacy home of the squash-hints preference, before it moved to config.toml.
+  const LEGACY_SQUASH_HINTS_KEY = 'arbor:experimental:squash-merge-hints';
+
+  // One-shot migration: if the config never recorded a choice and the old localStorage key
+  // exists, adopt it, persist it and drop the key so the user's earlier choice isn't lost.
+  function migrateLegacySquashHints() {
+    if (_config.squash_merge_hints != null) return;
+    try {
+      const legacy = localStorage.getItem(LEGACY_SQUASH_HINTS_KEY);
+      if (legacy === null) return;
+      _config = { ..._config, squash_merge_hints: legacy === 'true' };
+      persist();
+      localStorage.removeItem(LEGACY_SQUASH_HINTS_KEY);
+    } catch { /* storage unavailable — nothing to migrate */ }
+  }
+
   // Start loading immediately — not inside onMount or onMount-equivalent.
-  getGraphConfig()
-    .then(cfg => { _config = cfg; })
+  // `whenReady` lets one-shot readers (the graph load) wait for the disk value instead of
+  // racing it and silently seeing the default.
+  const whenReady: Promise<void> = getGraphConfig()
+    .then(cfg => { _config = cfg; migrateLegacySquashHints(); })
     .catch(() => { /* keep defaults */ })
     .finally(() => { _ready = true; });
 
@@ -60,18 +78,28 @@ function createGraphConfigStore() {
     persist();
   }
 
+  function setSquashMergeHints(value: boolean) {
+    if (_config.squash_merge_hints === value) return;
+    _config = { ..._config, squash_merge_hints: value };
+    persist();
+  }
+
   return {
     get pageSize()            { return _config.page_size; },
     get showRemoteBranches()  { return _config.show_remote_branches; },
     get showTags()            { return _config.show_tags; },
     get paginate()            { return _config.paginate; },
     get ticketLinksEnabled()  { return _config.ticket_links_enabled; },
+    /** Default OFF: the hints cost a network round-trip to the git provider. */
+    get squashMergeHints()    { return _config.squash_merge_hints === true; },
     get ready()               { return _ready; },
+    whenReady,
     setPaginate,
     setPageSize,
     setShowRemoteBranches,
     setShowTags,
     setTicketLinksEnabled,
+    setSquashMergeHints,
   };
 }
 

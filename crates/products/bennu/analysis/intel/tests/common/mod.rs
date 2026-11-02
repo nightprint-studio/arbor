@@ -541,6 +541,7 @@ impl Project {
                 .map(|s| s.to_string_lossy().to_string()),
             expected_package: None,
             java_major: Some(21),
+            jdk_major: None,
             classpath_complete: false,
         };
         bennu_check::prelude::check_file_resolved(

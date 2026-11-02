@@ -8,6 +8,8 @@
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import ModalSidebarToggle from '$lib/components/shared/ui/ModalSidebarToggle.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
+  import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { sidebarSlide } from '$lib/utils/panel-transitions';
@@ -199,6 +201,11 @@
   let memberPickEl: HTMLInputElement | undefined = $state();
   $effect(() => { if (addMemberOpen) memberPickEl?.focus(); });
   type GroupMode = 'workspace' | 'folder' | 'flat';
+  const GROUP_MODE_TABS: TabItem[] = [
+    { id: 'workspace', label: 'Workspace', tooltip: 'Group by workspace' },
+    { id: 'folder',    label: 'Folder',    tooltip: 'Group by parent folder' },
+    { id: 'flat',      label: 'Flat',      tooltip: 'No grouping' },
+  ];
   let memberGroupBy = $state<GroupMode>(
     (() => { try { const v = localStorage.getItem('arbor:link-picker-group'); return v === 'folder' || v === 'flat' ? v : 'workspace'; } catch { return 'workspace'; } })(),
   );
@@ -594,9 +601,9 @@
               <div class="sidebar-header">
                 <span class="sidebar-title">Links</span>
                 <span class="sidebar-count">{links.length}</span>
-                <button class="icon-btn" onclick={startCreate} use:tooltip={'New worktree link'}>
+                <IconButton tooltip="New worktree link" onclick={startCreate}>
                   <Plus size={13} />
-                </button>
+                </IconButton>
               </div>
 
               {#if creating}
@@ -609,7 +616,7 @@
                     bind:this={createNameEl}
                   />
                   <button class="icon-btn primary" onclick={confirmCreate} disabled={busy} use:tooltip={'Create'}><Check size={13}/></button>
-                  <button class="icon-btn" onclick={() => { creating = false; }} use:tooltip={'Cancel'}><X size={13}/></button>
+                  <IconButton tooltip="Cancel" onclick={() => { creating = false; }}><X size={13}/></IconButton>
                 </div>
               {/if}
 
@@ -667,10 +674,10 @@
                     onkeydown={(e) => { if (e.key === 'Enter') confirmRename(); else if (e.key === 'Escape') editingName = false; }}
                   />
                   <button class="icon-btn primary" onclick={confirmRename} use:tooltip={'Save'}><Check size={13}/></button>
-                  <button class="icon-btn" onclick={() => { editingName = false; }} use:tooltip={'Cancel'}><X size={13}/></button>
+                  <IconButton tooltip="Cancel" onclick={() => { editingName = false; }}><X size={13}/></IconButton>
                 {:else}
                   <h2 class="link-title">{selectedLink.name}</h2>
-                  <button class="icon-btn subtle" onclick={startRename} use:tooltip={'Rename'}><Edit3 size={12}/></button>
+                  <IconButton tooltip="Rename" onclick={startRename}><Edit3 size={12}/></IconButton>
                 {/if}
                 <span class="header-spacer"></span>
                 <button
@@ -682,9 +689,9 @@
                   <Power size={11}/>
                   <span>{selectedLink.sync_enabled ? 'Sync on' : 'Sync off'}</span>
                 </button>
-                <button class="icon-btn danger" onclick={deleteCurrent} use:tooltip={'Delete link'}>
+                <IconButton variant="danger" tooltip="Delete link" onclick={deleteCurrent}>
                   <Trash2 size={12}/>
-                </button>
+                </IconButton>
               </div>
 
               {#if error}<div class="error-msg">{error}</div>{/if}
@@ -713,32 +720,14 @@
                           bind:this={memberPickEl}
                           onkeydown={(e) => { if (e.key === 'Escape') addMemberOpen = false; }}
                         />
-                        <div class="seg-group" role="tablist" aria-label="Group repos by">
-                          <button
-                            class="seg"
-                            class:active={memberGroupBy === 'workspace'}
-                            onclick={() => memberGroupBy = 'workspace'}
-                            use:tooltip={'Group by workspace'}
-                            role="tab"
-                            aria-selected={memberGroupBy === 'workspace'}
-                          >Workspace</button>
-                          <button
-                            class="seg"
-                            class:active={memberGroupBy === 'folder'}
-                            onclick={() => memberGroupBy = 'folder'}
-                            use:tooltip={'Group by parent folder'}
-                            role="tab"
-                            aria-selected={memberGroupBy === 'folder'}
-                          >Folder</button>
-                          <button
-                            class="seg"
-                            class:active={memberGroupBy === 'flat'}
-                            onclick={() => memberGroupBy = 'flat'}
-                            use:tooltip={'No grouping'}
-                            role="tab"
-                            aria-selected={memberGroupBy === 'flat'}
-                          >Flat</button>
-                        </div>
+                        <Tabs
+                          variant="segmented"
+                          size="xs"
+                          ariaLabel="Group repos by"
+                          items={GROUP_MODE_TABS}
+                          value={memberGroupBy}
+                          onSelect={(id) => memberGroupBy = id as GroupMode}
+                        />
                       </div>
 
                       {#if availableRepos.length === 0}
@@ -884,9 +873,9 @@
                           >
                             <Power size={10}/>
                           </button>
-                          <button class="icon-btn danger subtle" onclick={() => removeMember(m.repo_id)} use:tooltip={'Remove'}>
+                          <IconButton variant="danger" tooltip="Remove" onclick={() => removeMember(m.repo_id)}>
                             <Trash2 size={11}/>
-                          </button>
+                          </IconButton>
                         </li>
                       {/each}
                     </ul>
@@ -940,9 +929,9 @@
                             </Dropdown>
                             <GitBranch size={10} class="muted-icon"/>
                             <input class="input alias-branch" placeholder="branch name" bind:value={entry.branch} />
-                            <button class="icon-btn subtle" onclick={() => removeGroupMemberRow(i)} use:tooltip={'Remove row'}>
+                            <IconButton tooltip="Remove row" onclick={() => removeGroupMemberRow(i)}>
                               <X size={11}/>
-                            </button>
+                            </IconButton>
                           </div>
                         {/each}
                         <div class="alias-actions">
@@ -971,12 +960,12 @@
                           {/each}
                         </div>
                         <div class="alias-row-actions">
-                          <button class="icon-btn subtle" onclick={() => startEditGroup(g)} use:tooltip={'Edit'}>
+                          <IconButton tooltip="Edit" onclick={() => startEditGroup(g)}>
                             <Edit3 size={11}/>
-                          </button>
-                          <button class="icon-btn danger subtle" onclick={() => dropGroup(g)} use:tooltip={'Remove'}>
+                          </IconButton>
+                          <IconButton variant="danger" tooltip="Remove" onclick={() => dropGroup(g)}>
                             <Trash2 size={11}/>
-                          </button>
+                          </IconButton>
                         </div>
                       </div>
                     {/if}
@@ -994,9 +983,9 @@
                           </select>
                           <GitBranch size={10} class="muted-icon"/>
                           <input class="input alias-branch" placeholder="branch name" bind:value={entry.branch} />
-                          <button class="icon-btn subtle" onclick={() => removeGroupMemberRow(i)} use:tooltip={'Remove row'}>
+                          <IconButton tooltip="Remove row" onclick={() => removeGroupMemberRow(i)}>
                             <X size={11}/>
-                          </button>
+                          </IconButton>
                         </div>
                       {/each}
                       <div class="alias-actions">
@@ -1445,33 +1434,6 @@
   }
   .picker-toolbar .input { flex: 1; }
 
-  .seg-group {
-    display: inline-flex;
-    background: var(--bg-overlay);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    padding: 2px;
-    gap: 2px;
-    flex-shrink: 0;
-  }
-  .seg {
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 3px 9px;
-    font-size: var(--font-size-2xs);
-    font-weight: 500;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .seg:hover { color: var(--text-primary); }
-  .seg.active {
-    background: var(--bg-base);
-    color: var(--accent);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
-  }
-
   .picker-empty {
     padding: 8px 10px;
     font-size: var(--font-size-xs);
@@ -1736,14 +1698,11 @@
   }
   .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
   .icon-btn:disabled { opacity: 0.4; pointer-events: none; }
-  .icon-btn.subtle { color: var(--text-muted); }
-  .icon-btn.subtle:hover { color: var(--text-primary); }
   .icon-btn.primary {
     background: var(--accent-subtle);
     color: var(--accent);
   }
   .icon-btn.primary:hover { background: var(--accent); color: var(--text-on-accent); }
-  .icon-btn.danger:hover { background: var(--error-subtle); color: var(--error); }
 
   .btn-ghost, .btn-primary {
     display: inline-flex; align-items: center; gap: 5px;

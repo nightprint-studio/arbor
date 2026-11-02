@@ -106,9 +106,12 @@ pub struct GraphConfig {
     pub show_tags: bool,
     #[serde(default = "default_true")] pub paginate: bool,
     #[serde(default = "default_true")] pub ticket_links_enabled: bool,
+    /// Experimental squash-merge ghost edges. `None` = never chosen (lets the frontend migrate the
+    /// legacy localStorage value once); treated as off.
+    #[serde(default)] pub squash_merge_hints: Option<bool>,
 }
 impl Default for GraphConfig {
-    fn default() -> Self { Self { page_size: 500, show_remote_branches: true, show_tags: true, paginate: true, ticket_links_enabled: true } }
+    fn default() -> Self { Self { page_size: 500, show_remote_branches: true, show_tags: true, paginate: true, ticket_links_enabled: true, squash_merge_hints: None } }
 }
 
 // ── cache ──

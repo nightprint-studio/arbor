@@ -17,6 +17,10 @@
    *     where the current view must be unmistakable. Carries a thin background
    *     trough so it reads as a single capsule on busy headers.
    *
+   *   - 'segmented': quiet neutral segmented control — a `--bg-overlay` trough with the active
+   *     tab lifted onto `--bg-base` in accent text. For a small view/grouping switch inside a
+   *     toolbar, where `solid`'s filled accent would shout. Pairs with `size="xs"`.
+   *
    * Optional features (all off by default):
    *   - draggable    — enables horizontal drag-to-reorder
    *   - overflow     — measure-based overflow that hides tabs beyond the
@@ -33,6 +37,8 @@
    * (interactive button, drag handlers, close X, accent underline) is always
    * supplied by the widget so consumers can't drift on a11y / reorder logic.
    */
+  import type { TooltipInput } from '$lib/stores/tooltip.svelte';
+
   export interface TabItem {
     id:          string;
     label?:      string;
@@ -69,14 +75,16 @@
     disabled?:   boolean;
     /** Native `title` tooltip on hover. */
     title?:      string;
+    /** Arbor tooltip (description, shortcut…) in place of {@link title}. Wins when both are set. */
+    tooltip?:    TooltipInput;
     /** Arbitrary consumer payload — surfaced in event callbacks and the
      *  `itemContent` snippet so callers don't have to look the item up
      *  themselves. */
     data?:       any;
   }
 
-  export type TabsVariant = 'underline' | 'pill' | 'panel' | 'solid';
-  export type TabsSize    = 'sm' | 'md';
+  export type TabsVariant = 'underline' | 'pill' | 'panel' | 'solid' | 'segmented';
+  export type TabsSize    = 'xs' | 'sm' | 'md';
 </script>
 
 <script lang="ts">
@@ -585,7 +593,7 @@
         aria-selected={active}
         aria-disabled={item.disabled || undefined}
         style:transform={dragTransform(i)}
-        use:tooltip={dragFromIndex === null ? (item.title ?? '') : ''}
+        use:tooltip={dragFromIndex === null ? (item.tooltip ?? item.title ?? '') : ''}
         onmousedown={(e) => startTabDrag(e, i)}
         onclick={() => selectItem(item)}
         onkeydown={(e) => handleKeydown(e, item)}
@@ -596,7 +604,7 @@
         {:else}
           {#if item.icon}
             {@const Icon = item.icon}
-            <Icon size={item.iconSize ?? (size === 'sm' ? 12 : 14)} color={item.iconColor ?? 'currentColor'} {...(item.iconProps ?? {})} />
+            <Icon size={item.iconSize ?? (size === 'md' ? 14 : 12)} color={item.iconColor ?? 'currentColor'} {...(item.iconProps ?? {})} />
           {/if}
           {#if item.label}
             <span class="tab-label" style:color={item.labelColor}>{item.label}</span>
@@ -769,6 +777,7 @@
      StatsOverlay, …) feel less cramped. The `panel` variant explicitly
      resets back to the compact font-size below — file-tab strips
      (RepoTabBar, TerminalPanel) need to stay tight to fit many tabs. */
+  .tabs-sz-xs .tabs-tab { padding: 2px 8px;  font-size: var(--font-size-2xs); }
   .tabs-sz-sm .tabs-tab { padding: 4px 8px;  font-size: var(--font-size-xs); }
   .tabs-sz-md .tabs-tab { padding: 7px 14px; font-size: var(--font-size-md); }
 
@@ -871,6 +880,33 @@
     color: var(--text-on-accent);
     font-weight: 600;
     box-shadow: 0 1px 2px rgba(0,0,0,0.18);
+  }
+
+  /* ── Variant: segmented (quiet neutral switch) ──────────────────────────
+     Trough on --bg-overlay, active segment lifted onto --bg-base. The strip must not clip: the
+     active segment's shadow falls below it, outside the strip's own box. At `xs` it keeps the
+     3px 9px padding this look was designed with (plain `xs` is a bit tighter). */
+  .tabs-segmented {
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    gap: 0;
+  }
+  .tabs-segmented .tabs-strip { overflow: visible; }
+  .tabs-segmented .tabs-spacer { display: none; }
+  .tabs-segmented .tabs-tab {
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  .tabs-segmented.tabs-sz-xs .tabs-tab { padding: 3px 9px; }
+  .tabs-segmented .tabs-tab:hover:not(.tab-disabled):not(.tab-active) { color: var(--text-primary); }
+  .tabs-segmented .tabs-tab.tab-active {
+    background: var(--bg-base);
+    color: var(--accent);
+    /* Same 18% black as the old hand-rolled segmented control, without a literal rgba. */
+    box-shadow: 0 1px 2px color-mix(in srgb, black 18%, transparent);
   }
 
   /* ── Variant: panel (JetBrains-style file tabs) ─────────────────────────

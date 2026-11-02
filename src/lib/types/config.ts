@@ -33,6 +33,8 @@ export interface GraphConfig {
   paginate: boolean;
   /** Render the ticket-link chip column in the commit graph. */
   ticket_links_enabled: boolean;
+  /** Experimental squash-merge ghost edges. null/absent = never chosen (treated as off). */
+  squash_merge_hints?: boolean | null;
 }
 
 /** Stable id of a commit-graph column.

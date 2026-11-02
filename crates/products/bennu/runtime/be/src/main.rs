@@ -44,9 +44,22 @@ mod completion_tuning;
 mod flc;
 mod flc_annotations;
 mod flc_arglist;
+mod flc_derived;
+mod flc_catch;
+mod flc_assert;
+mod flc_fit;
+mod flc_missing;
+mod flc_lambda;
+mod flc_ngram;
+mod flc_stubs;
+#[cfg(test)]
+mod flc_blitz;
+mod flc_tests;
 mod flc_chain;
 mod flc_echo;
+mod flc_body;
 mod flc_choices;
+mod flc_rank;
 mod flc_check;
 mod flc_mapper;
 mod flc_names;
@@ -54,6 +67,9 @@ mod flc_generic_slot;
 mod flc_habits;
 #[cfg(test)]
 mod flc_quality;
+// Offline ML bench on public code (M1 cascade ablation, M2 type-driven synthesis coverage, M3 learned ranking).
+#[cfg(test)]
+mod mlbench;
 // How often the ghost text is taken (`bennu_flc_feedback` / `bennu_flc_stats`): counters only, in the profile.
 mod flc_created;
 mod flc_format;
@@ -67,7 +83,9 @@ mod flc_stats;
 mod learn;
 mod flc_persist;
 mod flc_profile;
+mod flc_next;
 mod flc_similar;
+mod flc_words;
 mod config_cmds;
 // Project model: `bennu_open_project` / `bennu_project_tree` / `bennu_read_file` —
 // pom parse + capability detection + JDK/encoding detection + file tree + decoded

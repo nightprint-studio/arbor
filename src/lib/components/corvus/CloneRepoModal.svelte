@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Download, GitBranch, RefreshCw, AlertCircle, FolderOpen, ChevronDown } from 'lucide-svelte';
   import Button from '../shared/ui/Button.svelte';
+  import Checkbox from '../shared/ui/Checkbox.svelte';
   import { listRemoteBranchesForUrl, cloneRepo, openRepo } from '$lib/ipc/corvus/graph';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
@@ -10,6 +11,7 @@
   import FileExplorerModal from '../sitta/FileExplorerModal.svelte';
   import Modal from '../shared/Modal.svelte';
   import ModalHeader from '../shared/ModalHeader.svelte';
+  import ModalFooter from '../shared/ModalFooter.svelte';
   import FormField from '../shared/ui/FormField.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -326,15 +328,8 @@
 
       <!-- Options -->
       <div class="options">
-        <label class="checkbox-item">
-          <input type="checkbox" bind:checked={shallow} />
-          <span>Shallow clone</span>
-          <span class="opt-note">depth 1</span>
-        </label>
-        <label class="checkbox-item">
-          <input type="checkbox" bind:checked={recurse} />
-          <span>Recurse submodules</span>
-        </label>
+        <Checkbox bind:checked={shallow} label="Shallow clone (depth 1)" />
+        <Checkbox bind:checked={recurse} label="Recurse submodules" />
       </div>
 
       <!-- Clone error -->
@@ -348,18 +343,20 @@
     </div>
 
     {#snippet footer()}
-      <Button variant="secondary" onclick={onClose}>Cancel</Button>
-      <Button
-        variant="primary"
-        onclick={handleClone}
-        disabled={!canClone}
-        loading={cloning}
-      >
-        {#snippet iconStart()}
-          <Download size={13} />
-        {/snippet}
-        {cloning ? 'Cloning…' : 'Clone'}
-      </Button>
+      <ModalFooter hint="to clone">
+        <Button variant="secondary" onclick={onClose}>Cancel</Button>
+        <Button
+          variant="primary"
+          onclick={handleClone}
+          disabled={!canClone}
+          loading={cloning}
+        >
+          {#snippet iconStart()}
+            <Download size={13} />
+          {/snippet}
+          {cloning ? 'Cloning…' : 'Clone'}
+        </Button>
+      </ModalFooter>
     {/snippet}
   </Modal>
 {/if}
@@ -462,21 +459,6 @@
   /* Options */
   .options { display: flex; gap: 20px; padding-top: 2px; }
 
-  .checkbox-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    cursor: pointer;
-    user-select: none;
-  }
-  .checkbox-item input[type="checkbox"] {
-    accent-color: var(--accent);
-    width: 13px; height: 13px;
-    cursor: pointer; flex-shrink: 0;
-  }
-  .opt-note { color: var(--text-disabled); font-size: var(--font-size-2xs); font-family: var(--font-code); }
 
   /* Error panel */
   .error-panel {

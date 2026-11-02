@@ -57,6 +57,21 @@
   <FormRow label="Complete log statements" description="Finish a log call from the pattern this project writes most in that place — the entry line of a method, a catch block. Counted once in the background, kept current as files change; needs no model.">
     <Toggle checked={s.flc.logs} onchange={(v) => s.setFlc('logs', v)} ariaLabel="Complete log statements" />
   </FormRow>
+  <FormRow label="Suggest variable names" description="After a type, the name this project gives it — Order ▌ becomes order. On by default.">
+    <Toggle checked={s.flc.layerNames} onchange={(v) => s.setFlc('layerNames', v)} ariaLabel="Suggest variable names" />
+  </FormRow>
+  <FormRow label="Copy lines from the project" description="The rest of a line the project has most often written after the same last words, taken from its own files. On by default; switch it off if its suggestions get in the way.">
+    <Toggle checked={s.flc.layerNgram} disabled={!s.flc.enabled} onchange={(v) => s.setFlc('layerNgram', v)} ariaLabel="Copy lines from the project" />
+  </FormRow>
+  <FormRow label="Suggest creation arguments" description="The arguments of a new that the project always writes the same way. Off by default: measured on public projects, it was useful in fewer than one case in ten.">
+    <Toggle checked={s.flc.layerCreation} onchange={(v) => s.setFlc('layerCreation', v)} ariaLabel="Suggest creation arguments" />
+  </FormRow>
+  <FormRow label="Repeat list items" description="In a list that repeats itself, the call before the comma again. Off by default, for the same reason.">
+    <Toggle checked={s.flc.layerEcho} onchange={(v) => s.setFlc('layerEcho', v)} ariaLabel="Repeat list items" />
+  </FormRow>
+  <FormRow label="Suggest usual arguments" description="The grey suggestion built from how the project fills a call. On by default: its short suggestions look wrong when judged on the whole line, and are right as far as they write in four cases out of ten.">
+    <Toggle checked={s.flc.layerHabits} onchange={(v) => s.setFlc('layerHabits', v)} ariaLabel="Suggest usual arguments" />
+  </FormRow>
   <FormRow label="Check with Bennu" description="Run the model's line through Bennu's code checks and drop it when it names a method the receiver does not have, passes the wrong arguments or uses a variable that does not exist. A class you have not imported yet is not counted against it. Costs a validation of the file per suggestion.">
     <Toggle checked={s.flc.check} disabled={!s.flc.enabled} onchange={(v) => s.setFlc('check', v)} ariaLabel="Check with Bennu" />
   </FormRow>

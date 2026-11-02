@@ -30,11 +30,19 @@ use crate::engine::check_id::CheckId;
 /// Maven not run, indexing off) the resolver sees only JDK + project, so such an import is almost
 /// certainly a real library type we simply didn't index — flagging it would be a false positive.
 /// When `classpath_complete` is `false`, only `java.*` imports are checked.
-pub fn unresolved_imports(
+pub fn unresolved_imports(root: Node, source: &str, resolver: &dyn TypeResolver, classpath_complete: bool) -> Vec<Diagnostic> {
+    unresolved_imports_at(root, source, resolver, classpath_complete, false)
+}
+
+/// [`unresolved_imports`], told whether the file is compiled at a higher level than the JDK it is
+/// checked against (`jdk_is_behind`): then a `java.*` import that does not resolve may be a type newer
+/// than that JDK, and is left alone.
+pub fn unresolved_imports_at(
     root: Node,
     source: &str,
     resolver: &dyn TypeResolver,
     classpath_complete: bool,
+    jdk_is_behind: bool,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
@@ -53,6 +61,13 @@ pub fn unresolved_imports(
         // Only adjudicate non-`java.*` imports when the classpath is known-complete (else a real
         // library type we didn't index would be mis-flagged). `java.*` is always JDK-authoritative.
         if !classpath_complete && !is_java_core_import(dotted) {
+            continue;
+        }
+        // The file is compiled at a higher level than the JDK we can read (`src/main/java24` with a
+        // JDK 21 installed): a `java.*` type we cannot find may simply be newer than that JDK —
+        // `java.lang.classfile` — and the JDK is no longer authoritative for it. Said nothing rather
+        // than an error on code that compiles with the right JDK; install it and the import is checked.
+        if jdk_is_behind && is_java_core_import(dotted) {
             continue;
         }
         if is_star {
@@ -150,19 +165,26 @@ fn import_binary(dotted: &str, resolver: &dyn TypeResolver) -> Option<String> {
 /// (the JDK tier is authoritative), anything else only on a complete classpath. And a member is
 /// reported absent only over a hierarchy read to the end — a static import reaches inherited members
 /// too, so `import static p.Sub.CONST;` for a constant of `p.Base` is legal.
-pub fn unresolved_static_imports(
+pub fn unresolved_static_imports(root: Node, source: &str, resolver: &dyn TypeResolver, classpath_complete: bool) -> Vec<Diagnostic> {
+    unresolved_static_imports_at(root, source, resolver, classpath_complete, false)
+}
+
+/// [`unresolved_static_imports`] with the same `jdk_is_behind` allowance as [`unresolved_imports_at`].
+pub fn unresolved_static_imports_at(
     root: Node,
     source: &str,
     resolver: &dyn TypeResolver,
     classpath_complete: bool,
+    jdk_is_behind: bool,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let symbols = bennu_java::prelude::extract_symbols(source);
     let mut out = Vec::new();
     for target in bennu_java::prelude::static_import_targets(&symbols.imports) {
         let owner_dotted = target.owner_binary.replace('/', ".");
+        // A `java.*` owner is the JDK's to judge only while the JDK we read is not older than the file.
         let judged = classpath_complete
-            || is_java_core_import(&owner_dotted)
+            || (is_java_core_import(&owner_dotted) && !jdk_is_behind)
             || resolver.is_project_type(&target.owner_binary);
         let Some(owner) = import_binary(&owner_dotted, resolver) else {
             if judged {
@@ -526,6 +548,21 @@ mod tests {
     /// Adjudicate imports with a KNOWN-COMPLETE classpath (the default for these focused tests).
     fn unresolved(src: &str, known: &[&str]) -> Vec<String> {
         unresolved_cp(src, known, true)
+    }
+
+    /// A JDK too old for the file: `java.lang.classfile` is JDK 24's, and the resolver here reads an older one.
+    #[test]
+    fn a_java_import_newer_than_the_jdk_is_not_an_error_but_a_typo_still_is_at_the_jdks_level() {
+        let src = "import java.lang.classfile.ClassModel;\nclass A {}";
+        let run = |behind: bool| {
+            let tree = parse(src);
+            unresolved_imports_at(tree.root_node(), src, &Idx(Vec::new().into_iter().collect()), false, behind)
+                .into_iter()
+                .map(|d| d.message)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(run(false), ["Cannot resolve import `java.lang.classfile.ClassModel`"]);
+        assert!(run(true).is_empty());
     }
 
     /// Adjudicate imports with an explicit classpath-completeness flag.

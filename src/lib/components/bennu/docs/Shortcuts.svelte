@@ -86,6 +86,7 @@
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd></td><td><strong>Optimize imports</strong> in a Java file — Eclipse's key, since IntelliJ's <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>O</kbd> is dropped on those layouts</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>→</kbd> / <kbd>←</kbd></td><td><strong>Expand</strong> / <strong>shrink</strong> the selection by one syntactic step — VS Code's keys, since <kbd>Ctrl</kbd> + <kbd>W</kbd> may close a WebView</td></tr>
     <tr><td><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd></td><td>Walk a completion's <strong>placeholders</strong>; <kbd>Esc</kbd> leaves</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>→</kbd> (<kbd>Cmd</kbd> + <kbd>→</kbd> on macOS)</td><td>With a ghost text of <strong>several lines</strong> on screen — a constructor written from the fields — write the next line only and keep the rest drawn; <kbd>Tab</kbd> writes all of it</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd></td><td><strong>Expand the macro</strong> at the caret — recursive, and text rather than a file</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>/</kbd></td><td>Toggle a <strong>comment</strong> — Java <code>//</code>, JSP <code>&lt;%-- --%&gt;</code>, XML <code>&lt;!-- --&gt;</code></td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td><td><strong>Undo</strong> / <strong>redo</strong> — the history is the buffer's, so undo never reaches past the file in front of you</td></tr>

@@ -189,8 +189,12 @@
   }
 </script>
 
+<!-- Drag-to-pan and wheel-zoom are pointer conveniences; the nodes inside carry the keyboard path. -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class="mgc"
+  role="group"
+  aria-label="Module dependency graph"
   class:panning
   bind:this={scroller}
   onwheel={onWheel}

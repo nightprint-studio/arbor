@@ -17,6 +17,10 @@
     label?: string;
     /** Accessibility: announce to screen readers. */
     ariaLabel?: string;
+    /** Ms before the spinner becomes visible (default 250: operations faster
+     *  than that should not flash a spinner). It always occupies its space, so
+     *  there is no layout shift. `0` = show immediately. */
+    delay?: number;
   }
 
   let {
@@ -26,6 +30,7 @@
     block = false,
     label,
     ariaLabel = 'Loading',
+    delay = 250,
   }: Props = $props();
 
   const px = $derived(
@@ -42,7 +47,7 @@
 <span
   class="spinner v-{variant}"
   class:block
-  style={color ? `color: ${color};` : undefined}
+  style="--spinner-delay: {Math.max(0, delay)}ms;{color ? ` color: ${color};` : ''}"
   role="status"
   aria-label={ariaLabel}
   aria-live="polite"
@@ -75,6 +80,14 @@
     gap: 6px;
     color: var(--text-muted);
     line-height: 1;
+    /* Delayed reveal in pure CSS: `both` keeps opacity 0 during the delay, so
+       the box is laid out from the start (no shift) but nothing is painted
+       for fast operations. */
+    animation: spinner-reveal 0s linear var(--spinner-delay, 0ms) both;
+  }
+  @keyframes -global-spinner-reveal {
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
   .spinner.block {
     display: flex;

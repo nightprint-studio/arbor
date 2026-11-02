@@ -290,6 +290,7 @@
 </script>
 
 <!-- A single focus stop with its own key handling: the canvas has no inner elements to tab through. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
   bind:this={host}
   class="flame {klass}"

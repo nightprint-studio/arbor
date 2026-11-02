@@ -45,6 +45,12 @@ struct Settings {
     ignore_commented_code: bool,
     profile_project: bool,
     profile_global: bool,
+    /// The small layers that can be switched off one by one; see the `flc_layer_*` settings.
+    layer_names: bool,
+    layer_ngram: bool,
+    layer_creation: bool,
+    layer_echo: bool,
+    layer_habits: bool,
     excluded_dirs: Vec<String>,
 }
 
@@ -59,6 +65,11 @@ fn settings_from(config: &BennuConfig) -> Settings {
         ignore_commented_code: config.flc_ignore_commented_code,
         profile_project: config.flc_profile_project,
         profile_global: config.flc_profile_global,
+        layer_names: config.flc_layer_names,
+        layer_ngram: config.flc_layer_ngram,
+        layer_creation: config.flc_layer_creation,
+        layer_echo: config.flc_layer_echo,
+        layer_habits: config.flc_layer_habits,
         excluded_dirs: config.excluded_dirs.clone(),
     }
 }
@@ -209,12 +220,17 @@ fn forget_file(st: &mut LogState, key: &str) {
     st.lines.remove_file(key);
     crate::flc_names::remove_file(key);
     crate::flc_similar::remove_file(key);
+    crate::flc_next::remove_file(key);
     crate::flc_habits::remove_file(key);
     crate::flc_annotations::remove_file(key);
     crate::flc_format::remove_file(key);
     crate::flc_sequence::remove_file(key);
     crate::flc_member_args::remove_file(key);
     crate::flc_created::remove_file(key);
+    crate::flc_ngram::remove_file(key);
+    crate::flc_catch::remove_file(key);
+    crate::flc_lambda::remove_file(key);
+    crate::flc_assert::remove_file(key);
     st.seen.remove(key);
     st.fed.remove(key);
     st.dirty = true;
@@ -317,12 +333,17 @@ fn scan_root(root: &str, skip: &[String]) {
         // the names the project gives its types: read in the background only, a parse per keystroke is not worth it
         crate::flc_names::add_file(&key, &text);
         crate::flc_similar::add_file(&key, &text);
+        crate::flc_next::add_file(&key, &text);
         crate::flc_habits::add_file(&key, &text);
         crate::flc_annotations::add_file(&key, &text);
         crate::flc_format::add_file(&key, &text);
         crate::flc_sequence::add_file(&key, &text);
         crate::flc_member_args::add_file(&key, &text);
         crate::flc_created::add_file(&key, &text);
+        crate::flc_ngram::add_file(&key, &text);
+        crate::flc_catch::add_file(&key, &text);
+        crate::flc_lambda::add_file(&key, &text);
+        crate::flc_assert::add_file(&key, &text);
     }
     {
         let mut st = log_state().lock().unwrap_or_else(|p| p.into_inner());
@@ -438,12 +459,17 @@ fn apply_changes(batch: Vec<Change>) {
                     count_file(&key, &text);
                     crate::flc_names::add_file(&key, &text);
                     crate::flc_similar::add_file(&key, &text);
+                    crate::flc_next::add_file(&key, &text);
                     crate::flc_habits::add_file(&key, &text);
                     crate::flc_annotations::add_file(&key, &text);
                     crate::flc_format::add_file(&key, &text);
                     crate::flc_sequence::add_file(&key, &text);
                     crate::flc_member_args::add_file(&key, &text);
                     crate::flc_created::add_file(&key, &text);
+                    crate::flc_ngram::add_file(&key, &text);
+                    crate::flc_catch::add_file(&key, &text);
+                    crate::flc_lambda::add_file(&key, &text);
+                    crate::flc_assert::add_file(&key, &text);
                 }
                 _ => forget_file(&mut log_state().lock().unwrap_or_else(|p| p.into_inner()), &key),
             }
@@ -487,7 +513,7 @@ pub struct FlcReply {
     pub text: String,
     /// 0..1. For the log profile, the share of the place's calls the pattern holds.
     pub confidence: f32,
-    /// `"log"`, `"project"` (a line several files write alike), `"name"`, `"mapping"`, `"arguments"`, `"habit"` (the usual argument at a place), `"annotation"`, `"similar"` (the body of a twin method) or `"model"`.
+    /// `"log"`, `"project"` (a line several files write alike), `"name"`, `"mapping"`, `"arguments"`, `"habit"` (the usual argument at a place), `"annotation"`, `"similar"` (the body of a twin method), `"derived"` (a block written out from the class, such as a constructor) or `"model"`.
     pub origin: String,
 }
 
@@ -520,6 +546,10 @@ pub(crate) fn memory_items() -> Vec<arbor_be::prelude::MemoryItem> {
         ("calls on a variable", crate::flc_member_args::sizes()),
         ("layout", crate::flc_format::sizes()),
         ("types created under a name", crate::flc_created::sizes()),
+        ("lines copied from the project", crate::flc_ngram::sizes()),
+        ("how exceptions are handled", crate::flc_catch::sizes()),
+        ("functions passed to calls", crate::flc_lambda::sizes()),
+        ("assertions in tests", crate::flc_assert::sizes()),
         ("picks in the completion list", crate::flc_choices::sizes()),
     ];
     let extra = vec![crate::learn::memory_item(), crate::learned_rules::memory_item()];
@@ -707,7 +737,7 @@ fn model_suggestion(settings: &Settings, args: &FlcArgs, source: &str, line_pref
         Gate::Silent => return None,
         // a type name inside the parentheses of an unfinished call is an argument (`String` of `String.class`), not a
         // declaration waiting for its variable: the line alone cannot tell, the lines above it can
-        Gate::Name(_) if open_parens_before(source, args.offset).is_some_and(|depth| depth > 0) => {}
+        Gate::Name(_) if !settings.layer_names || open_parens_before(source, args.offset).is_some_and(|depth| depth > 0) => {}
         Gate::Name(derived) => {
             // the name this project gives that type, when it has a habit; else the one the type suggests
             let habit = bennu_flc::prelude::bare_type(line_prefix).and_then(|ty| crate::flc_names::name_for(&args.file, source, args.offset, &ty));
@@ -870,7 +900,27 @@ pub(crate) fn suggest(args: FlcArgs) -> Result<Option<FlcReply>, String> {
     // what the suggestion is for, read only when there is a learner to ask
     let context = if crate::learn::enabled() { learning_context(&args.file, args.source.as_deref(), args.offset) } else { String::new() };
     let lay_out = settings().profile_project;
-    Ok(suggest_from_layers(args)?.and_then(|reply| calibrated(reply, min, &context)).map(|reply| laid_out(reply, lay_out)))
+    let (file, offset, given) = (args.file.clone(), args.offset, args.source.clone());
+    Ok(suggest_from_layers(args)?
+        .filter(|reply| !drawn_where_it_cannot_fit(&file, given.as_deref(), offset, &reply.text))
+        .and_then(|reply| calibrated(reply, min, &context))
+        .map(|reply| laid_out(reply, lay_out)))
+}
+
+/// A lambda or an anonymous class where the expected type is a plain class — see `flc_fit`.
+fn drawn_where_it_cannot_fit(file: &str, given: Option<&str>, offset: usize, text: &str) -> bool {
+    let read;
+    let source = match given {
+        Some(s) => s,
+        None => match std::fs::read_to_string(file) {
+            Ok(text) => {
+                read = text;
+                &read
+            }
+            Err(_) => return false,
+        },
+    };
+    crate::flc_fit::impossible_here(file, source, offset, text)
 }
 
 /// A suggestion the layers WROTE (the model, an argument list built here) in the way the project lays out its code; one
@@ -931,6 +981,10 @@ fn suggest_from_layers(args: FlcArgs) -> Result<Option<FlcReply>, String> {
     let line_end = source[args.offset..].find('\n').map_or(source.len(), |p| args.offset + p);
     // the body of a twin method, right after a new signature: both caret shapes (`{|}` and the empty line below)
     // would be turned away by the checks that follow
+    // the body of a getter or a setter, written from its field
+    if let Some(b) = crate::flc_body::suggest(&source, args.offset) {
+        return Ok(Some(FlcReply { text: b.text, confidence: b.confidence, origin: "derived".into() }));
+    }
     if let Some(b) = crate::flc_similar::suggest(&args.file, &source, args.offset) {
         return Ok(Some(FlcReply { text: b.text, confidence: b.confidence, origin: "similar".into() }));
     }
@@ -938,6 +992,19 @@ fn suggest_from_layers(args: FlcArgs) -> Result<Option<FlcReply>, String> {
     if let Some(a) = crate::flc_annotations::suggest(&args.file, &source, args.offset) {
         let text = if source[args.offset..line_end].trim() == ")" { a.text.strip_suffix(')').unwrap_or(&a.text).to_string() } else { a.text };
         return Ok(Some(FlcReply { text, confidence: a.confidence, origin: "annotation".into() }));
+    }
+    // a block that follows from the class alone — the constructor of `public Order(`, over several lines. The editor's own closers
+    // after the caret are overwritten by it, so it is asked before the rule below that turns text after the caret away
+    if let Some(d) = crate::flc_derived::suggest(&source, args.offset) {
+        return Ok(Some(FlcReply { text: d.text, confidence: d.confidence, origin: "derived".into() }));
+    }
+    // a method the class owes its supertypes, started by name — written out from the index, like the blocks above
+    if let Some(d) = crate::flc_stubs::suggest(&args.file, &source, args.offset) {
+        return Ok(Some(FlcReply { text: d.text, confidence: d.confidence, origin: "derived".into() }));
+    }
+    // the test of a method of the class under test, in its `…Test` file
+    if let Some(d) = crate::flc_tests::suggest(&args.file, &source, args.offset) {
+        return Ok(Some(FlcReply { text: d.text, confidence: d.confidence, origin: "derived".into() }));
     }
     let line_prefix = &source[line_start..args.offset];
     // Only at the end of the line: text after the caret would be written twice. The one exception is the closer the
@@ -952,6 +1019,10 @@ fn suggest_from_layers(args: FlcArgs) -> Result<Option<FlcReply>, String> {
                 let inner = a.text.strip_suffix(");").or_else(|| a.text.strip_suffix(')')).unwrap_or(&a.text).to_string();
                 return Ok(Some(FlcReply { text: inner, confidence: a.confidence, origin: "arguments".into() }));
             }
+            // the call takes a function: the one the project passes there, for the type the index knows it receives
+            if let Some(f) = crate::flc_lambda::suggest(&args.file, &without, args.offset) {
+                return Ok(Some(FlcReply { text: f.text, confidence: f.confidence, origin: "lambda".into() }));
+            }
         }
         // any other closer the editor added with its opener (`@PostMapping(value = |)`, `foo(a, |)`): the layers below
         // see the line without it, and an answer that ends with the same closer leaves it where it is
@@ -959,8 +1030,9 @@ fn suggest_from_layers(args: FlcArgs) -> Result<Option<FlcReply>, String> {
             let without = format!("{}{}", &source[..args.offset], &source[line_end..]);
             let again = FlcArgs { file: args.file.clone(), offset: args.offset, source: Some(without.clone()) };
             let reply = crate::flc_echo::suggest(&without, args.offset)
+                .filter(|_| settings.layer_echo)
                 .map(|e| FlcReply { text: e.text, confidence: e.confidence, origin: "echo".into() })
-                .or_else(|| crate::flc_arglist::creation(&args.file, &without, args.offset).map(|a| FlcReply { text: a.text, confidence: a.confidence, origin: "arguments".into() }))
+                .or_else(|| crate::flc_arglist::creation(&args.file, &without, args.offset).filter(|_| settings.layer_creation).map(|a| FlcReply { text: a.text, confidence: a.confidence, origin: "arguments".into() }))
                 .or_else(|| crate::flc_arglist::array_constructor(&args.file, &without, args.offset)
                 .map(|a| FlcReply { text: a.text, confidence: a.confidence, origin: "arguments".into() }))
                 .or_else(|| crate::flc_arglist::class_literal(&args.file, &without, args.offset)
@@ -969,6 +1041,7 @@ fn suggest_from_layers(args: FlcArgs) -> Result<Option<FlcReply>, String> {
                 .filter(|m| !(settings.check && crate::flc_check::invents(&args.file, &without, args.offset, &m.text)))
                 .map(|m| FlcReply { text: m.text, confidence: m.confidence, origin: "habit".into() }))
                 .or_else(|| crate::flc_habits::suggest(&args.file, &without, args.offset)
+                .filter(|_| settings.layer_habits)
                 .filter(|h| !(settings.check && crate::flc_check::invents(&args.file, &without, args.offset, &h.text)))
                 .map(|h| FlcReply { text: h.text, confidence: h.confidence, origin: "habit".into() }))
                 .or_else(|| model_suggestion(&settings, &again, &without, line_prefix, line_end - rest.len()));
@@ -983,13 +1056,41 @@ fn suggest_from_layers(args: FlcArgs) -> Result<Option<FlcReply>, String> {
         return Ok(None);
     }
     // the next element of a list that repeats itself: the call before the comma, again
-    if let Some(e) = crate::flc_echo::suggest(&source, args.offset) {
+    if let Some(e) = crate::flc_echo::suggest(&source, args.offset).filter(|_| settings.layer_echo) {
         return Ok(Some(FlcReply { text: e.text, confidence: e.confidence, origin: "echo".into() }));
     }
     // the next field of a conversion (setter or builder step), in the style of the lines above it
     if line_prefix.trim().is_empty() {
         if let Some(m) = crate::flc_mapper::suggest(&args.file, &source, args.offset) {
             return Ok(Some(FlcReply { text: m.text, confidence: m.confidence, origin: "mapping".into() }));
+        }
+    }
+    // the assignment a constructor is missing, once its parameter is there
+    if line_prefix.trim().is_empty() {
+        if let Some(m) = crate::flc_missing::suggest(&source, args.offset) {
+            return Ok(Some(FlcReply { text: m.text, confidence: m.confidence, origin: "derived".into() }));
+        }
+    }
+    // what a test checks under the variable it just computed, in the way the project's tests write it
+    if line_prefix.trim().is_empty() {
+        if let Some(a) = crate::flc_assert::suggest(&args.file, &source, args.offset) {
+            return Ok(Some(FlcReply { text: a.text, confidence: a.confidence, origin: "assert".into() }));
+        }
+    }
+    // what this project usually does first when it catches this exception, on the empty line after the `catch (…) {`
+    if line_prefix.trim().is_empty() {
+        if let Some(c) = crate::flc_catch::suggest(&source, args.offset) {
+            if !(settings.check && crate::flc_check::invents(&args.file, &source, args.offset, &c.text)) {
+                return Ok(Some(FlcReply { text: c.text, confidence: c.confidence, origin: "catch".into() }));
+            }
+        }
+    }
+    // the next statement of a method, from the structure already written and the methods of this project that began alike
+    if line_prefix.trim().is_empty() {
+        if let Some(n) = crate::flc_next::suggest(&args.file, &source, args.offset) {
+            if !(settings.check && crate::flc_check::invents(&args.file, &source, args.offset, &n.text)) {
+                return Ok(Some(FlcReply { text: n.text, confidence: n.confidence, origin: "next".into() }));
+            }
         }
     }
     // what this project usually writes after the statement above, on an empty line
@@ -1044,13 +1145,13 @@ fn suggest_from_layers(args: FlcArgs) -> Result<Option<FlcReply>, String> {
             return Ok(Some(FlcReply { text: a.text, confidence: a.confidence, origin: "arguments".into() }));
         }
         // the position wants a class: how this code makes one, before any guess
-        if let Some(a) = crate::flc_arglist::creation(&args.file, &source, args.offset) {
+        if let Some(a) = crate::flc_arglist::creation(&args.file, &source, args.offset).filter(|_| settings.layer_creation) {
             if !(settings.check && crate::flc_check::invents(&args.file, &source, args.offset, &a.text)) {
                 return Ok(Some(FlcReply { text: a.text, confidence: a.confidence, origin: "arguments".into() }));
             }
         }
         // (a habit written for another method may name a variable this one does not have: the code checks decide)
-        if let Some(h) = crate::flc_habits::suggest(&args.file, &source, args.offset) {
+        if let Some(h) = crate::flc_habits::suggest(&args.file, &source, args.offset).filter(|_| settings.layer_habits) {
             if !(settings.check && crate::flc_check::invents(&args.file, &source, args.offset, &h.text)) {
                 return Ok(Some(FlcReply { text: h.text, confidence: h.confidence, origin: "habit".into() }));
             }
@@ -1065,12 +1166,29 @@ fn suggest_from_layers(args: FlcArgs) -> Result<Option<FlcReply>, String> {
         if let Some(a) = crate::flc_arglist::rest(&args.file, &source, args.offset) {
             return Ok(Some(FlcReply { text: a.text, confidence: a.confidence, origin: "arguments".into() }));
         }
+        // the function a call takes (`.map(▌`), as the project writes it, for the type the index knows it receives
+        if let Some(f) = crate::flc_lambda::suggest(&args.file, &source, args.offset) {
+            return Ok(Some(FlcReply { text: f.text, confidence: f.confidence, origin: "lambda".into() }));
+        }
         // the whole argument list of the call just opened, when every parameter has a clear match in scope
         if let Some(a) = crate::flc_arglist::suggest(&args.file, &source, args.offset) {
             return Ok(Some(FlcReply { text: a.text, confidence: a.confidence, origin: "arguments".into() }));
         }
     }
-    Ok(model_suggestion(&settings, &args, &source, line_prefix, line_end))
+    // what the project wrote after the same words, copied: a strong share goes before the model, a weak one only fills its silence.
+    // The bench first read this layer as stealing lines from the model; judged as far as it writes, it is right more often than the
+    // model on the lines it takes (75% against 41%), and its confidence tracks its precision.
+    let copied = if settings.enabled && settings.layer_ngram {
+        crate::flc_ngram::suggest(line_prefix)
+            .filter(|g| !(settings.check && crate::flc_check::invents(&args.file, &source, args.offset, &g.text)))
+    } else {
+        None
+    };
+    let reply = |g: crate::flc_ngram::Copied| FlcReply { text: g.text, confidence: g.confidence, origin: "ngram".into() };
+    if copied.as_ref().is_some_and(|g| g.confidence >= crate::flc_ngram::STRONG_SHARE) {
+        return Ok(copied.map(reply));
+    }
+    Ok(model_suggestion(&settings, &args, &source, line_prefix, line_end).or_else(|| copied.map(reply)))
 }
 
 #[derive(Deserialize)]

@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { Layers, FolderOpen, ChevronDown, GitCommit } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
   import { addWorktree } from '$lib/ipc/corvus/worktree';
   import { repoStore } from '$lib/stores/corvus/repo.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
@@ -227,10 +228,7 @@
       </FormField>
     {/if}
 
-    <label class="toggle-row">
-      <input type="checkbox" bind:checked={createBranch} />
-      <span class="toggle-label">Create a new branch</span>
-    </label>
+    <Checkbox bind:checked={createBranch} label="Create a new branch" />
 
     {#if createBranch}
       <FormField label="New branch name" for="wt-new-branch">
@@ -355,14 +353,6 @@
   }
   .browse-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
-  .toggle-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    user-select: none;
-  }
-  .toggle-label { font-size: var(--font-size-sm); color: var(--text-secondary); }
 
   .error-msg {
     padding: 7px 10px;

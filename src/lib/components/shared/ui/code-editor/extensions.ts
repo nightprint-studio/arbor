@@ -54,7 +54,7 @@ import { semanticHighlight } from './semantic-tokens';
 import { codeEditorTheme, codeEditorHighlightStyle, stableGutterTheme } from './theme';
 import { stableGutters } from './stable-gutters';
 import {
-  inlineCompletion, acceptInlineCompletion, dismissInlineCompletion,
+  inlineCompletion, acceptInlineCompletion, acceptInlineCompletionLine, dismissInlineCompletion,
 } from './inline-completion';
 
 /** The search keymap minus the bindings the host owns. The host routes `Ctrl+F` to the
@@ -546,6 +546,8 @@ export function createCodeEditorExtensions(
       Prec.highest(
         keymap.of([
           { key: 'Tab', run: acceptInlineCompletion },
+          // a block of several lines, one line at a time; a one-line proposal leaves the key to its usual move
+          { key: 'Mod-ArrowRight', run: acceptInlineCompletionLine },
           { key: 'Escape', run: dismissInlineCompletion },
         ]),
       ),

@@ -20,6 +20,9 @@
   import { untrack } from 'svelte';
   import Modal from '../shared/Modal.svelte';
   import FileExplorerModal from '../sitta/FileExplorerModal.svelte';
+  import ModalHeader from '../shared/ModalHeader.svelte';
+  import Button from '../shared/ui/Button.svelte';
+  import IconButton from '../shared/ui/IconButton.svelte';
   import Spinner from '../shared/ui/Spinner.svelte';
   import { FolderOpen, FileCode, Link2, AlertCircle, Check, X, Plus, Info } from 'lucide-svelte';
   import { studioBackend, type RootCandidate, type StudioFormat } from '$lib/ipc/studio/studio-format';
@@ -192,11 +195,11 @@
 
 <Modal onClose={onClose} width="min(560px, 92vw)" ariaLabel="Bind schema">
   {#snippet header()}
-    <span class="bs-icon-wrap"><Link2 size={16} /></span>
-    <span class="bs-title">{targetKind === 'folder' ? 'Bind schema to folder' : 'Bind schema'}</span>
-    <span class="bs-target" use:tooltip={relativePath}>{fileName}</span>
-    <div class="bs-spacer"></div>
-    <button class="close-btn" onclick={onClose} aria-label="Close"></button>
+    <ModalHeader {onClose}>
+      <span class="bs-icon-wrap"><Link2 size={16} /></span>
+      <span class="bs-title">{targetKind === 'folder' ? 'Bind schema to folder' : 'Bind schema'}</span>
+      <span class="bs-target" use:tooltip={relativePath}>{fileName}</span>
+    </ModalHeader>
   {/snippet}
 
   <div class="bs-body">
@@ -221,12 +224,9 @@
                bind:value={rsFile}
                placeholder={pickerConfig.placeholder}
                spellcheck="false" />
-        <button class="bs-icon-btn"
-                onclick={() => pickerOpen = true}
-                use:tooltip={'Browse…'}
-                aria-label="Browse">
+        <IconButton bordered size={30} tooltip="Browse…" onclick={() => pickerOpen = true}>
           <FolderOpen size={14} />
-        </button>
+        </IconButton>
       </div>
       {#if probing}
         <span class="bs-hint"><Spinner size="sm" /> {pickerConfig.probeHint}</span>
@@ -285,12 +285,9 @@
                onkeydown={onRefKey}
                placeholder={refs.length === 0 ? 'e.g. target, *_id, enemy_handle' : ''}
                spellcheck="false" />
-        <button class="bs-icon-btn bs-chip-add"
-                onclick={() => addRef(refsBuffer)}
-                use:tooltip={'Add pattern'}
-                aria-label="Add">
+        <IconButton bordered size={22} tooltip="Add pattern" onclick={() => addRef(refsBuffer)}>
           <Plus size={12} />
-        </button>
+        </IconButton>
       </div>
       <span class="bs-hint">
         <Info size={11} />
@@ -302,15 +299,16 @@
         </span>
       </span>
       {#if refs.length > 0}
-        <button class="bs-btn bs-btn-link" onclick={clearRefs}>Clear list</button>
+        <button class="bs-btn-link" onclick={clearRefs}>Clear list</button>
       {/if}
     </div>
 
     <div class="bs-actions">
-      <button class="bs-btn bs-btn-secondary" onclick={onClose}>Cancel</button>
-      <button class="bs-btn bs-btn-primary" disabled={!canSave} onclick={save}>
-        <FileCode size={12} /> Save binding
-      </button>
+      <Button variant="secondary" onclick={onClose}>Cancel</Button>
+      <Button variant="primary" disabled={!canSave} onclick={save}>
+        {#snippet iconStart()}<FileCode size={12} />{/snippet}
+        Save binding
+      </Button>
     </div>
   </div>
 </Modal>
@@ -347,7 +345,6 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     max-width: 280px;
   }
-  .bs-spacer { flex: 1; }
 
   .bs-body {
     display: flex; flex-direction: column;
@@ -394,16 +391,6 @@
   }
   .bs-input:focus { border-color: var(--accent); }
   .bs-select { font-family: var(--font-ui-sans); }
-  .bs-icon-btn {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 30px; height: 30px;
-    background: var(--bg-overlay);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-  }
-  .bs-icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--accent); }
 
   .bs-hint {
     display: inline-flex; align-items: center; gap: 4px;
@@ -475,10 +462,9 @@
     padding: 2px 4px;
   }
   .bs-chip-input::placeholder { color: var(--text-disabled); }
-  .bs-chip-add {
-    width: 22px; height: 22px;
-  }
   .bs-btn-link {
+    display: inline-flex; align-items: center;
+    font-weight: 500;
     align-self: flex-start;
     background: transparent;
     border: none;
@@ -494,33 +480,5 @@
     display: flex; justify-content: flex-end;
     gap: 8px;
     margin-top: 6px;
-  }
-  .bs-btn {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 6px 14px;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    font-size: var(--font-size-sm);
-    font-weight: 500;
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-  }
-  .bs-btn-secondary {
-    background: var(--bg-overlay);
-    color: var(--text-secondary);
-  }
-  .bs-btn-secondary:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .bs-btn-primary {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-  }
-  .bs-btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
-  .bs-btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 </style>

@@ -31,6 +31,7 @@
   import BennuTestSetupWarnings from './BennuTestSetupWarnings.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import { testIcon } from './test-icon';
   import { tooltip } from '$lib/actions/tooltip';
@@ -144,38 +145,21 @@
         </span>
       {/snippet}
     </Dropdown>
-    <button
-      class="ps-btn"
-      type="button"
+    <IconButton
+      tooltip="Look for tests again"
       disabled={!root || store.discovering}
-      use:tooltip={'Look for tests again'}
-      aria-label="Look for tests again"
       onclick={() => void store.discover(root, true)}
     >
       <RefreshCw size={13} />
-    </button>
+    </IconButton>
     <!-- Fold the lot — the same pair the Rust catalogue and the run console carry, in the same
          order, so the gesture is one habit across all three. -->
-    <button
-      class="ps-btn"
-      type="button"
-      disabled={!expanded.size}
-      use:tooltip={'Collapse all'}
-      aria-label="Collapse all"
-      onclick={collapseAll}
-    >
+    <IconButton tooltip="Collapse all" disabled={!expanded.size} onclick={collapseAll}>
       <ChevronsDownUp size={13} />
-    </button>
-    <button
-      class="ps-btn"
-      type="button"
-      disabled={!store.discovered.length}
-      use:tooltip={'Expand all'}
-      aria-label="Expand all"
-      onclick={expandAll}
-    >
+    </IconButton>
+    <IconButton tooltip="Expand all" disabled={!store.discovered.length} onclick={expandAll}>
       <ChevronsUpDown size={13} />
-    </button>
+    </IconButton>
   {/snippet}
 
   <!-- Above everything, including the empty states: it is a fact about every ▷ in this panel, and

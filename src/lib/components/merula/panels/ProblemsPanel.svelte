@@ -4,9 +4,11 @@
    * and severity filter chips (errors / warnings). Click (or Enter) a row to jump
    * the editor to the diagnostic's source span.
    */
-  import { AlertTriangle, CircleAlert, CircleCheckBig, Search, X } from 'lucide-svelte';
+  import { AlertTriangle, CircleAlert, CircleCheckBig } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
+  import FilterInput from '$lib/components/shared/ui/FilterInput.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { listNav } from '$lib/components/shared/ui/list-nav';
   import { merulaStore } from '../merula-store.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { diagnosticsStore } from '../stores/engine.svelte';
@@ -63,8 +65,6 @@
     );
   });
 
-  function clearSearch() { query = ''; searchEl?.focus(); }
-
   /** Jump the editor to a diagnostic's span. The backend reports byte offsets;
    *  the editor wants UTF-16 — convert against the active source (the eval'd
    *  file). The relay then scrolls + selects there. */
@@ -75,18 +75,14 @@
   }
 </script>
 
-<div class="prob">
+<div class="prob" use:listNav={{ fromInput: '.prob-toolbar input' }}>
   <BottomPanelHeader title="Problems" onClose={() => merulaStore.toggleBottom('problems')}>
     {#snippet icon()}<AlertTriangle size={13} />{/snippet}
     {#snippet children()}<span class="prob-meta">{visible.length}/{problems.length}</span>{/snippet}
   </BottomPanelHeader>
 
   <div class="prob-toolbar">
-    <div class="prob-search">
-      <Search size={12} />
-      <input bind:this={searchEl} bind:value={query} placeholder="Search… (Ctrl+F)" spellcheck="false" />
-      {#if query}<button class="prob-clear" onclick={clearSearch} aria-label="Clear search"><X size={11} /></button>{/if}
-    </div>
+    <FilterInput bind:value={query} bind:element={searchEl} placeholder="Search… (Ctrl+F)" />
     <div class="prob-filters">
       <button class="sev-chip sev-error" class:off={!showError} onclick={() => showError = !showError} use:tooltip={'Errors'} aria-pressed={showError}>
         <CircleAlert size={11} /> {errorCount}
@@ -105,7 +101,7 @@
     {:else}
       {#each visible as p, i (i)}
         {@const sevClass = isError(p.severity) ? 'error' : 'warning'}
-        <button class="prob-line" onclick={() => jumpTo(p)} disabled={p.start == null} use:tooltip={p.start != null ? 'Jump to source' : ''}>
+        <button class="prob-line" data-list-item onclick={() => jumpTo(p)} disabled={p.start == null} use:tooltip={p.start != null ? 'Jump to source' : ''}>
           <span class="prob-icon sev-{sevClass}">
             {#if isError(p.severity)}<CircleAlert size={13} />{:else}<AlertTriangle size={13} />{/if}
           </span>
@@ -126,25 +122,6 @@
     padding: 5px 10px; flex-shrink: 0;
     border-bottom: 1px solid var(--border-subtle);
   }
-  .prob-search {
-    flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
-    height: 24px; padding: 0 7px;
-    background: var(--bg-input); border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md); color: var(--text-muted);
-  }
-  .prob-search:focus-within { border-color: var(--border-focus); }
-  .prob-search input {
-    flex: 1; min-width: 0; background: transparent; border: none; outline: none;
-    color: var(--text-primary); font-family: var(--font-ui-sans); font-size: var(--font-size-sm);
-  }
-  .prob-search input::placeholder { color: var(--text-disabled); }
-  .prob-clear {
-    display: flex; align-items: center; justify-content: center;
-    width: 16px; height: 16px; flex-shrink: 0;
-    background: transparent; border: none; border-radius: 50%;
-    color: var(--text-muted); cursor: pointer;
-  }
-  .prob-clear:hover { background: var(--bg-hover); color: var(--text-primary); }
 
   .prob-filters { display: flex; gap: 4px; flex-shrink: 0; }
   .sev-chip {

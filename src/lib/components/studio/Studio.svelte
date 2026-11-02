@@ -68,6 +68,7 @@
   import StudioKindBadge from './StudioKindBadge.svelte';
   import StudioInlineEdit from './StudioInlineEdit.svelte';
   import StudioXrefPicker from './StudioXrefPicker.svelte';
+  import PromptModal from '../shared/PromptModal.svelte';
   import { useStudioEditPipeline }       from './composables/useStudioEditPipeline.svelte';
   import { useStudioCrossRefs }          from './composables/useStudioCrossRefs.svelte';
   import { useStudioRenameBulkPipeline } from './composables/useStudioRenameBulkPipeline.svelte';
@@ -112,7 +113,7 @@
   }
 
   let {
-    config,
+    config: configProp,
     bannersExtras,
     toolsExtras,
     errorsBody,
@@ -124,7 +125,12 @@
     footerPathSlot,
   }: Props = $props();
 
-  const BE = $derived(config.backend);
+  // The config is built once per wrapper modal and never swapped on a live <Studio> (a new
+  // format means a new instance), and the composables below read it at construction time.
+  // Capture it once here instead of sprinkling untrack over every read.
+  const config = untrack(() => configProp);
+
+  const BE =$derived(config.backend);
 
   // Object/array classification — formats with non-object/array kind
   // names (TOML table/array_of_tables, RON struct/list) override these.
@@ -243,13 +249,14 @@
       editPipeline.maybeShowEditBanner();
     } catch (e) { console.warn(`${config.formatId}-studio: insertItem failed`, e); }
   }
+  let fieldNamePromptFor = $state<TNode | null>(null);
   async function addFieldAction(parent: TNode, name?: string): Promise<void> {
     if (!isObjectLike(parent.kind)) return;
-    let key = name ?? '';
+    const key = name ?? '';
     if (!key) {
-      const proposed = window.prompt('Field name:', 'new_field');
-      if (!proposed) return;
-      key = proposed;
+      // Ask for the name in a modal; confirming re-enters with `name` set.
+      fieldNamePromptFor = parent;
+      return;
     }
     try {
       await config.insertField(parent.path, key, config.newFieldSnippet(parent.kind));
@@ -1087,6 +1094,21 @@
     {/if}
 
     {@render auxiliaryExtras?.()}
+
+    {#if fieldNamePromptFor}
+      <PromptModal
+        title="Add field"
+        label="Field name:"
+        initialValue="new_field"
+        confirmLabel="Add"
+        onCancel={() => fieldNamePromptFor = null}
+        onConfirm={(name) => {
+          const parent = fieldNamePromptFor;
+          fieldNamePromptFor = null;
+          if (parent) void addFieldAction(parent, name);
+        }}
+      />
+    {/if}
 
     {#if renameBulk.renameModalState && tabsStore.activeTabId}
       <StudioRenameModal

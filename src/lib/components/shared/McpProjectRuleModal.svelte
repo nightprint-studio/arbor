@@ -42,6 +42,7 @@
   window whose contents can be a lie about what an assistant is allowed to do right now.
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { FolderPlus, Layers, ListChecks, ListFilter, Plus, RotateCcw, Trash2 } from 'lucide-svelte';
 
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -104,7 +105,8 @@
   const ready = $derived(mcpStore.loaded);
   $effect(() => { void mcpStore.ensureLoaded(); });
 
-  let picked = $state<string | null>(root ?? null);
+  // Intentional one-shot capture: `root` preselects a project, the user can then pick another.
+  let picked = $state<string | null>(untrack(() => root) ?? null);
   let query = $state('');
 
   /**

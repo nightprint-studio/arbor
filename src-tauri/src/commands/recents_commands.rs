@@ -58,18 +58,27 @@ pub fn record_recent_project(
     let key = norm(&path);
     let mut cfg = state.lock_config()?;
     // One entry per (product, path): re-opening moves it up rather than piling
-    // duplicates that would push everything else out of the list.
+    // duplicates that would push everything else out of the list. A pin survives it.
+    let pinned = cfg.recents.iter().any(|r| r.pinned && r.product == product && norm(&r.path) == key);
     cfg.recents
         .retain(|r| !(r.product == product && norm(&r.path) == key));
     cfg.recents.insert(
         0,
-        RecentProject { product, path, name, opened_at: now_secs() },
+        RecentProject { product, path, name, opened_at: now_secs(), pinned },
     );
-    cfg.recents.truncate(MAX_RECENTS);
+    trim(&mut cfg.recents);
     let cfg_clone = cfg.clone();
     drop(cfg);
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(())
+}
+
+/// Cut the history to [`MAX_RECENTS`], oldest first, but pinned entries only after every unpinned one is gone.
+fn trim(list: &mut Vec<RecentProject>) {
+    while list.len() > MAX_RECENTS {
+        let victim = list.iter().rposition(|r| !r.pinned).unwrap_or(list.len() - 1);
+        list.remove(victim);
+    }
 }
 
 /// The cross-product history, newest first.
@@ -95,6 +104,33 @@ pub fn forget_recent_project(
     if cfg.recents.len() == before {
         return Ok(());
     }
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(())
+}
+
+/// Pin or unpin one entry — a pinned project stays at the top of the welcome page.
+#[tauri::command]
+pub fn pin_recent_project(
+    state: State<'_, AppState>,
+    product: String,
+    path: String,
+    pinned: bool,
+) -> Result<(), AppError> {
+    let key = norm(&path);
+    let mut cfg = state.lock_config()?;
+    let Some(entry) = cfg
+        .recents
+        .iter_mut()
+        .find(|r| r.product == product && norm(&r.path) == key)
+    else {
+        return Ok(());
+    };
+    if entry.pinned == pinned {
+        return Ok(());
+    }
+    entry.pinned = pinned;
     let cfg_clone = cfg.clone();
     drop(cfg);
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))?;
@@ -139,4 +175,31 @@ pub fn take_open_intent(product: String) -> Option<String> {
         .lock()
         .ok()
         .and_then(|mut g| g.as_mut().and_then(|m| m.remove(&product)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str, at: u64, pinned: bool) -> RecentProject {
+        RecentProject { product: "bennu".into(), path: format!("/p/{name}"), name: name.into(), opened_at: at, pinned }
+    }
+
+    #[test]
+    fn trimming_drops_the_oldest_unpinned_first_and_keeps_pins() {
+        let mut list: Vec<RecentProject> = (0..MAX_RECENTS as u64 + 3).map(|i| entry(&format!("n{i}"), 1000 - i, false)).collect();
+        // the oldest entry is pinned: it must outlive newer, unpinned ones
+        list.last_mut().unwrap().pinned = true;
+        trim(&mut list);
+        assert_eq!(list.len(), MAX_RECENTS);
+        assert!(list.iter().any(|r| r.pinned));
+        assert!(!list.iter().any(|r| r.name == format!("n{}", MAX_RECENTS + 1)));
+    }
+
+    #[test]
+    fn a_full_history_of_pins_still_gets_cut() {
+        let mut list: Vec<RecentProject> = (0..MAX_RECENTS as u64 + 2).map(|i| entry(&format!("n{i}"), 1000 - i, true)).collect();
+        trim(&mut list);
+        assert_eq!(list.len(), MAX_RECENTS);
+    }
 }

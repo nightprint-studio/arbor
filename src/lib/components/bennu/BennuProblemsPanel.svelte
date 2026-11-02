@@ -21,6 +21,7 @@
    * Warnings — each with only its rows of that severity. The header count is every leaf row.
    */
   import { tooltip } from '$lib/actions/tooltip';
+  import { listNav } from '$lib/components/shared/ui/list-nav';
   import {
     AlertTriangle, CircleAlert, Info, CircleCheckBig, ChevronRight, ChevronDown,
     Coffee, FileWarning, FileCode2, Package,
@@ -317,14 +318,17 @@
   {:else if total === 0}
     <div class="pb-clean"><CircleCheckBig size={14} /> No problems detected</div>
   {:else}
-    <div class="pb-tree" role="tree" aria-label="Problems">
+    <div class="pb-tree" role="tree" aria-label="Problems" use:listNav>
       {#each tree as mod (mod.key)}
        {@const modCollapsed = grouped && collapsed.has(mod.key)}
        {#if grouped}
         <button
           class="pb-mod"
+          data-list-item
           type="button"
           role="treeitem"
+          aria-selected="false"
+          aria-level={1}
           aria-expanded={!modCollapsed}
           onclick={() => toggle(mod.key)}
           use:tooltip={mod.title}
@@ -342,9 +346,12 @@
         {@const sevCollapsed = collapsed.has(sevId)}
         <button
           class="pb-sec"
+          data-list-item
           type="button"
           role="treeitem"
           style:--pb-d={grouped ? 1 : 0}
+          aria-selected="false"
+          aria-level={grouped ? 2 : 1}
           aria-expanded={!sevCollapsed}
           onclick={() => toggle(sevId)}
         >
@@ -361,9 +368,12 @@
             {@const gitBadge = fg.file ? bennuGitStatusStore.badgeFor(fg.file, false) : undefined}
             <button
               class="pb-file"
+              data-list-item
               type="button"
               role="treeitem"
               style:--pb-d={grouped ? 1 : 0}
+              aria-selected="false"
+              aria-level={grouped ? 3 : 2}
               aria-expanded={!fileCollapsed}
               onclick={() => toggle(fileId)}
             >
@@ -381,8 +391,11 @@
                 {@const RowIc = sevIcon(row.severity)}
                 <button
                   class="pb-row"
+                  data-list-item
                   type="button"
                   role="treeitem"
+                  aria-selected="false"
+                  aria-level={grouped ? 4 : 3}
                   style:--pb-d={grouped ? 1 : 0}
                   onclick={() => row.onClick?.()}
                   oncontextmenu={(e) => onRowContextMenu(row, e)}

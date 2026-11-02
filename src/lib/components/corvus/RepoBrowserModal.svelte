@@ -22,10 +22,14 @@
   import { animStore } from '$lib/stores/animations.svelte';
   import { keybindingsStore } from '$lib/stores/keybindings.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { listNav } from '$lib/components/shared/ui/list-nav';
   import { matchesBinding } from '$lib/utils/keybindings';
   import Modal from '../shared/Modal.svelte';
   import ModalHeader from '../shared/ModalHeader.svelte';
   import Dropdown from '../shared/ui/Dropdown.svelte';
+  import IconButton from '../shared/ui/IconButton.svelte';
+  import StateBlock from '../shared/ui/StateBlock.svelte';
+  import Spinner from '../shared/ui/Spinner.svelte';
   import ModalSidebarToggle from '../shared/ui/ModalSidebarToggle.svelte';
   import { fade } from 'svelte/transition';
 
@@ -294,7 +298,7 @@
   <div class="rb-body">
 
     <!-- ════════════════════════════════ LEFT PANEL ═══════════════════════════ -->
-    <div class="rb-left" class:collapsed={sidebarCollapsed}>
+    <div class="rb-left" class:collapsed={sidebarCollapsed} use:listNav={{ fromInput: '.rb-search' }}>
 
       <!-- Account selector -->
       <div class="rb-account-bar">
@@ -396,33 +400,29 @@
       <!-- Repo list / loading / error -->
       <div class="rb-repo-list">
         {#if store.reposLoading}
-          <div class="rb-state">
-            <Loader size={20} class="spin rb-state-icon" />
-            <span class="rb-state-title">Loading repositories…</span>
-          </div>
+          <StateBlock tone="loading" stack fill={false} title="Loading repositories…">
+            {#snippet spinner()}<Spinner size={20} />{/snippet}
+          </StateBlock>
         {:else if store.reposError}
-          <div class="rb-state rb-state-error">
-            <AlertCircle size={20} class="rb-state-icon" />
-            <span class="rb-state-title">Couldn't load repositories</span>
-            <span class="rb-state-msg">{store.reposError}</span>
-          </div>
+          <StateBlock tone="error" stack fill={false} iconSize={20}
+                      title="Couldn't load repositories" message={store.reposError}
+                      onretry={() => store.refreshRepos()} />
         {:else if store.namespaceGroups.length === 0}
-          <div class="rb-state">
-            {#if store.searchQuery}
-              <Search size={20} class="rb-state-icon" />
-              <span class="rb-state-title">No matches</span>
-              <span class="rb-state-msg">Try a different query</span>
-            {:else}
-              <Package size={20} class="rb-state-icon" />
-              <span class="rb-state-title">No repositories</span>
-              <span class="rb-state-msg">Connect an account in Settings → Accounts</span>
-            {/if}
-          </div>
+          {#if store.searchQuery}
+            <StateBlock stack fill={false} title="No matches" message="Try a different query">
+              {#snippet icon()}<Search size={20} />{/snippet}
+            </StateBlock>
+          {:else}
+            <StateBlock stack fill={false} title="No repositories" message="Connect an account in Settings → Accounts">
+              {#snippet icon()}<Package size={20} />{/snippet}
+            </StateBlock>
+          {/if}
         {:else}
           {#snippet nsNode(node: NamespaceTreeNode, depth: number)}
             <div class="rb-ns-group">
               <button
                 class="rb-ns-header"
+                data-list-item
                 class:expanded={node.expanded}
                 style="padding-left: {6 + depth * 12}px"
                 onclick={() => store.toggleNamespace(node.fullPath)}
@@ -453,6 +453,7 @@
                   {@const localTabId = findLocalTab(repo)}
                   <button
                     class="rb-repo-item"
+                    data-list-item
                     style="padding-left: {18 + depth * 12}px"
                     class:active={store.selectedRepo?.id === repo.id &&
                                   store.selectedRepo?.provider === repo.provider}
@@ -745,24 +746,20 @@
               </div>
               <div class="rb-preview-actions">
                 {#if store.fileContent?.content}
-                  <button
-                    class="rb-icon-btn"
-                    onclick={copyFileContent}
-                    use:tooltip={'Copy content'}
-                  ><Copy size={13} /></button>
+                  <IconButton size={26} tooltip="Copy content" onclick={copyFileContent}><Copy size={13} /></IconButton>
                 {/if}
-                <button
-                  class="rb-icon-btn"
+                <IconButton
+                  size={26}
+                  tooltip="Download file"
                   onclick={handleDownloadFile}
                   disabled={downloadingFile || store.fileLoading}
-                  use:tooltip={'Download file'}
                 >
                   {#if downloadingFile}
                     <Loader size={13} class="spin" />
                   {:else}
                     <Download size={13} />
                   {/if}
-                </button>
+                </IconButton>
                 <div class="rb-preview-sep"></div>
                 <button
                   class="close-btn"
@@ -1087,33 +1084,6 @@
     overflow-y: auto;
     padding: 4px 0;
   }
-  /* Generic state block (loading / error / empty) */
-  .rb-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 28px 18px;
-    text-align: center;
-  }
-  :global(.rb-state-icon) {
-    color: var(--text-muted);
-    margin-bottom: 4px;
-  }
-  .rb-state-title {
-    font-size: var(--font-size-sm);
-    font-weight: 500;
-    color: var(--text-secondary);
-  }
-  .rb-state-msg {
-    font-size: var(--font-size-xs);
-    color: var(--text-muted);
-    line-height: 1.4;
-    max-width: 220px;
-  }
-  .rb-state-error :global(.rb-state-icon) { color: var(--error, #f87171); }
-  .rb-state-error .rb-state-title { color: var(--error, #f87171); }
-
   .rb-ns-group { margin-bottom: 1px; }
   .rb-ns-header {
     display: flex;
@@ -1663,21 +1633,6 @@
     gap: 4px;
     flex-shrink: 0;
   }
-  .rb-icon-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    border-radius: var(--radius-sm);
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .rb-icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .rb-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .rb-preview-sep {
     width: 1px;
     height: 16px;
