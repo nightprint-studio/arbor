@@ -148,6 +148,8 @@
   import { branchGroupingStore } from '$lib/stores/corvus/branch-grouping.svelte';
   import { terminalStore } from '$lib/stores/terminal.svelte';
   import { pipelinesStore } from '$lib/stores/corvus/pipelines.svelte';
+  import { plansStore } from '$lib/stores/corvus/plans.svelte';
+  import PlanHost from '$lib/components/corvus/plan/PlanHost.svelte';
   import { linkedWorktreesStore } from '$lib/stores/corvus/linkedWorktrees.svelte';
   import { openRepo, checkIsGitRepo, initRepo } from '$lib/ipc/corvus/graph';
   import {
@@ -1452,6 +1454,8 @@
         case 'workspace_manager': workspaceManagerOpen = true; break;
         case 'pull':             window.dispatchEvent(new CustomEvent('arbor:pull')); break;
         case 'push':             window.dispatchEvent(new CustomEvent('arbor:push')); break;
+        case 'plan_open':        plansStore.openModal(); break;
+        case 'plan_add_push':    window.dispatchEvent(new CustomEvent('arbor:plan-add-push')); break;
         case 'new_branch':       window.dispatchEvent(new CustomEvent('arbor:new-branch')); break;
         case 'stash':            window.dispatchEvent(new CustomEvent('arbor:stash')); break;
         case 'jump_to_head':     window.dispatchEvent(new CustomEvent('arbor:jump-to-head')); break;
@@ -1632,6 +1636,10 @@
     const unlistenPipelines = pipelinesStore.setupListeners();
     pipelinesStore.load();
 
+    // Plans (ordered remote steps across repos): live updates + initial load
+    const unlistenPlans = plansStore.setupListeners();
+    plansStore.load();
+
     // Linked Worktrees (cross-project sync) events + initial load
     const unlistenLinks = linkedWorktreesStore.setupListeners();
     linkedWorktreesStore.load();
@@ -1657,6 +1665,7 @@
       unlistenDepsExplorer();
       unlistenPluginLogs();
       unlistenPipelines();
+      unlistenPlans();
       unlistenLinks();
       unlistenSync();
       unlistenStats();
@@ -2463,6 +2472,8 @@
        onCreate keeps the Manager open — Create stacks on top so closing it
        returns the user exactly where they were (repo list, search position
        and all). -->
+  <PlanHost />
+
   {#if workspaceManagerOpen}
     <WorkspaceManagementModal
       onClose={() => workspaceManagerOpen = false}

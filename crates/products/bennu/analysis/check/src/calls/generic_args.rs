@@ -20,6 +20,11 @@
 //!   * explicit type arguments (`GenericApi.<String>num(…)`) must be as many as the method's variables
 //!     and within their bounds.
 //!
+//! A **bare** call (`take(page)`, the enclosing type's own method) is judged like any other: its owner is found the way
+//! [`crate::calls::arguments`] finds it. And an argument that is itself a call is judged by its declared type whenever
+//! the method it calls declares no type variables of its own — such a call is not a poly expression, so its type is what
+//! the method says (`Page<Dog>`), and `Page<Dog>` is not a `Page<Cat>`.
+//!
 //! Never judged: a lambda or method reference among the arguments, a varargs candidate, a signature
 //! the index holds in class-file form, a type that does not resolve or whose hierarchy has a gap, a
 //! captured wildcard, an array, `null`, and any call whose overload set is not the whole set.
@@ -35,7 +40,7 @@ use tree_sitter::Node;
 use crate::engine::check_id::CheckId;
 use crate::source::generics_syntax::type_params_in_scope;
 use crate::support::assignable::{box_of, definite_mismatch, spells_its_type};
-use crate::support::bare_call::index_covers_file_sigs;
+use crate::support::bare_call::{bare_call_scope, index_covers_file_sigs, BareCalls, MemberOwner};
 use crate::support::nodes::is_type_var;
 use crate::support::resolve::{call_receiver_binary, type_binary, written_type_binary};
 use crate::support::scopes::enclosing_executable_scope;
@@ -53,6 +58,8 @@ struct File<'a, 't> {
     /// once: without one, no receiver can have a wildcard type, and the per-call scope walk that looks for
     /// it is the quadratic part of a large file.
     has_wildcards: bool,
+    /// What a bare call (`take(x)`) may mean in this file; `None` when the file has no type to read it against.
+    bare: Option<BareCalls<'t>>,
 }
 
 impl File<'_, '_> {
@@ -89,11 +96,19 @@ pub fn generic_argument_errors_in(
     resolver: &dyn TypeResolver,
     cache: &InferCache,
 ) -> Vec<Diagnostic> {
-    let file = File { root, source, symbols, resolver, cache, has_wildcards: writes_a_wildcard(source) };
+    let file = File {
+        root,
+        source,
+        symbols,
+        resolver,
+        cache,
+        has_wildcards: writes_a_wildcard(source),
+        bare: bare_call_scope(root, source, symbols, resolver),
+    };
     let mut out = Vec::new();
     for &n in nodes {
         match n.kind() {
-            "method_invocation" if n.child_by_field_name("object").is_some() => check_call(n, &file, &mut out),
+            "method_invocation" => check_call(n, &file, &mut out),
             "local_variable_declaration" => check_declaration(n, &file, &mut out),
             _ => {}
         }
@@ -446,8 +461,20 @@ struct Signature {
     params: Vec<String>,
 }
 
+/// The type whose methods a call chooses among: the receiver's type, or — for a bare call — the type that owns the name.
+fn call_owner(call: Node, file: &File) -> Option<String> {
+    if call.child_by_field_name("object").is_some() {
+        return call_receiver_binary(call, &file.root, file.source, file.symbols, file.resolver, file.cache);
+    }
+    let bare = file.bare.as_ref()?;
+    match bare.member_owner(call, file.bytes(), file.symbols, file.resolver)? {
+        MemberOwner::Nested(owner) => Some(owner),
+        MemberOwner::Top => Some(bare.top_binary.clone()),
+    }
+}
+
 fn generic_method<'t>(call: Node<'t>, head: Node<'t>, method: &str, args: &[Node<'t>], file: &File) -> Option<Node<'t>> {
-    let receiver = call_receiver_binary(call, &file.root, file.source, file.symbols, file.resolver, file.cache)?;
+    let receiver = call_owner(call, file)?;
     let res = file.cache.resolve_methods(file.resolver, &receiver, method);
     if !res.complete {
         return None;
@@ -556,7 +583,9 @@ fn judged_type(arg: Node, file: &File) -> Option<TypeRef> {
 /// A method call, or `new G<>(…)`, however many parentheses wrap it: an expression typed by its target.
 fn is_poly_call(arg: Node, file: &File) -> bool {
     match arg.kind() {
-        "method_invocation" => true,
+        // Only a call to a GENERIC method is typed by its target. One whose method declares no type variable has the
+        // type its signature gives it, wherever it is passed.
+        "method_invocation" => !is_standalone_call(arg, file),
         "parenthesized_expression" => arg.named_child(0).is_some_and(|inner| is_poly_call(inner, file)),
         "object_creation_expression" => arg
             .child_by_field_name("type")
@@ -564,6 +593,23 @@ fn is_poly_call(arg: Node, file: &File) -> bool {
             .is_some_and(|t| t.trim_end().ends_with("<>")),
         _ => false,
     }
+}
+
+/// Whether `call` is certainly a call to a method with no type variable of its own — every method of that name and arity
+/// the owner has — so that its type is exactly what the method declares. `false` whenever that cannot be told: an owner
+/// that does not resolve, a hierarchy with a gap, no method of that arity, a varargs candidate.
+fn is_standalone_call(call: Node, file: &File) -> bool {
+    let Some(name) = call.child_by_field_name("name").and_then(|n| n.utf8_text(file.bytes()).ok()) else { return false };
+    let Some(arguments) = call.child_by_field_name("arguments") else { return false };
+    let mut cursor = arguments.walk();
+    let argc = arguments.named_children(&mut cursor).filter(|a| !matches!(a.kind(), "line_comment" | "block_comment")).count();
+    let Some(owner) = call_owner(call, file) else { return false };
+    let res = file.cache.resolve_methods(file.resolver, &owner, name);
+    if !res.complete || res.candidates.iter().any(|m| m.params.last().is_some_and(|p| p.is_array())) {
+        return false;
+    }
+    let mut of_that_size = res.candidates.iter().filter(|m| m.kind == MemberKind::Method && m.params.len() == argc).peekable();
+    of_that_size.peek().is_some() && of_that_size.all(|m| m.method_type_params().is_empty())
 }
 
 /// A primitive's box, or the class itself.

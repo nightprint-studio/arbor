@@ -218,7 +218,7 @@ pub struct PullResult {
 /// When `Some`, the pull emits `arbor://pull-progress` events keyed by that id
 /// plus a final `arbor://pull-done`.
 #[arbor_rpc::handler]
-async fn pull_branch(
+pub(crate) async fn pull_branch(
     state: &CorvusState,
     tab_id: String,
     remote: String,

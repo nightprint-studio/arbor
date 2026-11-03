@@ -62,6 +62,9 @@ function createDependenciesStore() {
   const treeByRoot = new Map<string, DependencyTree>();
   const treeInFlight = new Map<string, Promise<void>>();
 
+  /** The one module the panel is narrowed to (its folder, forward slashes), or null for all of them. */
+  let solo = $state<string | null>(null);
+
   let vulns = $state<VulnIndex>(new Map());
   const vulnInFlight = new Map<string, Promise<void>>();
   /** The read in flight, so a burst of `load` calls costs one backend round-trip and not one
@@ -171,6 +174,16 @@ function createDependenciesStore() {
       return run;
     },
 
+    /** The module the panel shows alone — its folder — or null when every module is shown. */
+    get solo(): string | null {
+      return solo;
+    },
+    /** Show only the module in `dir`; the same module again, or null, shows them all. */
+    setSolo(dir: string | null) {
+      const next = dir === null ? null : dir.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
+      solo = next === solo ? null : next;
+    },
+
     /** Known vulnerabilities of `root`'s classpath, by artifact — what the rows badge. Empty until
      *  loaded, and when the check is off. */
     get advisories(): VulnIndex {
@@ -210,6 +223,7 @@ function createDependenciesStore() {
     },
 
     reset() {
+      solo = null;
       vulns = new Map();
       tree = null;
       treeError = '';

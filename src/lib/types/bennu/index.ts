@@ -445,8 +445,6 @@ export interface TomcatResourceDto {
   kind: string;
   name: string;
   driver: string;
-  /** A driver jar to copy into the server's `lib/` (`''` = find it on the classpath). */
-  driver_jar: string;
   url: string;
   user: string;
   /** `"secret"` | `"clear"`. */
@@ -483,6 +481,8 @@ export interface TomcatRunConfigDto {
   context_mode: string;
   context_raw: string;
   resources: TomcatResourceDto[];
+  /** Jars and folders of jars copied into the server's `lib/` at launch. */
+  lib_paths: string[];
 }
 
 /** The per-repo run-config bundle stored in `<root>/.arbor/config.toml`. */

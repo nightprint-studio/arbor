@@ -85,6 +85,8 @@ import { cargoTomlLang, isCargoManifest } from './cargo-toml-lang';
 import { packageJsonLanguage, isPackageManifest } from './package-json-lang';
 import { xmlSchemaLang } from './xml-schema-lang';
 import { pomSections } from './pom-sections';
+import { logPatternHighlight } from './log-pattern-highlight';
+import { logFileHighlight } from './log-file-highlight';
 import { isPomFile } from '$lib/ipc/bennu/maven';
 import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
@@ -165,6 +167,11 @@ function jinjaLang(name: string): LanguageDescriptor {
 const xmlLang = xmlSchemaLang('xml', xml);
 /** Plain XML for a field that holds a document (a Tomcat `context.xml`), not a file of the project. */
 export const xmlLanguage = xmlLang;
+// A `log4j2.xml` / `logback.xml` is XML with a small language in its strings: the conversion patterns. A descriptor of its own
+// for the same reason the pom has one — the identity keys the editor, and these colours must not reach every other XML file.
+const loggingLang = xmlSchemaLang('logging', xml, logPatternHighlight);
+/** A logging configuration by NAME: `log4j2.xml`, `log4j2-spring.xml`, `log4j.xml`, `logback-test.xml`, … */
+const isLoggingConfig = (name: string) => /^(?:log4j2?|logback)(?:[-_.][\w.-]*)?\.xml$/i.test(name);
 // A pom is XML whose top-level blocks mean different things, so each section gets its own hue.
 // A descriptor of its own: the identity keys the editor, and the pom's extra colouring must not
 // leak onto every other XML file.
@@ -382,6 +389,8 @@ const markdownDesc = cmLang('markdown', markdown({ codeLanguages: [...MARKDOWN_F
  */
 const dockerLang = streamLang('dockerfile', dockerFile);
 const plainLang = cmLang('text', []);
+/** A program's log, opened as text: levels, columns and stack traces drawn the way the console draws them. */
+const logFileLang = cmLang('log', logFileHighlight);
 
 /**
  * SQL descriptors, one per dialect, built on first use and cached.
@@ -457,6 +466,7 @@ export function languageForPath(path: string | null): LanguageDescriptor {
   // the manifest schema to one would flag every key in it.
   if (isCargoManifest(name)) return cargoManifestLang;
   if (isPomFile(name)) return pomLang;
+  if (isLoggingConfig(name)) return loggingLang;
   if (isDotEnvFile(name)) return dotEnvLang;
 
   const dot = name.lastIndexOf('.');
@@ -507,6 +517,7 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'md': case 'markdown': return markdownDesc;
     case 'yml': case 'yaml': return yamlLang;
     case 'properties': return propertiesLang;
+    case 'log': return logFileLang;
     case 'ini': case 'conf': case 'cfg': return propsLang;
     case 'ron': return ronLanguage;
     case 'mmd': case 'mermaid': return mermaidDiagramLanguage;

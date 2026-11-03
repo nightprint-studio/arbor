@@ -173,6 +173,9 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // Pairs with `commit` (Ctrl+Enter): same chord with Shift commits and pushes
   // in one go. Only meaningful while the commit message field has focus.
   commit_and_push: { key: 'Enter', ctrl: true, shift: true,  description: 'Commit staged changes and push', group: 'Git' },
+  // Plans (ordered remote steps across repos). Ctrl+Shift+J opens the modal; Ctrl+Shift+E queues the current branch's push.
+  plan_open:      { key: 'j',     ctrl: true,  shift: true,  description: 'Open the plan',         group: 'Git' },
+  plan_add_push:  { key: 'e',     ctrl: true,  shift: true,  description: 'Add push to the plan',  group: 'Git' },
   stage_all:      { key: 'a',     ctrl: true,  shift: true,  description: 'Stage all changes',     group: 'Git' },
   unstage_all:    { key: 'u',     ctrl: true,  shift: true,  description: 'Unstage all changes',   group: 'Git' },
 

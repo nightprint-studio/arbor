@@ -61,6 +61,8 @@ pub mod ext;
 pub mod grammar;
 // The editor's answers.
 pub mod intel;
+// Built-in grammars for log4j2.xml and logback.xml — completion without accusations.
+pub mod logging;
 pub mod prelude;
 // The tolerant scanner over a buffer being typed.
 pub mod scan;

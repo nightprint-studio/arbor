@@ -451,13 +451,14 @@
 {/if}
 
 <style>
-  .bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex: none; }
   .hint { color: var(--text-muted); font-size: var(--font-size-xs); }
   .sp { flex: 1; }
-  /* One height for the three columns, so the list is a sidebar and not as tall as its rows. */
+  /* The three columns take the height the pane gives them — one height, so the list is a sidebar and
+     not as tall as its rows — and each scrolls on its own. */
   .cols {
     display: grid; grid-template-columns: 230px minmax(0, 1fr) 320px; gap: 14px; align-items: stretch;
-    height: clamp(380px, 58vh, 560px);
+    flex: 1; min-height: 240px;
   }
   .col { min-width: 0; min-height: 0; }
   .list { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-base); padding: 4px; overflow: auto; }
@@ -467,10 +468,9 @@
   .code { display: flex; flex: 1; min-height: 0; min-width: 0; }
   .code > :global(*) { flex: 1; min-width: 0; min-height: 0; }
   .code.tall {
-    flex: none; height: clamp(320px, 52vh, 520px);
     border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden;
   }
   .err { margin: 8px 10px 0; color: var(--danger); font-size: var(--font-size-xs); }
-  .raw { display: flex; flex-direction: column; gap: 8px; }
+  .raw { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
   code { font-family: var(--font-code); }
 </style>

@@ -22,7 +22,7 @@
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
-    History, Tag, Trash2, ExternalLink, FolderPlus, FolderInput, Package, Boxes, ClipboardPaste, Sparkles, Info,
+    History, Tag, Trash2, ExternalLink, FolderPlus, FolderInput, Package, Boxes, ClipboardPaste, Sparkles, Info, Wand2,
   } from 'lucide-svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import FilePropertiesModal from '$lib/components/shared/internal/FilePropertiesModal.svelte';
@@ -622,6 +622,7 @@
           { id: 'new', label: 'New', icon: Plus, children: newSubmenu(newDir) },
           { separator: true, id: 'sep-new', label: '' },
           ...runItem,
+          { id: 'optimize-imports', label: 'Optimize imports…', icon: Wand2 },
           { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
           { separator: true, id: 'sep-hist-dir', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
@@ -674,6 +675,7 @@
         case 'new-folder':
         case 'new-module': runNew(id, newDir); break;
         case 'run-tests': runTestsFor(node); break;
+        case 'optimize-imports': bennuUiStore.openOptimizeImports(node.path); break;
         case 'rename':    renamePath = node.path; break;
         case 'move':      movePicker = node; break;
         case 'delete':    deleting = node; break;
@@ -737,6 +739,7 @@
       { id: 'expand',   label: 'Expand all',   icon: ChevronsUpDown },
       { id: 'collapse', label: 'Collapse all', icon: ChevronsDownUp },
       { separator: true, id: 'sep-root-tree', label: '' },
+      { id: 'optimize-imports', label: 'Optimize imports…', icon: Wand2 },
       { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
       { separator: true, id: 'sep-root-hist', label: '' },
       { id: 'copy-path', label: 'Copy path', icon: Copy },
@@ -752,6 +755,7 @@
         case 'new-folder': runNew(id, root); break;
         case 'expand':    expandAll(); break;
         case 'collapse':  collapseAll(); break;
+        case 'optimize-imports': bennuUiStore.openOptimizeImports(root); break;
         // Whole-project scope, because that is what the empty space stands for.
         case 'hist-show':
         case 'hist-label': bennuHistoryStore.showProject(root); break;

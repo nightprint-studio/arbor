@@ -62,8 +62,12 @@ function createBennuNavStore() {
     /** `file` cannot be opened any more — drop its stops. */
     forget(file: string) { mutate(() => history.forget(file)); },
 
-    /** Drop everything. Called when the window changes project: the paths in here belong to the
-     *  project that was open, and stepping back into them would open files from somewhere else. */
+    /** Keep only the stops in files `keep` accepts. Called when the window changes project: the stops in
+     *  the projects still open stay, so Back goes on across a switch; the ones of a project that is gone
+     *  would open files from somewhere else. */
+    retain(keep: (file: string) => boolean) { mutate(() => history.retain(keep)); },
+
+    /** Drop everything. */
     reset() { mutate(() => history.reset()); },
   };
 }

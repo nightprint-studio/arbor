@@ -127,6 +127,12 @@ export interface EditorViewSnapshot {
    * pay for it thousands of times to use it once.
    */
   history?: unknown;
+  /**
+   * {@link docHash} of the document {@link history} was recorded against. The history is handed back only to
+   * a document that hashes the same: one that changed since (edited on disk while the tab was away, or while
+   * Arbor was closed) would have the history's changes land on the wrong text.
+   */
+  historyHash?: number;
 }
 
 /**

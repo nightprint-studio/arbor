@@ -66,6 +66,11 @@
   read on to after arriving. Opening a file and landing on a line in it is one step, two places on the same line are one stop,
   and navigating after a Back starts a new branch the way a browser does.
 </Callout>
+<Callout variant="info" title="The history spans the workspace">
+  It belongs to the window, not to one project: switching to another project of the workspace keeps it, and Back (or Forward,
+  or a row of Recent locations) into a file of a project you left switches to that project first. It is not saved — closing
+  Arbor starts a new one — and the stops of a project that is no longer open are dropped.
+</Callout>
 <Callout variant="info" title="Stops follow your edits">
   Typing above a remembered place moves it with the text, so Back still lands on the same code after lines are added or removed
   above it. A file that can no longer be opened is dropped from the history instead of stopping it.

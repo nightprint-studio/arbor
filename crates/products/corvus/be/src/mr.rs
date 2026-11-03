@@ -85,7 +85,7 @@ async fn list_mrs(
 // ---------------------------------------------------------------------------
 
 #[arbor_rpc::handler]
-async fn get_mr_detail(
+pub(crate) async fn get_mr_detail(
     state:  &CorvusState,
     tab_id: String,
     number: u64,
@@ -101,7 +101,7 @@ async fn get_mr_detail(
 // ---------------------------------------------------------------------------
 
 #[arbor_rpc::handler]
-async fn create_mr(
+pub(crate) async fn create_mr(
     state:      &CorvusState,
     tab_id:     String,
     params:     CreateMrParams,
@@ -388,7 +388,7 @@ async fn get_merged_mr_hints(
 /// source branch on the remote via `git push :refs/heads/<branch>`, and fire
 /// `corvus:mr_merged`. Byte-identical to the in-process copy.
 #[arbor_rpc::handler]
-async fn merge_mr(
+pub(crate) async fn merge_mr(
     state:         &CorvusState,
     tab_id:        String,
     number:        u64,

@@ -66,6 +66,11 @@ corpus/args/ArgsCtorBad.java:81:9: compiler.err.cant.apply.symbol
 corpus/args/ArgsCtorBad.java:85:15: compiler.err.cant.apply.symbol
 corpus/args/ArgsCtorBad.java:89:9: compiler.err.cant.apply.symbols
 corpus/args/ArgsCtorBad.java:93:9: compiler.err.cant.apply.symbol
+corpus/args/ArgsGenericBad.java:37:9: compiler.err.cant.apply.symbol
+corpus/args/ArgsGenericBad.java:41:9: compiler.err.cant.apply.symbol
+corpus/args/ArgsGenericBad.java:45:9: compiler.err.cant.apply.symbol
+corpus/args/ArgsGenericBad.java:49:13: compiler.err.cant.apply.symbol
+corpus/args/ArgsGenericBad.java:54:9: compiler.err.cant.apply.symbol
 corpus/args/ArgsTypeBad.java:30:9: compiler.err.cant.apply.symbol
 corpus/args/ArgsTypeBad.java:34:9: compiler.err.cant.apply.symbol
 corpus/args/ArgsTypeBad.java:38:9: compiler.err.cant.apply.symbol

@@ -26,6 +26,7 @@ export type TimeMode = 'time' | 'hide';
 export type LevelMode = 'text' | 'letter' | 'hide';
 export type ThreadMode = 'hide' | 'short' | 'full';
 export type LoggerMode = 'abbr' | 'last' | 'full' | 'hide';
+export type MdcMode = 'show' | 'hide';
 export type RuleField = 'logger' | 'message' | 'thread' | 'level';
 export type RuleOp = 'starts' | 'contains' | 'equals' | 'regex';
 export type RuleAction = 'hide' | 'dim' | 'highlight';
@@ -48,6 +49,9 @@ export interface LogViewSettings {
   level: LevelMode;
   thread: ThreadMode;
   logger: LoggerMode;
+  mdc: MdcMode;
+  /** MDC keys never drawn, whatever `mdc` says. */
+  hidden_mdc: string[];
   min_level: LogLevel;
   dedupe: boolean;
   fold_frames: boolean;
@@ -62,6 +66,8 @@ export const DEFAULT_LOG_VIEW: LogViewSettings = {
   level: 'text',
   thread: 'hide',
   logger: 'abbr',
+  mdc: 'show',
+  hidden_mdc: [],
   min_level: 'trace',
   dedupe: true,
   fold_frames: true,
@@ -155,8 +161,77 @@ const TRIM_WS = /^\s+/;
 /** A separator the layout puts after a column (`" - "`, `" : "`), so hiding the column does not leave it dangling. */
 const TRIM_SEP = /^\s*(?:[-:|]\s+)?/;
 
+const isPlainPiece = (p: LogPiece) => !p.token || p.token === 'text';
+/** What a layout leaves behind once every MDC entry is gone: `| MDC:[]`, ` []`, `{}`-less equivalents. */
+const EMPTY_MDC_WRAPPER = /(?:\s*[|,;-]\s*)?[A-Za-z_]*:?\s*\[\s*\]/;
+
+/**
+ * The pieces without the MDC entries the settings hide — all of them, or the named keys.
+ *
+ * An entry is a key, an `=` and a value, with a comma on one side: removing it takes the comma too, so
+ * what is left still reads `[tenant=acme]` and not `[tenant=acme,]`. When every entry is gone the empty
+ * wrapper the layout prints around them goes with it.
+ */
+export function hideMdc(pieces: LogPiece[], s: LogViewSettings): LogPiece[] {
+  const all = s.mdc === 'hide';
+  const keys = new Set(s.hidden_mdc);
+  if (!all && keys.size === 0) return pieces;
+
+  const ps = pieces.slice();
+  const out: LogPiece[] = [];
+  let removed = false;
+  let eatComma = false;
+  for (let i = 0; i < ps.length; i++) {
+    const p = ps[i];
+    if (p.token === 'mdckey' && (all || keys.has(p.text))) {
+      removed = true;
+      const eq = ps[i + 1];
+      if (eq && isPlainPiece(eq) && eq.text.startsWith('=')) {
+        const rest = eq.text.slice(1);
+        if (rest) {
+          ps[i + 1] = { ...eq, text: rest }; // an empty value: the gap carries on after the "="
+        } else {
+          i++; // the "="
+          if (ps[i + 1]?.token === 'mdc') i++; // its value
+        }
+      }
+      const last = out[out.length - 1];
+      if (last && isPlainPiece(last) && /,\s*$/.test(last.text)) {
+        const text = last.text.replace(/,\s*$/, '');
+        if (text) out[out.length - 1] = { ...last, text };
+        else out.pop();
+      } else {
+        eatComma = true;
+      }
+      continue;
+    }
+    if (all && p.token === 'mdc') { removed = true; continue; }
+    if (eatComma && isPlainPiece(p)) {
+      eatComma = false;
+      const text = p.text.replace(/^\s*,\s*/, '');
+      if (text) out.push({ ...p, text });
+      continue;
+    }
+    eatComma = false;
+    out.push(p);
+  }
+  if (!removed) return pieces;
+
+  // Neighbouring plain pieces become one, so the wrapper the layout left (`MDC:[` … `]`) is a single string to clean.
+  const merged: LogPiece[] = [];
+  for (const p of out) {
+    const last = merged[merged.length - 1];
+    if (last && isPlainPiece(last) && isPlainPiece(p) && !last.link && !p.link) merged[merged.length - 1] = { ...last, text: last.text + p.text };
+    else merged.push(p);
+  }
+  return merged
+    .map((p) => (isPlainPiece(p) ? { ...p, text: p.text.replace(EMPTY_MDC_WRAPPER, '') } : p))
+    .filter((p) => p.text);
+}
+
 /** The pieces of a line after the column settings: dropped, shortened, or as they were. */
-export function transformPieces(pieces: LogPiece[], s: LogViewSettings): LogPiece[] {
+export function transformPieces(source: LogPiece[], s: LogViewSettings): LogPiece[] {
+  const pieces = hideMdc(source, s);
   const out: LogPiece[] = [];
   let trim: RegExp | null = null;
   for (const p of pieces) {

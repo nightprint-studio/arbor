@@ -21,6 +21,21 @@ export function isSamePath(a: string | null | undefined, b: string | null | unde
   return normalizePath(a) === normalizePath(b);
 }
 
+/** The deepest of `roots` that contains `path` (or is it), as it was given in `roots`; `null` when none does. */
+export function rootOwning(roots: readonly string[], path: string): string | null {
+  const file = normalizePath(path);
+  let best: string | null = null;
+  let bestLength = -1;
+  for (const root of roots) {
+    const r = normalizePath(root);
+    if ((file === r || file.startsWith(r + '/')) && r.length > bestLength) {
+      best = root;
+      bestLength = r.length;
+    }
+  }
+  return best;
+}
+
 /** The last segment of a path, for either separator. */
 export function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;

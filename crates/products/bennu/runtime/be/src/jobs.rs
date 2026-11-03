@@ -8,16 +8,34 @@
 //!
 //! A near-verbatim twin of `corvus-be`'s `JobHandle` (same reverse-channel contract).
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use arbor_feedback::prelude::{JobSpec, JobStatus};
 use arbor_ipc::prelude::HostCaller;
+use bennu_core::prelude::BennuState;
 use serde_json::json;
+
+/// What to do when the person cancels a job from the Jobs panel, by job id.
+///
+/// The shell's registry only knows a job as a row: cancelling it marks the row, and kills a child process if there is
+/// one — which a backend task never is. Without this the row said *cancelled* while the work went on, holding whatever
+/// it held. The front end tells the backend which job was cancelled ([`bennu_cancel_job`]) and the task that owns it
+/// says what stopping means for it.
+type Action = Arc<dyn Fn() + Send + Sync>;
+
+fn actions() -> &'static Mutex<HashMap<String, Action>> {
+    static ACTIONS: OnceLock<Mutex<HashMap<String, Action>>> = OnceLock::new();
+    ACTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// A live job in the shell registry, addressed by the id the shell assigned.
 pub struct JobHandle {
     host: Arc<dyn HostCaller>,
     pub id: String,
+    /// Set when the person cancelled the job — so the task can tell a cancelled run from a finished one.
+    cancelled: Arc<AtomicBool>,
 }
 
 impl JobHandle {
@@ -27,7 +45,22 @@ impl JobHandle {
         let value = serde_json::to_value(spec).map_err(|e| e.to_string())?;
         let id = host.call("__job_register", value)?;
         let id: String = serde_json::from_value(id).map_err(|e| e.to_string())?;
-        Ok(JobHandle { host, id })
+        Ok(JobHandle { host, id, cancelled: Arc::new(AtomicBool::new(false)) })
+    }
+
+    /// Run `action` when the person cancels this job. The job must have been registered cancellable.
+    pub fn on_cancel(&self, action: impl Fn() + Send + Sync + 'static) {
+        let flag = Arc::clone(&self.cancelled);
+        let action: Action = Arc::new(move || {
+            flag.store(true, Ordering::Release);
+            action();
+        });
+        actions().lock().unwrap_or_else(|p| p.into_inner()).insert(self.id.clone(), action);
+    }
+
+    /// Whether the person cancelled this job.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
     }
 
     /// Append an output line to the job's buffer. Registry-only — the caller is responsible
@@ -44,5 +77,27 @@ impl JobHandle {
         let _ = self
             .host
             .call("__job_set_status", json!({ "job_id": self.id, "status": status }));
+    }
+}
+
+impl Drop for JobHandle {
+    /// A finished job has nothing left to cancel.
+    fn drop(&mut self) {
+        actions().lock().unwrap_or_else(|p| p.into_inner()).remove(&self.id);
+    }
+}
+
+/// The person cancelled job `job_id` in the Jobs panel: stop what it stands for. `false` when no task here owns that id
+/// (it already finished, or it is not one of this backend's cancellable jobs).
+#[arbor_rpc::handler]
+fn bennu_cancel_job(_state: &BennuState, job_id: String) -> Result<bool, String> {
+    // Cloned out of the map before it runs: the action may take its own locks, and must not do so under this one.
+    let action = actions().lock().map_err(|e| e.to_string())?.get(&job_id).cloned();
+    match action {
+        Some(action) => {
+            action();
+            Ok(true)
+        }
+        None => Ok(false),
     }
 }

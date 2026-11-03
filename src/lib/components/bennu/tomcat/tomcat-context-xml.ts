@@ -8,7 +8,7 @@
  * development launch needs, and a "raw" context exists for the rest.
  *
  * The same reading carries the raw text back to the guided form: {@link mergeImport} keeps what
- * the XML cannot say (the driver jar, the linked Picus connection, a stored password), and
+ * the XML cannot say (the linked Picus connection, a stored password), and
  * {@link unmodeledTags} names what the form would drop.
  */
 
@@ -38,6 +38,9 @@ function parseDocument(text: string): { doc: Document } | { error: string } {
   return { doc };
 }
 
+/** A pool size or a wait read from an attribute: any whole number, `-1` (no limit) and `0` included, and the default for what is absent or not a number. */
+const whole = (text: string, fallback: number) => (text.trim() !== '' && Number.isInteger(Number(text)) ? Number(text) : fallback);
+
 const isDataSource = (el: Element) => /DataSource/i.test(el.getAttribute('type') ?? '') || !!el.getAttribute('url');
 
 export function parseContextXml(text: string): ContextImport {
@@ -65,9 +68,9 @@ export function parseContextXml(text: string): ContextImport {
         // Imported passwords go to the stored-secret side: pasting a context that carried one
         // should not put it into the file the repository shares.
         passwordMode: 'secret',
-        maxTotal: Number(attr(el, 'maxTotal') || attr(el, 'maxActive')) || 20,
-        maxIdle: Number(attr(el, 'maxIdle')) || 5,
-        maxWaitMs: Number(attr(el, 'maxWaitMillis') || attr(el, 'maxWait')) || 10000,
+        maxTotal: whole(attr(el, 'maxTotal') || attr(el, 'maxActive'), 20),
+        maxIdle: whole(attr(el, 'maxIdle'), 5),
+        maxWaitMs: whole(attr(el, 'maxWaitMillis') || attr(el, 'maxWait'), 10000),
         validationQuery: attr(el, 'validationQuery'),
         testOnBorrow: attr(el, 'testOnBorrow') !== 'false',
       });
@@ -111,7 +114,7 @@ export function unmodeledTags(text: string): string[] {
  * The resources of `read` (the raw text, read back) as the form should hold them.
  *
  * A resource is the same one when its kind and name match, and then it keeps what the XML cannot
- * carry — its id (a stored password is filed under it), the driver jar, the linked Picus
+ * carry — its id (a stored password is filed under it), the linked Picus
  * connection and how its password is kept. A literal password found in the text goes to the secret
  * store under the merged id, never into the configuration.
  */
@@ -128,7 +131,6 @@ export function mergeImport(
       ? {
           ...r,
           id: old.id,
-          driverJar: old.driverJar,
           picusConnection: old.picusConnection,
           passwordMode: old.passwordMode,
           password: old.password,

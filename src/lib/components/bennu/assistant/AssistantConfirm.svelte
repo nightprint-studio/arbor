@@ -7,9 +7,11 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
+  import AssistantStalePrompt from './AssistantStalePrompt.svelte';
   import type { ConfirmRequest } from './assistant-types';
 
   let { confirm, conversationId }: { confirm: ConfirmRequest; conversationId: string } = $props();
+  const waiting = $derived(bennuAssistantStore.waitingOn(conversationId));
   const answer = (a: 'yes' | 'no') => bennuAssistantStore.answerConfirm(conversationId, confirm.id, a);
 </script>
 
@@ -22,7 +24,9 @@
     {/if}
   </div>
   {#if confirm.detail}<p>{confirm.detail}</p>{/if}
-  {#if !confirm.answer}
+  {#if !confirm.answer && !waiting}
+    <AssistantStalePrompt />
+  {:else if !confirm.answer}
     <div class="buttons">
       <Button variant="ghost" size="sm" onclick={() => answer('no')}><X size={12} /> Decline</Button>
       <span class="grow"></span>

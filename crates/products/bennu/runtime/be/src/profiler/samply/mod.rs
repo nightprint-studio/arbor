@@ -28,6 +28,8 @@ use bennu_core::prelude::BennuState;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::task::{Task, TaskSpec};
+
 use asset::{digests_match, parse_checksum_file, pick_asset, Pick, Release};
 use store::{resolve, Resolved, Source};
 
@@ -224,9 +226,11 @@ fn bennu_samply_install(ctx: &BennuState, args: InstallArgs) -> Result<(), Strin
     }
     let guard = InstallGuard;
     let sink = ctx.event_sink();
-    let job = ctx.host_caller().and_then(|host| {
-        crate::index_service::register_bennu_job(&host, &sink, "Install samply", asset::LATEST_API_URL, "downloads", false)
-    });
+    let task = Task::start(
+        ctx.host_caller().as_ref(),
+        &sink,
+        TaskSpec::new("Install samply", asset::LATEST_API_URL).category("downloads"),
+    );
     std::thread::Builder::new()
         .name("bennu-samply-install".into())
         .spawn(move || {
@@ -236,7 +240,7 @@ fn bennu_samply_install(ctx: &BennuState, args: InstallArgs) -> Result<(), Strin
                 Ok(version) => emit(&sink, json!({ "kind": "done", "version": version })),
                 Err(e) => emit(&sink, json!({ "kind": "error", "error": e })),
             }
-            crate::index_service::finish_bennu_job(&sink, job, result.is_ok(), result.err());
+            task.finish(result.map(|_| ()));
         })
         .map(|_| ())
         .map_err(|e| {

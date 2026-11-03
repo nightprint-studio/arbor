@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { RefreshCw, ArrowUpToLine, ArrowDownToLine, Archive, GitCommitHorizontal, Play, ChevronDown } from 'lucide-svelte';
+  import { RefreshCw, ArrowUpToLine, ArrowDownToLine, Archive, GitCommitHorizontal, ListChecks, Play, ChevronDown } from 'lucide-svelte';
+  import SplitButton from '$lib/components/shared/ui/SplitButton.svelte';
+  import { plansStore, activeRepoRef } from '$lib/stores/corvus/plans.svelte';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { repoStore } from '$lib/stores/corvus/repo.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -306,6 +308,17 @@
     } finally { isPushing = false; }
   }
 
+  /** Queue this branch's push in the plan being composed instead of running it now. */
+  async function addPushToPlan() {
+    const repo = activeRepoRef();
+    const branch = status?.current_branch;
+    if (!repo || !branch || status?.is_detached) {
+      uiStore.showToast('Nothing to plan: no branch is checked out', 'warning');
+      return;
+    }
+    await plansStore.addPush(repo, branch);
+  }
+
   function openStageArea() {
     uiStore.toggleBottomSection('stage');
   }
@@ -341,7 +354,9 @@
     const onFetch = () => void handleFetch();
     const onPull  = () => void pull();
     const onPush  = () => void push();
+    const onPlanPush = () => void addPushToPlan();
     const onStash = () => openStashDialog();
+    window.addEventListener('arbor:plan-add-push', onPlanPush);
     window.addEventListener('arbor:fetch', onFetch);
     window.addEventListener('arbor:pull',  onPull);
     window.addEventListener('arbor:push',  onPush);
@@ -350,6 +365,7 @@
       window.removeEventListener('arbor:fetch', onFetch);
       window.removeEventListener('arbor:pull',  onPull);
       window.removeEventListener('arbor:push',  onPush);
+      window.removeEventListener('arbor:plan-add-push', onPlanPush);
       window.removeEventListener('arbor:stash', onStash);
     };
   });
@@ -405,20 +421,32 @@
     </button>
 
     <!-- Push -->
-    <button
-      class="action-btn push-btn"
-      class:has-ahead={status?.ahead && status.ahead > 0}
-      use:tooltip={!status?.current_branch || status.is_detached
+    <!-- The click pushes as always; the chevron holds the plan variant. -->
+    <SplitButton
+      class="push-split"
+      variant="ghost"
+      size="xs"
+      position="fixed"
+      direction="down"
+      tooltip={!status?.current_branch || status.is_detached
         ? 'Push non disponibile in detached HEAD — fai il checkout di un branch'
         : 'Push'}
       disabled={!tab || isPushing || !status?.current_branch || status.is_detached}
+      options={[
+        { id: 'push', label: 'Push', icon: ArrowUpToLine, iconColor: 'var(--accent)', action: 'push' },
+        { id: 'plan', label: 'Add push to plan', icon: ListChecks, iconColor: 'var(--accent)', action: 'plan_add_push',
+          description: plansStore.current ? `Adds to ${plansStore.current.name}` : 'Starts a new plan' },
+      ]}
       onclick={push}
+      onselect={(id) => (id === 'plan' ? void addPushToPlan() : void push())}
     >
-      <ArrowUpToLine size={13} class={isPushing ? 'spinning' : ''} />
-      {#if status?.ahead && status.ahead > 0}
-        <span class="badge ahead">{status.ahead}</span>
-      {/if}
-    </button>
+      <span class="push-face has-ahead-wrap" class:has-ahead={status?.ahead && status.ahead > 0}>
+        <ArrowUpToLine size={13} class={isPushing ? 'spinning' : ''} />
+        {#if status?.ahead && status.ahead > 0}
+          <span class="badge ahead">{status.ahead}</span>
+        {/if}
+      </span>
+    </SplitButton>
 
     <div class="sep"></div>
 
@@ -611,6 +639,9 @@
     margin: 0 2px;
     flex-shrink: 0;
   }
+
+  /* The split button's face: the badge positions against it, as it did against `.action-btn`. */
+  .push-face { position: relative; display: inline-flex; align-items: center; padding: 0 2px; }
 
   .badge {
     position: absolute;

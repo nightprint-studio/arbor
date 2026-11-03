@@ -56,6 +56,7 @@
 //! what a program printed and a transcript has no cursor to move.
 
 pub mod ansi;
+mod catalina;
 pub mod common;
 pub mod java;
 pub mod layout;

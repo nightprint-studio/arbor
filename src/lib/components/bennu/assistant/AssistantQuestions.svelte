@@ -16,9 +16,11 @@
   import ChoiceList from '$lib/components/shared/ui/ChoiceList.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
+  import AssistantStalePrompt from './AssistantStalePrompt.svelte';
   import type { QuestionSet } from './assistant-types';
 
   let { set, conversationId }: { set: QuestionSet; conversationId: string } = $props();
+  const waiting = $derived(bennuAssistantStore.waitingOn(conversationId));
 
   const OTHER = '__other__';
 
@@ -74,6 +76,9 @@
         </div>
       {/each}
     </dl>
+  {:else if !waiting}
+    <p class="text">{questions.map((q) => q.text).join(' · ')}</p>
+    <AssistantStalePrompt />
   {:else}
     {#if questions.length > 1}
       <div class="tabs" role="tablist" aria-label="Questions">

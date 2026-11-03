@@ -40,14 +40,29 @@ fn canonical_tab_id(workdir: &str) -> String {
 
 /// Forward slashes, no `\\?\` verbatim prefix, no trailing separator — the shape libgit2's
 /// `workdir()` reports and the one the rest of the backend compares paths in.
-fn normalise(path: &str) -> String {
-    let p = path.strip_prefix(r"\\?\").unwrap_or(path).replace('\\', "/");
+pub(crate) fn normalise(path: &str) -> String {
+    // `\\?\UNC\server\share\x` is the verbatim spelling of `\\server\share\x`: dropping only the
+    // `\\?\` would leave a bogus `UNC/server/…` path that matches nothing.
+    let p = match path.strip_prefix(r"\\?\UNC\") {
+        Some(rest) => format!("//{rest}"),
+        None => path.strip_prefix(r"\\?\").unwrap_or(path).to_string(),
+    }
+    .replace('\\', "/");
     let trimmed = p.trim_end_matches('/');
     // Keep a bare root (`/`, `C:/`) intact.
     if trimmed.is_empty() || trimmed.ends_with(':') {
         p
     } else {
         trimmed.to_string()
+    }
+}
+
+/// `path` resolved through links, mapped drives and `subst`, in the same shape [`discover_workdir`]
+/// reports the working directory in — the spelling the two must share for one to be cut from the other.
+pub(crate) fn resolved_path(path: &str) -> String {
+    match std::fs::canonicalize(path) {
+        Ok(abs) => normalise(&abs.to_string_lossy()),
+        Err(_) => normalise(path),
     }
 }
 

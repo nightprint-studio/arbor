@@ -93,6 +93,9 @@
     /** Intercept keydown before the shell. Return true to consume. */
     onKeydownCapture?: (e: KeyboardEvent) => boolean;
     width?: string;
+    /** The highlighted row (index into the flattened sections), bindable so a host can act on
+     *  it — a multi-select picker toggles it on Space. */
+    selectedIdx?: number;
   }
 
   let {
@@ -101,6 +104,7 @@
     sections,
     query = $bindable(''),
     inputEl = $bindable(null),
+    selectedIdx = $bindable(0),
     placeholder = 'Type a command…',
     verbChip = null,
     onClearVerb,
@@ -113,7 +117,6 @@
     width = 'min(640px, 90vw)',
   }: Props = $props();
 
-  let selectedIdx = $state(0);
   let listEl = $state<HTMLElement | null>(null);
 
   const flatItems = $derived(sections.flatMap((s) => s.items));

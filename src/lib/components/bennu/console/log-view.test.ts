@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LogPiece } from '$lib/types/log';
 import {
-  abbreviate, buildView, DEFAULT_LOG_VIEW, entryText, frameClass, isOwnClass, ruleFromLine, shortenThread,
+  abbreviate, buildView, DEFAULT_LOG_VIEW, entryText, frameClass, hideMdc, isOwnClass, ruleFromLine, shortenThread,
   transformPieces, type LogViewRule, type LogViewSettings, type ViewLine, type ViewOptions,
 } from './log-view';
 
@@ -141,5 +141,31 @@ describe('ruleFromLine', () => {
   });
   it('has nothing to say about a line without a logger', () => {
     expect(ruleFromLine({ text: 'plain', stream: 'out' }, 'logger', 'hide')).toBeNull();
+  });
+});
+
+describe('hideMdc', () => {
+  // `| MDC:[tenant=acme,trace_id=abc,user=bob] | hello`, as the scanner cuts it.
+  const mdcLine = (): LogPiece[] => [
+    piece('INFO', 'level'), piece(' | MDC:['), piece('tenant', 'mdckey'), piece('='), piece('acme', 'mdc'),
+    piece(','), piece('trace_id', 'mdckey'), piece('='), piece('abc', 'mdc'),
+    piece(','), piece('user', 'mdckey'), piece('='), piece('bob', 'mdc'), piece('] | hello'),
+  ];
+  const text = (ps: LogPiece[]) => ps.map((p) => p.text).join('');
+  const settings = (over: Partial<LogViewSettings>): LogViewSettings => ({ ...DEFAULT_LOG_VIEW, ...over });
+
+  it('removes one entry with its comma, wherever it sits', () => {
+    expect(text(hideMdc(mdcLine(), settings({ hidden_mdc: ['trace_id'] })))).toBe('INFO | MDC:[tenant=acme,user=bob] | hello');
+    expect(text(hideMdc(mdcLine(), settings({ hidden_mdc: ['tenant'] })))).toBe('INFO | MDC:[trace_id=abc,user=bob] | hello');
+    expect(text(hideMdc(mdcLine(), settings({ hidden_mdc: ['user'] })))).toBe('INFO | MDC:[tenant=acme,trace_id=abc] | hello');
+  });
+
+  it('removes every entry and the empty wrapper the layout leaves', () => {
+    expect(text(hideMdc(mdcLine(), settings({ mdc: 'hide' })))).toBe('INFO | hello');
+  });
+
+  it('leaves a line alone when nothing is hidden', () => {
+    const line = mdcLine();
+    expect(hideMdc(line, settings({}))).toBe(line);
   });
 });

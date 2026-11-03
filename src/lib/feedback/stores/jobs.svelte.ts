@@ -10,6 +10,8 @@ const MAX_LINES = 2000;
 const SHOW_HIDDEN_LS_KEY = 'arbor:jobs-show-hidden';
 
 function createJobsStore() {
+  /** What a product does when one of ITS jobs is cancelled in the panel, by the job's `plugin_name`. */
+  const cancelHooks = new Map<string, (jobId: string) => Promise<unknown>>();
   let jobs       = $state<JobInfo[]>([]);
   let outputs    = $state<Record<string, string[]>>({});
   /** Job whose output is currently shown in the jobs panel. */
@@ -150,6 +152,10 @@ function createJobsStore() {
 
   async function cancel(jobId: string) {
     try { await cancelJob(jobId); } catch { /* ignore */ }
+    // The registry only marks the row. A product whose job is a task of its own backend says what stopping it means.
+    const owner = jobs.find(j => j.id === jobId)?.plugin_name;
+    const hook = owner ? cancelHooks.get(owner) : undefined;
+    if (hook) { try { await hook(jobId); } catch { /* the task may already be over */ } }
     const idx = jobs.findIndex(j => j.id === jobId);
     if (idx >= 0) jobs[idx] = { ...jobs[idx], status: { type: 'cancelled' } };
   }
@@ -222,6 +228,11 @@ function createJobsStore() {
     setupListeners,
     loadOutput,
     cancel,
+    /** Register what cancelling a job of `plugin` means beyond marking its row — a product's own backend task stops here. */
+    onCancel(plugin: string, hook: (jobId: string) => Promise<unknown>) {
+      cancelHooks.set(plugin, hook);
+      return () => { cancelHooks.delete(plugin); };
+    },
     setActiveJob,
     dismiss,
     clearFinished,

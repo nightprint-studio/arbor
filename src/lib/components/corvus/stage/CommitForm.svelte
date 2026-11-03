@@ -17,6 +17,7 @@
   import { commitChanges, getGitCommitTemplate } from '$lib/ipc/corvus/stage';
   import { getGitIdentity } from '$lib/ipc/corvus/graph';
   import { pushBranch } from '$lib/ipc/corvus/remote';
+  import { plansStore, activeRepoRef } from '$lib/stores/corvus/plans.svelte';
 
   let { onCommit }: { onCommit?: () => void } = $props();
 
@@ -86,6 +87,12 @@
     onCommit?.();
     const short = oid.slice(0, 7);
 
+    if (req.plan) {
+      await refreshUi(origin.id);
+      uiStore.showToast(`Committed ${short}`, 'success');
+      await queueRemoteSteps(origin, req.plan);
+      return true;
+    }
     if (!req.push) {
       await refreshUi(origin.id);
       uiStore.showToast(`Committed ${short}`, 'success');
@@ -108,6 +115,20 @@
     return true;
   }
 
+  /** The commit is done; what must reach the remote goes to the plan instead of running now. */
+  async function queueRemoteSteps(origin: NonNullable<typeof tab>, kind: NonNullable<CommitRequest['plan']>) {
+    const repo = activeRepoRef();
+    const branch = origin.currentBranch;
+    if (!repo || !branch) {
+      uiStore.showToast('Nothing to plan: no branch is checked out', 'warning');
+      return;
+    }
+    const plan = await plansStore.addPush(repo, branch);
+    if (plan && kind === 'push_mr') {
+      plansStore.openMrDraft({ repo, tabId: origin.id, source: branch, planId: plan.id, newPhaseAfter: true });
+    }
+  }
+
   async function onIdentitySaved() {
     const req = identityRetry;
     const settle = settleIdentity;
@@ -127,6 +148,7 @@
   stagedCount={repoStore.status?.staged.length ?? 0}
   {template}
   allowPush
+  allowPlan
   onSubmit={submit}
 >
   {#snippet extra()}

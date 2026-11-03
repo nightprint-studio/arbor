@@ -12,9 +12,8 @@
    *
    * No delete button: removing a resource is the row's trash in the list beside this form.
    */
-  import { Check, FolderOpen, Plug } from 'lucide-svelte';
+  import { Check, Plug } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
-  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { jdbcFor, specFromJdbc, testTyped, testWithPicus, type PicusTest } from './tomcat-picus';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
@@ -40,8 +39,6 @@
     form: TomcatForm;
     onchange: (patch: Partial<TomcatResource>) => void;
   } = $props();
-
-  let pickingJar = $state(false);
 
   let typed = $state('');
   /** The last password typed here, kept in memory for the check only: the stored one is never read
@@ -124,7 +121,7 @@
     <Input value={resource.name} placeholder="jdbc/Gestionale" oninput={(v) => onchange({ name: v })} />
   </FormField>
 
-  <FormField label="Driver">
+  <FormField label="Driver" hint="The jar is found on the project's classpath or in the Deployment tab's server libraries; failing that, PostgreSQL, MySQL, MariaDB and SQLite are fetched from Maven Central.">
     <div class="pair">
       <Input value={resource.driver} placeholder="org.postgresql.Driver" oninput={(v) => onchange({ driver: v })} />
       <Select
@@ -132,19 +129,6 @@
         options={[{ value: '', label: 'Presets…' }, ...DRIVER_PRESETS.map((p) => ({ value: p.driver, label: p.label }))]}
         onchange={applyPreset}
       />
-    </div>
-  </FormField>
-
-  <FormField
-    label="Driver jar"
-    hint="Empty = found on the project's runtime classpath, or fetched from Maven Central for PostgreSQL, MySQL, MariaDB and SQLite. Choose one for any other driver: it is copied to the server's lib/ at launch."
-  >
-    <div class="pair">
-      <Input value={resource.driverJar} placeholder="Found on the classpath" oninput={(v) => onchange({ driverJar: v })} />
-      <Button variant="secondary" size="sm" onclick={() => (pickingJar = true)} tooltip={{ content: 'Choose a driver jar' }}>
-        {#snippet iconStart()}<FolderOpen size={13} />{/snippet}
-        Browse…
-      </Button>
     </div>
   </FormField>
 
@@ -190,16 +174,16 @@
   </FormField>
 
   <div class="three">
-    <FormField label="maxTotal">
-      <NumberStepper value={resource.maxTotal} min={1} max={1000} step={1} narrow={false} ariaLabel="maxTotal"
+    <FormField label="maxTotal" hint="-1 = no limit">
+      <NumberStepper value={resource.maxTotal} min={-1} max={1000} step={1} narrow={false} ariaLabel="maxTotal"
         onchange={(v) => onchange({ maxTotal: Math.round(v) })} />
     </FormField>
-    <FormField label="maxIdle">
-      <NumberStepper value={resource.maxIdle} min={0} max={1000} step={1} narrow={false} ariaLabel="maxIdle"
+    <FormField label="maxIdle" hint="-1 = no limit">
+      <NumberStepper value={resource.maxIdle} min={-1} max={1000} step={1} narrow={false} ariaLabel="maxIdle"
         onchange={(v) => onchange({ maxIdle: Math.round(v) })} />
     </FormField>
-    <FormField label="maxWait (ms)">
-      <NumberStepper value={resource.maxWaitMs} min={0} max={600000} step={500} narrow={false} ariaLabel="maxWait"
+    <FormField label="maxWait (ms)" hint="-1 = wait forever">
+      <NumberStepper value={resource.maxWaitMs} min={-1} max={600000} step={500} narrow={false} ariaLabel="maxWait"
         onchange={(v) => onchange({ maxWaitMs: Math.round(v) })} />
     </FormField>
   </div>
@@ -259,20 +243,8 @@
   </FormField>
 {/if}
 
-{#if pickingJar}
-  <FileExplorerModal
-    mode="file"
-    title="Choose the JDBC driver jar"
-    extensions={['jar']}
-    initialPath={resource.driverJar || root}
-    onConfirm={(path) => { onchange({ driverJar: path }); pickingJar = false; }}
-    onCancel={() => (pickingJar = false)}
-    onClose={() => (pickingJar = false)}
-  />
-{/if}
-
 <style>
-  .pair { display: grid; grid-template-columns: 1fr 140px; gap: 8px; }
+  .pair { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 8px; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   .check { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }

@@ -283,6 +283,12 @@ export function validateProject(root: string): Promise<ProjectValidationResult> 
   return bennu('bennu_validate_project', { args: { root } });
 }
 
+/** The person cancelled one of bennu's own jobs (the project analysis) in the Jobs panel: stop the work behind it.
+ *  `false` when nothing here owns that id any more. */
+export function cancelBennuJob(jobId: string): Promise<boolean> {
+  return bennu('bennu_cancel_job', { job_id: jobId });
+}
+
 /** Cancel the running whole-project validation. Fire-and-forget: the BE stops the sweep and discards
  *  its partial results (no cache written). No-op if nothing is validating. Wire:
  *  `bennu_cancel_validation` — `ValidateProjectArgs { root }`. */

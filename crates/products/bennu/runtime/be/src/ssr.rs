@@ -609,12 +609,19 @@ fn bennu_ssr_preview(_ctx: &BennuState, args: SsrReplaceArgs) -> Result<Preview,
 /// are no longer there, and applying it would silently undo whatever happened in between.
 #[arbor_rpc::handler]
 fn bennu_ssr_apply(_ctx: &BennuState, args: SsrApplyArgs) -> Result<Applied, String> {
+    Ok(apply_planned(&args.root, &args.files))
+}
+
+/// Write a previewed plan file by file, refusing any file that is no longer what the plan was
+/// built from. Shared by every whole-project rewrite (structural replace, optimize imports), so
+/// they all refuse the same way.
+pub(crate) fn apply_planned(root: &str, files: &[ApplyFile]) -> Applied {
     let mut written = Vec::new();
     let mut refused = Vec::new();
-    for file in &args.files {
-        match read_source(&args.root, &file.file) {
+    for file in files {
+        match read_source(root, &file.file) {
             Some(current) if digest(&current) == file.digest => {
-                match write_source(&args.root, &file.file, &file.after) {
+                match write_source(root, &file.file, &file.after) {
                     Ok(()) => written.push(file.file.clone()),
                     Err(e) => refused.push(Refusal { file: file.file.clone(), reason: e }),
                 }
@@ -629,7 +636,7 @@ fn bennu_ssr_apply(_ctx: &BennuState, args: SsrApplyArgs) -> Result<Applied, Str
             }),
         }
     }
-    Ok(Applied { written, refused })
+    Applied { written, refused }
 }
 
 // ── the walk ────────────────────────────────────────────────────────────────────
@@ -929,7 +936,7 @@ fn collect(dir: &Path, dialect: Dialect, out: &mut Vec<String>) {
 
 /// Read a source in the project's declared encoding — a legacy tree is frequently Cp1252, and a
 /// file this could not decode is a file whose matches would be missing from the count.
-fn read_source(root: &str, path: &str) -> Option<String> {
+pub(crate) fn read_source(root: &str, path: &str) -> Option<String> {
     let encoding = crate::index_service::encoding_plan(root);
     bennu_intel::prelude::read_source_for_index(Path::new(path), &encoding).map(|d| d.text)
 }
@@ -957,7 +964,7 @@ fn absolute(root: &str, rel: &str) -> String {
 
 /// A cheap content fingerprint. Not cryptographic — it exists to notice a file that changed
 /// between a preview and its apply, which any 64-bit hash notices.
-fn digest(text: &str) -> u64 {
+pub(crate) fn digest(text: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in text.as_bytes() {
         h ^= *byte as u64;

@@ -23,7 +23,16 @@
   import { groupByProject, type ModuleRef } from './project-modules';
   import type { ModuleKind } from '$lib/ipc/bennu/modules';
 
-  let { kinds, ariaLabel = 'Modules' }: { kinds: ModuleKind[]; ariaLabel?: string } = $props();
+  let {
+    kinds,
+    ariaLabel = 'Modules',
+    onModuleContextMenu,
+  }: {
+    kinds: ModuleKind[];
+    ariaLabel?: string;
+    /** A right-click on a module row, for the window that hosts the tree to answer with its own menu. */
+    onModuleContextMenu?: (x: number, y: number, module: ModuleRef) => void;
+  } = $props();
 
   interface Node {
     id: string;
@@ -66,6 +75,9 @@
       selectedId={target?.id ?? null}
       selectable={(n) => !!n.module}
       onSelect={pick}
+      onContextMenu={onModuleContextMenu
+        ? (n, e) => { if (n.module) onModuleContextMenu(e.clientX, e.clientY, n.module); }
+        : undefined}
       rowTitle={(n) => n.module?.toolRoot}
       guides
       {ariaLabel}

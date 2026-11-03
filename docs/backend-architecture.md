@@ -301,6 +301,14 @@ and the host loads zero plugins while every hook fire silently reaches nobody. S
   - In a Tauri-agnostic crate use `AppCtx::spawn`, not `tokio::spawn` directly.
 - **Prelude**: every library crate exposes its public API via `pub mod prelude`; call sites
   import through it. When you add a `pub` item, add it to `prelude.rs` in the same change.
+- **Background work is a `Task`** (bennu-be: `crate::task`). Anything that outlives the call that started it
+  — a download, a dependency resolve, an index pass — gets a row in the Jobs panel through `Task::start`,
+  never through hand-written register/finish calls. A `Task` that is dropped unfinished closes its row as
+  failed, so an early `return`, a `?` or a panic cannot leave a job "running" forever; `.deferred(after)`
+  registers the row only if the work is still going after a delay (registering is a synchronous reverse-
+  channel call, so do not do it for millisecond work); `.cancellable()` + `on_cancel` give the row a real
+  Cancel button — the front end forwards it to `bennu_cancel_job`. Report progress with `task.progress(..)`,
+  which says each percentage once, not with a line per file.
 
 ---
 

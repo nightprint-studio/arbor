@@ -546,6 +546,10 @@ pub struct LogViewConfig {
     pub thread: String,
     /// `abbr` | `last` | `full` | `hide`.
     pub logger: String,
+    /// `show` | `hide` — every MDC entry (`tenant=acme`) of a line.
+    pub mdc: String,
+    /// MDC keys never drawn, whatever `mdc` says: the entry is removed, key and value.
+    pub hidden_mdc: Vec<String>,
     /// Lowest level shown: `trace` … `error`.
     pub min_level: String,
     /// Collapse identical consecutive lines into one with a count.
@@ -566,6 +570,8 @@ impl Default for LogViewConfig {
             level: "text".into(),
             thread: "hide".into(),
             logger: "abbr".into(),
+            mdc: "show".into(),
+            hidden_mdc: Vec::new(),
             min_level: "trace".into(),
             dedupe: true,
             fold_frames: true,

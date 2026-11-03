@@ -24,6 +24,7 @@ use serde_json::json;
 use crate::build_queue::{BuildGuard, Kind as QueueKind};
 use crate::index_service::IndexService;
 use crate::progress_gate::ProgressGate;
+use crate::task::{Task, TaskSpec};
 
 /// Progress ticks while a project validation runs (`{ root, done, total }`).
 const EVT_VALIDATE_PROGRESS: &str = "arbor://bennu/validate-progress";
@@ -64,6 +65,13 @@ fn bennu_validate_project(
 ) -> Result<ProjectValidationResult, String> {
     let _guard = BuildGuard::acquire(ctx.event_sink(), &args.root, QueueKind::Check, "validate project")?;
     let sink = ctx.event_sink();
+    // Taken once it is this project's turn, not while it waits in the queue. Cancelling it stops the sweep.
+    let task = Task::start(
+        ctx.host_caller().as_ref(),
+        &sink,
+        TaskSpec::new("Validating project", args.root.as_str()).category("Validation").cancellable(),
+    );
+    task.on_cancel(|| IndexService::global().request_cancel_validation());
     let encoding = crate::index_service::encoding_plan(&args.root);
     let svc = IndexService::global();
 
@@ -72,11 +80,18 @@ fn bennu_validate_project(
     // queue unread in the throttled webview and are delivered all at once on the way back.
     let gate = ProgressGate::new();
     let on_progress = |done: usize, total: usize| {
+        task.progress("Validating", done, total);
         if gate.allow(done, total) {
             sink.emit(EVT_VALIDATE_PROGRESS, json!({ "root": &args.root, "done": done, "total": total }));
         }
     };
     let mut out = svc.validate_project_collect(&args.root, &encoding, &on_progress);
+    // Said, not left to read as an empty project: the lane of this project is released and the panel shows why.
+    if out.waited_out {
+        let why = "Another analysis of this project has been running for over five minutes. Cancel \"Analyzing project\" in the Jobs panel, then validate again.";
+        task.fail(why);
+        return Err(why.into());
+    }
     eprintln!(
         "bennu-be: validated {} file(s) in {}ms, {} served from the diagnostic cache",
         out.validated, out.wall_ms, out.cached_hits
@@ -91,6 +106,8 @@ fn bennu_validate_project(
     out.stats.truncate(MAX_STAT_ROWS);
     out.diagnostics.truncate(MAX_DIAG_FILES);
 
+    // Ends as cancelled when the person cancelled it: the task knows.
+    task.ok();
     sink.emit(EVT_VALIDATE_DONE, json!({
         "root": &args.root,
         "total_files": out.validated,
@@ -135,6 +152,9 @@ fn bennu_project_diagnostics(
     }
     let encoding = crate::index_service::encoding_plan(&args.root);
     let mut out = svc.validate_project_collect(&args.root, &encoding, &|_done, _total| {});
+    if out.waited_out {
+        return Ok(None);
+    }
     out.diagnostics.truncate(MAX_DIAG_FILES);
     Ok(Some(out.diagnostics))
 }

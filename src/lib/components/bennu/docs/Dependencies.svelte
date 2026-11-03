@@ -52,7 +52,7 @@
 <h2>Changing what is on disk</h2>
 <p>
   The three actions that change the disk — as opposed to reading it again — live in the build tool's window: the Maven
-  tool window's actions menu. All three run as background jobs and report in the Jobs panel.
+  tool window's actions menu. All three run as background jobs and report in the Jobs panel. So does the work Bennu starts by itself when a project opens: <em>Indexing</em>, <em>Resolving dependencies</em> — a failure there stays in the list, a success clears it — and <em>Analyzing project</em>; and, when you ask for them, <em>Validating project</em> (<strong>Cancel</strong> stops it) and the project-wide vulnerability check, which shows only if it takes more than a couple of seconds.
 </p>
 <div class="feature-grid">
   <div class="feature-card">
@@ -106,19 +106,26 @@
   which dependency brought a jar in, and why there is more than one version of it — because Maven's choice between versions
   depends on the whole reactor. The <strong>Resolve tree</strong> button (the flow icon in the toolbar, or the one in the notice
   at the top) runs <code>mvn dependency:tree</code> in the background. It can take a while on a cold cache, so it only runs when
-  you ask, honours the <em>automatic download</em> setting (offline otherwise), and keeps its answer per project until you resolve again.
+  you ask, honours the <em>automatic download</em> setting (offline otherwise), and keeps its answer per project until you resolve again. While it
+  runs it is a row in the <strong>Jobs</strong> panel, like any other long resolve.
 </p>
 <p>Once it has answered:</p>
 <ul class="prop-list">
   <li><strong>Version conflicts</strong>a group at the top with every artifact the project sees at more than one version. Each lists the version Maven kept, the ones it dropped, and for each version the chain of dependencies that asked for it.</li>
-  <li><strong>via …</strong>every transitive row names the declared dependencies that bring it in</li>
+  <li><strong>via …</strong>every transitive row names the declared dependencies that bring it in; its chevron opens <strong>Required by</strong>, every route from what a module declared down to it (<code>spring-boot-starter-web → spring-web → spring-core</code>)</li>
   <li><strong>Details</strong>a declared row opens (chevron) to show what it pulls in and, when conflicted, its versions</li>
+  <li><strong>Search</strong>the filter also finds a library by what it pulls in — typing <code>freemarker</code> opens the dependencies that bring it, with the match highlighted — and by the routes of a transitive row</li>
   <li><strong>Vulnerability badge</strong>a shield with the count on a dependency with known CVEs — see <strong>Dependency security</strong></li>
 </ul>
 <p>
   On a Cargo workspace the same button runs <code>cargo tree --workspace</code>. Cargo never drops a version — two incompatible
   versions of a crate are both built — so the group is called <strong>Duplicate versions</strong> and lists them without "kept / dropped".
   Maven runs under the JDK the project is indexed with.
+</p>
+<p>
+  Every group starts <strong>closed</strong>, so opening the panel shows the modules and nothing more; a filter opens the groups it found something in.
+  <strong>Show only this module</strong> — on a group header's menu (right-click) or on a module of the selector tree above the list — narrows the panel to that module;
+  <strong>Show all</strong> brings the rest back.
 </p>
 <p>
   Each group header has <strong>Focus in Project</strong> — its locate button, or a right-click on the header — which opens

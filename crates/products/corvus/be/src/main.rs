@@ -58,6 +58,7 @@ mod missing;
 mod mr;
 mod host_handle;
 mod notes;
+mod plan;
 mod plugin_profile;
 mod plugin_rpc;
 mod provider;
@@ -1539,6 +1540,9 @@ fn main() {
     // Reclaims headless repos (named by path, no tab) once idle past `cache.headless_repo_ttl_secs`.
     let sweep_state = Arc::clone(&state);
     app.init(move || ephemeral::start_sweeper(sweep_state));
+    // Plans: the executor is a detached task per run, so it needs the process-wide state by value.
+    let plan_state = Arc::clone(&state);
+    app.init(move || plan::init(plan_state));
 
     if let Err(e) = app.run(dispatcher) {
         eprintln!("corvus-be: serve loop ended with error: {e}");

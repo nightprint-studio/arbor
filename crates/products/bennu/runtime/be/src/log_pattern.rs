@@ -4,57 +4,100 @@
 //! — `%d{…} | %-5level | %logger{1} | …`. Reading that turns the run console's guesses into
 //! facts (see `arbor_logscan::layout`): which column is the class, which values are MDC.
 //!
-//! Where it looks, in this order, in the project root and in the `src/main/resources` of the root
-//! and of each module one level down:
+//! Where it looks, in the project root and in the resources of the root and of each module one level
+//! down (`src/main/resources`, `WEB-INF/classes`, `WEB-INF`), in this order:
 //!
 //! 1. `logback-spring.xml`, `logback.xml` — the pattern of the console appender (the first
 //!    appender when none is a console one), `<property>` substitutions applied;
-//! 2. `log4j2-spring.xml`, `log4j2.xml` — the `PatternLayout` of the `Console` appender;
-//! 3. `application.properties`, `application.yml`, `application.yaml` — `logging.pattern.console`.
+//! 2. `log4j2-spring.xml`, `log4j2.xml`, `log4j2.properties` — the `PatternLayout` of the `Console`
+//!    appender, `<Property>` substitutions applied;
+//! 3. `log4j.xml`, `log4j.properties` — Log4j 1.x's `ConversionPattern`;
+//! 4. `application.properties`, `application.yml`, `application.yaml` — `logging.pattern.console`.
 //!
-//! A pattern that cannot be fully resolved (an unknown `${property}`) or that the layout parser
-//! does not model is simply not used: the console keeps the shape rules, which is what it had.
-//! Reading is a handful of small files at the start of a run, never on the output path.
+//! A project with several of those (a module each) gets a list of them; the first that yields a
+//! layout is the one used. A pattern that cannot be fully resolved (an unknown `${property}`) or
+//! that the layout parser does not model is simply not used: the console keeps the shape rules,
+//! which is what it had. Reading is a handful of small files at the start of a run, never on the
+//! output path.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use arbor_logscan::prelude::PatternLayout;
+use serde::Serialize;
 
 /// The most a config file is read for. A real one is a few kilobytes.
 const MAX_CONFIG_BYTES: u64 = 512 * 1024;
 
+/// One logging configuration that names a console pattern.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct Candidate {
+    /// Relative to the project root, with `/`.
+    pub file: String,
+    /// `logback` | `log4j2` | `log4j` | `spring`.
+    pub kind: &'static str,
+    pub pattern: String,
+    /// The layout parser models it, so the console can use it.
+    pub usable: bool,
+}
+
 /// The layout the project at `root` logs in, if its configuration says one this understands.
 pub(crate) fn detect(root: &Path) -> Option<PatternLayout> {
+    candidates(root).iter().find(|c| c.usable).and_then(|c| PatternLayout::parse(&c.pattern))
+}
+
+/// Every logging configuration of the project that names a pattern, in the order they are consulted.
+pub(crate) fn candidates(root: &Path) -> Vec<Candidate> {
+    let mut found = Vec::new();
     for dir in resource_dirs(root) {
-        for (name, read) in SOURCES {
-            let Some(text) = read_small(&dir.join(name)) else { continue };
-            for pattern in read(&text) {
-                if let Some(layout) = PatternLayout::parse(&pattern) {
-                    return Some(layout);
-                }
-            }
+        for (name, kind, read) in SOURCES {
+            let path = dir.join(name);
+            let Some(text) = read_small(&path) else { continue };
+            let patterns = read(&text);
+            let Some(first) = patterns.first() else { continue };
+            let usable = patterns.iter().find(|p| PatternLayout::parse(p).is_some());
+            found.push(Candidate {
+                file: relative(root, &path),
+                kind,
+                pattern: usable.unwrap_or(first).clone(),
+                usable: usable.is_some(),
+            });
         }
     }
-    None
+    found
+}
+
+fn relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
 }
 
 type Reader = fn(&str) -> Vec<String>;
 
-/// Files in the order they are consulted, each with what extracts its candidate patterns.
-const SOURCES: &[(&str, Reader)] = &[
-    ("logback-spring.xml", patterns_from_logback),
-    ("logback.xml", patterns_from_logback),
-    ("log4j2-spring.xml", patterns_from_log4j2),
-    ("log4j2.xml", patterns_from_log4j2),
-    ("application.properties", patterns_from_properties),
-    ("application.yml", patterns_from_yaml),
-    ("application.yaml", patterns_from_yaml),
+/// Files in the order they are consulted, each with its kind and what extracts its candidate patterns.
+const SOURCES: &[(&str, &str, Reader)] = &[
+    ("logback-spring.xml", "logback", patterns_from_logback),
+    ("logback.xml", "logback", patterns_from_logback),
+    ("log4j2-spring.xml", "log4j2", patterns_from_log4j2),
+    ("log4j2.xml", "log4j2", patterns_from_log4j2),
+    ("log4j2.properties", "log4j2", patterns_from_log4j2_properties),
+    ("log4j.xml", "log4j", patterns_from_log4j1_xml),
+    ("log4j.properties", "log4j", patterns_from_log4j1_properties),
+    ("application.properties", "spring", patterns_from_properties),
+    ("application.yml", "spring", patterns_from_yaml),
+    ("application.yaml", "spring", patterns_from_yaml),
 ];
 
-/// `root` and `root/*` (modules), each with its `src/main/resources`.
+/// `root` and `root/*` (modules), each with the places a web module keeps its resources.
 fn resource_dirs(root: &Path) -> Vec<PathBuf> {
-    let mut dirs = vec![root.join("src/main/resources"), root.to_path_buf()];
+    let places = |base: &Path| {
+        [
+            base.join("src/main/resources"),
+            base.join("src/main/webapp/WEB-INF/classes"),
+            base.join("src/main/webapp/WEB-INF"),
+        ]
+    };
+    let mut dirs: Vec<PathBuf> = places(root).into();
+    dirs.push(root.to_path_buf());
     if let Ok(entries) = std::fs::read_dir(root) {
         let mut modules: Vec<PathBuf> = entries
             .filter_map(Result::ok)
@@ -63,7 +106,7 @@ fn resource_dirs(root: &Path) -> Vec<PathBuf> {
             .collect();
         modules.sort();
         for module in modules {
-            dirs.push(module.join("src/main/resources"));
+            dirs.extend(places(&module));
         }
     }
     dirs
@@ -137,8 +180,11 @@ fn substitute(pattern: &str, props: &HashMap<String, String>) -> Option<String> 
 
 // ── Log4j2 ──────────────────────────────────────────────────────────────────────
 
-/// The `pattern` attribute of every `PatternLayout`, those inside a `Console` first.
+/// The `pattern` attribute of every `PatternLayout`, those inside a `Console` first, with the
+/// `<Property name="…">value</Property>` of the file substituted. One that names a property it
+/// does not define (`${sys:…}`) is dropped.
 pub(crate) fn patterns_from_log4j2(xml: &str) -> Vec<String> {
+    let props = log4j2_properties(xml);
     let mut console: Vec<String> = Vec::new();
     let mut other: Vec<String> = Vec::new();
     let lower = xml.to_ascii_lowercase();
@@ -151,11 +197,96 @@ pub(crate) fn patterns_from_log4j2(xml: &str) -> Vec<String> {
         // The nearest opening appender tag above says what kind of appender this belongs to.
         let owner = lower[..start].rfind("<console").zip(lower[..start].rfind("</")).map(|(c, close)| c > close);
         let is_console = owner.unwrap_or_else(|| lower[..start].rfind("<console").is_some());
-        let pattern = unescape(&pattern);
+        let Some(pattern) = substitute(&unescape(&pattern), &props) else { continue };
         if is_console { console.push(pattern) } else { other.push(pattern) }
     }
     console.extend(other);
     console
+}
+
+/// `<Property name="LOG_PATTERN">%d … %msg%n</Property>` → name → text.
+fn log4j2_properties(xml: &str) -> HashMap<String, String> {
+    let mut props = HashMap::new();
+    for block in blocks(xml, "<property ", "</property>") {
+        let Some(name) = attribute(block, "name") else { continue };
+        let Some(body) = block.find('>').map(|i| &block[i + 1..]) else { continue };
+        let value = body.strip_suffix("</Property>").or_else(|| body.strip_suffix("</property>")).unwrap_or(body);
+        props.insert(name, unescape(value));
+    }
+    props
+}
+
+/// `appender.console.layout.pattern = …` of a `.properties` file, the `Console` appenders first,
+/// with `property.NAME = …` substituted.
+pub(crate) fn patterns_from_log4j2_properties(text: &str) -> Vec<String> {
+    let entries = key_values(text);
+    let props: HashMap<String, String> =
+        entries.iter().filter_map(|(k, v)| k.strip_prefix("property.").map(|n| (n.to_string(), v.clone()))).collect();
+    let is_console = |name: &str| {
+        entries.iter().any(|(k, v)| *k == format!("appender.{name}.type") && v.eq_ignore_ascii_case("console"))
+    };
+    appender_patterns(&entries, "appender.", ".layout.pattern", is_console, |p| substitute(p, &props))
+}
+
+// ── Log4j 1.x ───────────────────────────────────────────────────────────────────
+
+/// `<param name="ConversionPattern" value="…"/>` of each appender, the `ConsoleAppender` first.
+pub(crate) fn patterns_from_log4j1_xml(xml: &str) -> Vec<String> {
+    let mut console: Vec<String> = Vec::new();
+    let mut other: Vec<String> = Vec::new();
+    for block in blocks(xml, "<appender", "</appender>") {
+        let is_console = block.to_ascii_lowercase().contains("consoleappender");
+        for tag in blocks(block, "<param", ">") {
+            if attribute(tag, "name").is_some_and(|n| n.eq_ignore_ascii_case("conversionpattern")) {
+                if let Some(value) = attribute(tag, "value") {
+                    if is_console { console.push(unescape(&value)) } else { other.push(unescape(&value)) }
+                }
+            }
+        }
+    }
+    console.extend(other);
+    console
+}
+
+/// `log4j.appender.STDOUT.layout.ConversionPattern=…`, the appenders that are a `ConsoleAppender` first.
+pub(crate) fn patterns_from_log4j1_properties(text: &str) -> Vec<String> {
+    let entries = key_values(text);
+    let is_console = |name: &str| {
+        entries
+            .iter()
+            .any(|(k, v)| *k == format!("log4j.appender.{name}") && v.to_ascii_lowercase().contains("consoleappender"))
+    };
+    appender_patterns(&entries, "log4j.appender.", ".layout.ConversionPattern", is_console, |p| Some(p.to_string()))
+}
+
+/// The patterns of every `<prefix><name><suffix>` entry, those whose appender `is_console` first, each
+/// run through `resolve` (which may drop it).
+fn appender_patterns(
+    entries: &[(String, String)],
+    prefix: &str,
+    suffix: &str,
+    is_console: impl Fn(&str) -> bool,
+    resolve: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let mut console: Vec<String> = Vec::new();
+    let mut other: Vec<String> = Vec::new();
+    for (key, value) in entries {
+        let Some(name) = key.strip_prefix(prefix).and_then(|k| k.strip_suffix(suffix)) else { continue };
+        let Some(pattern) = resolve(value) else { continue };
+        if is_console(name) { console.push(pattern) } else { other.push(pattern) }
+    }
+    console.extend(other);
+    console
+}
+
+/// `key = value` (or `key: value`) lines of a properties file, without comments.
+fn key_values(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('!'))
+        .filter_map(|l| l.split_once('=').or_else(|| l.split_once(':')))
+        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        .collect()
 }
 
 // ── Spring Boot properties ──────────────────────────────────────────────────────
@@ -203,6 +334,61 @@ fn unquote(value: &str) -> String {
         }
     }
     v.to_string()
+}
+
+// ── the files the configuration writes to ───────────────────────────────────────
+
+/// The logging configurations that can name a file the program writes its log to.
+const FILE_SOURCES: &[&str] = &[
+    "logback-spring.xml",
+    "logback.xml",
+    "log4j2-spring.xml",
+    "log4j2.xml",
+    "log4j2.properties",
+    "log4j.xml",
+    "log4j.properties",
+];
+
+/// The log files the project's logging configuration writes to, that exist: Log4j2's `fileName`,
+/// Logback's `<file>`, Log4j 1.x's `File`. A name that needs a variable (`${sys:…}`) is skipped — it
+/// cannot be known without running — and a relative one is taken from the project root, where the
+/// program runs from.
+pub(crate) fn declared_files(root: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for dir in resource_dirs(root) {
+        for name in FILE_SOURCES {
+            let Some(text) = read_small(&dir.join(name)) else { continue };
+            for value in declared_names(&text) {
+                if value.is_empty() || value.contains("${") {
+                    continue;
+                }
+                let path = Path::new(&value);
+                let path = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
+                if path.is_file() && !out.contains(&path) {
+                    out.push(path);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn declared_names(text: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for tag in blocks(text, "<", ">") {
+        names.extend(attribute(tag, "filename")); // `attribute` matches case-insensitively and wants the name lowercase
+        if attribute(tag, "name").is_some_and(|n| n.eq_ignore_ascii_case("file")) {
+            names.extend(attribute(tag, "value"));
+        }
+    }
+    names.extend(elements(text, "file").into_iter().map(|f| unescape(f.trim())));
+    names.extend(
+        key_values(text)
+            .into_iter()
+            .filter(|(k, _)| k.ends_with(".fileName") || k.ends_with(".File") || k.ends_with(".file"))
+            .map(|(_, v)| v),
+    );
+    names
 }
 
 // ── tiny XML helpers ────────────────────────────────────────────────────────────
@@ -327,6 +513,45 @@ mod tests {
         assert_eq!(got.len(), 2);
     }
 
+    /// The usual Log4j2 shape: the pattern defined once in `<Properties>` and named in the layout.
+    #[test]
+    fn a_log4j2_property_is_substituted() {
+        let xml = "<Configuration><Properties><Property name=\"LOG_PATTERN\">%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n</Property></Properties>\
+                   <Appenders><Console name=\"C\"><PatternLayout pattern=\"${LOG_PATTERN}\"/></Console></Appenders></Configuration>";
+        assert_eq!(patterns_from_log4j2(xml), ["%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"]);
+    }
+
+    #[test]
+    fn a_log4j2_system_property_drops_the_pattern() {
+        let xml = "<Configuration><Appenders><Console name=\"C\"><PatternLayout pattern=\"${sys:LOG_PATTERN}\"/></Console></Appenders></Configuration>";
+        assert!(patterns_from_log4j2(xml).is_empty());
+    }
+
+    #[test]
+    fn log4j2_properties_name_the_console_pattern() {
+        let text = "property.p = %d{HH:mm:ss} %level %msg%n\n\
+                    appender.file.type = File\nappender.file.layout.pattern = %d %m\n\
+                    appender.console.type = Console\nappender.console.layout.pattern = ${p}\n";
+        assert_eq!(patterns_from_log4j2_properties(text), ["%d{HH:mm:ss} %level %msg%n", "%d %m"]);
+    }
+
+    #[test]
+    fn log4j1_xml_reads_the_conversion_pattern() {
+        let xml = "<log4j:configuration>\
+                   <appender name=\"F\" class=\"org.apache.log4j.FileAppender\"><layout class=\"org.apache.log4j.PatternLayout\"><param name=\"ConversionPattern\" value=\"%d %m\"/></layout></appender>\
+                   <appender name=\"C\" class=\"org.apache.log4j.ConsoleAppender\"><layout class=\"org.apache.log4j.PatternLayout\"><param name=\"ConversionPattern\" value=\"%d{HH:mm:ss} %-5p [%c] %m%n\"/></layout></appender>\
+                   </log4j:configuration>";
+        assert_eq!(patterns_from_log4j1_xml(xml), ["%d{HH:mm:ss} %-5p [%c] %m%n", "%d %m"]);
+    }
+
+    #[test]
+    fn log4j1_properties_read_the_console_appender_first() {
+        let text = "log4j.rootLogger=INFO, F, C\n\
+                    log4j.appender.F=org.apache.log4j.FileAppender\nlog4j.appender.F.layout.ConversionPattern=%d %m\n\
+                    log4j.appender.C=org.apache.log4j.ConsoleAppender\nlog4j.appender.C.layout.ConversionPattern=%d{HH:mm:ss} %-5p %c - %m%n\n";
+        assert_eq!(patterns_from_log4j1_properties(text), ["%d{HH:mm:ss} %-5p %c - %m%n", "%d %m"]);
+    }
+
     #[test]
     fn spring_properties_name_the_console_pattern() {
         let text = "server.port=8080\n# a comment\nlogging.pattern.console = %d{HH:mm:ss} %level %msg%n\nlogging.pattern.file=%d %msg\n";
@@ -357,7 +582,54 @@ mod tests {
         )
         .unwrap();
         assert!(detect(&dir).is_some());
+        let found = candidates(&dir);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].file, "web/src/main/resources/logback.xml");
+        assert!(found[0].usable);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_web_modules_classes_folder_is_searched() {
+        let dir = std::env::temp_dir().join(format!("bennu-log-pattern-web-{}", std::process::id()));
+        let classes = dir.join("Webapp/src/main/webapp/WEB-INF/classes");
+        std::fs::create_dir_all(&classes).unwrap();
+        std::fs::write(
+            classes.join("log4j2.xml"),
+            "<Configuration><Appenders><Console name=\"C\"><PatternLayout pattern=\"%d{HH:mm:ss} %-5level %logger{36} - %msg%n\"/></Console></Appenders></Configuration>",
+        )
+        .unwrap();
+        assert!(detect(&dir).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_pattern_the_parser_does_not_model_is_listed_but_not_used() {
+        let dir = std::env::temp_dir().join(format!("bennu-log-pattern-odd-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("src/main/resources")).unwrap();
+        std::fs::write(
+            dir.join("src/main/resources/logback.xml"),
+            "<configuration><appender class=\"x.ConsoleAppender\"><pattern>%replace(%msg){'a','b'}%n</pattern></appender></configuration>",
+        )
+        .unwrap();
+        let found = candidates(&dir);
+        assert_eq!(found.len(), 1);
+        assert!(!found[0].usable);
+        assert!(detect(&dir).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_files_a_configuration_writes_to_are_named() {
+        let log4j2 = "<Configuration><Appenders><File name=\"F\" fileName=\"logs/app.log\"/><File name=\"G\" fileName=\"${sys:dir}/x.log\"/></Appenders></Configuration>";
+        assert_eq!(declared_names(log4j2), ["logs/app.log", "${sys:dir}/x.log"]);
+        let logback = "<configuration><appender class=\"x.FileAppender\"><file>logs/web.log</file></appender></configuration>";
+        assert_eq!(declared_names(logback), ["logs/web.log"]);
+        let log4j1 = "<appender class=\"org.apache.log4j.FileAppender\"><param name=\"File\" value=\"logs/old.log\"/></appender>";
+        assert_eq!(declared_names(log4j1), ["logs/old.log"]);
+        assert_eq!(declared_names("log4j.appender.F.File=logs/p.log
+log4j.appender.F.layout=x
+"), ["logs/p.log"]);
     }
 
     #[test]
@@ -365,6 +637,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bennu-log-pattern-none-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(detect(&dir).is_none());
+        assert!(candidates(&dir).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

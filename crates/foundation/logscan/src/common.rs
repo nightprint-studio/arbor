@@ -80,6 +80,11 @@ pub fn level_of(word: &str) -> Option<Level> {
         "INFO" | "NOTICE" => Level::Info,
         "WARN" | "WARNING" => Level::Warn,
         "ERROR" | "SEVERE" => Level::Error,
+        // `java.util.logging` prints its level in the JVM's language — Tomcat's own logs on an Italian,
+        // French, German or Spanish machine. `GRAVE` is SEVERE in Italian, French and Spanish.
+        "GRAVE" | "SCHWERWIEGEND" => Level::Error,
+        "AVVERTENZA" | "AVERTISSEMENT" | "WARNUNG" | "ADVERTENCIA" | "AVISO" => Level::Warn,
+        "INFORMAZIONI" | "INFORMATIONS" | "INFORMATIONEN" | "INFORMACIÓN" | "INFORMAÇÕES" => Level::Info,
         "FATAL" | "CRITICAL" => Level::Fatal,
         _ => return None,
     })
@@ -523,7 +528,16 @@ fn path_rule(text: &str, at: usize) -> Option<Hit> {
     if !looks_like_path(path) {
         return None;
     }
-    Some(Hit::linked(at, end, Token::Path, Link::File { path: path.to_string(), line, method: None }))
+    Some(Hit::linked(at, end, Token::Path, Link::File { path: without_url_slash(path).to_string(), line, method: None }))
+}
+
+/// `/C:/Sviluppo/app` → `C:/Sviluppo/app`. A `file:/C:/…` URL, which is what a class loader or Tomcat prints
+/// for a Windows file, leaves the slash of the URL in front of the drive once the scheme is gone — and
+/// that is not a path anything can open.
+fn without_url_slash(path: &str) -> &str {
+    let b = path.as_bytes();
+    let drive_after_slash = b.len() >= 4 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' && (b[3] == b'/' || b[3] == b'\\');
+    if drive_after_slash { &path[1..] } else { path }
 }
 
 /// Whether `s` is shaped like a path rather than like a word that happens to contain a
@@ -713,6 +727,14 @@ mod tests {
             line.spans[0].link,
             Some(Link::File { path: "C:/build/out/app.jar".into(), line: None, method: None })
         );
+    }
+
+    #[test]
+    fn the_slash_of_a_file_url_is_not_part_of_a_windows_path() {
+        let line = interpret(&RuleSet::common(), "Loaded file:/C:/work/app/Foo.class ok");
+        let link = line.spans.iter().find(|s| s.token == Token::Path).and_then(|s| s.link.clone());
+        assert_eq!(link, Some(Link::File { path: "C:/work/app/Foo.class".into(), line: None, method: None }));
+        assert_eq!(without_url_slash("/home/u/x"), "/home/u/x");
     }
 
     #[test]

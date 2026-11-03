@@ -94,7 +94,8 @@ impl Catalog {
                 return Some(g);
             }
         }
-        builtin::grammar_for(scan)
+        // The file's own name settles a Logback file that is still just `<configuration>`.
+        builtin::grammar_for(scan).or_else(|| crate::logging::grammar_for_file(scan, doc_path))
     }
 
     /// The schema file a location refers to.

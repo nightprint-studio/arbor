@@ -96,6 +96,23 @@ export function introducers(usage: ArtifactUsage | undefined): string[] {
   return out;
 }
 
+/** Every route by which `usage` gets into a module: the dependency the module declared, down to the
+ *  artifact itself. "Who requires this" is the last-but-one entry; the first is who to blame. */
+export function routes(usage: ArtifactUsage | undefined): string[][] {
+  if (!usage) return [];
+  const seen = new Set<string>();
+  const out: string[][] = [];
+  for (const o of usage.occurrences) {
+    if (o.node.omitted || o.chain.length === 0) continue;
+    const route = [...o.chain.map((c) => c.coord), usage.coord];
+    const key = route.join('>');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(route);
+  }
+  return out;
+}
+
 /** Whether some module declares `coord` itself. */
 export function isDeclaredDirectly(usage: ArtifactUsage | undefined): boolean {
   return !!usage?.occurrences.some((o) => o.chain.length === 0 && !o.node.omitted);

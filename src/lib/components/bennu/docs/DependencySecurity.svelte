@@ -87,6 +87,9 @@
       (also reachable by asking the assistant to show them). The same window the Corvus security dashboard uses: severity
       tabs with counts, worst first, one row per advisory, and a detail view with the summary, whether the dependency is declared
       (and in which modules) or pulled in transitively, the fixed version, and links to osv.dev and — for a CVE — NVD.
+      <strong>Ask Imber</strong> in the detail's header asks the assistant whether this project is really exposed — whether the
+      vulnerable part of the library is used, and reachable, from your code — and what fixing it would change: the version to move to,
+      what that drags in, the API changes your code would have to follow. It reads the project and changes nothing.
     </div>
   </div>
 </div>

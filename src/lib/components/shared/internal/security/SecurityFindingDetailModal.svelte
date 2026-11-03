@@ -12,7 +12,7 @@
    * code path used by MR/Issue modals). CVE/CWE/GHSA chips with a `url`
    * open the upstream advisory in the system browser.
    */
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, type Snippet } from 'svelte';
   import {
     ShieldAlert, ExternalLink, FileCode2, Bug, Tag, Calendar, Hash,
     AlertOctagon, CircleDot, CheckCircle2, Ban, Clock, Building2, Layers,
@@ -35,9 +35,11 @@
   interface Props {
     finding: SecurityFinding;
     onClose: () => void;
+    /** Extra header actions of the host (Bennu: "Ask Imber"), before "Open in …". */
+    actions?: Snippet<[SecurityFinding]>;
   }
 
-  let { finding, onClose }: Props = $props();
+  let { finding, onClose, actions: hostActions }: Props = $props();
 
   const sev = $derived(SEVERITY_META[finding.severity]);
 
@@ -213,6 +215,7 @@
       </Badge>
 
       {#snippet actions()}
+        {@render hostActions?.(finding)}
         {#if finding.web_url}
           <Button
             variant="secondary"

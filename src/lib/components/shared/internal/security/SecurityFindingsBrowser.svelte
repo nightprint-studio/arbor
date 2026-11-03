@@ -48,6 +48,8 @@
     toolbar?: Snippet;
     /** Extra footer text (Corvus: the "capped at N" warning). */
     note?: Snippet;
+    /** Extra actions in the header of a finding's detail window (Bennu: "Ask Imber"). */
+    findingActions?: Snippet<[SecurityFinding]>;
   }
 
   let {
@@ -62,6 +64,7 @@
     emptyMessage = 'No findings to show.',
     toolbar,
     note,
+    findingActions,
   }: Props = $props();
 
   // svelte-ignore state_referenced_locally
@@ -225,7 +228,7 @@
 </div>
 
 {#if selectedFinding}
-  <SecurityFindingDetailModal finding={selectedFinding} onClose={() => (selectedFinding = null)} />
+  <SecurityFindingDetailModal finding={selectedFinding} actions={findingActions} onClose={() => (selectedFinding = null)} />
 {/if}
 
 <style>

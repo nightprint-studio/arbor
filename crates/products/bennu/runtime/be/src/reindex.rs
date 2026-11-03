@@ -24,6 +24,21 @@ pub struct ReindexArgs {
     pub root: String,
 }
 
+/// Re-read the sources of the project at `root` after something outside Bennu **wrote** some: a Maven
+/// lifecycle run from the Maven tool window, whose annotation processors put `Order_` (the JPA metamodel),
+/// `*MapperImpl` or `QOrder` under `target/generated-sources`. The index only reads a file when it opens
+/// the project, so until it is told, every reference to a generated class stays "cannot find symbol" —
+/// whatever the build just produced.
+///
+/// The cheap tier, [`IndexService::refresh_after_compile`] — what `bennu_build` does after its own compile —
+/// and not [`bennu_reindex`]: no pom changed, so the dependency list is still true and Maven is not asked again.
+#[arbor_rpc::handler]
+fn bennu_refresh_index(ctx: &BennuState, args: ReindexArgs) -> Result<(), String> {
+    IndexService::global().set_host(ctx.host_caller());
+    IndexService::global().refresh_after_compile(&args.root, ctx.event_sink());
+    Ok(())
+}
+
 /// Invalidate + rebuild the whole semantic index for the project at `root`. Returns
 /// immediately; the rebuild runs off-thread and reports progress on the index-progress
 /// event stream. Errs when no open project owns `root`.

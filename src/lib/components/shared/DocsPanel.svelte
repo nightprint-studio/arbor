@@ -24,7 +24,7 @@
     GitPullRequest, Search, FolderPlus, Download, Settings, TicketCheck,
     StickyNote, FolderTree, FolderOpen, History, Bug, BarChart2,
     Monitor, Database, Shield, ShieldCheck, Cloud, Tag, Share2, FolderX, Bot,
-    Palette, Link2, Store, Music4,
+    Palette, Link2, Store, Music4, ListChecks,
   } from 'lucide-svelte';
 
   // ── Section components ───────────────────────────────────────────────────────
@@ -56,6 +56,7 @@
   import SettingsProject      from './docs/SettingsProject.svelte';
   import PipelinesLocal       from './docs/PipelinesLocal.svelte';
   import PipelinesCicd        from './docs/PipelinesCicd.svelte';
+  import Plans                from './docs/Plans.svelte';
   import SourceExport         from './docs/SourceExport.svelte';
   import TagsStash            from './docs/TagsStash.svelte';
   import IssuesDocs     from './docs/IssuesDocs.svelte';
@@ -138,6 +139,7 @@
         { id: 'pipelines-local', label: 'Pipelines',              icon: Workflow       },
         { id: 'source-export',   label: 'Source Export plugin',   icon: Share2         },
         { id: 'pipelines-cicd',  label: 'CI / CD',                icon: Cloud          },
+        { id: 'plans',           label: 'Plans',                  icon: ListChecks     },
         { id: 'mr',            label: 'Pull / Merge Requests',  icon: GitPullRequest },
         { id: 'issues',        label: 'Issues (Linear / Jira)',  icon: TicketCheck    },
         { id: 'security',      label: 'Security Dashboard',     icon: ShieldCheck    },
@@ -209,6 +211,7 @@
     'settings-project':      SettingsProject,
     'pipelines-local':       PipelinesLocal,
     'pipelines-cicd':        PipelinesCicd,
+    'plans':                 Plans,
     'source-export':         SourceExport,
     'tags-stash':            TagsStash,
     'security':              Security,

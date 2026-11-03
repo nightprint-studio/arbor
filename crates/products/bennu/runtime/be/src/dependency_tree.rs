@@ -20,6 +20,7 @@ use bennu_deps::prelude::{parse_tree_output, ModuleTree};
 use serde::{Deserialize, Serialize};
 
 use crate::dep_classpath::{auto_download, find_mvn_launcher};
+use crate::task::{Task, TaskSpec};
 
 /// A reactor resolve can take minutes on a cold cache; past this it is hung, not slow.
 const TIMEOUT: Duration = Duration::from_secs(300);
@@ -44,10 +45,21 @@ pub struct DependencyTree {
 /// something never downloaded, a pom that does not build — because "empty" would be read as "no
 /// dependencies".
 #[arbor_rpc::handler]
-async fn bennu_dependency_tree(_ctx: &BennuState, args: DependencyTreeArgs) -> Result<DependencyTree, String> {
-    tokio::task::spawn_blocking(move || tree_of(Path::new(&args.root)))
+async fn bennu_dependency_tree(ctx: &BennuState, args: DependencyTreeArgs) -> Result<DependencyTree, String> {
+    // Minutes on a cold repository: it is a row in the Jobs panel for as long as it runs, like every other
+    // long resolve, and the panel that asked keeps its own spinner.
+    let host = ctx.host_caller();
+    let task = Task::start(
+        host.as_ref(),
+        &ctx.event_sink(),
+        TaskSpec::new("Resolve dependency tree", args.root.clone()).category("Dependencies"),
+    );
+    let result = tokio::task::spawn_blocking(move || tree_of(Path::new(&args.root)))
         .await
-        .map_err(|e| format!("dependency tree: {e}"))?
+        .map_err(|e| format!("dependency tree: {e}"))
+        .and_then(|r| r);
+    task.finish(result.as_ref().map(|_| ()).map_err(Clone::clone));
+    result
 }
 
 fn tree_of(root: &Path) -> Result<DependencyTree, String> {

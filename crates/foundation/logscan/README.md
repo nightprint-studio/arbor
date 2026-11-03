@@ -43,6 +43,8 @@ inside whichever console needed it first.
 | `at com.acme.Order.total(Order.java:118)` | `Package` + `Frame`, both linked to the source |
 | `com.acme.OrderNotFoundException` | `Exception` |
 | `com.acme.order.OrderService` | `Package` |
+| `03-Nov-2026 13:11:14.490 GRAVE [main] org.apache.catalina.core.StandardContext.listenerStart …` (Tomcat's own log, level in the JVM's language) | `Timestamp`, `Level`, `Thread`, `Logger` (linked to the class) |
+| `[03/Nov/2026:14:18:34 +0100]` (access log) | `Timestamp` |
 
 Every rule is written to **decline** rather than guess. `and/or` is not a path, `Error
 handling is enabled` is not an error, `1.8.0_292` is not a package, and `order.total` in a

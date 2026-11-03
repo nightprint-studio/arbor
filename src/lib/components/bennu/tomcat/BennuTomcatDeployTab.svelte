@@ -16,12 +16,14 @@
   import type { RunConfig } from '$lib/stores/bennu/run-config.svelte';
   import type { TomcatSettings } from '$lib/stores/bennu/tomcat-config';
   import type { TomcatForm } from './tomcat-form.svelte';
+  import BennuTomcatLibsField from './BennuTomcatLibsField.svelte';
 
   let {
     config,
     patch,
     patchT,
     form,
+    root,
     moduleOptions,
     isMultiModule,
   }: {
@@ -29,6 +31,7 @@
     patch: (p: Partial<Omit<RunConfig, 'id'>>) => void;
     patchT: (p: Partial<TomcatSettings>) => void;
     form: TomcatForm;
+    root: string;
     moduleOptions: { value: string; label: string }[];
     isMultiModule: boolean;
   } = $props();
@@ -89,6 +92,10 @@
     <Toggle checked={t.reloadable} onchange={(v) => patchT({ reloadable: v })} />
     <span>Reload the context when classes change</span>
   </label>
+</FormField>
+
+<FormField label="Server libraries">
+  <BennuTomcatLibsField paths={t.libPaths} {root} onchange={(libPaths) => patchT({ libPaths })} />
 </FormField>
 
 <style>

@@ -11,9 +11,11 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
+  import AssistantStalePrompt from './AssistantStalePrompt.svelte';
   import type { AccessAnswer, AccessRequest } from './assistant-types';
 
   let { request, conversationId }: { request: AccessRequest; conversationId: string } = $props();
+  const waiting = $derived(bennuAssistantStore.waitingOn(conversationId));
 
   const answer = (a: AccessAnswer) => bennuAssistantStore.answerAccess(conversationId, request.id, a);
 
@@ -22,25 +24,43 @@
     read: { label: 'Reading allowed', tone: 'info' },
     write: { label: 'Reading and writing allowed', tone: 'success' },
   };
+  // Writing in a folder already open for reading: the reading is settled, so the only question left is
+  // whether to allow writing — and "no" is final for the session, the agent is told not to ask again.
+  const upgrade = $derived(!!request.upgrade);
+  const result = $derived(
+    request.answer
+      ? upgrade && request.answer !== 'write'
+        ? { label: 'Kept read-only', tone: 'info' as const }
+        : RESULT[request.answer]
+      : null,
+  );
 </script>
 
 <div class="ask" class:done={request.answer !== undefined}>
   <div class="head">
     <FolderOpen size={13} />
-    <span class="title">Wants to reach a folder outside the allowed scope</span>
-    {#if request.answer}<Badge variant="tone" tone={RESULT[request.answer].tone} size="sm">{RESULT[request.answer].label}</Badge>{/if}
+    <span class="title">{upgrade ? 'Wants to write in a folder opened for reading' : 'Wants to reach a folder outside the allowed scope'}</span>
+    {#if result}<Badge variant="tone" tone={result.tone} size="sm">{result.label}</Badge>{/if}
   </div>
 
   <code class="path">{request.folder}</code>
   {#if request.file}<span class="why">Because of <code>{request.file}</code></span>{/if}
   <p class="reason">{request.reason}</p>
 
-  {#if !request.answer}
+  {#if !request.answer && !waiting}
+    <AssistantStalePrompt />
+  {:else if !request.answer}
     <div class="buttons">
-      <Button variant="ghost" size="sm" onclick={() => answer('denied')}><X size={12} /> Deny</Button>
-      <span class="grow"></span>
-      <Button variant="secondary" size="sm" onclick={() => answer('read')}><Eye size={12} /> Allow reading</Button>
-      <Button variant="primary" size="sm" onclick={() => answer('write')}><Pencil size={12} /> Allow reading &amp; writing</Button>
+      {#if upgrade}
+        <Button variant="secondary" size="sm" onclick={() => answer('denied')}><Eye size={12} /> Keep read-only</Button>
+        <span class="grow"></span>
+        <Button variant="primary" size="sm" onclick={() => answer('write')}><Pencil size={12} /> Allow writing</Button>
+      {:else}
+        <Button variant="ghost" size="sm" onclick={() => answer('denied')}><X size={12} /> Deny</Button>
+        <span class="grow"></span>
+        <Button variant="secondary" size="sm" onclick={() => answer('read')}><Eye size={12} /> Allow reading</Button>
+        <Button variant="primary" size="sm" onclick={() => answer('write')}><Pencil size={12} /> Allow reading &amp; writing</Button>
+      {/if}
     </div>
     <span class="note"><Check size={10} /> For this session, for this folder only.</span>
   {/if}

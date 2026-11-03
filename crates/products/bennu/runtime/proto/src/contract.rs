@@ -1467,6 +1467,10 @@ pub struct TomcatRunConfig {
     pub context_raw: String,
     /// The JNDI resources of the generated context.
     pub resources: Vec<TomcatResource>,
+    /// Jars, and folders of jars, copied into the server's `lib/` at launch — JDBC drivers the
+    /// project does not depend on, and anything else the server itself must load. A folder
+    /// contributes the `.jar` files directly in it. Absolute, or relative to the project root.
+    pub lib_paths: Vec<String>,
 }
 
 impl Default for TomcatRunConfig {
@@ -1486,6 +1490,7 @@ impl Default for TomcatRunConfig {
             context_mode: "guided".to_string(),
             context_raw: String::new(),
             resources: Vec::new(),
+            lib_paths: Vec::new(),
         }
     }
 }
@@ -1503,10 +1508,6 @@ pub struct TomcatResource {
     pub name: String,
     /// `datasource` — the JDBC driver class.
     pub driver: String,
-    /// `datasource` — a driver jar to copy into the server's `lib/` at launch, for a driver the
-    /// project does not depend on. Empty = find it on the project's runtime classpath by name.
-    /// Absolute, or relative to the project root.
-    pub driver_jar: String,
     /// `datasource` — the JDBC URL.
     pub url: String,
     /// `datasource` — the database user.
@@ -1516,12 +1517,12 @@ pub struct TomcatResource {
     pub password_mode: String,
     /// `datasource` in `"clear"` mode — the password. Always empty in `"secret"` mode.
     pub password: String,
-    /// `datasource` — `maxTotal`.
-    pub max_total: u32,
-    /// `datasource` — `maxIdle`.
-    pub max_idle: u32,
-    /// `datasource` — `maxWaitMillis`.
-    pub max_wait_ms: u32,
+    /// `datasource` — `maxTotal`. Negative (`-1`) means no limit.
+    pub max_total: i32,
+    /// `datasource` — `maxIdle`. Negative (`-1`) means no limit.
+    pub max_idle: i32,
+    /// `datasource` — `maxWaitMillis`. `-1` waits indefinitely for a connection.
+    pub max_wait_ms: i32,
     /// `datasource` — `validationQuery`; empty omits it.
     pub validation_query: String,
     /// `datasource` — `testOnBorrow`.
@@ -1545,7 +1546,6 @@ impl Default for TomcatResource {
             kind: "datasource".to_string(),
             name: String::new(),
             driver: String::new(),
-            driver_jar: String::new(),
             url: String::new(),
             user: String::new(),
             password_mode: "secret".to_string(),

@@ -25,9 +25,13 @@ import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
 import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
 
-/** Backslashes to forward slashes — the form every path in the project store is in. */
+/**
+ * Backslashes to forward slashes — the form every path in the project store is in — and without the
+ * slash a `file:/C:/…` URL leaves in front of a Windows drive: `/C:/app/Foo.java` names no file, and
+ * the editor would open an empty tab for it.
+ */
 function canon(path: string): string {
-  return path.replace(/\\/g, '/');
+  return path.replace(/\\/g, '/').replace(/^\/([A-Za-z]:\/)/, '$1');
 }
 
 /**

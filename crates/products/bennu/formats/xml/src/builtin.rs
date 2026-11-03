@@ -328,7 +328,11 @@ pub fn grammar_for(scan: &Scan) -> Option<Grammar> {
     if is_pom(scan) {
         return Some(pom());
     }
-    is_taglib(scan).then(taglib)
+    if is_taglib(scan) {
+        return Some(taglib());
+    }
+    // `log4j2.xml` and `logback.xml`: the other two files nobody ships a schema for.
+    crate::logging::grammar_for(scan)
 }
 
 /// Whether this document is a tag library descriptor: a `<taglib>` root. Unlike `<project>`,

@@ -11,8 +11,9 @@
 //!    trace in a console;
 //! 2. the module's run classpath (Maven, runtime scope) is resolved — the same one a plain run uses;
 //! 3. a **live** deployment mounts `src/main/webapp` with the compiled classes and each dependency
-//!    jar under it, so there is nothing to package; the JDBC drivers it finds are copied to the
-//!    base's `lib/` instead, where Tomcat looks for them;
+//!    jar under it, so there is nothing to package; the server libraries the configuration lists
+//!    (`libs`) and the JDBC drivers it finds are copied to the base's `lib/` instead, where Tomcat
+//!    looks for them;
 //! 4. the base is regenerated, the secrets are looked up, and the JVM is started through the same
 //!    [`spawn_streamed`] every other run uses — so the console, stdin, Stop and the debugger need
 //!    nothing new.
@@ -22,7 +23,9 @@
 
 mod download;
 mod driver_fetch;
+mod libs;
 mod secrets;
+mod web_lib;
 
 use std::collections::HashMap;
 use std::net::TcpListener;
@@ -45,6 +48,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use driver_fetch::Fetch;
+
+use crate::task::{Task, TaskSpec};
 
 use crate::build::{
     is_gradle_root, java_program, launching_jdk_major, resolve_java_home, run_classpath, spawn_streamed,
@@ -383,16 +388,11 @@ fn bennu_tomcat_download(ctx: &BennuState, args: DownloadArgs) -> Result<(), Str
     }
     let guard = InstallGuard;
     let sink = ctx.event_sink();
-    let job = ctx.host_caller().and_then(|host| {
-        crate::index_service::register_bennu_job(
-            &host,
-            &sink,
-            &format!("Download Tomcat {}", args.version),
-            &url,
-            "downloads",
-            false,
-        )
-    });
+    let task = Task::start(
+        ctx.host_caller().as_ref(),
+        &sink,
+        TaskSpec::new(format!("Download Tomcat {}", args.version), url.as_str()).category("downloads"),
+    );
     let dir = install_dir(&args.root, &args.install_dir);
     std::thread::Builder::new()
         .name("bennu-tomcat-install".into())
@@ -403,7 +403,7 @@ fn bennu_tomcat_download(ctx: &BennuState, args: DownloadArgs) -> Result<(), Str
                 Ok(version) => emit(&sink, json!({ "kind": "done", "version": version, "home": forward(&dir.join(version)) })),
                 Err(e) => emit(&sink, json!({ "kind": "error", "error": e })),
             }
-            crate::index_service::finish_bennu_job(&sink, job, result.is_ok(), result.err());
+            task.finish(result.map(|_| ()));
         })
         .map(|_| ())
         .map_err(|e| {
@@ -517,13 +517,18 @@ fn live_deployment(
         ));
     }
     let mut mounts = Vec::new();
+    // Only the module's own classes are `/WEB-INF/classes` in a packaged WAR; the sibling modules it is built
+    // from would be jars in `/WEB-INF/lib`. They stay loadable but unlisted, so code telling "plugins under
+    // development" (classes) from installed ones (jars) does not take a sibling for the former.
+    let own_classes = forward(&module.join("target/classes"));
     for entry in classpath.iter().filter(|e| !driver_jars.contains(e)) {
         let path = Path::new(entry);
         if path.is_dir() {
-            mounts.push(Mount { kind: MountKind::Dir, base: forward(path), web_app_mount: "/WEB-INF/classes".into() });
+            let class_loader_only = forward(path) != own_classes;
+            mounts.push(Mount { kind: MountKind::Dir, base: forward(path), web_app_mount: "/WEB-INF/classes".into(), class_loader_only });
         } else if path.is_file() && entry.to_ascii_lowercase().ends_with(".jar") {
             let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            mounts.push(Mount { kind: MountKind::File, base: forward(path), web_app_mount: format!("/WEB-INF/lib/{name}") });
+            mounts.push(Mount { kind: MountKind::File, base: forward(path), web_app_mount: format!("/WEB-INF/lib/{name}"), class_loader_only: false });
         }
     }
     Ok((forward(&webapp), mounts))
@@ -564,18 +569,22 @@ fn bennu_run_tomcat(ctx: &BennuState, args: RunTomcatArgs) -> Result<RunHandle, 
     let entries: Vec<String> = classpath.split(separator).filter(|e| !e.is_empty()).map(str::to_string).collect();
 
     let datasources: Vec<_> = t.resources.iter().filter(|r| r.kind == "datasource").collect();
-    // A data source that names its own driver jar is not looked up on the classpath: the jar the
-    // person chose is the one that goes into the server's `lib/`.
-    let (own_jar, by_name): (Vec<_>, Vec<_>) = datasources.iter().partition(|r| !r.driver_jar.trim().is_empty());
-    let drivers: Vec<&str> = by_name.iter().map(|r| r.driver.as_str()).filter(|d| !d.is_empty()).collect();
+    // What the person put in the server libraries goes into `lib/` as it is, and comes first: a
+    // driver found there is not looked for anywhere else.
+    let libs::LibSet { jars: mut lib_jars, warnings: lib_warnings } =
+        libs::expand(&t.lib_paths, |p| resolve_dir(&args.root, p, ""));
+    warnings.extend(lib_warnings);
+    let lib_names: Vec<String> = lib_jars.iter().map(|j| j.to_string_lossy().into_owned()).collect();
+    let wanted: Vec<&str> = datasources.iter().map(|r| r.driver.as_str()).filter(|d| !d.is_empty()).collect();
+    let drivers: Vec<&str> = wanted.iter().copied().filter(|d| pick_driver_jars(&lib_names, &[*d]).is_empty()).collect();
+    // Then the drivers the project itself depends on. Whichever copy of a driver the project has, it is
+    // not also mounted into the web application: the server's own `lib/` provides it.
     let driver_jars = pick_driver_jars(&entries, &drivers);
-    let mut lib_jars: Vec<PathBuf> = driver_jars.iter().map(PathBuf::from).collect();
-    let keep = |jar: PathBuf, lib_jars: &mut Vec<PathBuf>| {
-        if !lib_jars.contains(&jar) {
-            lib_jars.push(jar);
-        }
-    };
-    // A driver the project does not depend on comes from Maven Central, once, and is kept.
+    let unmounted = pick_driver_jars(&entries, &wanted);
+    for jar in &driver_jars {
+        libs::add(&mut lib_jars, PathBuf::from(jar));
+    }
+    // And a driver found nowhere comes from Maven Central, once, and is kept.
     let mut asked: Vec<&str> = Vec::new();
     for d in drivers.iter().copied().filter(|d| pick_driver_jars(&entries, &[*d]).is_empty()) {
         if asked.contains(&d) {
@@ -583,28 +592,21 @@ fn bennu_run_tomcat(ctx: &BennuState, args: RunTomcatArgs) -> Result<RunHandle, 
         }
         asked.push(d);
         match driver_fetch::ensure(d, crate::dep_classpath::auto_download()) {
-            Ok(Fetch::Cached(jar)) => keep(jar, &mut lib_jars),
+            Ok(Fetch::Cached(jar)) => libs::add(&mut lib_jars, jar),
             Ok(Fetch::Downloaded(jar)) => {
                 warnings.push(format!("Downloaded the JDBC driver {d} from Maven Central: {}\n", jar.display()));
-                keep(jar, &mut lib_jars);
+                libs::add(&mut lib_jars, jar);
             }
             Ok(Fetch::NotAllowed) => warnings.push(format!(
-                "The JDBC driver {d} is not a dependency of the project. Automatic downloads are off — turn them on, add the dependency, or choose the jar on the data source.\n"
+                "The JDBC driver {d} is not a dependency of the project. Automatic downloads are off — turn them on, add the dependency, or add the jar to the server libraries.\n"
             )),
             Ok(Fetch::Unknown) => warnings.push(format!(
-                "No jar for the JDBC driver {d} is on the project's runtime classpath, and Bennu cannot fetch it — add its dependency or choose the jar on the data source, or it will fail to open.\n"
+                "No jar for the JDBC driver {d} is on the project's runtime classpath, and Bennu cannot fetch it — add its dependency or the jar to the server libraries, or it will fail to open.\n"
             )),
             Err(e) => warnings.push(format!("The JDBC driver {d} could not be downloaded: {e}\n")),
         }
     }
-    for r in &own_jar {
-        let jar = resolve_dir(&args.root, r.driver_jar.trim(), "");
-        if jar.is_file() {
-            keep(jar, &mut lib_jars);
-        } else {
-            warnings.push(format!("The driver jar of {} is not there: {}\n", r.name, jar.display()));
-        }
-    }
+    warnings.extend(libs::conflicts(&lib_jars));
 
     let (doc_base, mounts) = if t.deploy == "external" {
         if t.doc_base.trim().is_empty() {
@@ -612,7 +614,7 @@ fn bennu_run_tomcat(ctx: &BennuState, args: RunTomcatArgs) -> Result<RunHandle, 
         }
         (t.doc_base.trim().to_string(), Vec::new())
     } else {
-        live_deployment(&module_dir(&args.root, &cfg.module), &entries, &driver_jars)?
+        live_deployment(&module_dir(&args.root, &cfg.module), &entries, &unmounted)?
     };
 
     let mut secrets_in_use: Vec<(String, String)> = Vec::new();
@@ -624,6 +626,19 @@ fn bennu_run_tomcat(ctx: &BennuState, args: RunTomcatArgs) -> Result<RunHandle, 
     }
 
     let base = resolve_dir(&args.root, &t.base_dir, DEFAULT_BASE_DIR).join(&cfg.id);
+    // The application's `/WEB-INF/lib` must be a folder Tomcat can list, not a set of single-jar mounts.
+    let staged_jars = mounts.iter().filter(|m| m.web_app_mount.starts_with("/WEB-INF/lib/")).count();
+    let mounts = web_lib::stage(&base, mounts)?;
+    if t.deploy != "external" {
+        // Tomcat answers `null` to a listing of an empty folder, so a count of zero explains the NPE at once.
+        warnings.push(if staged_jars == 0 {
+            "The runtime classpath holds no dependency jars, so /WEB-INF/lib is empty: code that lists it at start-up gets null. \
+             Check the classpath scope (Launch), or that the dependencies are not system/provided.\n"
+                .to_string()
+        } else {
+            format!("/WEB-INF/lib: {staged_jars} jars staged in {}\n", forward(&base.join("web-lib")))
+        });
+    }
     prepare_base(
         Path::new(&install.home),
         &base,

@@ -77,8 +77,10 @@
   <li>A file opened from the <strong>Project</strong> tree or a <strong>Find in project</strong> hit joins the tab strip.</li>
   <li>A click switches tabs; the <strong>×</strong> closes one, and a neighbour takes the focus.</li>
   <li>A tab keeps its cursor, its scroll position and its <strong>undo history</strong> while it is open, so coming back to
-    a file lands you where you left it and <kbd>Ctrl/Cmd</kbd> + <kbd>Z</kbd> still takes back what you typed there. Closing
-    the tab lets them go.</li>
+    a file lands you where you left it and <kbd>Ctrl/Cmd</kbd> + <kbd>Z</kbd> still takes back what you typed there. That holds
+    across switching to another project of the workspace and across closing Arbor: the cursor and scroll are part of the saved session, and the undo history is
+    kept on disk — but only while the file is the same text it was, so a file changed outside Arbor in the meantime reopens without it. Closing the tab lets
+    them go.</li>
   <li><strong>Drag a tab</strong> to reorder it: the tab you hold follows the pointer while the ones it passes slide aside, so
     what you see is the order you will get. <kbd>Esc</kbd> cancels.</li>
 </ul>
@@ -332,11 +334,21 @@ import static org.junit.Assert.assertEquals;`, 'java')}</code></pre>
 <Callout variant="info" title="A comment among the imports stops it">
   A comment sits above the import it was written for, and reordering would strand it above another — so such a file is left alone.
 </Callout>
+<h3>Over a whole project or module</h3>
+<p>
+  <em>Optimize imports in project…</em> in the command palette, or <em>Optimize imports…</em> in the right-click menu of a folder in
+  the project tree (or of the tree's empty space, for the whole project), applies the same rule to every Java file under a folder.
+  The dialog lists the files that would change and how many imports each loses; <em>Change…</em> narrows it to a module or any other
+  folder. Nothing is written until <kbd>Ctrl</kbd> + <kbd>Enter</kbd>, a file that changed on disk since the list was built is
+  skipped, and files with unsaved edits are left out and named. Build output and dependency folders are never entered.
+</p>
 
 <h2>Parameter and inlay hints</h2>
 <p>
-  Inside a call's argument list, a strip above the line shows the <strong>signature</strong> with the argument you are on picked
-  out, following the commas as you type. Bennu answers it for Java, the language server for everything else.
+  <kbd>Ctrl</kbd>+<kbd>P</kbd> inside a call's argument list (or <em>Parameter info</em> in the command palette) shows a tooltip
+  above the line with the <strong>signature</strong> and the argument you are on picked out, following the commas as you type.
+  It never opens by itself; <kbd>Esc</kbd> closes it, and so does moving the caret out of the call. Bennu answers it for Java,
+  the language server for everything else.
 </p>
 <p>
   It describes the <em>call</em>, not the declaration: the receiver's type arguments are filled in, so

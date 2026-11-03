@@ -326,6 +326,14 @@ export function reindex(root: string): Promise<void> {
   return bennu('bennu_reindex', { args: { root } });
 }
 
+/** Re-read the sources after a build outside Bennu's own compile wrote some (a Maven run's
+ *  `target/generated-sources`: the JPA metamodel, MapStruct, QueryDSL). The cheap tier — nothing
+ *  remembered is dropped and Maven is not asked again, unlike {@link reindex}.
+ *  Wire: `bennu_refresh_index` — `ReindexArgs { root }`. */
+export function refreshIndex(root: string): Promise<void> {
+  return bennu('bennu_refresh_index', { args: { root } });
+}
+
 // ── rename (docs §5 #10-12) ─────────────────────────────────────────────────────
 
 /** Reason an edit was planned — drives the preview grouping + the review nudge.

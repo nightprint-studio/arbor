@@ -22,7 +22,7 @@
 
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::SourceEdit;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Args for [`bennu_optimize_imports`].
 #[derive(Deserialize)]
@@ -51,6 +51,131 @@ fn bennu_optimize_imports(
             }]
         })
         .unwrap_or_default())
+}
+
+/// Args for [`bennu_optimize_imports_preview`].
+#[derive(Deserialize)]
+pub struct ProjectPreviewArgs {
+    pub root: String,
+    /// The folder to walk — the project root, a module, or any folder under it.
+    pub scope: String,
+    /// Files with unsaved edits in the editor. Optimizing what is on disk would be computed from a
+    /// version nobody is looking at, and writing it would fight the buffer.
+    #[serde(default)]
+    pub skip: Vec<String>,
+}
+
+/// One file the optimization would change.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedFile {
+    pub file: String,
+    pub rel: String,
+    /// Import lines that go (unused or duplicate). Zero means the file is only being reordered.
+    pub removed: usize,
+    /// What the file was when the plan was built; handed back to the apply, which refuses on a mismatch.
+    pub digest: u64,
+    pub after: String,
+}
+
+/// What optimizing a folder would do. Nothing is written.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPlan {
+    pub files: Vec<PlannedFile>,
+    /// Java files looked at.
+    pub scanned: usize,
+    /// Files that would change but are open with unsaved edits, so were left out.
+    pub skipped: Vec<String>,
+}
+
+/// Args for [`bennu_optimize_imports_apply`].
+#[derive(Deserialize)]
+pub struct ProjectApplyArgs {
+    pub root: String,
+    pub files: Vec<crate::ssr::ApplyFile>,
+}
+
+/// What optimizing every Java file under a folder would do, file by file.
+///
+/// The per-file rule is exactly [`bennu_optimize_imports`]'s — one engine, so the whole-project run
+/// can never disagree with Ctrl+Alt+O on a file you have open. Reads from disk, so a file's plan is
+/// only valid while the disk does not change; the apply re-checks that.
+#[arbor_rpc::handler]
+fn bennu_optimize_imports_preview(
+    _ctx: &BennuState,
+    args: ProjectPreviewArgs,
+) -> Result<ProjectPlan, String> {
+    let root = args.root.replace('\\', "/");
+    let scope = args.scope.replace('\\', "/");
+    if !scope.to_lowercase().starts_with(&root.trim_end_matches('/').to_lowercase()) {
+        return Err("the folder is outside the project".to_string());
+    }
+    let skip: Vec<String> = args.skip.iter().map(|p| p.replace('\\', "/").to_lowercase()).collect();
+
+    let mut paths = Vec::new();
+    collect_java(std::path::Path::new(&scope), &mut paths);
+    paths.sort();
+
+    let mut plan = ProjectPlan { files: Vec::new(), scanned: paths.len(), skipped: Vec::new() };
+    for path in paths {
+        let Some(before) = crate::ssr::read_source(&args.root, &path) else { continue };
+        let Some((start, end, text)) = optimize(&before) else { continue };
+        if skip.contains(&path.to_lowercase()) {
+            plan.skipped.push(path);
+            continue;
+        }
+        let removed = import_lines(&before[start..end]).saturating_sub(import_lines(&text));
+        let mut after = before.clone();
+        after.replace_range(start..end, &text);
+        let rel = path
+            .strip_prefix(&format!("{}/", root.trim_end_matches('/')))
+            .unwrap_or(&path)
+            .to_string();
+        plan.files.push(PlannedFile {
+            digest: crate::ssr::digest(&before),
+            file: path,
+            rel,
+            removed,
+            after,
+        });
+    }
+    Ok(plan)
+}
+
+/// Write a plan built by [`bennu_optimize_imports_preview`], refusing any file that changed since.
+#[arbor_rpc::handler]
+fn bennu_optimize_imports_apply(
+    _ctx: &BennuState,
+    args: ProjectApplyArgs,
+) -> Result<crate::ssr::Applied, String> {
+    Ok(crate::ssr::apply_planned(&args.root, &args.files))
+}
+
+/// Every `.java` under `dir`, skipping what the project tree itself treats as noise (VCS metadata,
+/// dependencies, build output) so a generated source is never "optimized" behind the build's back.
+fn collect_java(dir: &std::path::Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else { continue };
+        let path = entry.path();
+        if kind.is_dir() {
+            let name = entry.file_name();
+            if !bennu_project::prelude::is_tree_noise_dir(dir, &name.to_string_lossy()) {
+                collect_java(&path, out);
+            }
+        } else if kind.is_file() {
+            let text = path.to_string_lossy().replace('\\', "/");
+            if crate::intel::is_java_file(&text) {
+                out.push(text);
+            }
+        }
+    }
+}
+
+/// How many `import` statements a block holds.
+fn import_lines(block: &str) -> usize {
+    block.lines().filter(|l| l.trim_start().starts_with("import ")).count()
 }
 
 /// The replacement for the import block: `(start, end, text)`, or `None` when there is nothing to
@@ -89,9 +214,7 @@ fn optimize(source: &str) -> Option<(usize, usize, String)> {
         rendered.push((group_of(entry), line));
     }
     if rendered.is_empty() {
-        // Every import went. Removing the block leaves the blank line that followed it, which the
-        // caller's own formatting pass collapses.
-        return changed(source, start, end, String::new());
+        return changed(source, start, end + trailing_break_len(source, start, end), String::new());
     }
 
     // Sorted by group then by the line itself: within a group the line and the path order the same
@@ -115,6 +238,29 @@ fn optimize(source: &str) -> Option<(usize, usize, String)> {
         previous = Some(*group);
     }
     changed(source, start, end, out)
+}
+
+/// How much of what follows a removed block goes with it, so its place is not left as an extra
+/// blank line: the line break that ended it, and — when a blank line already sat above the block —
+/// the blank lines below, which would otherwise stack up into two.
+fn trailing_break_len(source: &str, start: usize, end: usize) -> usize {
+    let blank_above = start == 0
+        || source[..start].ends_with("\n\n")
+        || source[..start].ends_with("\r\n\r\n");
+    let tail = &source[end..];
+    let mut eaten = 0;
+    loop {
+        let rest = &tail[eaten..];
+        let step = if rest.starts_with("\r\n") { 2 } else { usize::from(rest.starts_with('\n')) };
+        if step == 0 {
+            break;
+        }
+        eaten += step;
+        if !blank_above {
+            break;
+        }
+    }
+    eaten
 }
 
 /// The edit, unless it would replace the block with exactly what is already there.
@@ -260,6 +406,20 @@ mod tests {
         let src = "package p;\r\nimport org.acme.Thing;\r\nimport java.util.List;\r\nclass C { List<Thing> f() { return null; } }\r\n";
         let out = run(src).expect("the order changed");
         assert!(!out.contains("Thing;\nimport"), "a bare LF crept in:\n{out:?}");
+    }
+
+    #[test]
+    fn removing_every_import_leaves_one_blank_line_not_two() {
+        let spaced = "package p;\n\nimport java.io.File;\n\nclass C {}\n";
+        assert_eq!(run(spaced).expect("the import went"), "package p;\n\nclass C {}\n");
+        let tight = "package p;\nimport java.io.File;\n\nclass C {}\n";
+        assert_eq!(run(tight).expect("the import went"), "package p;\n\nclass C {}\n");
+    }
+
+    #[test]
+    fn import_lines_counts_statements() {
+        assert_eq!(import_lines("import a.B;\nimport static a.C.d;\n\nimport e.F;"), 3);
+        assert_eq!(import_lines(""), 0);
     }
 
     #[test]

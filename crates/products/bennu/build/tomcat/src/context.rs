@@ -15,6 +15,8 @@
 
 use bennu_proto::prelude::{TomcatResource, TomcatRunConfig};
 
+const CLASSES_MOUNT: &str = "/WEB-INF/classes";
+
 /// How a mount is backed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MountKind {
@@ -32,6 +34,10 @@ pub struct Mount {
     pub base: String,
     /// Where it appears inside the application (`/WEB-INF/classes`).
     pub web_app_mount: String,
+    /// Loadable by the application's class loader but invisible to `ServletContext.getResourcePaths`.
+    /// For classes a packaged WAR would carry as jars: code that lists `/WEB-INF/classes` to tell
+    /// "plugins under development" from "plugins in `/WEB-INF/lib`" must not see them as the former.
+    pub class_loader_only: bool,
 }
 
 /// What [`render_context`] needs besides the configuration.
@@ -125,10 +131,15 @@ pub fn render_context(cfg: &TomcatRunConfig, input: &ContextInput) -> String {
                 MountKind::Dir => "org.apache.catalina.webresources.DirResourceSet",
                 MountKind::File => "org.apache.catalina.webresources.FileResourceSet",
             };
+            // Classes are searched before the jars of `/WEB-INF/lib`, as in a WAR: a project that overrides a
+            // library class (a patched `JdkVersion`, say) must win over the jar's copy. Tomcat looks at
+            // `PreResources` ahead of the jars and at `PostResources` after them.
+            let element = if m.web_app_mount == CLASSES_MOUNT { "PreResources" } else { "PostResources" };
             out.push(format!(
-                "    <PostResources className=\"{class}\" base=\"{}\" webAppMount=\"{}\"/>",
+                "    <{element} className=\"{class}\" base=\"{}\" webAppMount=\"{}\"{}/>",
                 attr(&m.base),
-                attr(&m.web_app_mount)
+                attr(&m.web_app_mount),
+                if m.class_loader_only { " classLoaderOnly=\"true\"" } else { "" }
             ));
         }
         out.push("  </Resources>".to_string());
@@ -213,11 +224,15 @@ mod tests {
             &ContextInput {
                 doc_base: "/w".into(),
                 mounts: vec![
-                    Mount { kind: MountKind::Dir, base: "/m/target/classes".into(), web_app_mount: "/WEB-INF/classes".into() },
-                    Mount { kind: MountKind::File, base: "/r/x.jar".into(), web_app_mount: "/WEB-INF/lib/x.jar".into() },
+                    Mount { kind: MountKind::Dir, base: "/m/target/classes".into(), web_app_mount: "/WEB-INF/classes".into(), class_loader_only: false },
+                    Mount { kind: MountKind::Dir, base: "/u/target/classes".into(), web_app_mount: "/WEB-INF/classes".into(), class_loader_only: true },
+                    Mount { kind: MountKind::File, base: "/r/x.jar".into(), web_app_mount: "/WEB-INF/lib/x.jar".into(), class_loader_only: false },
                 ],
             },
         );
+        assert_eq!(xml.matches("classLoaderOnly=\"true\"").count(), 1, "only the upstream classes are hidden: {xml}");
+        assert_eq!(xml.matches("<PreResources").count(), 2, "classes lead the jars: {xml}");
+        assert_eq!(xml.matches("<PostResources").count(), 1, "jars stay after: {xml}");
         assert!(xml.contains("DirResourceSet") && xml.contains("FileResourceSet"), "{xml}");
         assert!(xml.contains("webAppMount=\"/WEB-INF/lib/x.jar\"") && xml.contains("reloadable=\"true\""), "{xml}");
     }

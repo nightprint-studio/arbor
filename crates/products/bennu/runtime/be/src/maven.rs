@@ -26,6 +26,8 @@ use bennu_core::prelude::BennuState;
 use bennu_maven::prelude::{Catalog, LocalRepo, Resolution};
 use serde::{Deserialize, Serialize};
 
+use crate::task::{Task, TaskSpec};
+
 /// Args naming a project root.
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct MavenRootArgs {
@@ -261,14 +263,7 @@ pub(crate) fn bennu_maven_download(ctx: &BennuState, args: MavenRootArgs) -> Res
     let root_str = args.root.clone();
 
     std::thread::spawn(move || {
-        let job = crate::index_service::register_bennu_job(
-            &host,
-            &sink,
-            "Download dependencies",
-            "mvn -U dependency:go-offline",
-            "Download",
-            false,
-        );
+        let task = Task::start(Some(&host), &sink, TaskSpec::new("Download dependencies", "mvn -U dependency:go-offline").category("Download"));
         let mvn = crate::dep_classpath::find_mvn_launcher(&root);
         let outcome = run_go_offline(&root, &mvn);
         match outcome {
@@ -281,7 +276,7 @@ pub(crate) fn bennu_maven_download(ctx: &BennuState, args: MavenRootArgs) -> Res
                 // types resolve, and a job that closed here left the longest part of the work —
                 // minutes on a large project — running with nothing on screen to say so.
                 let indexed = reindex_and_wait(&root_str, &sink);
-                crate::index_service::finish_bennu_job(&sink, job, indexed, (!indexed).then(|| "The index could not be rebuilt.".to_string()));
+                task.finish(if indexed { Ok(()) } else { Err("The index could not be rebuilt.".to_string()) });
                 crate::index_service::notify(
                     &sink,
                     "Dependencies downloaded",
@@ -291,11 +286,11 @@ pub(crate) fn bennu_maven_download(ctx: &BennuState, args: MavenRootArgs) -> Res
             }
             Ok((false, log)) => {
                 let reason = go_offline_failure(&log);
-                crate::index_service::finish_bennu_job(&sink, job, false, Some(reason.clone()));
+                task.fail(reason.clone());
                 crate::index_service::notify(&sink, "Download failed", &reason, "error");
             }
             Err(e) => {
-                crate::index_service::finish_bennu_job(&sink, job, false, Some(e.clone()));
+                task.fail(e.clone());
                 crate::index_service::notify(&sink, "Download failed", &e, "error");
             }
         }
@@ -330,16 +325,11 @@ pub(crate) fn bennu_maven_reload(ctx: &BennuState, args: MavenRootArgs) -> Resul
         // ends with reports under a name of its own. Pressed, it used to look *exactly* like a
         // button that does nothing — and the natural next move is to press it again, which starts
         // a second catalogue walk over the first.
-        let job = host.as_ref().and_then(|host| {
-            crate::index_service::register_bennu_job(
-                host,
-                &sink,
-                "Re-resolve dependencies",
-                "drop the classpath cache · rescan ~/.m2 · reindex",
-                "Dependencies",
-                false,
-            )
-        });
+        let task = Task::start(
+            host.as_ref(),
+            &sink,
+            TaskSpec::new("Re-resolve dependencies", "drop the classpath cache · rescan ~/.m2 · reindex").category("Dependencies"),
+        );
         crate::dep_classpath::clear_list_cache(&root);
         let catalog = Catalog::scan(&LocalRepo::discover());
         let artifacts = catalog.len();
@@ -349,12 +339,7 @@ pub(crate) fn bennu_maven_reload(ctx: &BennuState, args: MavenRootArgs) -> Resul
         // the longest part of the work ran with nothing on screen and the press looked finished
         // after a second.
         let indexed = reindex_and_wait(&root_str, &sink);
-        crate::index_service::finish_bennu_job(
-            &sink,
-            job,
-            indexed,
-            (!indexed).then(|| "The index could not be rebuilt.".to_string()),
-        );
+        task.finish(if indexed { Ok(()) } else { Err("The index could not be rebuilt.".to_string()) });
         crate::index_service::notify(
             &sink,
             "Dependencies re-resolved",
@@ -418,14 +403,7 @@ pub(crate) fn bennu_maven_download_sources(
     let root_str = args.root.clone();
 
     std::thread::spawn(move || {
-        let job = crate::index_service::register_bennu_job(
-            &host,
-            &sink,
-            "Download dependency sources",
-            "mvn dependency:sources",
-            "Download",
-            false,
-        );
+        let task = Task::start(Some(&host), &sink, TaskSpec::new("Download dependency sources", "mvn dependency:sources").category("Download"));
         let mvn = crate::dep_classpath::find_mvn_launcher(&root);
         match run_mvn(&root, &mvn, &["dependency:sources"]) {
             Ok((_, log)) => {
@@ -433,7 +411,7 @@ pub(crate) fn bennu_maven_download_sources(
                 // artifact with no published sources is a normal outcome, not a failed run. What is
                 // worth reporting is how many arrived.
                 let attached = log.matches("Resolving: ").count();
-                crate::index_service::finish_bennu_job(&sink, job, true, None);
+                task.ok();
                 crate::index_service::notify(
                     &sink,
                     "Sources downloaded",
@@ -448,7 +426,7 @@ pub(crate) fn bennu_maven_download_sources(
                 crate::index_service::IndexService::global().refresh_dep_sources(&root_str);
             }
             Err(e) => {
-                crate::index_service::finish_bennu_job(&sink, job, false, Some(e.clone()));
+                task.fail(e.clone());
                 crate::index_service::notify(&sink, "Download sources failed", &e, "error");
             }
         }

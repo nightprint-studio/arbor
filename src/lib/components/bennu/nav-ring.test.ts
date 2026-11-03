@@ -178,3 +178,19 @@ describe('edits and recent places', () => {
     expect(h.canBack || h.canForward || h.hasEdits || h.recent.length > 0).toBe(false);
   });
 });
+
+describe('retain', () => {
+  it('keeps the stops of the files it accepts and drops the rest, from every list', () => {
+    const h = new NavHistory();
+    h.leave(at('A/one.java', 5));
+    h.leave(at('B/two.java', 7));
+    h.noteEdit(at('B/two.java', 9));
+    h.noteEdit(at('A/one.java', 40));
+    h.retain((file) => file.startsWith('A/'));
+    expect(h.snapshot().back).toEqual([at('A/one.java', 5)]);
+    expect(h.hasEdits).toBe(true);
+    expect(h.recent.every((r) => r.file.startsWith('A/'))).toBe(true);
+    h.retain(() => false);
+    expect(h.canBack || h.hasEdits || h.recent.length > 0).toBe(false);
+  });
+});

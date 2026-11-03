@@ -117,7 +117,7 @@ async fn list_ci_workflows(state: &CorvusState, tab_id: String) -> Result<Vec<Ci
 ///            (GitHub does not expose the run ID synchronously; the caller should
 ///            refresh the run list after a short delay).
 #[arbor_rpc::handler]
-async fn create_ci_pipeline(
+pub(crate) async fn create_ci_pipeline(
     state: &CorvusState,
     tab_id: String,
     branch: String,

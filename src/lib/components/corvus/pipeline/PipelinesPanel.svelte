@@ -20,6 +20,8 @@
   import PipelineRunGraph from './PipelineRunGraph.svelte';
   import CiPipelineDetailModal from './CiPipelineDetailModal.svelte';
   import CreateCiPipelineModal from './CreateCiPipelineModal.svelte';
+  import PlansTab from '$lib/components/corvus/plan/PlansTab.svelte';
+  import { plansStore } from '$lib/stores/corvus/plans.svelte';
   import { pipelinesStore } from '$lib/stores/corvus/pipelines.svelte';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -34,7 +36,12 @@
   import type { PipelineDef, PipelineRun, CiRun } from '$lib/types/corvus/pipeline';
 
   // ── Tab switching ─────────────────────────────────────────────────────────
-  let activeTab = $state<'local' | 'ci'>('local');
+  let activeTab = $state<'local' | 'ci' | 'plans'>('local');
+
+  // "Open the plan" (palette / shortcut) lands here: show the Plans tab behind the modal too.
+  $effect(() => {
+    if (plansStore.modalPlanId !== null) activeTab = 'plans';
+  });
 
   const defs = $derived(pipelinesStore.defs);
   const runs = $derived(pipelinesStore.runs);
@@ -486,11 +493,12 @@
         items={[
           { id: 'local', label: 'Local Pipelines' },
           { id: 'ci',    label: 'CI / CD' },
+          { id: 'plans', label: 'Plans' },
         ]}
         value={activeTab}
         variant="underline"
         size="sm"
-        onSelect={(id) => activeTab = id as 'local' | 'ci'}
+        onSelect={(id) => activeTab = id as 'local' | 'ci' | 'plans'}
       />
     </div>
     {#snippet actions()}
@@ -759,6 +767,12 @@
         {/if}
       </div>
     </div>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- PLANS TAB (cross-repo, independent of the open repo)             -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  {:else if activeTab === 'plans'}
+    <PlansTab />
 
   <!-- ════════════════════════════════════════════════════════════════ -->
   <!-- CI / CD TAB                                                      -->

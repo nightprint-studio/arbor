@@ -18,11 +18,21 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import TokenListInput from '$lib/components/shared/ui/TokenListInput.svelte';
+  import Alert from '$lib/components/shared/ui/Alert.svelte';
   import { bennuLogViewStore as store } from '$lib/stores/bennu/log-view.svelte';
+  import { projectStore } from '$lib/stores/bennu/project.svelte';
   import type { LogViewRule } from './log-view';
 
   let tab = $state('columns');
   const s = $derived(store.settings);
+
+  // Read again whenever the panel opens: the configuration may have been edited since the run began.
+  $effect(() => { void store.refreshLayouts(projectStore.project?.root); });
+  const layout = $derived(store.layout);
+  /** Configurations that name a pattern the console cannot read, when none can be. */
+  const unreadable = $derived((store.layouts ?? []).filter((l) => !l.usable));
+  /** What Logger and Thread depend on: without a layout they are guesses, and the shape rules rarely make them. */
+  const guessing = $derived(store.layouts !== null && !layout);
 
   const TABS = [
     { id: 'columns', label: 'Columns' },
@@ -57,6 +67,16 @@
 
   <div class="body">
     {#if tab === 'columns'}
+      {#if layout}
+        <Alert variant="success" compact title={`Layout read from ${layout.file}`}>
+          <code class="pat">{layout.pattern}</code>
+        </Alert>
+      {:else if guessing}
+        <Alert variant="warning" compact title="No log layout found"
+          text={unreadable.length
+            ? `${unreadable[0].file} names a pattern Bennu cannot read, so the columns are guessed from the shape of each line.`
+            : 'No logback, log4j2, log4j or Spring configuration names a console pattern, so the columns are guessed from the shape of each line. Logger and Thread need a layout.'} />
+      {/if}
       <FormField label="Time">
         <Select size="sm" fill value={s.time} onchange={(v) => store.patch({ time: v as typeof s.time })}
           options={[{ value: 'time', label: 'Time of day' }, { value: 'hide', label: 'Hidden' }]} />
@@ -66,15 +86,23 @@
           options={[{ value: 'text', label: 'Word' }, { value: 'letter', label: 'Letter only' }, { value: 'hide', label: 'Hidden (row colour only)' }]} />
       </FormField>
       <FormField label="Thread">
-        <Select size="sm" fill value={s.thread} onchange={(v) => store.patch({ thread: v as typeof s.thread })}
+        <Select size="sm" fill disabled={guessing} value={s.thread} onchange={(v) => store.patch({ thread: v as typeof s.thread })}
           options={[{ value: 'hide', label: 'Hidden' }, { value: 'short', label: 'Shortened' }, { value: 'full', label: 'Full' }]} />
       </FormField>
       <FormField label="Logger" hint="Only on lines whose layout Bennu could read from the project’s logging configuration.">
-        <Select size="sm" fill value={s.logger} onchange={(v) => store.patch({ logger: v as typeof s.logger })}
+        <Select size="sm" fill disabled={guessing} value={s.logger} onchange={(v) => store.patch({ logger: v as typeof s.logger })}
           options={[
             { value: 'abbr', label: 'Abbreviated (c.a.d.FooDao)' }, { value: 'last', label: 'Class name only' },
             { value: 'full', label: 'Full name' }, { value: 'hide', label: 'Hidden' },
           ]} />
+      </FormField>
+      <FormField label="MDC" hint="The key=value entries a layout prints for each line (tenant, trace id, user). Needs a layout read from the project’s logging configuration.">
+        <Select size="sm" fill disabled={guessing} value={s.mdc} onchange={(v) => store.patch({ mdc: v as typeof s.mdc })}
+          options={[{ value: 'show', label: 'Shown' }, { value: 'hide', label: 'Hidden' }]} />
+      </FormField>
+      <FormField label="Hidden MDC keys" hint="Hide only these entries, key and value. Quickest: right-click a line and pick the key.">
+        <TokenListInput ariaLabel="Hidden MDC keys" placeholder="trace_id" values={s.hidden_mdc}
+          onchange={(v) => store.patch({ hidden_mdc: v })} />
       </FormField>
       <Toggle checked={s.dedupe} label="Collapse repeated lines (×N)" onchange={(v) => store.patch({ dedupe: v })} />
       <p class="note">Only what is drawn changes. Copy, save and the assistant still get the text the program wrote.</p>
@@ -126,5 +154,6 @@
   .rule { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-elevated); }
   .r1 { display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 6px; align-items: center; }
   .r2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .pat { display: block; margin-top: 2px; font-family: var(--font-code); font-size: var(--font-size-2xs); overflow-wrap: anywhere; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 </style>

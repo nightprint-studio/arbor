@@ -122,14 +122,14 @@
 {:else}
   <FormSection label="Pool" collapsible open summary="maxTotal {maxTotal} · maxIdle {maxIdle}">
     <div class="three">
-      <FormField label="maxTotal">
-        <NumberStepper value={maxTotal} min={1} max={1000} step={1} narrow={false} ariaLabel="maxTotal" onchange={(v) => (maxTotal = Math.round(v))} />
+      <FormField label="maxTotal" hint="-1 = no limit">
+        <NumberStepper value={maxTotal} min={-1} max={1000} step={1} narrow={false} ariaLabel="maxTotal" onchange={(v) => (maxTotal = Math.round(v))} />
       </FormField>
-      <FormField label="maxIdle">
-        <NumberStepper value={maxIdle} min={0} max={1000} step={1} narrow={false} ariaLabel="maxIdle" onchange={(v) => (maxIdle = Math.round(v))} />
+      <FormField label="maxIdle" hint="-1 = no limit">
+        <NumberStepper value={maxIdle} min={-1} max={1000} step={1} narrow={false} ariaLabel="maxIdle" onchange={(v) => (maxIdle = Math.round(v))} />
       </FormField>
-      <FormField label="maxWait (ms)">
-        <NumberStepper value={maxWaitMs} min={0} max={600000} step={500} narrow={false} ariaLabel="maxWait" onchange={(v) => (maxWaitMs = Math.round(v))} />
+      <FormField label="maxWait (ms)" hint="-1 = wait forever">
+        <NumberStepper value={maxWaitMs} min={-1} max={600000} step={500} narrow={false} ariaLabel="maxWait" onchange={(v) => (maxWaitMs = Math.round(v))} />
       </FormField>
     </div>
     <div class="two">

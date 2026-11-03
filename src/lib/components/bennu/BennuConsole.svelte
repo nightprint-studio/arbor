@@ -56,6 +56,11 @@
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { buildView, entryText, ruleFromLine, type LogViewRule, type RuleAction } from './console/log-view';
   import BennuLogViewSettings from './console/BennuLogViewSettings.svelte';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
+  import { bennuLogTailStore as tail } from '$lib/stores/bennu/log-tail.svelte';
+  import { slide } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
+  import { animStore } from '$lib/stores/animations.svelte';
 
   /** A SQL statement in the log was pressed: copy it, and say so — the click has no other visible effect. */
   function copySql(sql: string) {
@@ -69,9 +74,15 @@
     emptyMessage?: string;
     /** Extra class on the viewport. */
     class?: string;
+    /** Offer the project's log files (Tomcat's, the application's) as a source besides the output. */
+    sources?: boolean;
   }
 
-  let { lines, emptyMessage = 'No output.', class: klass = '' }: Props = $props();
+  let { lines: runLines, emptyMessage = 'No output.', class: klass = '', sources = false }: Props = $props();
+
+  // A followed log file takes the place of the output: the same rows, the same menu, the same links.
+  const lines = $derived(tail.active ? tail.lines : runLines);
+  const shownEmpty = $derived(tail.active ? (tail.error ?? 'Nothing in this file yet.') : emptyMessage);
 
   /** The buffer's own text — what the assistant and a copy are given, whatever the view draws. */
   const original = $derived(lines.map((l) => l.text));
@@ -96,6 +107,36 @@
     void logView.load();
     void logView.detect(projectStore.project?.root);
   });
+  $effect(() => {
+    if (sources) void tail.refresh(projectStore.project?.root);
+  });
+
+  // ── the source: the output, or a log file ───────────────────────────────────
+  const SOURCE_OPEN = '__open__';
+  const SOURCE_REFRESH = '__refresh__';
+  let picking = $state(false);
+  const root = $derived(projectStore.project?.root ?? '');
+  const fileName = (p: string) => p.split(/[\\/]/).pop() ?? p;
+
+  const sourceOptions = $derived.by(() => {
+    const found = tail.files ?? [];
+    const options = [
+      { value: '', label: 'Output' },
+      ...found.map((f) => ({ value: f.path, label: `${f.name} · ${f.group === 'tomcat' ? 'Tomcat' : f.rel.split('/').slice(0, -1).join('/') || 'project'}` })),
+    ];
+    // A file opened from elsewhere is not in the list, and must still be what the select shows.
+    if (tail.source && !found.some((f) => f.path === tail.source!.path)) options.push({ value: tail.source.path, label: tail.source.name });
+    options.push({ value: SOURCE_OPEN, label: 'Open a log file…' }, { value: SOURCE_REFRESH, label: 'Refresh the list' });
+    return options;
+  });
+
+  function pickSource(value: string | number) {
+    const v = String(value);
+    if (v === SOURCE_OPEN) picking = true;
+    else if (v === SOURCE_REFRESH) void tail.refresh(root);
+    else if (v === '') void tail.close();
+    else void tail.open(root, v, tail.files?.find((f) => f.path === v)?.name ?? fileName(v));
+  }
 
   const LEVEL_OPTIONS = [
     { value: 'trace', label: 'All levels' }, { value: 'debug', label: 'Debug and above' },
@@ -127,10 +168,24 @@
     if (i >= 0) logView.removeRule(i);
   }
 
+  function hideMdcKey(key: string) {
+    logView.patch({ hidden_mdc: [...view.hidden_mdc, key] });
+    if (!view.clean) logView.setClean(true);
+    toastStore.show(`Hiding MDC ${key}`, 'info', 5000, {
+      label: 'Undo',
+      onClick: () => logView.patch({ hidden_mdc: logView.settings.hidden_mdc.filter((k) => k !== key) }),
+    });
+  }
+
   function rowMenu(index: number): MenuItem[] {
     const l = lines[index];
     const has = (how: 'logger' | 'thread') => !!ruleFromLine(l, how, 'hide');
+    // The MDC entries this very line carries: one verb each, so hiding "trace_id" is a right-click away.
+    const mdcKeys = [...new Set((l.pieces ?? []).filter((p) => p.token === 'mdckey').map((p) => p.text))]
+      .filter((k) => !view.hidden_mdc.includes(k));
     return [
+      ...mdcKeys.slice(0, 8).map((k) => ({ id: `hide-mdc:${k}`, label: `Hide MDC “${k}”` })),
+      ...(mdcKeys.length ? [{ id: 's-mdc', label: '', separator: true }] : []),
       { id: 'hide-logger', label: 'Hide this logger', disabled: !has('logger') },
       { id: 'hide-package', label: 'Hide everything from its package', disabled: !has('logger') },
       { id: 'dim-logger', label: 'Dim this logger', disabled: !has('logger') },
@@ -146,6 +201,7 @@
     const index = Number(cell.dataset.entry);
     e.preventDefault();
     bennuContextMenuStore.show(e.clientX, e.clientY, rowMenu(index), (id) => {
+      if (id.startsWith('hide-mdc:')) return hideMdcKey(id.slice('hide-mdc:'.length));
       switch (id) {
         case 'hide-logger': return addRuleFrom(index, 'logger', 'hide');
         case 'hide-package': return addRuleFrom(index, 'package', 'hide');
@@ -217,6 +273,17 @@
 
 <div class="bc-root">
   <div class="bc-bar">
+    {#if sources}
+      <Select
+        size="sm"
+        value={tail.source?.path ?? ''}
+        options={sourceOptions}
+        highlight={tail.active}
+        searchable={sourceOptions.length > 10}
+        ariaLabel="What the console shows"
+        onchange={pickSource}
+      />
+    {/if}
     <IconButton
       tooltip="Clean view — hides the columns, lines and stack frames you chose not to read"
       shortcut="Ctrl+Shift+L"
@@ -249,7 +316,7 @@
         lineHeight={rowH || 17}
         bind:follow
         {rowClass}
-        {emptyMessage}
+        emptyMessage={shownEmpty}
       >
         {#snippet line({ index })}
           {@const e = entries[index]}
@@ -267,14 +334,31 @@
       </VirtualTextView>
     </div>
 
-    {#if sideOpen}<BennuLogViewSettings />{/if}
+    <!-- The slide is on this wrapper, a direct child of the `{#if}`: a transition inside the component would be local to it and never play. -->
+    {#if sideOpen}
+      <div class="bc-side" transition:slide={{ axis: 'x', duration: animStore.dPanel, easing: cubicOut }}>
+        <BennuLogViewSettings />
+      </div>
+    {/if}
   </div>
 </div>
+
+{#if picking}
+  <FileExplorerModal
+    mode="file"
+    title="Open a log file"
+    initialPath={root}
+    onConfirm={(path) => { picking = false; void tail.open(root, path, fileName(path)); }}
+    onCancel={() => (picking = false)}
+    onClose={() => (picking = false)}
+  />
+{/if}
 
 <style>
   /* Takes the place the bare viewport used to have in its parent, whichever way that parent lays out. */
   .bc-root { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
   .bc-body { flex: 1; min-height: 0; display: flex; }
+  .bc-side { flex: none; display: flex; min-height: 0; overflow: hidden; }
   .bc-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .bc-bar {
     display: flex; align-items: center; gap: 6px; flex: none; padding: 3px 8px;

@@ -32,6 +32,7 @@ mod brp;
 // `JobHandle`: register the background analysis warm-up as a tracked job in the shell registry
 // (over the reverse channel) so it appears in the bennu Jobs overlay.
 mod jobs;
+mod task;
 
 // Domain handler modules — each holds the `#[arbor_rpc::handler]`s for one bennu
 // domain. They self-register via `inventory`, so `arbor_rpc::registry()` collects
@@ -428,6 +429,9 @@ mod repo_config;
 // resolves the frames' classes to project files through the index — the one half of the job
 // a general-purpose log interpreter cannot do.
 mod log;
+// The undo/redo history of an open tab, kept across a restart.
+mod editor_history;
+mod log_files;
 mod log_pattern;
 mod run_deps_store;
 // Dependency-classpath sourcing for the index: resolve a Maven project's `~/.m2` dep jars (cached

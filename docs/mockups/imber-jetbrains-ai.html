@@ -72,6 +72,30 @@
   table { border-collapse:collapse; width:100%; font-size:13px } td,th { text-align:left; padding:6px 8px; border-top:1px solid var(--border); vertical-align:top } th { color:var(--text-3); font-weight:500; border-top:0 }
   code { font-family:var(--code); font-size:12px; background:var(--bg-elevated); padding:1px 5px; border-radius:4px }
   ul { margin:6px 0; padding-left:20px } li { margin:3px 0 }
+
+  /* credit meter */
+  .gauge { display:inline-flex; align-items:center; gap:3px; background:transparent; border:0; border-radius:6px; padding:4px 6px; color:var(--text-2); cursor:pointer }
+  .gauge:hover, .gauge[aria-expanded="true"] { background:var(--bg-overlay); color:var(--text) }
+  .gauge svg.arc circle.v { transition:stroke-dashoffset .5s ease, stroke .3s }
+  .gauge .chev { transition:transform .22s ease; opacity:.7 }
+  .gauge[aria-expanded="true"] .chev { transform:rotate(180deg) }
+  .gauge[aria-expanded="true"] svg.arc { animation:pop .35s ease }
+  @keyframes pop { 0%{transform:scale(.8)} 60%{transform:scale(1.12)} 100%{transform:scale(1)} }
+  .pop { position:absolute; right:70px; top:38px; width:330px; background:var(--bg-elevated); border:1px solid var(--border); border-radius:10px; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,.45);
+         transform-origin:top right; transition:opacity .16s ease, transform .18s ease; }
+  .pop.closed { opacity:0; transform:scale(.96) translateY(-4px); pointer-events:none }
+  .prow { border-radius:7px }
+  .prow > button { all:unset; box-sizing:border-box; display:flex; align-items:center; gap:8px; width:100%; padding:7px 8px; border-radius:7px; cursor:pointer; font-size:12.5px }
+  .prow > button:hover { background:var(--bg-overlay) }
+  .prow .name { flex:1; min-width:0 } .prow .name small { display:block; color:var(--text-3); font-size:11px }
+  .prow .fig { font-family:var(--code); font-size:12px; color:var(--text-2) }
+  .prow .chev { transition:transform .2s ease; color:var(--text-3) }
+  .prow.open .chev { transform:rotate(90deg) }
+  .prow .more { display:grid; grid-template-rows:0fr; transition:grid-template-rows .22s ease }
+  .prow.open .more { grid-template-rows:1fr }
+  .prow .more > div { overflow:hidden } .prow .more .in { padding:2px 10px 8px 26px; font-size:12px; color:var(--text-2) }
+  .prow .dl { display:flex; justify-content:space-between; gap:10px; padding:2px 0 } .prow .dl span:last-child { font-family:var(--code) }
+  .pop .foot { display:flex; gap:6px; padding:6px 8px 4px; border-top:1px solid var(--border); margin-top:2px }
 </style>
 </head>
 <body>
@@ -84,6 +108,11 @@
     <div class="seg" id="seg-provider">
       <button data-v="key" aria-pressed="false">Chiave API</button>
       <button data-v="jb" aria-pressed="true">JetBrains AI</button>
+    </div>
+    <span>Chiave Admin Anthropic</span>
+    <div class="seg" id="seg-admin">
+      <button data-v="no" aria-pressed="true">Assente</button>
+      <button data-v="yes" aria-pressed="false">Presente</button>
     </div>
     <span>Stato Central</span>
     <div class="seg" id="seg-state">
@@ -213,7 +242,40 @@
     </div>
   </div>
 
-  <h2>4. Il resto</h2>
+  <h2>4. Crediti nella titlebar</h2>
+  <p class="lead">Un solo punto, la titlebar, come in IntelliJ. La pillola mostra il provider attivo; il clic apre un menu con il credito di tutti i provider. Niente sul rail.</p>
+  <div class="two">
+    <div>
+      <div class="app" style="padding:0;position:relative;min-height:430px">
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;font-size:12.5px;color:var(--text-2)">
+          <b style="color:var(--text)">Bennu</b><span>shop-api</span>
+          <span style="flex:1"></span>
+          <button class="gauge" id="meter-pill" aria-expanded="true" aria-label="Crediti AI" title="Crediti AI">
+            <svg class="arc" width="22" height="22" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="11" fill="none" stroke="var(--bg-overlay)" stroke-width="2.6"/><circle class="v" id="g-arc" cx="13" cy="13" r="11" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="69.1" stroke-dashoffset="15"/><path d="M13 7.2c.5 3.1 2.7 5.3 5.8 5.8-3.1.5-5.3 2.7-5.8 5.8-.5-3.1-2.7-5.3-5.8-5.8 3.1-.5 5.3-2.7 5.8-5.8Z" fill="currentColor"/></svg>
+            <svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+          <span style="width:60px;color:var(--text-3)">– ▢ ✕</span>
+        </div>
+        <div id="meter-pop" class="pop"></div>
+        <div class="page" style="margin:6px;min-height:340px;color:var(--text-3);font-size:12px">editor…</div>
+      </div>
+    </div>
+    <div>
+      <h3>Come si comporta</h3>
+      <ul style="color:var(--text-2);font-size:13px">
+        <li><b>Icona:</b> la scintilla di Imber dentro un anello. L'anello è la <b>media di ciò che resta</b> sui provider che hanno un limite noto: JetBrains con i suoi crediti, Anthropic con il periodo più vicino al tuo limite. Chi non ha un limite (nessun limite impostato, Central spento) non entra nella media. Con un solo provider, è quello.</li>
+        <li><b>Colore dal peggiore, non dalla media:</b> una media nasconde un provider quasi esaurito (100 % e 5 % fanno 52 %). Quindi l'anello si riempie con la media ma diventa ambra sotto «Avvisa da» e rosso a esaurimento quando <i>uno</i> dei due è lì. Il menu dice quale.</li>
+        <li><b>Menu:</b> una riga per provider (JetBrains AI, Anthropic), con la cifra principale; il clic su una riga la espande (con animazione) e mostra il dettaglio. Il provider attivo parte espanso e sta in cima; uno non configurato compare comunque, con ciò che manca.</li>
+        <li><b>Aggiornamento:</b> in background ogni pochi minuti e dopo ogni risposta. Mai nel percorso della richiesta.</li>
+        <li><b>Impostazione:</b> «Mostra il consumo nella titlebar» on/off. Default on.</li>
+      </ul>
+      <div class="callout warn" style="margin:10px 0 0"><b>Cosa la chiave Admin può e non può dare</b>
+        Le API di Anthropic con una chiave Admin riportano il <b>speso reale</b> dell'organizzazione (costi e token, per periodo e modello). Non risulta un'API per il <b>saldo residuo</b>: quello si vede solo nella Console. Quindi «rimasto» resta: tuo limite − speso. Non l'ho verificato sul riferimento completo delle API Admin.</div>
+      <p class="note">La chiave Admin si ottiene solo in un'organizzazione Anthropic, da chi ha il ruolo admin. Un account individuale non può averne una. Si salva nel vault di Imber, come la chiave normale, e serve solo per leggere.</p>
+    </div>
+  </div>
+
+  <h2>5. Il resto</h2>
   <table>
     <tr><th>Superficie</th><th>Cambio</th></tr>
     <tr><td>Command Palette</td><td><code>Imber: Switch provider</code>, <code>Imber: Check JetBrains connection</code>, <code>Imber: Open Central guide</code>.</td></tr>
@@ -228,7 +290,7 @@
 
 <script>
   const $ = (s) => document.querySelector(s), $$ = (s) => [...document.querySelectorAll(s)];
-  const st = { provider:'jb', state:'ready' };
+  const st = { provider:'jb', state:'ready', admin:'no' };
   const B = (k, t) => `<span class="badge ${k}">${t}</span>`;
   const STATES = {
     ready:   { bin:['ok','Installato'], binTxt:'central 0.9.2 · C:\\Users\\…\\central.exe', login:['ok','Connesso'], loginTxt:'Licenza JetBrains AI · account personale',
@@ -243,6 +305,7 @@
   function render() {
     const jb = st.provider === 'jb', S = STATES[st.state];
     $$('#seg-provider button, #provider-cards .opt').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === st.provider)));
+    $$('#seg-admin button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === st.admin)));
     $$('#seg-state button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === st.state)));
     $('#card-key').classList.toggle('hide', jb); $('#card-jb').classList.toggle('hide', !jb);
     $('#cost-key').classList.toggle('hide', jb); $('#cost-jb').classList.toggle('hide', !jb);
@@ -257,8 +320,65 @@
     $('#s-credits').textContent = S.creditsTxt; $('#b-credits').innerHTML = B(...S.credits);
     const h = $('#hint-fix'); h.classList.toggle('hide', !S.hint); h.innerHTML = S.hint || '';
     $('#btn-check').disabled = st.state === 'missing';
+    renderMeter(jb, st.state === 'ready');
   }
+  const openRows = new Set(['active']);
+  let popOpen = true;
+  function renderMeter(jb, ready) {
+    const pill = $('#meter-pill'), pop = $('#meter-pop'), arc = $('#g-arc');
+    // What is left of each provider, 0..1, or null when it has no known limit.
+    const left = { jb: ready ? 0.62 : null, key: 0.95 };
+    const known = Object.entries(left).filter(([, v]) => v != null);
+    const avg = known.length ? known.reduce((a, [, v]) => a + v, 0) / known.length : 0;
+    const worst = known.reduce((m, e) => (m == null || e[1] < m[1] ? e : m), null);
+    const label = { jb: 'JetBrains AI', key: 'Anthropic' };
+    const warnAt = 0.2;
+    const tone = !worst ? 'var(--text-3)' : worst[1] <= 0.05 ? 'var(--err)' : worst[1] <= warnAt ? 'var(--warn)' : 'var(--accent)';
+    const bar = (p, c) => '<div class="meter" style="width:54px"><i style="width:' + p + '%;' + (c ? 'background:' + c : '') + '"></i></div>';
+    const dl = (a, b) => '<div class="dl"><span>' + a + '</span><span>' + b + '</span></div>';
+    const row = (id, name, sub, fig, p, details, tone) =>
+      '<div class="prow' + (openRows.has(id) ? ' open' : '') + '" data-id="' + id + '"><button type="button" aria-expanded="' + openRows.has(id) + '">'
+      + '<svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
+      + '<span class="name"><b style="font-weight:500">' + name + '</b><small>' + sub + '</small></span>'
+      + (p != null ? bar(p) : '') + '<span class="fig">' + fig + '</span></button>'
+      + '<div class="more"><div><div class="in">' + details + '</div></div></div></div>';
+
+    const jbRow = row('jb', 'JetBrains AI', jb ? 'Attivo · via Central' : 'Non attivo',
+      ready ? '62 / 100' : '—', ready ? 62 : null,
+      ready ? dl('Questa conversazione', '12 crediti') + dl('Rinnovo', '1 dic') + dl('Aggiornato', '1 min fa')
+            : 'Central non risponde. Vedi le impostazioni.');
+    const sep = '<div style="margin:6px 0 2px;color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">';
+    const real = st.admin === 'yes'
+      ? sep + 'Consumo reale · da Anthropic</div>' + dl('Mese (organizzazione)', '$ 184,20') + dl('Di cui Imber', '$ 12,70')
+        + '<div style="color:var(--text-3);margin-top:3px">Il saldo residuo non è esposto dalle API: si legge nella Console.</div>'
+      : sep + 'Consumo reale · non disponibile</div>Si legge solo con una <b>chiave Admin</b>, che esiste solo nelle organizzazioni Anthropic (ruolo admin): un account individuale non può averne una. Sopra, quanto ha speso Imber.'
+        + '<div style="margin-top:6px"><button class="btn">Aggiungi chiave Admin…</button></div>';
+    const keyRow = row('key', 'Anthropic', !jb ? 'Attivo · chiave API' : 'Non attivo · chiave API', '€ 0,43', 95,
+      sep + 'Speso da Imber · limiti tuoi</div>' + dl('Conversazione', '€ 0,09 / 5') + dl('Oggi', '€ 0,43 / 20') + dl('Settimana', '€ 3,10 / 60') + dl('Mese', '€ 11,80 / —') + real);
+
+    const summary = '<div style="padding:6px 8px 8px;border-bottom:1px solid var(--border);margin-bottom:4px;font-size:12px;color:var(--text-2)">'
+      + (known.length
+        ? '<b style="color:var(--text)">' + Math.round(avg * 100) + ' %</b> disponibile in media su ' + known.length + (known.length === 1 ? ' provider' : ' provider')
+          + (known.length > 1 ? '<div style="color:var(--text-3);margin-top:2px">Il più basso: <span style="color:' + tone + '">' + label[worst[0]] + ' ' + Math.round(worst[1] * 100) + ' %</span></div>' : '')
+        : 'Nessun provider con un limite noto.')
+      + '</div>';
+    openRows.has('active') && (openRows.delete('active'), openRows.add(jb ? 'jb' : 'key'));
+    pop.innerHTML = summary + (jb ? jbRow + keyRow : keyRow + jbRow)
+      + '<div class="foot"><button class="btn">Aggiorna</button><button class="btn ghost">Impostazioni…</button></div>';
+    pop.classList.toggle('closed', !popOpen);
+    pill.setAttribute('aria-expanded', String(popOpen));
+    arc.setAttribute('stroke-dashoffset', String(69.1 * (1 - avg)));
+    arc.setAttribute('stroke', tone);
+    pill.title = known.length ? 'Crediti: ' + Math.round(avg * 100) + ' % in media' : 'Nessun limite noto';
+    pop.querySelectorAll('.prow > button').forEach(b => b.onclick = () => {
+      const id = b.parentElement.dataset.id;
+      openRows.has(id) ? openRows.delete(id) : openRows.add(id);
+      b.parentElement.classList.toggle('open'); b.setAttribute('aria-expanded', String(openRows.has(id)));
+    });
+  }
+  $('#meter-pill').onclick = () => { popOpen = !popOpen; renderMeter(st.provider === 'jb', st.state === 'ready'); };
   $$('#seg-provider button, #provider-cards .opt').forEach(b => b.onclick = () => { st.provider = b.dataset.v; render(); });
+  $$('#seg-admin button').forEach(b => b.onclick = () => { st.admin = b.dataset.v; render(); });
   $$('#seg-state button').forEach(b => b.onclick = () => { st.state = b.dataset.v; render(); });
   render();
 </script>

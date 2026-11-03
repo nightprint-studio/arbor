@@ -31,11 +31,10 @@
    * a "via …" line to every transitive row, and an expandable detail on declared ones.
    */
   import {
-    Library, Package, Layers, LocateFixed, ShieldAlert, Workflow, TriangleAlert, Link2,
+    Library, Package, Layers, LocateFixed, ShieldAlert, Workflow, TriangleAlert, Eye,
   } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
-  import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
@@ -45,14 +44,14 @@
   import BennuModuleTree from './BennuModuleTree.svelte';
   import DependencyRow from './dependencies/DependencyRow.svelte';
   import DependencyConflicts from './dependencies/DependencyConflicts.svelte';
-  import { buildTreeIndex, childrenOf, introducers } from './dependencies/dependency-tree';
-  import { splitCoord } from './dependencies/dep-labels';
+  import TransitiveRow from './dependencies/TransitiveRow.svelte';
+  import { buildTreeIndex, childrenOf, nodeCoord, routes } from './dependencies/dependency-tree';
   import { afterPaint } from '$lib/utils/after-paint';
-  import { tooltip } from '$lib/actions/tooltip';
+  import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import type { ModuleRef } from './project-modules';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
-  import { buildUnitDir, openBuildUnitMenu } from './build-unit-menu';
-  import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { buildUnitDir, openBuildUnitMenu } from './build-unit-menu';  import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { moduleFocusStore } from '$lib/stores/bennu/module-focus.svelte';
   import { dependenciesStore, vulnFor } from '$lib/stores/bennu/dependencies.svelte';
   import {
@@ -121,31 +120,71 @@
     if (root) void dependenciesStore.loadTree(root, true);
   }
 
-  function matches(d: Dependency, q: string): boolean {
+  /** A dependency matches by what it is, and — once the tree is resolved — by what it pulls in: searching
+   *  for `freemarker` finds the library that brings it. */
+  function matches(m: DependencyModule, d: Dependency, q: string): boolean {
     if (!q) return true;
     const origin = d.origin.kind === 'declared' ? '' : d.origin.from;
-    return `${coordOf(d)} ${d.name} ${d.version} ${d.scope} ${d.source} ${d.condition} ${origin}`
-      .toLowerCase()
-      .includes(q);
+    if (`${coordOf(d)} ${d.name} ${d.version} ${d.scope} ${d.source} ${d.condition} ${origin}`.toLowerCase().includes(q)) {
+      return true;
+    }
+    return pullsOf(m, d).some((n) => `${nodeCoord(n)} ${n.version}`.toLowerCase().includes(q));
   }
 
+  const normDir = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
+  const solo = $derived(dependenciesStore.solo);
+  const searching = $derived(filter.trim().length > 0);
+  /** What the filter is, as the rows see it. */
+  const query = $derived(filter.trim().toLowerCase());
+
   // Modules with their filtered lists. A module that matched nothing drops out while a filter is
-  // active, so the panel shows the answer rather than a page of empty groups.
+  // active, so the panel shows the answer rather than a page of empty groups. A module the panel
+  // is narrowed to is the only one drawn.
   const modules = $derived.by(() => {
-    const q = filter.trim().toLowerCase();
+    const q = query;
     return (report?.modules ?? [])
-      .map((m) => ({ module: m, deps: m.dependencies.filter((d) => matches(d, q)) }))
+      .filter((m) => !solo || normDir(buildUnitDir(m)) === solo)
+      .map((m) => ({ module: m, deps: m.dependencies.filter((d) => matches(m, d, q)) }))
       .filter((m) => m.deps.length > 0 || !q);
   });
 
   const transitive = $derived.by(() => {
-    const q = filter.trim().toLowerCase();
+    const q = query;
+    // The report's transitive group is the whole project's, not one module's: narrowed to a module it
+    // would show a long tail that is mostly not that module's, so it is left out.
+    if (solo) return [];
     return (report?.transitive ?? []).filter((t) => {
       if (!q) return true;
-      const via = introducers(treeIndex.artifacts.get(coordOf(t))).join(' ');
+      const via = routes(treeIndex.artifacts.get(coordOf(t))).flat().join(' ');
       return `${coordOf(t)} ${t.version} ${via}`.toLowerCase().includes(q);
     });
   });
+
+  /** The menu of a module row of the selector tree: the same verb the section's own menu has. */
+  function openTreeMenu(x: number, y: number, m: ModuleRef) {
+    const dir = normDir(m.toolRoot);
+    const only = solo === dir;
+    bennuContextMenuStore.show(
+      x, y,
+      [
+        { id: 'solo', label: only ? 'Show all modules' : 'Show only this module', icon: only ? Layers : Eye },
+        { id: 'focus', label: 'Focus in Project', icon: LocateFixed },
+      ],
+      (id) => {
+        if (id === 'solo') dependenciesStore.setSolo(m.toolRoot);
+        else if (id === 'focus') bennuUiStore.focusInTree(m.toolRoot);
+      },
+    );
+  }
+
+  function openSectionMenu(x: number, y: number, m: DependencyModule) {
+    const only = solo === normDir(buildUnitDir(m));
+    openBuildUnitMenu(x, y, m, {
+      label: only ? 'Show all modules' : 'Show only this module',
+      icon: only ? Layers : Eye,
+      run: () => dependenciesStore.setSolo(buildUnitDir(m)),
+    });
+  }
 
   const conflicts = $derived.by(() => {
     const q = filter.trim().toLowerCase();
@@ -162,14 +201,14 @@
       : 0,
   );
 
-  // All groups open by default; the transitive one closed, because it is the long tail and
-  // opening the panel should show what the project asked for, not what came in behind it.
+  // Every group starts closed: opening the panel shows the list of modules, and what to read is
+  // one click away. A filter opens the groups it found something in (see `searching`).
   const open = $state<Record<string, boolean>>({});
-  function isOpen(id: string, fallback = true): boolean {
-    return open[id] ?? fallback;
+  function isOpen(id: string): boolean {
+    return searching || (open[id] ?? false);
   }
-  function toggle(id: string, fallback = true) {
-    open[id] = !isOpen(id, fallback);
+  function toggle(id: string) {
+    open[id] = !(open[id] ?? false);
   }
 
   /** The pom that decides this dependency — which is the one the row opens. */
@@ -188,13 +227,6 @@
   function pullsOf(m: DependencyModule, d: Dependency) {
     const mod = tree?.modules.find((t) => t.module === m.id || t.module.endsWith(`:${m.id}`));
     return mod ? childrenOf(tree, mod.module, coordOf(d)) : [];
-  }
-
-  /** "via spring-web, jackson-databind" for a transitive row; empty before the tree is resolved. */
-  function viaOf(coord: string): string {
-    const names = introducers(treeIndex.artifacts.get(coord)).map((c) => splitCoord(c).name);
-    if (names.length === 0) return '';
-    return names.length > 3 ? `${names.slice(0, 3).join(', ')} +${names.length - 3}` : names.join(', ');
   }
 </script>
 
@@ -231,7 +263,7 @@
   {#if !root}
     <EmptyState message="Open a project to see its dependencies." />
   {:else if dependenciesStore.error}
-    <div class="dep-scroll"><BennuModuleTree kinds={['Maven', 'Gradle', 'Cargo']} ariaLabel="Projects" /></div>
+    <div class="dep-scroll"><BennuModuleTree kinds={['Maven', 'Gradle', 'Cargo']} ariaLabel="Projects" onModuleContextMenu={openTreeMenu} /></div>
     <div class="dep-notice">
       <Alert variant="error" compact text={dependenciesStore.error} />
     </div>
@@ -239,7 +271,16 @@
     <div class="dep-loading"><Spinner size={16} /><span>Reading the project's manifests…</span></div>
   {:else if report}
     <div class="dep-body">
-      <BennuModuleTree kinds={['Maven', 'Gradle', 'Cargo']} ariaLabel="Projects" />
+      <BennuModuleTree kinds={['Maven', 'Gradle', 'Cargo']} ariaLabel="Projects" onModuleContextMenu={openTreeMenu} />
+      {#if solo}
+        <div class="dep-notice dep-solo">
+          <span>Showing one {unitWord} only.</span>
+          <Button variant="secondary" size="sm" onclick={() => dependenciesStore.setSolo(null)}>
+            {#snippet iconStart()}<Layers size={12} />{/snippet}
+            Show all
+          </Button>
+        </div>
+      {/if}
       {#if report.unreadable.length > 0}
         <div class="dep-notice">
           <Alert variant="warning" compact>
@@ -334,7 +375,7 @@
             onToggle={() => toggle(m.module.manifest)}
             badge={m.deps.length}
             badgeTitle={`Dependencies this ${unitWord} declares`}
-            onContextMenu={(x, y) => openBuildUnitMenu(x, y, m.module)}
+            onContextMenu={(x, y) => openSectionMenu(x, y, m.module)}
           >
             {#snippet icon()}<Package size={13} />{/snippet}
             {#snippet actions()}
@@ -364,6 +405,7 @@
                       usage={treeIndex.artifacts.get(coordOf(d))}
                       vuln={vulnFor(dependenciesStore.advisories, coordOf(d), d.version)}
                       pulls={pullsOf(m.module, d)}
+                      {query}
                       onOpen={openDeclaration}
                     />
                   </li>
@@ -376,35 +418,21 @@
         {#if transitive.length > 0}
           <SidebarSection
             label="Pulled in transitively"
-            expanded={isOpen('__transitive', false)}
-            onToggle={() => toggle('__transitive', false)}
+            expanded={isOpen('__transitive')}
+            onToggle={() => toggle('__transitive')}
             badge={transitive.length}
           >
             {#snippet icon()}<Layers size={13} />{/snippet}
             <ul class="dep-list">
               {#each transitive as t (t.name + '@' + t.version)}
                 {@const coord = coordOf(t)}
-                {@const via = viaOf(coord)}
-                {@const usage = treeIndex.artifacts.get(coord)}
-                {@const parts = splitCoord(coord)}
-                <li class="tr-row" use:tooltip={t.resolved || 'Not in the local cache'}>
-                  <span class="tr-top">
-                    <span class="tr-name">{parts.name}</span>
-                    <span class="tr-ver mono" class:conflict={usage?.conflicted}>{t.version}</span>
-                  </span>
-                  <span class="tr-meta">
-                    {#if parts.group}<span class="tr-group mono">{parts.group}</span>{/if}
-                    {#if via}<span class="tr-via"><Link2 size={10} /> via {via}</span>{/if}
-                    {#if usage?.conflicted}
-                      <Badge variant="tone" tone="warning" size="sm" label={`${usage.versions.length} versions`} />
-                    {/if}
-                    {#if vulnFor(dependenciesStore.advisories, coord, t.version)}
-                      {@const v = vulnFor(dependenciesStore.advisories, coord, t.version)!}
-                      <span use:tooltip={`${v.count} known ${v.count === 1 ? 'vulnerability' : 'vulnerabilities'} (${v.severity})`}>
-                        <Badge variant="tone" tone="error" size="sm" label={`${v.count} CVE`} />
-                      </span>
-                    {/if}
-                  </span>
+                <li>
+                  <TransitiveRow
+                    dep={t}
+                    usage={treeIndex.artifacts.get(coord)}
+                    vuln={vulnFor(dependenciesStore.advisories, coord, t.version)}
+                    {query}
+                  />
                 </li>
               {/each}
             </ul>
@@ -448,24 +476,10 @@
     font: inherit; color: var(--accent); text-decoration: underline;
   }
 
-  /* Transitive rows share the declared rows' shape — name over group — but are not a link anywhere:
-     there is no declaration to open. */
-  .tr-row { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px; border-radius: var(--radius-sm); }
-  .tr-row:hover { background: var(--bg-hover); }
-  .tr-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-  .tr-name {
-    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    color: var(--text-primary); font-size: var(--font-size-sm); font-weight: 500;
+  .dep-solo {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: var(--font-size-xs); color: var(--text-muted);
   }
-  .tr-ver { flex-shrink: 0; color: var(--text-secondary); }
-  .tr-ver.conflict { color: var(--warning); font-weight: 600; }
-  .tr-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
-  .tr-group { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tr-via {
-    display: inline-flex; align-items: center; gap: 3px;
-    font-size: var(--font-size-3xs); color: var(--text-muted);
-  }
-  .mono { font-family: var(--font-code); font-size: var(--font-size-xs); }
   code {
     font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-primary);
   }

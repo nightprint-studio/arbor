@@ -559,7 +559,7 @@
 
       <!-- RIGHT — form for the selected config ────────────────────────────── -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <section class="form-pane" onkeydown={onBodyKeydown}>
+      <section class="form-pane" class:fill={selected?.kind === 'tomcat'} onkeydown={onBodyKeydown}>
         {#if !selected}
           <EmptyState message="Select or create a configuration to edit it." />
         {:else}
@@ -647,9 +647,11 @@
           {:else if selected.kind === 'tomcat'}
             <!-- Keyed by the configuration: the form holds what it learned about the outside world
                  (installations, ports, stored passwords) for ONE configuration. -->
-            {#key selected.id}
-              <BennuTomcatRunForm config={selected} {patch} root={project?.root ?? ''} {moduleOptions} {isMultiModule} />
-            {/key}
+            <div class="tomcat-fill">
+              {#key selected.id}
+                <BennuTomcatRunForm config={selected} {patch} root={project?.root ?? ''} {moduleOptions} {isMultiModule} />
+              {/key}
+            </div>
           {:else if selected.kind === 'script'}
             <!-- Same bargain as cargo above: a script has no module, no classpath and no VM
                  arguments, so an inline arm would be a form of fields that never apply. -->
@@ -969,6 +971,10 @@
     overflow-y: auto;
     min-height: 0;
   }
+  /* A Tomcat configuration lays out its own columns, each of which scrolls: the pane itself stays
+     put, so the name and the tabs never leave the screen. */
+  .form-pane.fill { overflow: hidden; }
+  .tomcat-fill { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .form-head {
     display: grid;
     grid-template-columns: 1fr auto;

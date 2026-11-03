@@ -13,6 +13,7 @@
   import { corvus } from '$lib/ipc/rpc';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
+  import { plansStore } from '$lib/stores/corvus/plans.svelte';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { windowsStore } from '$lib/stores/windows.svelte';
@@ -269,6 +270,8 @@
     'action:prev-tab':           'prev_tab',
     'action:pull':               'pull',
     'action:push':               'push',
+    'action:plan-add-push':      'plan_add_push',
+    'action:plan-open':          'plan_open',
     'action:fetch':              'fetch',
     'action:stash':              'stash',
     'action:commit':             'commit',
@@ -464,8 +467,18 @@
         { id: 'action:stash',        kind: 'action', icon: 'Layers',      group: 'Git',
           title: 'Stash Changes',
           action: () => closeAndDispatch('arbor:stash') },
+        { id: 'action:plan-add-push', kind: 'action', icon: 'ListChecks', group: 'Plan',
+          title: 'Plan: Add Push',    subtitle: 'Queue this branch\'s push in the plan instead of pushing now',
+          action: () => closeAndDispatch('arbor:plan-add-push') },
       );
     }
+
+    // ── Plan ────────────────────────────────────────────────────────────────
+    actions.push({
+      id: 'action:plan-open', kind: 'action', icon: 'ListChecks', group: 'Plan',
+      title: 'Plan: Open', subtitle: 'Compose and run ordered steps across repositories',
+      action: () => { onClose(); tick().then(() => plansStore.openModal()); },
+    });
 
     // ── Stage & Commit ──────────────────────────────────────────────────────
     if (hasTab) {

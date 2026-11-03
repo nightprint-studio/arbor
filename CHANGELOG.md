@@ -7,7 +7,43 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+- **Bennu › Parameter info is on demand** — the signature of the call at the caret no longer pops up by itself (and could not be dismissed): Ctrl+P shows it, Esc closes it, and it uses the same tooltip look as the hover card.
+- **Bennu › Imber plans before it changes things, and answers a question without editing** — a task that edits files starts with a step plan (unless you say to just do it), and a question about an exception or a piece of code gets an explanation, not an unrequested fix.
+
+### Fixed
+- **Bennu › Tomcat Live: an application that lists `/WEB-INF/lib` at start-up no longer fails with a `NullPointerException`** — the dependency jars are now a real, listable `/WEB-INF/lib` folder instead of single-file mounts, which `getResourcePaths` answered `null` for; the classes of sibling modules are loadable but no longer listed under `/WEB-INF/classes`, as they would be jars in a WAR; the module's classes are searched before the jars, so a project class that overrides a library one wins.
+- **Bennu › Imber stops pestering for write access after you allowed reading only** — the question now offers just «Keep read-only» or «Allow writing», and a no makes Imber adapt (analyse and describe the change) instead of asking again. It is also told to ask for the narrowest access the task needs rather than the whole project.
+- **Bennu › Git Blame on a project reached through a mapped drive, junction or symlink** — the file was not found in the repository, so the margin stayed empty; it is now matched through its resolved path.
+- **“Open in Corvus” from Bennu and the File Explorer opens Corvus** — it raised the launcher's program picker; it now opens (or focuses) the Corvus window and the repository in it.
+- **Bennu › Tomcat's own log is read** — `catalina` / `localhost` lines get their timestamp, level, thread and `class.method`, and a level in the JVM's language (`GRAVE`, `AVVERTENZA`) colours the line like `SEVERE` / `WARNING`.
+- **Bennu › Generated sources resolve after a Maven build** — after a compiling phase run from the Maven window, the index reads `target/generated-sources` again (JPA metamodel `Order_`, MapStruct, QueryDSL) without a manual rebuild.
+- **Bennu › Resolving the dependency tree is a job** — it shows in the Jobs panel while Maven runs.
+
 ### Added
+- **Corvus › Plans: ordered remote steps across repositories** — push, create / merge an MR, pipeline, tag and pull arranged in phases with start conditions (an MR merged, a delay, your go-ahead) and a `finally`. Add steps from the Push button, the Create PR dialog and the Commit menu, or inside the plan (Ctrl+Shift+J); they run as one job, pause on a failure and resume.
+- **Bennu › Dependencies: show one module, and who requires a transitive library** — a right-click on a module (in the panel or its tree) shows only that module; a transitive row opens to every route that brings it in; the filter also finds a library by what it pulls in. Groups start closed.
+- **Bennu › Console: hide MDC entries** — all of them, or one key at a time (right-click a line › *Hide MDC “key”*), keeping what remains readable.
+- **Bennu › Log files in the editor are coloured** — a `.log` file takes the colour of each line's level, with its stack traces, timestamp, thread and logger.
+- **Bennu › Ask Imber about a vulnerability** — the detail of a dependency vulnerability can ask the assistant whether the project is really exposed and what fixing it would change.
+- **Bennu › Maven runs wear Maven's mark** instead of a play button.
+- **Bennu › Optimize imports over a project, module or folder** — from the command palette or a folder's right-click menu in the project tree: a dialog lists the Java files that would change, and one Ctrl+Enter writes them. Files with unsaved edits are left out.
+- **Bennu › Back/Forward survive switching project** — the navigation history (Back, Forward, Recent locations, last edit) is kept when you move between the projects of a workspace, and stepping into a place of the project you left switches to it. It still starts empty on a new launch.
+- **Bennu › A rebuild during an analysis no longer starts a second one beside it** — the analysis of the old index now stops, and the new one starts after it, instead of both running over the same files.
+- **Bennu › Switching project no longer loses a file's undo history and scroll** — going to another project of the workspace and back, the files you had open keep their undo history and where you were reading; before, they came back at the top with nothing to undo.
+- **Bennu › Undo history survives closing Arbor** — a tab's undo/redo history is kept on disk and given back on the next start, as long as the file has not changed outside Arbor.
+- **Bennu › Imber's Stop button can be clicked again** — the animated ring around it swallowed the click.
+- **Bennu › Imber no longer hangs after you allow reading and it then needs to write** — the second access request for the same folder could not be answered («no longer waiting»), leaving the run stuck on «Editing…».
+- **Bennu › Imber: a question left open no longer offers buttons that do nothing** — a question, confirmation or access request whose run was cancelled, timed out or reopened later now says it is no longer waiting, instead of failing when answered.
+- **Bennu › More background work is a job** — indexing, resolving dependencies, the whole-project validation (cancellable) and the project-wide vulnerability check now show in the Jobs panel, with their output; the last one only when it takes more than a couple of seconds.
+- **Bennu › A `Page<Y>` passed where a `Page<X>` is expected is reported** — an argument of the right class with the wrong type arguments (generics are invariant) was missed on a call to a method of the same class, and on an argument that was itself a call to a non-generic method.
+- **Bennu › Colour for log patterns** — the conversion patterns of `log4j2.xml` and `logback.xml` (and Log4j 1.x's) are coloured by what each `%` conversion prints, with `{options}` quieter and `${property}` marked.
+- **Bennu › Jobs that end unexpectedly no longer stay "running"** — the downloads, the dependency re-resolve and the analysis share one lifecycle, so a job that stops early or fails is closed as failed instead of sitting in the Jobs panel for good.
+- **Bennu › Cancel the project analysis** — the *Analyzing project* job has a Cancel button in the Jobs panel that stops the analysis, instead of only marking the row.
+- **Bennu › Completion in `log4j2.xml` and `logback.xml`** — elements, attributes and the values of the closed ones (levels, `ACCEPT`/`DENY`, booleans) are offered and explained, with no false underlines for appenders of your own.
+- **Bennu › Log files in the console** — a select in the Run console switches from the output to a log file of the project (Tomcat's `logs`, `*.log`, the files its Logback or Log4j configuration writes to), followed live and read like a run: levels, source links, stack traces, SQL copy and Fix with Imber.
+- **Bennu › Log layout detection** — the console's columns are also read from `log4j2.properties`, `log4j.xml`, `log4j.properties` and `WEB-INF`, from Log4j2 `<Property>` values and from `%highlight{…}` wrappers; the clean view's Columns tab names the file the layout came from, or says none was found.
+- **Bennu › Tomcat server libraries** — the Deployment tab takes any number of jars and folders of jars, copied into the server's `lib/` at launch.
 - **Sitta › Drag files to other applications** — dragging files out of the explorer window onto another program (a browser upload, a chat, another file manager) now carries the real files, with the system's own drag image; moving between explorer windows uses the same drag.
 - **Bennu › One Tomcat for every project** — downloaded Tomcats now live in a single folder of your Bennu profile instead of inside each project, so a version is fetched once and shared; each configuration still generates its own ports, `context.xml` and logs under its project.
 - **Bennu › Clean view for the console** — an eye in the Run, Build and Test consoles (`Ctrl+Shift+L`) draws program output without the noise: hide or shorten the time, level, thread and logger; hide, dim or highlight lines with rules (made from a right-click on a line); fold stack-trace frames that are not your code (your packages are found in the project); count repeated lines. Only the drawing changes — copy and the assistant still get the original text.
@@ -54,8 +90,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu › A class after `new` writes the call** — picking `ArrayList` after `new` writes `ArrayList<>()`, a class with a no-arg constructor `Plain()` with the caret after it, one whose constructors all take arguments `Needy()` with the caret between the parentheses, and an interface or abstract class `Runnable() {}` with the caret inside the body (an anonymous class). Enums, a name that stands for several classes and a call already written are left as they were; the order by expected type is unchanged.
 
 ### Fixed
-- **Bennu › Tomcat data source with a driver the project does not depend on** — PostgreSQL, MySQL, MariaDB and SQLite drivers are fetched from Maven Central once and reused; any other driver can be named as a jar on the data source.
+- **Bennu › Tomcat data source with a driver the project does not depend on** — PostgreSQL, MySQL, MariaDB and SQLite drivers are fetched from Maven Central once and reused; any other driver goes in the new **Server libraries** of the Deployment tab.
 - **Bennu › Tomcat context editor** — Raw XML is a real code editor and the two views stay in step: entering Raw starts from the form, going back reads the text into it; the resource list is a full-height sidebar with checkboxes for the bulk editor, "From a Picus connection" is a picker in the Add menu, and "Test connection" checks what the form says instead of a saved connection.
+- **Bennu › A build or validation no longer waits forever behind a stuck analysis** — it gives up after five minutes and says why, instead of staying on *Compiling…*.
+- **Bennu › Analysis no longer hangs on a very long call chain** — a fluent builder of more than about 128 calls (a Lombok `@Builder` with a hundred-odd setters) made the validation of that file take forever and left the analysis at its last percentage. A call chain of any length is now typed link by link, so the checks reach its last call too.
+- **Bennu › A file that stalls the analysis is named** — when a file has been validating for 20 seconds, the Analyzing job and a toast say which one, instead of the pass sitting at its last percentage.
+- **Bennu › Go to from a log on Windows** — a path printed as a `file:/C:/…` URL opens the file instead of an empty tab.
+- **Bennu › Clean view panel animates** — the log settings panel slides open and closed like the other side panels.
+- **Bennu › Tomcat data source pool** — `maxTotal`, `maxIdle` and `maxWait` accept `-1` (no limit, wait forever) instead of stopping the launch, and an imported `0` is kept.
 - **Bennu › Tomcat run configuration** — the classpath scope can be set from the Launch tab, for APIs the project marks `provided` that an application server would have supplied.
 - **Bennu › Running a module of a multi-module project** — a failing Ant step in a sibling module (a `context.xml` copy, say) no longer leaves the run's classpath without that module's dependencies.
 - **Context menus act again** — picking an entry in a right-click menu (a Picus connection's Connect, Edit or Delete, a tab's Close, a worktree's actions, and every other menu that acts on the row it was opened on) did nothing since the menu started closing before it reported the pick.

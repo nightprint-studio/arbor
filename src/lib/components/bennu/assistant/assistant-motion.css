@@ -84,7 +84,8 @@
 /* A ring that turns around the Stop button. */
 .asst-ring { position: relative; display: inline-flex; border-radius: 50%; }
 .asst-ring::before {
-  content: ''; position: absolute; inset: -3px; border-radius: 50%;
+  /* Decoration only: it sits over the button it circles, and the mask hides the pixels, not the hits. */
+  content: ''; position: absolute; inset: -3px; border-radius: 50%; pointer-events: none;
   background: conic-gradient(from 0deg, transparent 0 55%, var(--accent) 85%, var(--info) 100%);
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));

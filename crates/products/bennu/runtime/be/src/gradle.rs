@@ -358,24 +358,16 @@ pub(crate) fn bennu_gradle_download(ctx: &BennuState, args: GradleRootArgs) -> R
     let root_str = args.root.clone();
 
     std::thread::spawn(move || {
-        let job = crate::index_service::register_bennu_job(
-            &host,
+        let task = crate::task::Task::start(
+            Some(&host),
             &sink,
-            "Download dependencies",
-            "gradle --refresh-dependencies · resolve every classpath",
-            "Download",
-            false,
+            crate::task::TaskSpec::new("Download dependencies", "gradle --refresh-dependencies · resolve every classpath").category("Download"),
         );
         match crate::gradle_classpath::run_classpath(&root, true) {
             Ok(jars) => {
                 crate::dep_classpath::clear_list_cache(&root);
                 let indexed = crate::maven::reindex_and_wait(&root_str, &sink);
-                crate::index_service::finish_bennu_job(
-                    &sink,
-                    job,
-                    indexed,
-                    (!indexed).then(|| "The index could not be rebuilt.".to_string()),
-                );
+                task.finish(if indexed { Ok(()) } else { Err("The index could not be rebuilt.".to_string()) });
                 crate::index_service::notify(
                     &sink,
                     "Dependencies downloaded",
@@ -388,7 +380,7 @@ pub(crate) fn bennu_gradle_download(ctx: &BennuState, args: GradleRootArgs) -> R
                 );
             }
             Err(reason) => {
-                crate::index_service::finish_bennu_job(&sink, job, false, Some(reason.clone()));
+                task.fail(reason.clone());
                 crate::index_service::notify(&sink, "Download failed", &reason, "error");
             }
         }
@@ -409,24 +401,14 @@ pub(crate) fn bennu_gradle_reload(ctx: &BennuState, args: GradleRootArgs) -> Res
     let sink = ctx.event_sink();
     let root_str = args.root.clone();
     std::thread::spawn(move || {
-        let job = host.as_ref().and_then(|host| {
-            crate::index_service::register_bennu_job(
-                host,
-                &sink,
-                "Re-resolve dependencies",
-                "drop the classpath cache · reindex",
-                "Dependencies",
-                false,
-            )
-        });
+        let task = crate::task::Task::start(
+            host.as_ref(),
+            &sink,
+            crate::task::TaskSpec::new("Re-resolve dependencies", "drop the classpath cache · reindex").category("Dependencies"),
+        );
         crate::dep_classpath::clear_list_cache(&root);
         let indexed = crate::maven::reindex_and_wait(&root_str, &sink);
-        crate::index_service::finish_bennu_job(
-            &sink,
-            job,
-            indexed,
-            (!indexed).then(|| "The index could not be rebuilt.".to_string()),
-        );
+        task.finish(if indexed { Ok(()) } else { Err("The index could not be rebuilt.".to_string()) });
         crate::index_service::notify(
             &sink,
             "Dependencies re-resolved",

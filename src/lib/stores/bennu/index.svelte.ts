@@ -22,9 +22,14 @@ import { SvelteMap } from 'svelte/reactivity';
 import { coalesceLatest } from '$lib/utils/coalesce';
 import { operationsStore } from '$lib/feedback/stores/operations.svelte';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
-import { indexStats as ipcIndexStats, classIndex as ipcClassIndex } from '$lib/ipc/bennu';
+import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
+import { indexStats as ipcIndexStats, classIndex as ipcClassIndex, cancelBennuJob } from '$lib/ipc/bennu';
 import { reindex as ipcReindex } from '$lib/ipc/bennu/nav';
 import type { ClassEntry } from '$lib/types/bennu';
+
+// Cancelling the project analysis in the Jobs panel must stop the analysis, not only mark its row: the sweep holds
+// the project, and every build and validation of it queues behind that.
+jobsStore.onCancel('bennu', (jobId) => cancelBennuJob(jobId));
 
 const OP_ID = 'bennu-index';
 const PHASES: { key: string; label: string }[] = [

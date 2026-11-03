@@ -36,7 +36,7 @@
   <li><strong>Not a statement</strong><code>list.clear;</code> — the call's <code>()</code> forgotten — or <code>1 + 1;</code></li>
   <li><strong>Unknown method or field</strong>on the receiver's inferred type, so <code>s.lenght()</code> on a <code>String</code> is caught</li>
   <li><strong>Wrong argument count</strong>a call or <code>new</code> matching no overload; varargs understood</li>
-  <li><strong>Wrong argument type</strong><code>foo(1)</code> where <code>foo</code> takes a <code>String</code> — only when a single overload is unambiguous</li>
+  <li><strong>Wrong argument type</strong><code>foo(1)</code> where <code>foo</code> takes a <code>String</code> — only when a single overload is unambiguous. Generics are invariant: a <code>Page&lt;Dog&gt;</code> is not a <code>Page&lt;Cat&gt;</code> (nor a <code>Page&lt;Animal&gt;</code>), whether it is a variable, the result of a call to a method with no type variable of its own, or passed to a method of the same class</li>
   <li><strong>Unresolved import</strong>a type that does not exist; needs the classpath complete</li>
   <li><strong>Unresolved type</strong>in a declaration, <code>extends</code>, generics or <code>catch</code> — an annotation counts, and so does a nested type through its outer (below)</li>
   <li><strong>Type incompatibility</strong>an impossible cast, or a value of the wrong type assigned or returned — <code>int x = "1";</code>, <code>int y = "1" + 1;</code></li>
@@ -230,7 +230,9 @@ class LegacyImporter { … }`, 'java')}</code></pre>
   <dt>Cached</dt>
   <dd>Each file's result is kept against the exact project types it depends on, so an unchanged project validates instantly again, and after an edit only the changed file — and whatever its types touched — is checked.</dd>
   <dt>Warmed up</dt>
-  <dd>The cache fills in the background right after indexing, so the first validation is already instant. <strong>Settings → Java → Validate project on open</strong> turns that off.</dd>
+  <dd>The cache fills in the background right after indexing, so the first validation is already instant. <strong>Settings → Java → Validate project on open</strong> turns that off.
+    It shows as <em>Analyzing project</em> in the Jobs panel, and <strong>Cancel</strong> there stops it for real — a build or a validation of the same project waits for it, so a pass that is too slow is not something to sit behind.
+    A validation that has waited more than five minutes for it gives up and says so, rather than staying on <em>Compiling…</em>. If one file stays in validation for more than twenty seconds, the job's output and a notification name it.</dd>
   <dt>A background citizen</dt>
   <dd>At most about half the cores by default, so the editor stays responsive. <strong>Settings → Java → Validation CPU threads</strong> caps it (1 for single-threaded); its sibling <strong>Indexing CPU threads</strong> caps the index build and the reference walk, serial by default. <strong>Cancel</strong> on the "Validating…" status stops a sweep.</dd>
 </dl>

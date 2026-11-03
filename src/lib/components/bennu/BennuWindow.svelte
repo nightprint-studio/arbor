@@ -114,6 +114,7 @@
   import BennuFindInFilesModal from './BennuFindInFilesModal.svelte';
   import BennuProjectConfigModal from './BennuProjectConfigModal.svelte';
   import BennuAboutModal from './BennuAboutModal.svelte';
+  import BennuOptimizeImportsModal from './BennuOptimizeImportsModal.svelte';
   // The plugin surface. Both halves load lazily inside `PluginTools`: a window that never
   // opens the Plugin Manager should not carry it, and the marketplace pulls the whole
   // catalogue view with it.
@@ -182,6 +183,7 @@
   import { bennuNavStore } from '$lib/stores/bennu/nav-history.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { rootOwning } from '$lib/utils/paths';
   import { watchRoots } from '$lib/ipc/bennu/tree-watch';
   import { bennuTreeSyncStore } from '$lib/stores/bennu/tree-sync.svelte';
   import { workspacesStore } from '$lib/stores/bennu/workspaces.svelte';
@@ -546,16 +548,19 @@
     }
   });
 
-  // The navigation history belongs to the project too — and unlike the index it has to be
-  // dropped for EVERY kind of project, Cargo and demo included, which is why it is not folded
-  // into the effect above (that one returns early for exactly those). Stepping Back into a path
-  // from the project you just closed would open a file from somewhere else.
+  // The navigation history belongs to the WORKSPACE: switching between its projects keeps it, and Back
+  // into a file of the project you left switches to it (see `BennuEditor.stepHistory`). What goes is the
+  // stops of a project that is no longer open — replacing the workspace, closing a project — because
+  // stepping Back into one would open a file from somewhere else. It has to run for EVERY kind of project,
+  // Cargo and demo included, which is why it is not folded into the effect above (that one returns early
+  // for exactly those). It is session state: a restart starts with an empty history.
   let lastNavRoot: string | null = null;
   $effect(() => {
     const root = projectStore.project?.root ?? null;
     if (root === lastNavRoot) return;
     lastNavRoot = root;
-    untrack(() => bennuNavStore.reset());
+    const roots = [...projectStore.workspaceRoots];
+    untrack(() => bennuNavStore.retain((file) => rootOwning(roots, file) !== null));
   });
 
   // The project's Java language level, for the editor decisions that are only correct with it —
@@ -813,6 +818,7 @@
     focusEditor: () => void;
     requestCompletion: () => void;
     openIntentions: () => void;
+    toggleParameterInfo: () => void;
     goToDefinition: () => void;
     goToImplementation: () => Promise<void>;
     openRename: () => void;
@@ -1844,6 +1850,9 @@
         // Also the language-server quick-fix list for a server-backed buffer — the user's gesture
         // is "what can you do here", and which engine answers is not their problem.
         action: () => run(() => editor?.openIntentions()), when: isJava || isLspFile(path) },
+      // The signature of the call at the caret. Never opens by itself; Esc closes it.
+      { id: 'paraminfo', title: 'Parameter info', icon: 'Info', shortcut: 'Ctrl+P',
+        action: () => run(() => editor?.toggleParameterInfo()), when: isJava || isLspFile(path) },
       // NOT IntelliJ's Ctrl+Alt+L: on IT/DE/FR/ES layouts Chromium drops Ctrl+Alt+<letter> to
       // preserve AltGr, so the binding would simply never fire. Alt+Shift+F is VS Code's and is
       // in the safe family.
@@ -1854,6 +1863,10 @@
       // AltGr).
       { id: 'optimizeimports', title: 'Optimize imports', icon: 'Wand2', shortcut: 'Ctrl+Shift+O',
         action: () => run(() => void editor?.optimizeImportsInBuffer()), when: isJava },
+      // The same rule over every Java file of the project; the dialog's folder picker narrows it to a module.
+      { id: 'optimizeimportsproject', title: 'Optimize imports in project…', icon: 'Wand2',
+        action: () => run(() => bennuUiStore.openOptimizeImports(projectStore.project!.root)),
+        when: !!projectStore.project },
       // What a macro expands to. Recursive — the server has no single-step form — and read-only,
       // because what comes back is text rather than a file it knows.
       // The assistant's margin mark, from the keyboard: what it offers depends on the selection, a problem
@@ -3180,6 +3193,12 @@
 <PluginOverlays />
 {#if bennuUiStore.aboutOpen}
   <BennuAboutModal onClose={() => bennuUiStore.closeAbout()} />
+{/if}
+{#if bennuUiStore.optimizeImportsScope}
+  <BennuOptimizeImportsModal
+    scope={bennuUiStore.optimizeImportsScope}
+    onClose={() => bennuUiStore.closeOptimizeImports()}
+  />
 {/if}
 
 {#if bennuUiStore.generateOpen}

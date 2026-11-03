@@ -30,6 +30,14 @@ fn set_bennu_log_view(_state: &BennuState, config: LogViewConfig) -> Result<(), 
     save(&current)
 }
 
+/// The logging configurations of the project that name a console pattern, in the order they are
+/// consulted — the first usable one is the layout the console reads its columns with. Empty when
+/// the project configures none, which is what the settings page says out loud.
+#[arbor_rpc::handler]
+fn bennu_log_layouts(_state: &BennuState, root: String) -> Result<Vec<crate::log_pattern::Candidate>, String> {
+    Ok(crate::log_pattern::candidates(Path::new(&root)))
+}
+
 /// The top-level packages the project's own sources declare, most populated first.
 #[arbor_rpc::handler]
 fn bennu_own_packages(_state: &BennuState, root: String) -> Result<Vec<String>, String> {

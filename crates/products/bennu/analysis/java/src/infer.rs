@@ -93,6 +93,11 @@ pub struct InferCache {
     /// How many times the depth limit cut a walk short. An answer reached after a cut is only as good as the cut, so it is
     /// not kept in `inner`.
     cutoffs: Cell<u32>,
+    /// What a walk answered **after** a cut, by span, kind and the depth it was entered at. Such an answer depends on how much depth
+    /// was left, so it cannot live in `inner` — but not keeping it at all makes a chain longer than the cap cost twice as much per
+    /// link (every link types its receiver again, from scratch, because the walk below it was cut): a fluent builder of 130 calls
+    /// is 2^128 steps. Keyed by depth, each `(node, depth)` is walked once.
+    cut: RefCell<HashMap<(usize, usize, u16, usize), Option<TypeRef>>>,
 }
 
 
@@ -946,10 +951,19 @@ impl Ctx<'_> {
         if let Some(hit) = self.cache.inner.borrow().get(&key) {
             return hit.clone();
         }
+        // A walk that was cut short answers differently at a different depth, so it is remembered per depth. A hit is itself a cut
+        // answer: the callers above it must not keep theirs as a final one either.
+        let cut_key = (key.0, key.1, key.2, self.depth.get());
+        if let Some(hit) = self.cache.cut.borrow().get(&cut_key) {
+            self.cache.cutoffs.set(self.cache.cutoffs.get() + 1);
+            return hit.clone();
+        }
         let cuts = self.cache.cutoffs.get();
         let result = self.infer_expr_walk(node, enclosing);
         if self.cache.cutoffs.get() == cuts {
             self.cache.inner.borrow_mut().insert(key, result.clone());
+        } else {
+            self.cache.cut.borrow_mut().insert(cut_key, result.clone());
         }
         result
     }
@@ -1710,11 +1724,66 @@ impl Ctx<'_> {
 
     /// `recv.foo(args)` or bare `foo(args)`. Resolves `foo`'s return type (arity-aware overload
     /// selection), applying generics carry-through from the receiver.
+    ///
+    /// A chain — `a.f().g().h()` — is **one loop, not one level of recursion per call**. Its calls nest to the left,
+    /// each the receiver of the next, so typing the last one recursed once per link: a builder with a hundred and
+    /// thirty setters went past [`MAX_INFER_DEPTH`] and was not typed at all, and one much longer would have taken the
+    /// stack with it. The spine is walked down to its first call, that one is typed, and the rest are applied on the
+    /// way back up — each link's answer kept in `inner`, so a check that asks about a link in the middle finds it.
     fn infer_method_invocation(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+        // Outermost first. Stops at the first call whose receiver is not a call, or at one already typed.
+        let mut chain = vec![*node];
+        let mut seed: Option<Option<TypeRef>> = None;
+        while let Some(obj) = chain
+            .last()
+            .and_then(|last| last.child_by_field_name("object"))
+            .filter(|o| o.kind() == "method_invocation")
+        {
+            let key = (obj.start_byte(), obj.end_byte(), obj.kind_id());
+            if let Some(hit) = self.cache.inner.borrow().get(&key) {
+                seed = Some(hit.clone());
+                break;
+            }
+            chain.push(obj);
+        }
+        let cuts = self.cache.cutoffs.get();
+        let mut ty = match seed {
+            Some(known) => known,
+            None => {
+                let first = chain.pop().unwrap_or(*node);
+                let typed = self.infer_first_invocation(&first, enclosing);
+                if first.id() != node.id() && self.cache.cutoffs.get() == cuts {
+                    let key = (first.start_byte(), first.end_byte(), first.kind_id());
+                    self.cache.inner.borrow_mut().insert(key, typed.clone());
+                }
+                typed
+            }
+        };
+        for link in chain.iter().rev() {
+            ty = ty.and_then(|recv| self.invoke_on(link, &recv, enclosing));
+            // Not kept when a depth cut touched anything on the way: such an answer is only as good as the cut.
+            if link.id() != node.id() && self.cache.cutoffs.get() == cuts {
+                let key = (link.start_byte(), link.end_byte(), link.kind_id());
+                self.cache.inner.borrow_mut().insert(key, ty.clone());
+            }
+        }
+        ty
+    }
+
+    /// One call with its receiver typed: the method's return type on `recv`, settled against a declared target.
+    fn invoke_on(&self, call: &Node, recv: &TypeRef, enclosing: Option<&str>) -> Option<TypeRef> {
+        let name = call.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))?;
+        let args = self.call_arg_nodes(call);
+        let explicit = self.explicit_type_arguments(call);
+        let result = self.method_return_with(recv, &name, &args, enclosing, &explicit)?;
+        Some(self.settle_from_target(call, result))
+    }
+
+    /// The call at the bottom of a chain: its receiver is a value, a type, or nothing (a bare `foo()`).
+    fn infer_first_invocation(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
         let name = node
             .child_by_field_name("name")
             .and_then(|n| node_text(&n, self.bytes))?;
-        let args = self.call_arg_nodes(node);
 
         let recv_type = match node.child_by_field_name("object") {
             Some(obj) => match self.infer_expr(&obj, enclosing) {
@@ -1729,6 +1798,7 @@ impl Ctx<'_> {
             // (`import static X.max;` → `max(…)`). We try the enclosing type first (an instance/own
             // method wins over an import, as in Java), then fall back to the static import.
             None => {
+                let args = self.call_arg_nodes(node);
                 if let Some(fqn) = enclosing {
                     if let Some(tr) = self.method_return_on(
                         &TypeRef::simple(to_binary(fqn)),
@@ -1743,9 +1813,7 @@ impl Ctx<'_> {
             }
         };
 
-        let explicit = self.explicit_type_arguments(node);
-        let result = self.method_return_with(&recv_type, &name, &args, enclosing, &explicit)?;
-        Some(self.settle_from_target(node, result))
+        self.invoke_on(node, &recv_type, enclosing)
     }
 
     /// `Collections.<String>emptyList()`: the type arguments written before the method name.
@@ -4622,6 +4690,35 @@ mod depth_tests {
                 .map(|t| t.binary_name),
             Some("java/lang/String".to_string()),
         );
+    }
+
+    /// A fluent chain longer than the depth cap — a Lombok builder with a hundred and thirty setters is one — must come back in
+    /// moments. Before cut answers were remembered, every link above the cut typed its receiver again from scratch and the cost
+    /// doubled per link: the analysis of one such file never finished.
+    #[test]
+    fn a_chain_longer_than_the_cap_does_not_blow_up() {
+        let calls = ".f()".repeat(MAX_INFER_DEPTH + 40);
+        let src = format!("class A {{ A f() {{ return this; }} void m(A a) {{ Object o = a{calls}; }} }}");
+        let start = src.find("a.f()").expect("the chain is in the fixture");
+        let end = start + 1 + calls.len();
+        let began = std::time::Instant::now();
+        let ty = infer_expression_type(&src, start, end, &resolver());
+        assert!(began.elapsed() < std::time::Duration::from_secs(5), "took {:?}", began.elapsed());
+        // And it is typed to the end: a chain's length is no reason to stop knowing what it returns.
+        assert_eq!(ty.map(|t| t.binary_name).as_deref(), Some("A"));
+    }
+
+    /// A link in the middle of a chain keeps its answer, so a check that asks about it does not walk the chain again.
+    #[test]
+    fn every_link_of_a_chain_is_typed_and_kept() {
+        let calls = ".f()".repeat(5);
+        let src = format!("class A {{ A f() {{ return this; }} void m(A a) {{ Object o = a{calls}; }} }}");
+        let start = src.find("a.f()").expect("the chain is in the fixture");
+        for links in 1..=5 {
+            let end = start + 1 + ".f()".len() * links;
+            let ty = infer_expression_type(&src, start, end, &resolver());
+            assert_eq!(ty.map(|t| t.binary_name).as_deref(), Some("A"), "{links} link(s)");
+        }
     }
 
     /// The guard gives its level back when it goes out of scope — which is the whole

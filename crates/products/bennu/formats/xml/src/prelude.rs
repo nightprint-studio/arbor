@@ -23,6 +23,9 @@ pub use crate::builtin::{
     taglib as taglib_grammar,
 };
 
+// The logging configurations' grammars.
+pub use crate::logging::{log4j2 as log4j2_grammar, logback as logback_grammar};
+
 // Where the caret is, in XML's terms.
 pub use crate::caret::{classify, Caret};
 

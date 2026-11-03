@@ -32,12 +32,17 @@
 <h3>Deployment</h3>
 <p>
   <strong>Live</strong> serves the module's <code>src/main/webapp</code> directly, with its compiled classes and runtime dependencies mounted underneath — nothing is packaged,
-  and a JSP saved in the editor is the JSP the next request runs. <strong>External</strong> serves a WAR or exploded folder built elsewhere. The context path decides where the
+  and a JSP saved in the editor is the JSP the next request runs. The dependency jars appear as a real <code>/WEB-INF/lib</code> folder (linked from the local repository, no copy
+  where the disk allows), so code that lists it at start-up finds the jars as it would in a packaged WAR. Only the module's own classes appear under <code>/WEB-INF/classes</code>; the sibling modules it is built from are loaded but not listed there, since a WAR would carry them as jars. Classes are searched before the jars, as in a WAR, so a class of the project that replaces one of a library wins. <strong>External</strong> serves a WAR or exploded folder built elsewhere. The context path decides where the
   application is served.
 </p>
 <p>
   Each configuration gets its own generated server folder (<code>.arbor/bennu/tomcat/&lt;configuration&gt;</code>, in the project), rewritten at every launch; logs and compiled JSPs are kept.
   The installation itself is never touched — which is why one installation can serve any number of configurations, as long as their ports differ.
+</p>
+
+<p>
+  <strong>Server libraries</strong> are jars, and folders of jars, that Tomcat itself must load — a JDBC driver the project does not depend on, a logging binding. They are copied into the generated server's <code>lib/</code> at every launch (a folder adds the <code>.jar</code> files directly in it, so one added later is there next time; paths are absolute or relative to the project). Two versions of one library are flagged in the console, because only one of them is used.
 </p>
 
 <h3>context.xml</h3>
@@ -61,9 +66,7 @@
   <li>Each row of the list has a checkbox and its own trash, shown on hover. Tick several rows (or <kbd>Ctrl</kbd>/<kbd>⌘</kbd>-click, <kbd>Shift</kbd>-click, <kbd>Ctrl</kbd> + <kbd>A</kbd>):
     with more than one data source selected the form becomes a <strong>bulk editor</strong> — pool sizes, driver, a find-and-replace across the URLs (swap a host everywhere), and
     where the passwords live.</li>
-  <li>The JDBC driver jar is found on the project's runtime classpath and copied into the server's <code>lib/</code> at launch. One the project does not depend on is fetched from Maven Central
-    for PostgreSQL, MySQL, MariaDB and SQLite — once, into the Tomcat folder of your Bennu profile, and reused by every project — as long as automatic dependency downloads are on. For any other driver (Oracle, DB2, SQL Server),
-    <strong>Driver jar</strong> names the file to copy instead (absolute, or relative to the project); it also overrides the lookup for a driver Bennu could fetch.</li>
+  <li>The JDBC driver is looked for in three places, in this order: the <strong>server libraries</strong> of the Deployment tab, the project's runtime classpath, and — for PostgreSQL, MySQL, MariaDB and SQLite — Maven Central, once, into the Tomcat folder of your Bennu profile, reused by every project, as long as automatic dependency downloads are on. A driver found in the first two is copied into the server's <code>lib/</code> at launch. For any other driver (Oracle, DB2, SQL Server), add its jar to the server libraries.</li>
 </ul>
 <Callout variant="info" title="Passwords">
   By default a data source's password is kept <strong>outside the repository</strong>, in a file in your Bennu profile, and handed to Tomcat as a system property: the generated

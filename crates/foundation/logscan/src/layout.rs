@@ -160,6 +160,14 @@ fn parse_elements(pattern: &str) -> Option<Vec<Element>> {
             }
             i = close + 1;
         }
+        // Log4j2 writes the wrapper with braces: `%highlight{%-5level}{FATAL=red}` — the first brace is
+        // what is inside, the rest is styling.
+        if COLOUR_WRAPPERS.contains(&word.as_str()) || matches!(word.as_str(), "style") {
+            if let Some(inner) = option.as_deref().filter(|_| chars.get(i) != Some(&'(')) {
+                out.extend(parse_elements(inner)?);
+                continue;
+            }
+        }
         if chars.get(i) == Some(&'(') {
             let close = matching(&chars, i, '(', ')')?;
             if !COLOUR_WRAPPERS.contains(&word.as_str()) {
@@ -510,6 +518,14 @@ mod tests {
     #[test]
     fn colour_wrappers_are_looked_through() {
         let layout = PatternLayout::parse("%d{HH:mm:ss} %highlight(%-5level) %cyan(%logger{15}) - %msg%n").unwrap();
+        let line = interpret(&layout.over_java(), "14:03:22 ERROR OrderService - boom");
+        assert!(line.spans.iter().any(|s| s.token == Token::Logger));
+        assert_eq!(line.level, Some(crate::model::Level::Error));
+    }
+
+    #[test]
+    fn log4j2_brace_wrappers_are_looked_through() {
+        let layout = PatternLayout::parse("%d{HH:mm:ss} %highlight{%-5level}{FATAL=red, ERROR=red} %style{%logger{15}}{cyan} - %msg%n").unwrap();
         let line = interpret(&layout.over_java(), "14:03:22 ERROR OrderService - boom");
         assert!(line.spans.iter().any(|s| s.token == Token::Logger));
         assert_eq!(line.level, Some(crate::model::Level::Error));

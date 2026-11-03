@@ -27,6 +27,13 @@ export interface BuildUnit {
   manifest: string;
 }
 
+/** One verb a panel adds on top of the shared four — what that panel can do with a unit that the others cannot. */
+export interface BuildUnitMenuExtra {
+  label: string;
+  icon?: MenuItem['icon'];
+  run: () => void;
+}
+
 /** The directory the unit occupies: its manifest's parent, which is the row the tree shows. */
 export function buildUnitDir(unit: BuildUnit): string {
   const fwd = unit.manifest.replace(/\\/g, '/');
@@ -44,9 +51,10 @@ function manifestName(unit: BuildUnit): string {
  * Open the menu at a point — see `SidebarSection`'s `onContextMenu`, which is where the
  * coordinates come from for both the right-click and the keyboard route.
  */
-export function openBuildUnitMenu(x: number, y: number, unit: BuildUnit): void {
+export function openBuildUnitMenu(x: number, y: number, unit: BuildUnit, extra?: BuildUnitMenuExtra): void {
   const dir = buildUnitDir(unit);
   const items: MenuItem[] = [
+    ...(extra ? [{ id: 'extra', label: extra.label, icon: extra.icon }, { separator: true, id: 'sep-extra', label: '' }] : []),
     { id: 'focus', label: 'Focus in Project', icon: LocateFixed },
     { id: 'manifest', label: `Open ${manifestName(unit)}`, icon: FileCode2 },
     { separator: true, id: 'sep', label: '' },
@@ -55,6 +63,7 @@ export function openBuildUnitMenu(x: number, y: number, unit: BuildUnit): void {
   ];
   bennuContextMenuStore.show(x, y, items, (id) => {
     switch (id) {
+      case 'extra':     extra?.run(); break;
       case 'focus':     bennuUiStore.focusInTree(dir); break;
       case 'manifest':  void projectStore.openFile(unit.manifest); break;
       case 'copy-path': void copyToClipboard(dir); break;

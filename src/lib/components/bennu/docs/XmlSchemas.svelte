@@ -89,6 +89,20 @@
   <li>What the schema wraps in an optional group is not asked for either.</li>
 </ul>
 
+<h3>Logging configurations</h3>
+<p>
+  <code>log4j2.xml</code> and <code>logback.xml</code> are in the same position as the POM — no schema in any jar — so their vocabulary is built in too: the appenders, layouts, filters, policies and loggers
+  of Log4j2, and the appenders, encoders, rolling policies and loggers of Logback, with each element's attributes (the required ones marked) and the values the closed ones take — a level, <code>ACCEPT</code> /
+  <code>DENY</code> / <code>NEUTRAL</code>, <code>true</code> / <code>false</code>. Both are plugin systems, so a table of what ships can never be the whole vocabulary: these grammars complete and explain, and
+  <strong>never underline</strong> — an appender of your own is not an error.
+</p>
+<p>
+  The <strong>conversion patterns</strong> in these files are coloured as the small language they are — in a <code>pattern="…"</code>, a <code>filePattern</code>, a Logback <code>&lt;pattern&gt;</code> or <code>&lt;fileNamePattern&gt;</code>, and Log4j 1.x's
+  <code>ConversionPattern</code>. Each <code>%</code> conversion takes the hue of what it prints (the date, the level, the logger, the thread, the message, an MDC value) — the same ones the console uses for those columns, so a pattern and
+  the line it produces read alike — its <code>&lbrace;options&rbrace;</code> are quieter, the newline and the exception are dimmed, and a <code>$&lbrace;property&rbrace;</code> is marked as the substitution it is. <code>%highlight&lbrace;…&rbrace;</code>, <code>%style&lbrace;…&rbrace;</code> and
+  Logback's <code>%highlight(…)</code> are looked through, so the conversion inside them keeps its own colour.
+</p>
+
 <h3>The POM's required fields</h3>
 <p>
   A <code>&lt;dependency&gt;</code> with no <code>&lt;artifactId&gt;</code>, a <code>&lt;parent&gt;</code> without its version, a root POM that never says who it is — Maven

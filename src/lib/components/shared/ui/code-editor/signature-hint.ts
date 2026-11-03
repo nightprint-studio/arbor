@@ -10,8 +10,9 @@
  * ## A tooltip above the caret, not a completion
  *
  * It is not a list and nothing is chosen from it, so it must not behave like completion: it never
- * takes the keyboard, never intercepts Enter, and closes on Escape without eating the key that
- * would otherwise close something else. What it is, is a tooltip pinned above the call.
+ * takes the keyboard and never intercepts Enter. What it is, is a tooltip pinned above the call,
+ * styled as the editor's other tooltips. The host decides when to ask for it (Bennu: on demand, by
+ * shortcut) and closes it on Escape — {@link signatureHintActive} is there for that keymap.
  *
  * ## The provider decides what is shown; this decides when
  *
@@ -120,19 +121,19 @@ const signatureField = StateField.define<Tooltip | null>({
 
 const signatureTheme = EditorView.baseTheme({
   '.cm-sig-hint': {
-    padding: '4px 8px',
+    // Surface, border and radius come from the editor's `.cm-tooltip`, so this card is the same
+    // object as the hover card; only its contents are styled here, with the hover card's tokens.
+    padding: '8px 11px',
     maxWidth: '640px',
-    fontFamily: 'var(--font-mono, monospace)',
-    fontSize: '12px',
-    lineHeight: '1.5',
-    background: 'var(--bg-elevated, #2b2b2b)',
-    color: 'var(--text-secondary, #bbb)',
-    border: '1px solid var(--border-subtle, #3c3c3c)',
-    borderRadius: 'var(--radius-md, 4px)',
+    fontFamily: 'var(--font-ui-sans)',
+    color: 'var(--text-secondary)',
   },
-  '.cm-sig-line': { whiteSpace: 'pre-wrap' },
+  '.cm-sig-line': {
+    whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: '1.5',
+    fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-sm)',
+  },
   '.cm-sig-active': {
-    color: 'var(--text-primary, #fff)',
+    color: 'var(--text-primary)',
     fontWeight: '600',
     // Underlined as well as bold: on a signature of several same-typed parameters, weight alone is
     // easy to lose track of at a glance.
@@ -141,14 +142,16 @@ const signatureTheme = EditorView.baseTheme({
   },
   '.cm-sig-overload': {
     marginLeft: '8px',
-    fontSize: '11px',
-    color: 'var(--text-faint, #888)',
+    fontFamily: 'var(--font-ui-sans)',
+    fontSize: 'var(--font-size-2xs)',
+    color: 'var(--text-muted)',
   },
   '.cm-sig-doc': {
-    marginTop: '3px',
-    fontFamily: 'var(--font-sans, sans-serif)',
-    fontSize: '11px',
-    color: 'var(--text-muted, #999)',
+    marginTop: '5px',
+    paddingTop: '5px',
+    borderTop: '1px solid var(--border-subtle)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--text-secondary)',
     whiteSpace: 'pre-wrap',
   },
 });

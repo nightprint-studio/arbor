@@ -215,6 +215,21 @@ export class NavHistory {
     this.recentList = this.recentList.filter(keep);
   }
 
+  /**
+   * Keep only the stops in files `keep` accepts. For the window changing what is open: switching between
+   * the projects of a workspace keeps every stop, while replacing the workspace drops the ones whose
+   * project is gone.
+   */
+  retain(keep: (file: string) => boolean): void {
+    const wanted = (p: NavPlace) => keep(p.file);
+    const same = (a: NavPlace, b: NavPlace) => this.samePlace(a, b);
+    this.backStack = dedupeAdjacent(this.backStack.filter(wanted), same);
+    this.forwardStack = dedupeAdjacent(this.forwardStack.filter(wanted), same);
+    this.edits = this.edits.filter(wanted);
+    this.editStep = -1;
+    this.recentList = this.recentList.filter(wanted);
+  }
+
   /** Drop everything — the project changed and these paths belong to the old one. */
   reset(): void {
     this.backStack = [];

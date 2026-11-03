@@ -106,11 +106,11 @@
 <div class="tc">
   <Tabs {items} value={tab} variant="underline" size="sm" ariaLabel="Tomcat configuration" onSelect={(id) => (tab = id as TomcatTab)} />
 
-  <div class="pane">
+  <div class="pane" class:fixed={tab === 'context'}>
     {#if tab === 'server'}
       <BennuTomcatServerTab {config} {patchT} {form} {root} onDownload={() => (downloading = true)} />
     {:else if tab === 'deploy'}
-      <BennuTomcatDeployTab {config} {patch} {patchT} {form} {moduleOptions} {isMultiModule} />
+      <BennuTomcatDeployTab {config} {patch} {patchT} {form} {root} {moduleOptions} {isMultiModule} />
     {:else if tab === 'context'}
       <BennuTomcatContextTab {config} {patchT} {form} {root} />
     {:else}
@@ -131,6 +131,9 @@
 {/if}
 
 <style>
-  .tc { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-  .pane { min-width: 0; }
+  .tc { display: flex; flex-direction: column; gap: 14px; min-width: 0; flex: 1; min-height: 0; }
+  /* The tabs stay in place and the pane under them scrolls; context.xml is the exception — it lays
+     out columns that scroll on their own, so it gets the pane's height instead. */
+  .pane { min-width: 0; flex: 1; min-height: 0; overflow-y: auto; }
+  .pane.fixed { overflow: hidden; display: flex; flex-direction: column; }
 </style>

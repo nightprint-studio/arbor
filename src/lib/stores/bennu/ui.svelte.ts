@@ -205,6 +205,9 @@ function createBennuUiStore() {
   let fileStructureOpen = $state(false);
   // About Bennu modal.
   let aboutOpen = $state(false);
+  // Optimize imports over a folder: the folder it opens on (the project root, or a tree folder), or
+  // null when closed.
+  let optimizeImportsScope = $state<string | null>(null);
 
   // ── Tools ─────────────────────────────────────────────────────────────────
   // The same three Corvus keeps under its hamburger's Tools separator. They belong here too
@@ -317,7 +320,8 @@ function createBennuUiStore() {
     get tomcatConfigOpen() { return tomcatConfigOpen; },
     get fileStructureOpen() { return fileStructureOpen; },
     get aboutOpen()    { return aboutOpen; },
-    get pluginsOpen()     { return pluginsOpen; },
+    get optimizeImportsScope() { return optimizeImportsScope; },
+    get pluginsOpen()    { return pluginsOpen; },
     get generateOpen() { return generateOpen; },
     get templateGenerateKind() { return templateGenerateKind; },
     get newTemplateKind() { return newTemplateKind; },
@@ -443,6 +447,9 @@ function createBennuUiStore() {
     closeFileStructure() { fileStructureOpen = false; },
     openAbout()          { aboutOpen = true; },
     closeAbout()         { aboutOpen = false; },
+    /** Open the project-wide Optimize imports dialog on `folder` (the project root when omitted by the caller). */
+    openOptimizeImports(folder: string) { optimizeImportsScope = folder; },
+    closeOptimizeImports() { optimizeImportsScope = null; },
     togglePlugins()      { pluginsOpen = !pluginsOpen; },
     closePlugins()       { pluginsOpen = false; },
     /** Docked in the bottom tool window, not floated: the whole use of a log is reading it

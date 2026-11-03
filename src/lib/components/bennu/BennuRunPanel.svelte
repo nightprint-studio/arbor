@@ -573,7 +573,7 @@
          rest. Running: the transcript is all of it. -->
     <div class="rp-body">
       {#if atBreakpoint}{@render debugColumns()}{/if}
-      <BennuConsole {lines} emptyMessage="No output yet." />
+      <BennuConsole {lines} emptyMessage="No output yet." sources />
     </div>
 
     <!-- Only on the tab that IS the live run: there is nothing to answer on a transcript. -->

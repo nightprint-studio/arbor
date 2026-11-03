@@ -12,7 +12,7 @@
  * Rune store — private `$state`, returned getters + methods (CLAUDE.md).
  */
 
-import { getLogView, setLogView, ownPackages } from '$lib/ipc/bennu/log-view';
+import { getLogView, setLogView, ownPackages, logLayouts, type LogLayoutSource } from '$lib/ipc/bennu/log-view';
 import { DEFAULT_LOG_VIEW, type LogViewRule, type LogViewSettings } from '$lib/components/bennu/console/log-view';
 
 /** How long a burst of edits waits before it is written — typing in a rule's value is one save, not twenty. */
@@ -22,6 +22,8 @@ function createLogViewStore() {
   let settings = $state<LogViewSettings>(structuredClone(DEFAULT_LOG_VIEW));
   let detected = $state<string[]>([]);
   let detectedRoot = '';
+  /** The project's logging configurations; `null` until asked, so "none found" is never shown for "not read yet". */
+  let layouts = $state<LogLayoutSource[] | null>(null);
   let loading: Promise<void> | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -42,13 +44,17 @@ function createLogViewStore() {
     get settings() { return settings; },
     /** Detected from the project's sources. */
     get detected() { return detected; },
+    /** The logging configurations found in the project, or `null` before they were read. */
+    get layouts() { return layouts; },
+    /** The one the console reads its columns with: the first that yields a layout. */
+    get layout(): LogLayoutSource | null { return layouts?.find((l) => l.usable) ?? null; },
     /** Every package that counts as the user's code: detected, then added by hand. */
     get own(): string[] { return [...new Set([...detected, ...settings.extra_own_packages])]; },
 
     /** Read the saved settings, once. */
     load(): Promise<void> {
       loading ??= getLogView()
-        .then((c) => { settings = { ...DEFAULT_LOG_VIEW, ...c, rules: c.rules ?? [], extra_own_packages: c.extra_own_packages ?? [] }; })
+        .then((c) => { settings = { ...DEFAULT_LOG_VIEW, ...c, rules: c.rules ?? [], extra_own_packages: c.extra_own_packages ?? [], hidden_mdc: c.hidden_mdc ?? [] }; })
         .catch(() => {});
       return loading;
     },
@@ -58,6 +64,12 @@ function createLogViewStore() {
       if (!root || root === detectedRoot) return;
       detectedRoot = root;
       try { detected = await ownPackages(root); } catch { detected = []; }
+    },
+
+    /** Read the project's logging configurations again — they may have been edited since the last run. */
+    async refreshLayouts(root: string | undefined): Promise<void> {
+      if (!root) { layouts = []; return; }
+      try { layouts = await logLayouts(root); } catch { layouts = []; }
     },
 
     patch,

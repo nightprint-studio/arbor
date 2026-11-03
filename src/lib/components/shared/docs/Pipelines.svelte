@@ -7,7 +7,7 @@
 <p>Arbor's pipeline system lets plugins define and run multi-stage CI/CD-style workflows directly inside the app. Each pipeline is a sequence of <strong>stages</strong>, each containing one or more <strong>steps</strong> (shell commands). Progress is shown in a live node graph.</p>
 
 <h2>Opening the Pipelines panel</h2>
-<p>Click the <strong>Workflow</strong> icon in the Activity Bar (bottom group). It is always visible. Toggle the panel to show/hide it as a resizable bottom section. Inside, two tabs are available: <strong>Local Pipelines</strong> (plugin-defined) and <strong>CI / CD</strong> (GitHub Actions / GitLab CI).</p>
+<p>Click the <strong>Workflow</strong> icon in the Activity Bar (bottom group). It is always visible. Toggle the panel to show/hide it as a resizable bottom section. Inside, three tabs are available: <strong>Local Pipelines</strong> (plugin-defined), <strong>CI / CD</strong> (GitHub Actions / GitLab CI) and <strong>Plans</strong> (ordered remote git steps across repositories — see <em>Plans</em>).</p>
 
 <h2>Running a pipeline</h2>
 <p>Select a pipeline in the left sidebar, then click <strong>Run</strong>. The orchestrator spawns a background thread that executes each step sequentially. The node graph updates in real time with status colours:</p>

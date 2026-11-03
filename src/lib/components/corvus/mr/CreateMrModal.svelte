@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { GitPullRequest, Wand2, Info } from 'lucide-svelte';
+  import { GitPullRequest, ListChecks, Wand2, Info } from 'lucide-svelte';
   import { onMount } from 'svelte';
   import { createMr, getMrCapabilities } from '$lib/ipc/corvus/mr';
   import { listLocalBranches, listRemoteBranches } from '$lib/ipc/corvus/branch';
@@ -8,6 +8,8 @@
   import type { CreateMrParams } from '$lib/types/corvus/mr';
   import type { BranchInfo } from '$lib/types/corvus/git';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import SplitButton from '$lib/components/shared/ui/SplitButton.svelte';
+  import { plansStore, activeRepoRef } from '$lib/stores/corvus/plans.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
@@ -17,9 +19,15 @@
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import BranchSelect from '$lib/components/shared/internal/BranchSelect.svelte';
 
-  let { onClose, onCreated, currentBranch = '', initialTargetBranch = '', initialTitle = '' }: {
+  let { onClose, onCreated, onPlan, tabId: tabIdProp, planMode = false, currentBranch = '', initialTargetBranch = '', initialTitle = '' }: {
     onClose:              () => void;
     onCreated:            () => void;
+    /** Plan mode: the form's result is handed here instead of creating the MR. */
+    onPlan?:              (params: CreateMrParams) => void | Promise<void>;
+    /** Read branches from this tab (or `path:<dir>` headless id) instead of the active one. */
+    tabId?:               string;
+    /** Opened from a plan: the primary button adds a step rather than creating the MR. */
+    planMode?:            boolean;
     currentBranch?:       string;
     /** Pre-fill the target branch (e.g. when triggered by Git Flow finish). */
     initialTargetBranch?: string;
@@ -27,7 +35,7 @@
     initialTitle?:        string;
   } = $props();
 
-  const tabId = $derived(tabsStore.activeTabId ?? '');
+  const tabId = $derived(tabIdProp ?? tabsStore.activeTabId ?? '');
 
   // Form state
   // svelte-ignore state_referenced_locally
@@ -123,13 +131,8 @@
     }
   });
 
-  async function submit() {
-    if (!canSubmit) return;
-    // Snapshot the tab so a mid-flight tab switch doesn't redirect the PR
-    // creation to a different repository.
-    const mrTabId = tabId;
-    submitting = true;
-    const params: CreateMrParams = {
+  function buildParams(): CreateMrParams {
+    return {
       title:        title.trim(),
       description:  description.trim() || null,
       sourceBranch: sourceBranch.trim(),
@@ -143,6 +146,36 @@
       deleteBranch: autoMerge ? autoMergeDelete : false,
       autoMerge,
     };
+  }
+
+  /** Whether the source branch exists on the remote — when it does not, a plan must push it first. */
+  const sourceIsPushed = $derived(
+    remoteBranches.some(b => b.name.replace(/^origin\//, '') === sourceBranch.trim()),
+  );
+
+  /** Hand the form to a plan. From a plan (plan mode) the caller places it; from the MR sidebar it
+   *  joins the plan being composed, preceded by the branch's push when that is still local. */
+  async function addToPlan() {
+    if (!canSubmit) return;
+    const params = buildParams();
+    if (planMode && onPlan) {
+      await onPlan(params);
+      onClose();
+      return;
+    }
+    const repo = activeRepoRef();
+    if (!repo) return;
+    const plan = await plansStore.addMergeRequest({ repo, tabId, pushFirst: !sourceIsPushed }, params);
+    if (plan) onClose();
+  }
+
+  async function submit() {
+    if (!canSubmit) return;
+    // Snapshot the tab so a mid-flight tab switch doesn't redirect the PR
+    // creation to a different repository.
+    const mrTabId = tabId;
+    submitting = true;
+    const params = buildParams();
     try {
       const mr = await createMr(mrTabId, params);
       uiStore.showToast(`${isDraft ? 'Draft ' : ''}PR #${mr.number} created`, 'success');
@@ -156,17 +189,17 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !submitting) submit();
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !submitting) void (planMode ? addToPlan() : submit());
   }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
-<Modal {onClose} width="580px" ariaLabel="Create Pull Request">
+<Modal {onClose} width="580px" ariaLabel={planMode ? 'Add Pull Request to plan' : 'Create Pull Request'}>
   {#snippet header()}
     <ModalHeader {onClose}>
       <GitPullRequest size={14} />
-      <span class="modal-title">Create Pull / Merge Request</span>
+      <span class="modal-title">{planMode ? 'Add Pull / Merge Request to plan' : 'Create Pull / Merge Request'}</span>
     </ModalHeader>
   {/snippet}
 
@@ -306,11 +339,28 @@
   </div>
 
   {#snippet footer()}
-    <ModalFooter hint="to create">
+    <ModalFooter hint={planMode ? 'to add to the plan' : 'to create'}>
       <Button variant="secondary" onclick={onClose} disabled={submitting}>Cancel</Button>
-      <Button variant="primary" onclick={submit} disabled={!canSubmit || submitting} loading={submitting}>
-        {isDraft ? 'Create draft' : 'Create PR'}
-      </Button>
+      {#if planMode}
+        <Button variant="primary" onclick={addToPlan} disabled={!canSubmit}>
+          <ListChecks size={13} /> Add to plan
+        </Button>
+      {:else}
+        <SplitButton
+          label={isDraft ? 'Create draft' : 'Create PR'}
+          variant="primary"
+          direction="up"
+          disabled={!canSubmit || submitting}
+          loading={submitting}
+          options={[
+            { id: 'create', label: isDraft ? 'Create draft' : 'Create PR', icon: GitPullRequest, iconColor: 'var(--accent)' },
+            { id: 'plan', label: 'Add to plan', icon: ListChecks, iconColor: 'var(--accent)',
+              description: sourceIsPushed ? 'Create it later, in order, with the rest of the plan' : 'Adds the push of this branch first' },
+          ]}
+          onclick={submit}
+          onselect={(id) => (id === 'plan' ? addToPlan() : submit())}
+        />
+      {/if}
     </ModalFooter>
   {/snippet}
 </Modal>

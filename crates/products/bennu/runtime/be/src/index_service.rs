@@ -43,6 +43,7 @@ use arbor_ipc::prelude::{EventSink, HostCaller};
 use bennu_index::prelude::Symbol;
 
 use crate::jobs::JobHandle;
+use crate::task::{Task, TaskSpec};
 use bennu_complete::prelude::MatchCase;
 use bennu_proto::prelude::SourceEdit;
 use bennu_intel::prelude::{
@@ -105,17 +106,38 @@ struct BuildCard {
     my_gen: u64,
     /// Set once the build has emitted the terminal event itself, on its own happy path.
     closed: bool,
+    /// The build as a row in the Jobs panel. It ends where the card does — and, like the card, on every way out.
+    task: Option<Task>,
 }
 
 impl BuildCard {
     /// The build reached the end and said `ready` itself — nothing left for the guard to do.
     fn closed(&mut self) {
         self.closed = true;
+        if let Some(task) = self.task.take() {
+            task.ok();
+        }
+    }
+
+    /// A line in the build's job output.
+    fn say(&self, text: &str) {
+        if let Some(task) = &self.task {
+            task.line(text);
+        }
     }
 }
 
 impl Drop for BuildCard {
     fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            // A newer build owns the project: this one did not fail, it was replaced.
+            if self.svc.superseded(&self.root, self.my_gen) {
+                task.line("Superseded by a newer build.");
+                task.ok();
+            } else {
+                task.fail("The index build ended before it was ready.");
+            }
+        }
         if self.closed || self.svc.superseded(&self.root, self.my_gen) {
             return;
         }
@@ -900,7 +922,14 @@ struct ProjectSlot {
     /// Serializing them makes the second one a cache read instead of a second pass. It waits rather
     /// than being refused, because a refused Validate is a click the user has to repeat, and the
     /// wait is bounded by work that was going to happen anyway.
-    sweep: Mutex<()>,
+    ///
+    /// Shared across the slots of one project: a rebuild makes a NEW slot, and a lock of its own let the
+    /// analysis it starts run beside the one still going on the old slot — two passes over the same files, and
+    /// two "Analyzing project" rows. [`Self::open`] hands the previous slot's lock on to its successor.
+    sweep: Arc<Mutex<()>>,
+    /// Set when a newer slot has replaced this one: the sweep running on it is for a build that no longer
+    /// counts, so it stops and its results are dropped, and the newer slot's sweep takes the lock.
+    sweep_stop: AtomicBool,
 }
 
 impl ProjectSlot {
@@ -1189,6 +1218,15 @@ impl IndexService {
         // live provider still has mmapped (Windows os error 1224 on overwrite/truncate).
         let gen = next_gen(&index_base);
         let index_dir = gen_dir(&index_base, gen);
+        // The slot this one replaces (a rebuild, a re-open): its sweep must not go on beside the new one's. It is told
+        // to stop, and the lock is passed on so the new sweep waits for it to let go rather than racing it.
+        let sweep = match self.slots.lock().unwrap_or_else(|p| p.into_inner()).get(&root_path) {
+            Some(previous) => {
+                previous.sweep_stop.store(true, Ordering::Release);
+                Arc::clone(&previous.sweep)
+            }
+            None => Arc::new(Mutex::new(())),
+        };
         let slot = Arc::new(ProjectSlot {
             root: root_path.clone(),
             index_base: index_base.clone(),
@@ -1212,7 +1250,8 @@ impl IndexService {
             provider_stage: AtomicU8::new(stage::BUILDING),
             indexed_hashes: Mutex::new(HashMap::new()),
             config_rebuild: ConfigRebuild::default(),
-            sweep: Mutex::new(()),
+            sweep,
+            sweep_stop: AtomicBool::new(false),
         });
         self.slots.lock().unwrap_or_else(|p| p.into_inner()).insert(root_path.clone(), slot.clone());
 
@@ -1254,6 +1293,16 @@ impl IndexService {
                 root_str: root_str.clone(),
                 my_gen,
                 closed: false,
+                task: Some(Task::start(
+                    host.as_ref(),
+                    &sink,
+                    TaskSpec::new(
+                        format!("Indexing {}", root_str.rsplit(['/', '\\']).next().unwrap_or(&root_str)),
+                        root_str.as_str(),
+                    )
+                    .category("system")
+                    .system(),
+                )),
             };
             // The CPU budget for every background sweep this build sets off — the parse, and the
             // reference walk that follows it — and the directories the walk refuses to enter. Both
@@ -1321,6 +1370,7 @@ impl IndexService {
                 root_path.display()
             );
             emit_progress(&sink, &root_str, "project", "end");
+            card.say(&format!("Symbol index built: {types} types, {members} members."));
 
             // A newer build (a rebuild / re-open) already superseded this one → stop NOW: skip the
             // Maven resolve, the provider build, the O(N) reference walk, and the warm-up entirely,
@@ -1392,6 +1442,7 @@ impl IndexService {
                 let slot = slot.clone();
                 let sink = sink.clone();
                 let root_str = root_str.clone();
+                let host = host.clone();
                 std::thread::spawn(move || {
                     build_dependency_tier(
                         &slot,
@@ -1400,6 +1451,7 @@ impl IndexService {
                         &jdk_version,
                         &pairs,
                         &sink,
+                        host.as_ref(),
                         &root_str,
                     );
                 })
@@ -1490,17 +1542,23 @@ impl IndexService {
                 // Track the warm-up as a JOB in the shell registry so it shows in the bennu Jobs
                 // overlay (a background citizen, self-purged shortly after it completes). `None` when
                 // no reverse channel is wired — the warm-up still runs, just untracked.
-                let job = host.as_ref().and_then(|h| register_warmup_job(h, &sink, &root_str));
+                let task = analysis_task(host.as_ref(), &sink, &root_str);
                 emit_progress(&sink, &root_str, "validation", "start");
-                warm_up_validation_cache(&root_str, &sources, job.as_ref(), &sink);
+                warm_up_validation_cache(&root_str, &sources, &task, &sink);
                 // Only stamp "up to date" when this gen is still current — a warm-up superseded
                 // mid-run must not record a marker the winning build would trust and then skip its
                 // own warm-up over possibly-different sources.
-                if !svc.superseded(&root_path, my_gen) {
+                // Nor one the person cancelled: a pass that stopped part-way has not warmed everything.
+                let cancelled = task.is_cancelled();
+                if !svc.superseded(&root_path, my_gen) && !cancelled {
                     svc.record_warmup_stamp(&root_str, &sources);
                 }
                 emit_progress(&sink, &root_str, "validation", "end");
-                finish_warmup_job(&sink, job);
+                if svc.superseded(&root_path, my_gen) {
+                    task.line("Stopped: the index was rebuilt, and the analysis of the new one takes over.");
+                }
+                // Ends as cancelled when the person cancelled it: the task knows.
+                task.ok();
             }
 
             // Diagnostic (idle-CPU investigation): confirms the build thread reaches its end and
@@ -2154,6 +2212,7 @@ impl IndexService {
             let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
             slots.get(&PathBuf::from(root)).map(Arc::clone)
         };
+        let stop = slot.clone();
         let (provider, jdk_available, classpath_complete, requested_major, jdk_major) = match slot {
             Some(slot) => {
                 let status = bennu_classpath::prelude::jdk_status(&slot.jdk_version);
@@ -2170,7 +2229,8 @@ impl IndexService {
             // No project owns this root — validate pure-AST over an empty provider, no caching.
             None => (Arc::new(NativeJavaProvider::new()), false, false, None, None),
         };
-        validate_files_parallel(&provider, jdk_available, classpath_complete, requested_major, jdk_major, Path::new(root), files, cache, on_progress)
+        let superseded = stop.as_ref().map(|s| &s.sweep_stop);
+        validate_files_parallel(&provider, jdk_available, classpath_complete, requested_major, jdk_major, Path::new(root), files, cache, superseded, on_progress)
     }
 
     /// Request cancellation of the currently-running whole-project validation sweep (the FE's Cancel
@@ -2261,7 +2321,15 @@ impl IndexService {
         // loaded: a warm-up that is still running has not saved yet, and loading first is exactly
         // how both passes ended up validating everything.
         let slot = self.slot_for_root(root);
-        let _sweep = slot.as_ref().map(|s| s.sweep.lock().unwrap_or_else(|p| p.into_inner()));
+        let _sweep = match slot.as_ref().map(|s| acquire_sweep(s)) {
+            Some(Sweep::Held(guard)) => Some(guard),
+            Some(Sweep::TimedOut) => {
+                eprintln!("bennu-be: gave up waiting for the analysis of {root} to finish");
+                return RunOutcome { waited_out: true, ..RunOutcome::default() };
+            }
+            Some(Sweep::Cancelled) => return RunOutcome::default(),
+            None => None,
+        };
         let mut cache = self.diag_cache_load(root);
         let run = std::time::Instant::now();
         let results = self.validate_project_batch(root, &sources, &cache, on_progress);
@@ -2269,7 +2337,7 @@ impl IndexService {
 
         // Cancelled mid-sweep → discard the partial batch: don't persist a partial cache, don't
         // report partial diagnostics. The FE already dismissed the card.
-        if self.validation_cancelled() {
+        if self.validation_cancelled() || slot.as_ref().is_some_and(|s| s.sweep_stop.load(Ordering::Acquire)) {
             return RunOutcome::default();
         }
 
@@ -2320,6 +2388,7 @@ impl IndexService {
             cached_hits,
             max_ms,
             max_file,
+            waited_out: false,
         }
     }
 
@@ -3835,13 +3904,15 @@ impl IndexService {
             let Some(gav) = crate::sources_download::gav_from_m2_jar(&jar) else {
                 return fail(&sink, "Couldn't determine the dependency's Maven coordinates.");
             };
-            let job = register_bennu_job(
-                &host,
+            let task = Task::start(
+                Some(&host),
                 &sink,
-                &format!("Download sources: {}", crate::sources_download::artifact_label(&gav)),
-                &crate::sources_download::sources_artifact(&gav),
-                "Download",
-                true,
+                TaskSpec::new(
+                    format!("Download sources: {}", crate::sources_download::artifact_label(&gav)),
+                    crate::sources_download::sources_artifact(&gav),
+                )
+                .category("Download")
+                .system(),
             );
             let mvn = crate::dep_classpath::find_mvn_launcher(&root_path);
             let jdk_home = bennu_classpath::prelude::find_jdk_home(&jdk_version);
@@ -3856,7 +3927,7 @@ impl IndexService {
                     svc.forget_library_facts(&root);
                     let _ = svc.decompiled_stub(&file, &source, &name);
                     sink.emit(EVT_SOURCES_READY, json!({ "path": &view_path, "ok": true }));
-                    finish_bennu_job(&sink, job, true, None);
+                    task.ok();
                     notify(
                         &sink,
                         "Sources downloaded",
@@ -3867,12 +3938,12 @@ impl IndexService {
                 Ok((false, log)) => {
                     let msg = sources_failure_reason(&log);
                     sink.emit(EVT_SOURCES_READY, json!({ "path": &view_path, "ok": false }));
-                    finish_bennu_job(&sink, job, false, Some(msg.clone()));
+                    task.fail(msg.clone());
                     notify(&sink, "Download sources failed", &msg, "error");
                 }
                 Err(e) => {
                     sink.emit(EVT_SOURCES_READY, json!({ "path": &view_path, "ok": false }));
-                    finish_bennu_job(&sink, job, false, Some(e.clone()));
+                    task.fail(e.clone());
                     notify(&sink, "Download sources failed", &e, "error");
                 }
             }
@@ -4474,6 +4545,8 @@ pub struct RunOutcome {
     pub cached_hits: usize,
     pub max_ms: u64,
     pub max_file: Option<String>,
+    /// The sweep never started: another one held the project for [`SWEEP_WAIT`] and did not let go.
+    pub waited_out: bool,
 }
 
 /// Cooperative cancel flag for the whole-project validation sweep (warm-up + explicit "Validate").
@@ -4481,6 +4554,111 @@ pub struct RunOutcome {
 /// parallel worker loop checks it per file and drains the rest cheaply, and the caller then discards
 /// the (partial) results instead of persisting them. Reset at the start of each run.
 static CANCEL_VALIDATION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// How long a validation waits for the sweep that already holds the project before it gives up.
+///
+/// Long enough for a warm-up over a large project to finish — it is minutes, not seconds — and finite, because the
+/// alternative is the other end of the same lock: a sweep stuck on one file kept every build and validation of the
+/// project waiting behind it for as long as the process lived, with nothing in the panel but "Compiling…".
+const SWEEP_WAIT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// What waiting for a project's sweep came to.
+enum Sweep<'a> {
+    Held(std::sync::MutexGuard<'a, ()>),
+    /// The holder did not let go in time.
+    TimedOut,
+    /// The person cancelled while this waited: there is nothing left to wait for.
+    Cancelled,
+}
+
+/// Take `slot`'s sweep lock, waiting at most [`SWEEP_WAIT`] and not at all once a cancel has been asked for.
+fn acquire_sweep(slot: &ProjectSlot) -> Sweep<'_> {
+    let began = std::time::Instant::now();
+    loop {
+        match slot.sweep.try_lock() {
+            // A cancel left over from an earlier run is not for this one, which now owns the project.
+            Ok(guard) => {
+                CANCEL_VALIDATION.store(false, Ordering::Release);
+                return Sweep::Held(guard);
+            }
+            Err(std::sync::TryLockError::Poisoned(p)) => {
+                CANCEL_VALIDATION.store(false, Ordering::Release);
+                return Sweep::Held(p.into_inner());
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
+        // A cancel asked for while a sweep holds the project is for that sweep, which is about to let go.
+        if CANCEL_VALIDATION.load(Ordering::Acquire) {
+            return Sweep::Cancelled;
+        }
+        if began.elapsed() >= SWEEP_WAIT {
+            return Sweep::TimedOut;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// How long one file may take to validate before the sweep says so. A real file takes milliseconds; a
+/// file at this age is one that has stopped, and the sweep cannot finish without it.
+const STALL_AFTER: std::time::Duration = std::time::Duration::from_secs(20);
+
+type StallNote = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// Told, once per file, that a file has been validating for [`STALL_AFTER`]. Set by the warm-up for the
+/// length of its pass, so the message lands in its job's output and as a toast instead of only on stderr.
+static STALL_NOTE: Mutex<Option<StallNote>> = Mutex::new(None);
+
+/// Clears [`STALL_NOTE`] when the pass that set it ends, however it ends.
+struct StallNoteGuard;
+
+impl StallNoteGuard {
+    fn set(note: StallNote) -> Self {
+        *STALL_NOTE.lock().unwrap_or_else(|p| p.into_inner()) = Some(note);
+        StallNoteGuard
+    }
+}
+
+impl Drop for StallNoteGuard {
+    fn drop(&mut self) {
+        *STALL_NOTE.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+}
+
+/// Watches the files being validated and names the ones that have been at it for too long.
+///
+/// The sweep joins every worker, so a single file that never returns holds the whole analysis at its
+/// last progress report — "97%" for as long as the process lives — and, through the sweep lock, anything
+/// that waits for it. Nothing can stop a thread from outside, but the file can at least be named, which
+/// is what turns "it hangs" into a bug that can be fixed.
+fn watch_for_stalls(inflight: &Mutex<HashMap<String, (String, std::time::Instant)>>, finished: &AtomicBool) {
+    let mut told: HashSet<String> = HashSet::new();
+    while !finished.load(Ordering::Acquire) {
+        for _ in 0..25 {
+            if finished.load(Ordering::Acquire) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        let stuck: Vec<(String, u64)> = inflight
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .filter(|(_, since)| since.elapsed() >= STALL_AFTER)
+            .map(|(file, since)| (file.clone(), since.elapsed().as_secs()))
+            .collect();
+        for (file, secs) in stuck {
+            if !told.insert(file.clone()) {
+                continue;
+            }
+            let message = format!("Still validating {file} after {secs}s — it looks stuck, and the analysis cannot finish without it.");
+            eprintln!("bennu-be: {message}");
+            let note = STALL_NOTE.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            if let Some(note) = note {
+                note(&message);
+            }
+        }
+    }
+}
 
 /// The worker cap for the whole-project validation sweep: the user's `validation_threads` setting when
 /// set, else auto = roughly half the cores — so the sweep leaves ample headroom for the interactive
@@ -4509,17 +4687,23 @@ fn validate_files_parallel(
     root: &Path,
     files: &[(PathBuf, String)],
     cache: &bennu_intel::prelude::DiagCache,
+    superseded: Option<&AtomicBool>,
     on_progress: &(dyn Fn(usize, usize) + Sync),
 ) -> Vec<BatchResult> {
     let total = files.len();
     let counter = AtomicUsize::new(0);
     // Fresh run → clear any stale cancel request from a previous sweep.
     CANCEL_VALIDATION.store(false, Ordering::Release);
-    bennu_intel::prelude::parallel_map_capped(files, validation_worker_cap(), |(path, source)| {
+    let inflight: Mutex<HashMap<String, (String, std::time::Instant)>> = Mutex::new(HashMap::new());
+    let finished = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+    scope.spawn(|| watch_for_stalls(&inflight, &finished));
+    let results = bennu_intel::prelude::parallel_map_capped(files, validation_worker_cap(), |(path, source)| {
         // Cooperative cancel: once requested (FE Cancel on the operation card), workers stop doing
         // real work and drain the remaining files as cheap empty results; the caller then discards
         // the whole (partial) batch instead of persisting it.
-        if CANCEL_VALIDATION.load(Ordering::Acquire) {
+        // Or its slot was replaced by a rebuild: what it would find is about the old build.
+        if CANCEL_VALIDATION.load(Ordering::Acquire) || superseded.is_some_and(|s| s.load(Ordering::Acquire)) {
             return BatchResult { file: norm_path(path), diags: Vec::new(), deps: None, hit: false, ms: 0 };
         }
         let file = norm_path(path);
@@ -4543,7 +4727,10 @@ fn validate_files_parallel(
             Some(diags) => BatchResult { file, diags, deps: None, hit: true, ms: 0 },
             None => {
                 let t = std::time::Instant::now();
+                let worker = format!("{:?}", std::thread::current().id());
+                inflight.lock().unwrap_or_else(|p| p.into_inner()).insert(worker.clone(), (file.clone(), t));
                 let (diags, recorded) = provider.validate_recording(source, &ctx, jdk_available);
+                inflight.lock().unwrap_or_else(|p| p.into_inner()).remove(&worker);
                 let ms = t.elapsed().as_millis() as u64;
                 // Store deps only when a resolver exists to check freshness against next time.
                 let deps = provider
@@ -4558,6 +4745,9 @@ fn validate_files_parallel(
             on_progress(done, total);
         }
         result
+    });
+    finished.store(true, Ordering::Release);
+    results
     })
 }
 
@@ -4597,13 +4787,16 @@ pub(crate) fn refresh_import_census_setting() {
     IMPORT_CENSUS.store(bennu_core::config::load().completion_import_census, Ordering::Relaxed);
 }
 
-pub(crate) fn register_bennu_job(
+/// The only way a job reaches the Jobs panel — through [`crate::task::Task`], which is what to use. A job the person can cancel
+/// (`non_cancellable == false`) gets a Cancel button, and the task says what cancelling means with [`JobHandle::on_cancel`].
+pub(crate) fn register_job(
     host: &Arc<dyn HostCaller>,
     sink: &Arc<dyn EventSink>,
     name: &str,
     command: &str,
     category: &str,
     is_system: bool,
+    non_cancellable: bool,
 ) -> Option<JobHandle> {
     let job = JobHandle::register(
         Arc::clone(host),
@@ -4612,7 +4805,7 @@ pub(crate) fn register_bennu_job(
             plugin_name: "bennu".into(),
             command: command.to_string(),
             category: Some(category.to_string()),
-            non_cancellable: true,
+            non_cancellable,
             hidden: false,
             is_system,
             target: Some("bennu".into()),
@@ -4642,7 +4835,12 @@ pub(crate) fn finish_bennu_job(
     error: Option<String>,
 ) {
     let Some(job) = job else { return };
-    let status = if success {
+    // A job the person cancelled ends as cancelled, whatever the task makes of having been told to stop.
+    let cancelled = job.is_cancelled();
+    let success = success && !cancelled;
+    let status = if cancelled {
+        JobStatus::Cancelled
+    } else if success {
         JobStatus::Completed { exit_code: 0 }
     } else {
         JobStatus::Failed { error: error.clone().unwrap_or_default() }
@@ -4654,7 +4852,7 @@ pub(crate) fn finish_bennu_job(
             "job_id": job.id,
             "success": success,
             "exit_code": if success { 0i32 } else { -1i32 },
-            "cancelled": false,
+            "cancelled": cancelled,
             "error": error,
         }),
     );
@@ -4704,56 +4902,22 @@ fn sources_failure_reason(log: &str) -> String {
 
 /// The whole-project analysis warm-up job (visible while it runs, self-clears when done — like
 /// IntelliJ's background analysis). Supersession by a rebuild stops the pass.
-fn register_warmup_job(
-    host: &Arc<dyn HostCaller>,
-    sink: &Arc<dyn EventSink>,
-    root: &str,
-) -> Option<JobHandle> {
+fn analysis_task(host: Option<&Arc<dyn HostCaller>>, sink: &Arc<dyn EventSink>, root: &str) -> Task {
     let display = root.rsplit(['/', '\\']).next().unwrap_or(root);
-    register_bennu_job(host, sink, "Analyzing project", &format!("→ {display}"), "system", true)
-}
-
-/// Finish the warm-up job (always success — the pass either completes or is superseded before this).
-fn finish_warmup_job(sink: &Arc<dyn EventSink>, job: Option<JobHandle>) {
-    finish_bennu_job(sink, job, true, None);
-}
-
-/// Report the warm-up's progress into its job, coalesced.
-///
-/// The batch calls back **per file** — thousands of times on a real project — so a line
-/// each would flood the reverse channel to say what one line says: the flooding that once
-/// left the backend answering nothing. One line per whole percentage point is at most a
-/// hundred for the entire pass, and a percentage is what somebody watching a progress
-/// readout is reading anyway.
-fn warmup_progress_line(
-    job: Option<&JobHandle>,
-    sink: &Arc<dyn EventSink>,
-    last_pct: &AtomicUsize,
-    done: usize,
-    total: usize,
-) {
-    let Some(job) = job else { return };
-    if total == 0 {
-        return;
-    }
-    let pct = done * 100 / total;
-    // `swap` and not load-then-store: the callback runs on the batch's worker threads, and
-    // two arriving together must not both emit the same percentage.
-    if last_pct.swap(pct, Ordering::Relaxed) == pct {
-        return;
-    }
-    let line = format!("Analyzing… {pct}% ({done}/{total} files)");
-    job.append(&line);
-    sink.emit(
-        "arbor://job-output-batch",
-        json!({ "job_id": &job.id, "lines": [line] }),
+    // Cancellable: stopping it stops the sweep, which is what lets a build or a validation queued behind it go ahead.
+    let task = Task::start(
+        host,
+        sink,
+        TaskSpec::new("Analyzing project", format!("→ {display}")).category("system").system().cancellable(),
     );
+    task.on_cancel(|| IndexService::global().request_cancel_validation());
+    task
 }
 
 fn warm_up_validation_cache(
     root: &str,
     sources: &[(PathBuf, String)],
-    job: Option<&JobHandle>,
+    task: &Task,
     sink: &Arc<dyn EventSink>,
 ) {
     let svc = IndexService::global();
@@ -4761,16 +4925,23 @@ fn warm_up_validation_cache(
         return; // pre-index / no JDK — validating pure-AST with nothing to cache would be waste
     }
     let Some(slot) = svc.slot_for_root(root) else { return };
-    let _sweep = slot.sweep.lock().unwrap_or_else(|p| p.into_inner());
+    let Sweep::Held(_sweep) = acquire_sweep(&slot) else { return };
+    // A file that never finishes would leave this pass at its last percentage with nothing to say why.
+    let _stall = {
+        let (sink, log) = (Arc::clone(sink), task.log());
+        StallNoteGuard::set(Arc::new(move |message: &str| {
+            notify(&sink, "Analysis is stuck on a file", message, "warning");
+            log.line(message);
+        }))
+    };
     let mut cache = svc.diag_cache_load(root);
-    // `usize::MAX` and not 0: a project whose first callback really is 0% should still print
-    // it, and a sentinel that collides with a real value swallows the first line.
-    let last_pct = AtomicUsize::new(usize::MAX);
+    // One line per whole percentage point — the batch calls back per file, thousands of times, and the Task says each
+    // percentage once.
     let results = svc.validate_project_batch(root, sources, &cache, &|done: usize, total: usize| {
-        warmup_progress_line(job, sink, &last_pct, done, total);
+        task.progress("Analyzing", done, total);
     });
-    if svc.validation_cancelled() {
-        return; // cancelled → don't stamp/persist a partial warm-up
+    if svc.validation_cancelled() || slot.sweep_stop.load(Ordering::Acquire) {
+        return; // cancelled, or replaced by a rebuild → don't stamp/persist a partial warm-up
     }
     let mut seen = HashSet::with_capacity(results.len());
     let mut filled = 0usize;
@@ -4784,11 +4955,7 @@ fn warm_up_validation_cache(
     cache.files.retain(|k, _| seen.contains(k));
     svc.diag_cache_save(root, &cache);
     // The closing line: a job whose output ends mid-percentage reads as one that died there.
-    if let Some(job) = job {
-        let line = format!("Analyzed {filled} files ({} cached)", seen.len());
-        job.append(&line);
-        sink.emit("arbor://job-output-batch", json!({ "job_id": &job.id, "lines": [line] }));
-    }
+    task.line(&format!("Analyzed {filled} files ({} cached)", seen.len()));
     eprintln!(
         "bennu-be: validation cache warmed for {root} ({filled} validated, {} total cached)",
         seen.len()
@@ -4817,8 +4984,13 @@ fn build_dependency_tier(
     jdk_version: &str,
     pairs: &[(String, String)],
     sink: &Arc<dyn EventSink>,
+    host: Option<&Arc<dyn HostCaller>>,
     root_str: &str,
 ) {
+    // The longest part of opening a project, and the one that can stall on a network: a row of its own, so it is
+    // never a spinner with nothing behind it. A failure keeps the row; a success clears it.
+    let task = Task::start(host, sink, TaskSpec::new("Resolving dependencies", root_str).category("system").system());
+    let mut verdict: Result<(), String> = Ok(());
     emit_progress(sink, root_str, "dependencies", "start");
     let deps = match crate::dep_classpath::resolve_dep_classpath(root_path, jdk_version) {
         crate::dep_classpath::DepOutcome::Resolved(d) => {
@@ -4827,12 +4999,14 @@ fn build_dependency_tier(
                 root_path.display(),
                 d.jars.len()
             );
+            task.line(&format!("{} jar(s) on the classpath.", d.jars.len()));
             // A PARTIAL tier is told about too, and for the same reason a missing one is: the
             // visible symptom is identical — every type from an unresolved jar reads as "cannot
             // resolve" — and a warning that only fires on the all-or-nothing case leaves the
             // commoner half of the problem looking like a Bennu bug.
             if let Some(reason) = &d.partial {
                 notify(sink, "Some dependencies not resolved", reason, "warning");
+                task.line(reason);
             }
             // NOT recorded on the slot yet — see the swap below. The jar list is what
             // `classpath_complete` is derived from, and publishing it here would say "we can see the
@@ -4850,6 +5024,7 @@ fn build_dependency_tier(
                 &format!("{reason} Library types won't resolve until this is fixed."),
                 "warning",
             );
+            verdict = Err(reason);
             None
         }
         crate::dep_classpath::DepOutcome::NotApplicable => None,
@@ -4913,6 +5088,7 @@ fn build_dependency_tier(
                 // fine, and the only visible consequence is every library type reading as
                 // unresolved — which reads as "Bennu is broken", not as "this step failed".
                 eprintln!("bennu-be: dependency provider build failed ({}): {e}", root_path.display());
+                verdict = Err(format!("The dependency jars resolved, but their index could not be built ({e})."));
                 notify(
                     sink,
                     "Dependency index not built",
@@ -4929,6 +5105,7 @@ fn build_dependency_tier(
     // provisional policy — hand it the full classpath now. When the walk has not landed yet this is
     // a no-op and the build's own call after the join does it.
     install_full_policy(slot);
+    task.finish(verdict);
 }
 
 /// Hand the live semantic engine the **full-classpath** policy resolver, if both exist yet.

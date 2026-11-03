@@ -118,6 +118,8 @@ export interface AccessRequest {
   /** The file that made it ask, if one did. */
   file?: string;
   reason: string;
+  /** Writing in a folder already opened for reading — the card then offers keep-read-only or allow-writing. */
+  upgrade?: boolean;
   /** Absent until you answer. */
   answer?: AccessAnswer;
 }

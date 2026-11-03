@@ -24,6 +24,8 @@
    * between a panel that reads a pom and a panel that guesses.
    */
   import { Boxes, FileCode2, LocateFixed, Play, Puzzle } from 'lucide-svelte';
+  // What presses a Maven run: Maven's own mark, the one a `pom.xml` wears everywhere else in the app.
+  import BennuFileIcon from './BennuFileIcon.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
@@ -123,14 +125,14 @@
     {#snippet icon()}<Play size={13} />{/snippet}
     {#each phases as phase (phase.id)}
       <SidebarItem onclick={() => onRun([phase.id])}>
-        {#snippet icon()}<span class="mm-run"><Play size={11} /></span>{/snippet}
+        {#snippet icon()}<span class="mm-run"><BennuFileIcon path="pom.xml" size={12} /></span>{/snippet}
         {phase.id}
         {#snippet badges()}<span class="mm-hint">{phase.hint}</span>{/snippet}
       </SidebarItem>
     {/each}
     <!-- The one combination nobody types out, because it is the one everybody runs. -->
     <SidebarItem onclick={() => onRun(['clean', 'install'])}>
-      {#snippet icon()}<span class="mm-run"><Play size={11} /></span>{/snippet}
+      {#snippet icon()}<span class="mm-run"><BennuFileIcon path="pom.xml" size={12} /></span>{/snippet}
       clean install
       {#snippet badges()}<span class="mm-hint">Both lifecycles, in one run</span>{/snippet}
     </SidebarItem>
@@ -160,7 +162,7 @@
               onclick={() =>
                 onRun([plugin.prefix ? `${plugin.prefix}:${goal}` : `${plugin.group_id}:${plugin.artifact_id}:${goal}`])}
             >
-              {#snippet icon()}<span class="mm-run"><Play size={11} /></span>{/snippet}
+              {#snippet icon()}<span class="mm-run"><BennuFileIcon path="pom.xml" size={12} /></span>{/snippet}
               {goal}
               {#snippet badges()}
                 <span class="mm-hint">
@@ -191,7 +193,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .mm-run { color: var(--success); display: flex; }
+  .mm-run { display: flex; }
   .mm-plugin { color: var(--text-muted); display: flex; }
   .mm-hint {
     font-size: var(--font-size-2xs);

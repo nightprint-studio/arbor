@@ -74,6 +74,7 @@ import {
 // does: what a build prints is the whole of what it produced, and there is one place to read it.
 import { mavenGoal as ipcMavenGoal } from '$lib/ipc/bennu/maven-build';
 import { gradleTask as ipcGradleTask } from '$lib/ipc/bennu/gradle';
+import { refreshIndex } from '$lib/ipc/bennu/nav';
 // A `junit` configuration is launched by the TEST runner, not by this one — see `runConfig`.
 // (`tests` imports only a TYPE from here, so the edge is erased at build and there is no
 // runtime cycle.)
@@ -469,10 +470,21 @@ function createBennuRunStore() {
     for (const replay of queue) replay(tabId);
   }
 
+  /** Lifecycle phases (and the ones before them) that run the compiler, and so the annotation processors. */
+  const WRITES_SOURCES = new Set([
+    'generate-sources', 'process-sources', 'generate-resources', 'process-resources', 'compile', 'process-classes',
+    'generate-test-sources', 'process-test-sources', 'test-compile', 'test', 'package', 'verify', 'install', 'deploy',
+  ]);
+
   /** The program in `tabId` ended — close the tab's record of it and say how it went. */
   function exited(tabId: string, code: number | null) {
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
+    // A Maven build that went well may have generated sources (the JPA metamodel `Order_`, MapStruct's
+    // implementations): the index reads files when the project opens, so it is told to read them again.
+    if (tab.spec.kind === 'maven' && code === 0 && !tab.stopping && tab.spec.goals.some((g) => WRITES_SOURCES.has(g))) {
+      void refreshIndex(tab.spec.root).catch(() => {});
+    }
     const durationMs = tab.startedAt ? Date.now() - tab.startedAt : null;
     patchTab(tabId, {
       live: false,

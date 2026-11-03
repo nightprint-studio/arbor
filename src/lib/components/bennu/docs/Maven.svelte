@@ -66,6 +66,11 @@
   No <code>-am</code>, no <code>-pl</code>: what runs is what running <code>mvn</code> in that folder would have run.
 </Callout>
 <p>
+  Every run row carries Maven's own mark. When a phase that compiles (<code>compile</code>, <code>test</code>, <code>package</code>,
+  <code>install</code>, …) finishes well, the symbol index reads the sources again, so what the annotation processors generated —
+  the JPA metamodel (<code>Order_</code>), MapStruct's implementations, QueryDSL's <code>QOrder</code> — resolves without a manual rebuild.
+</p>
+<p>
   The module header answers what the two groups cannot — <strong>where the module is</strong>. Its
   <strong>locate</strong> button, or <strong>Focus in Project</strong> from a right-click on the header, opens the Project
   tree on the module's folder. The same menu opens its <code>pom.xml</code> and copies its path.

@@ -81,6 +81,7 @@
   import SymbolKindIcon from './SymbolKindIcon.svelte';
   import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { forgetEditorHistory, loadEditorHistory, saveEditorHistory, type StoredHistory } from '$lib/ipc/bennu/editor-history';
   import { bennuGitStatusStore } from '$lib/stores/bennu/git-status.svelte';
   import { GIT_BADGE_COLOR, GIT_BADGE_LABEL } from '$lib/utils/git-badge';
   import { setFocusedTimeout, clearFocusedTimeout } from '$lib/utils/focused-timeout';
@@ -176,7 +177,7 @@
   import type {
     EditorDiagnostic, EditorViewSnapshot, SemanticToken,
   } from '$lib/components/shared/ui/code-editor';
-  import type { EditorView } from '@codemirror/view';
+  import type { EditorView, KeyBinding } from '@codemirror/view';
   import { bennuIntentionsStore } from '$lib/stores/bennu/intentions.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
   import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
@@ -204,7 +205,7 @@
   // Path identity is one function, not one per component: the BE speaks forward slashes and the
   // FE carries native separators, so a `===` between them is quietly false on Windows — and the
   // bug it causes is always a silent fallback rather than a visible error.
-  import { baseName, isSamePath } from '$lib/utils/paths';
+  import { baseName, isSamePath, rootOwning } from '$lib/utils/paths';
   import type { PaneIndex } from '$lib/stores/bennu/editor-panes';
   import { tabDragStore } from '$lib/stores/tab-drag.svelte';
 
@@ -243,6 +244,8 @@
     scrollToLineCol: (line: number, col?: number) => void;
     /** Scroll to a remembered pixel offset, retried until the layout exists. */
     restoreScrollTop: (top: number) => void;
+    /** The undo history of the live document and the hash of the text it applies to. */
+    historySnapshot: () => { history: unknown; hash: number } | null;
     /** Which document the mounted view actually holds — see `nav-flow`'s `ready`. */
     documentKey: () => string | undefined;
     /** Whether a line is visible right now, as opposed to having been asked for. */
@@ -373,12 +376,91 @@
   const viewStates = new Map<string, EditorViewSnapshot>();
   // A closed tab's snapshot goes with it. The history is the largest thing in there, and it is
   // bounded by the tabs you have open rather than by everything you have opened this session.
+  //
+  // "Closed" means closed in the project that is showing. `openFilePaths` is that project's tabs, so a tab of
+  // ANOTHER workspace project is not in it — and it is not closed, only out of sight. Pruning it too is what
+  // made switching projects cost you every file's undo history and scroll in the one you left.
   $effect(() => {
     const open = new Set(projectStore.openFilePaths);
+    const activeRoot = projectStore.project?.root ?? null;
     for (const path of [...viewStates.keys()]) {
-      if (!open.has(path)) viewStates.delete(path);
+      if (open.has(path)) continue;
+      const owner = historyRoot(path);
+      if (owner && owner !== activeRoot) continue;
+      viewStates.delete(path);
+      diskHistories.delete(path);
+      if (owner) void forgetEditorHistory(owner, path).catch(() => {});
     }
   });
+
+  // ── The undo history, kept on disk ───────────────────────────────────────────
+  //
+  // `viewStates` keeps a tab's history while Arbor runs; this keeps it when it does not. It is written when
+  // a tab is left and a moment after typing in it, and read back the first time a tab is shown without a live
+  // snapshot — a restart. The editor refuses a history recorded against other text (the file changed while
+  // Arbor was closed), so a stale one costs nothing but the undo it would have given.
+  const diskHistories = new Map<string, StoredHistory>();
+  /** Tabs whose history has been asked for, answered or not — the editor must not mount before the answer,
+   *  because the history can only be given to it as it is created. */
+  let historyKnown = $state<Record<string, true>>({});
+  /** True while the shown tab may have a history on disk that has not been read yet. Only a tab the project
+   *  remembers a caret for can have one: nobody undoes in a file they never touched. */
+  const historyPending = $derived(
+    !!activePath && !viewStates.has(activePath) && !historyKnown[activePath]
+      && projectStore.caretOf(activePath) !== null && historyRoot(activePath) !== null,
+  );
+  $effect(() => {
+    const path = activePath;
+    const root = path ? historyRoot(path) : null;
+    if (!path || !root || !historyPending) return;
+    const settle = () => { historyKnown = { ...historyKnown, [path]: true }; };
+    // A backend that does not answer must not keep the file from opening: the history is a convenience.
+    const giveUp = setTimeout(settle, 1500);
+    void loadEditorHistory(root, path)
+      .then((stored) => { if (stored) diskHistories.set(path, stored); })
+      .catch(() => {})
+      .finally(() => { clearTimeout(giveUp); settle(); });
+  });
+
+  /** The workspace project a file belongs to — the key its history is kept under. */
+  function historyRoot(path: string): string | null {
+    const canon = path.replace(/\\/g, '/').toLowerCase();
+    let best: string | null = null;
+    for (const p of projectStore.workspaceProjects) {
+      const r = p.root.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+      if ((canon === r || canon.startsWith(r + '/')) && (!best || p.root.length > best.length)) best = p.root;
+    }
+    return best ?? projectStore.project?.root ?? null;
+  }
+
+  function persistHistory(path: string, history: unknown, hash: number | undefined) {
+    const root = historyRoot(path);
+    if (!root || hash === undefined) return;
+    // A tab that has just been closed hands over its history as it goes; keeping it would undo the forgetting.
+    if (root === projectStore.project?.root && !projectStore.openFilePaths.includes(path)) return;
+    void saveEditorHistory(root, path, hash, history).catch(() => {});
+  }
+
+  let historyTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The shown tab's history, written once typing pauses: leaving the tab writes it too, but closing the
+   *  window under it does not run that. */
+  function scheduleHistorySave() {
+    clearTimeout(historyTimer);
+    historyTimer = setTimeout(() => {
+      const path = activePath;
+      const snap = path ? editorComp?.historySnapshot() : null;
+      if (path && snap) persistHistory(path, snap.history, snap.hash);
+    }, 1200);
+  }
+  $effect(() => () => clearTimeout(historyTimer));
+
+  /** What a tab's editor starts from: the live snapshot of a tab already visited, else its history from disk. */
+  function startState(path: string): EditorViewSnapshot | undefined {
+    const live = viewStates.get(path);
+    if (live) return live;
+    const stored = diskHistories.get(path);
+    return stored ? { anchor: 0, head: 0, scrollTop: 0, history: stored.history, historyHash: stored.hash } : undefined;
+  }
   // The editor language for the active file — Java (tree-sitter) or a CodeMirror
   // built-in / legacy mode (XML, JSP, YAML, JSON, …) picked by extension.
   const editorLanguage = $derived(languageForPath(activePath));
@@ -552,6 +634,20 @@
   }
 
   /**
+   * A place the history remembers may be in another project of the workspace: the one you came from. Showing
+   * it means switching to that project first, or the file would open as a foreign tab of the one on screen.
+   * Only the history's own places go through here — an ordinary go-to into another project's file keeps opening
+   * it where you are.
+   */
+  async function enterOwnerOf(file: string) {
+    const owner = rootOwning(projectStore.workspaceRoots, file);
+    if (!owner || isSamePath(owner, projectStore.project?.root)) return;
+    await projectStore.switchProject(owner);
+    // The editor reacts to the new project (its flow forgets where the reader was) a beat after the switch.
+    await tick();
+  }
+
+  /**
    * Open `file` and land on `line` — the one way the editor navigates, across files or inside one.
    *
    * Every caller used to write the steps out, and they are not steps: they are one navigation
@@ -632,6 +728,7 @@
       const place = dir === 'back' ? bennuNavStore.back(here) : bennuNavStore.forward(here);
       if (!place) return;
       try {
+        await enterOwnerOf(place.file);
         await goTo(place, false);
         return;
       } catch {
@@ -649,12 +746,12 @@
     const place = bennuNavStore.stepEdit();
     if (!place) return;
     // An edit place is not in the jump ring, so going there IS a navigation.
-    void goTo(place, true);
+    void enterOwnerOf(place.file).then(() => goTo(place, true));
   }
 
   /** Ctrl+Shift+E — go to a place picked from Recent Locations. */
   export function navToPlace(place: NavPlace) {
-    void goTo(place, true);
+    void enterOwnerOf(place.file).then(() => goTo(place, true));
   }
 
   // ── Restore the caret a restart lost ─────────────────────────────────────────
@@ -672,13 +769,19 @@
   // answer, and a go-to that asked for a specific line outranks both — hence the relays below
   // claim the tab through this same flag.
   let restoredCaretFor: string | null = null;
+  /** The tab the guard above was last about. */
+  let restoreSeenTab: string | null = null;
   // Tabs whose remembered scroll has been dealt with, so a later report of theirs is the reader's
   // own scrolling and worth persisting. Before that the editor reports the 0 of a fresh mount.
   const scrollArmed = new Set<string>();
   $effect(() => {
     const path = activePath;
     const source = path ? projectStore.sourceOf(path) : '';
-    if (!path || !source || isPreviewTab) return;
+    // Leaving a tab ends its activation: coming back to it — from another project, or from a project with no
+    // tab at all — is a new one. Without this the guard still held the old path, the restore was skipped as
+    // "already done", and the tab came back at the top.
+    if (path !== restoreSeenTab) { restoreSeenTab = path; restoredCaretFor = null; }
+    if (!path || !source || isPreviewTab || historyPending) return;
     if (restoredCaretFor === path) return;
     if (viewStates.has(path)) { scrollArmed.add(path); return; }
     restoredCaretFor = path;
@@ -788,6 +891,7 @@
     if (!file) return;
     bennuNavStore.applyEdits(file, lineEditsOf(c.changes, c.before, c.after));
     if (c.external) return;
+    scheduleHistorySave();
     let end = 0;
     c.changes.iterChanges((_fromA, _toA, _fromB, toB) => { end = toB; });
     const line = c.after.lineAt(end);
@@ -1789,13 +1893,35 @@
   // comma. Both engines answer it — Bennu's resolver for Java, the language server for everything
   // else — into the same shared widget, so the two look and behave identically.
   //
+  // On demand only (Ctrl+P): a strip that opens by itself whenever the caret rests on a call is in
+  // the way more often than it helps, and it used to have no way out. Escape closes it, and so does
+  // the caret leaving the call — it does not come back on its own when the caret returns.
+  let parameterInfoOn = $state(false);
+
+  /** Show the parameter info for the call at the caret, or close it when it is already up. */
+  export function toggleParameterInfo() {
+    parameterInfoOn = !parameterInfoOn;
+  }
+
+  /** Escape: close the parameter info if it is up; otherwise leave the key to whoever wants it. */
+  function dismissParameterInfo(): boolean {
+    if (!parameterInfoOn) return false;
+    parameterInfoOn = false;
+    return true;
+  }
+
+  const editorKeyBindings: KeyBinding[] = [
+    { key: 'Mod-p', run: () => { toggleParameterInfo(); return true; } },
+    { key: 'Escape', run: () => dismissParameterInfo() },
+  ];
+
   // Cleared eagerly on a caret that is not in a call, rather than waiting for the answer: leaving
   // the last signature up while you type the next statement is worse than a flicker, because it
   // reads as a claim about the line you are on now.
   $effect(() => {
     const path = activePath;
     const caret = highlightCaret;
-    if (!path || (!isJavaFileOf(path) && !isLspFileOf(path))) {
+    if (!parameterInfoOn || !path || (!isJavaFileOf(path) && !isLspFileOf(path))) {
       editorComp?.setSignatureHint(null);
       return;
     }
@@ -1808,6 +1934,8 @@
       void fetch
         .then((hint) => {
           if (cancelled || activePath !== path) return;
+          // Not inside a call (any more): the request is spent, so moving back in stays quiet.
+          if (!hint) parameterInfoOn = false;
           editorComp?.setSignatureHint(hint);
         })
         .catch(() => {});
@@ -5475,6 +5603,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="ed-editor-wrap" oncontextmenu={onEditorContextMenu}>
       {#key activePath}
+        {#if !historyPending}
         <CodeEditor
           bind:this={editorComp}
           value={projectStore.sourceOf(activePath)}
@@ -5518,7 +5647,7 @@
           }}
           tabSize={bennuSettingsStore.tabSize}
           indentUnit={bennuSettingsStore.indentStyle === 'tabs' ? '\t' : ' '.repeat(bennuSettingsStore.tabSize)}
-          initialState={viewStates.get(activePath)}
+          initialState={startState(activePath)}
           stateKey={activePath}
           oninput={onInput}
           ondocchange={onDocChange}
@@ -5530,11 +5659,15 @@
             // once the restore has had its turn (`scrollArmed`): a restored tab mounts reporting 0,
             // which would wipe the offset it is about to be given.
             if (scrollArmed.has(key)) projectStore.rememberScroll(key, s.scrollTop);
+            // Only a teardown carries the history; that is the moment to keep it on disk.
+            if (s.history !== undefined) persistHistory(key, s.history, s.historyHash);
           }}
           onGoto={onEditorGoto}
           onFindInFiles={(q) => bennuUiStore.openFind(q)}
           onLensPress={(key) => void onLensPress(key)}
+          keyBindings={editorKeyBindings}
         />
+        {/if}
       {/key}
       {#if askChip}
         <!-- Mouse-down is kept from the editor so pressing the chip does not move the caret or drop the selection. -->

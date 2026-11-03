@@ -18,6 +18,7 @@
   } from '@codemirror/state';
   // The undo/redo history as a serialisable field — see `emitViewState`.
   import { historyField } from '@codemirror/commands';
+  import { docHash } from './doc-hash';
   // The explicit "ask for completions here" command — see `requestCompletion`.
   import { startCompletion } from '@codemirror/autocomplete';
   import {
@@ -418,9 +419,21 @@
         history: withHistory
           ? (view.state.toJSON({ history: historyField }) as { history?: unknown }).history
           : undefined,
+        historyHash: withHistory ? docHash(view.state.doc.toString()) : undefined,
       },
       heldKey,
     );
+  }
+
+  /**
+   * The undo history of the live document with the hash of the text it applies to, for a host that keeps it
+   * on disk. Asked for now and then while the tab is edited, because teardown — the other time it is
+   * emitted — does not run when the window is closed under a tab.
+   */
+  export function historySnapshot(): { history: unknown; hash: number } | null {
+    if (!view) return null;
+    const history = (view.state.toJSON({ history: historyField }) as { history?: unknown }).history;
+    return history === undefined ? null : { history, hash: docHash(view.state.doc.toString()) };
   }
 
   // ── Byte-span diagnostics → CM lint markers ───────────────────────────────────
@@ -840,7 +853,10 @@
     // doc is passed through it rather than through `create`. A stored history that no longer
     // fits the document (the file changed on disk while the tab was away) would apply changes at
     // positions that belonged to text no longer there, so it is dropped rather than trusted.
-    const storedHistory = initialState?.history;
+    // Nor is one recorded against a different text: same positions, other characters.
+    const fits =
+      initialState?.historyHash === undefined || initialState.historyHash === docHash(value.replace(/\r\n?/g, '\n'));
+    const storedHistory = fits ? initialState?.history : undefined;
     let state: EditorState;
     if (storedHistory !== undefined) {
       try {

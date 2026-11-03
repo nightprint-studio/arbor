@@ -34,10 +34,14 @@
     pulls?: TreeNode[];
     /** Known vulnerabilities of this artifact at its version, when there are any. */
     vuln?: { count: number; severity: string };
+    /** The panel's filter, lower-cased: a row whose *pulled-in* artifact matches it opens to show it. */
+    query?: string;
     onOpen: (d: Dependency) => void;
   }
 
-  let { dep, ecosystem, resolvedKnown, usage, pulls = [], vuln, onOpen }: Props = $props();
+  let { dep, ecosystem, resolvedKnown, usage, pulls = [], vuln, query = '', onOpen }: Props = $props();
+
+  const pullHit = (n: TreeNode) => !!query && `${nodeCoord(n)} ${n.version}`.toLowerCase().includes(query);
 
   /** OSV says `moderate`; the severity tokens say `medium`. */
   const vulnColor = $derived(
@@ -51,6 +55,10 @@
   const conflicted = $derived(!!usage?.conflicted);
   const expandable = $derived(conflicted || pulls.length > 0);
   let open = $state(false);
+
+  $effect(() => {
+    if (pulls.some(pullHit)) open = true;
+  });
 </script>
 
 <div class="row" class:unresolved class:open>
@@ -117,8 +125,9 @@
       {#if pulls.length > 0}
         <div class="d-head">Pulls in</div>
         <ul class="d-list">
-          {#each pulls.slice(0, 12) as n (nodeCoord(n) + n.version)}
-            <li><span class="mono">{nodeCoord(n)}</span><span class="d-ver mono">{n.version}</span></li>
+          <!-- The matches first, so a filtered library shows what it was found by, not "…and 7 more". -->
+          {#each [...pulls].sort((a, b) => +pullHit(b) - +pullHit(a)).slice(0, 12) as n (nodeCoord(n) + n.version)}
+            <li class:hit={pullHit(n)}><span class="mono">{nodeCoord(n)}</span><span class="d-ver mono">{n.version}</span></li>
           {/each}
           {#if pulls.length > 12}<li class="d-more">…and {pulls.length - 12} more</li>{/if}
         </ul>
@@ -171,5 +180,6 @@
   .d-ver { margin-left: auto; color: var(--text-muted); }
   .d-tag { color: var(--text-muted); font-size: var(--font-size-3xs); }
   .d-more { color: var(--text-disabled); }
+  .d-list li.hit { color: var(--accent); font-weight: 600; }
   .mono { font-family: var(--font-code); font-size: var(--font-size-xs); }
 </style>

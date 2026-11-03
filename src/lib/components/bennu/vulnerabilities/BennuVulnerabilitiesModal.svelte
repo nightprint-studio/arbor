@@ -11,7 +11,7 @@
    * findings, and owns the one state Corvus does not have: the check being switched off.
    */
   import { onMount } from 'svelte';
-  import { ShieldAlert, RefreshCw } from 'lucide-svelte';
+  import { ShieldAlert, RefreshCw, Sparkles } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -20,9 +20,17 @@
   import { projectAdvisories, type ProjectAdvisories } from '$lib/ipc/bennu/maven';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuConfigStore } from '$lib/stores/bennu/config.svelte';
-  import { advisoriesToFindings } from './advisory-findings';
+  import { advisoriesToFindings, assessmentPrompt } from './advisory-findings';
+  import { askAssistant } from '../assistant/assistant-launch';
+  import type { SecurityFinding } from '$lib/types/corvus/security';
 
   let { onClose }: { onClose: () => void } = $props();
+
+  /** Close this window and put the question to the assistant, which opens beside the editor. */
+  function askAboutFinding(finding: SecurityFinding) {
+    onClose();
+    void askAssistant(assessmentPrompt(finding));
+  }
 
   let data = $state<ProjectAdvisories | null>(null);
   let loading = $state(true);
@@ -91,6 +99,13 @@
         {#if data?.truncated}
           <span class="vl-trunc">A large classpath: only the first {data.checked} artifacts were checked.</span>
         {/if}
+      {/snippet}
+      <!-- Whether the vulnerable code is reached is a question about this project: that is the assistant's to answer. -->
+      {#snippet findingActions(finding)}
+        <Button variant="secondary" size="sm" onclick={() => askAboutFinding(finding)} tooltip="Ask Imber whether this project is really exposed, and what fixing it would change">
+          {#snippet iconStart()}<Sparkles size={13} />{/snippet}
+          Ask Imber
+        </Button>
       {/snippet}
     </SecurityFindingsBrowser>
   {/if}

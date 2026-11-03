@@ -195,11 +195,33 @@
     coloured but not a link, so a click never opens the wrong class.</li>
 </ul>
 
+<h3>Log files</h3>
+<p>
+  The select at the left of the console bar switches what it shows: the program's <strong>Output</strong>, or a log file the project has on disk — the <code>logs</code> folder of each Tomcat
+  configuration (<code>catalina</code>, <code>localhost</code>, the access log), any <code>*.log</code> or <code>logs/</code> folder of the project, and the files its Logback or Log4j configuration writes to.
+  <strong>Open a log file…</strong> takes any other. The end of the file is shown and new lines follow as they are written; a file that is truncated or rotated starts again.
+</p>
+<p>
+  A line from a file is read exactly like one from a run: levels and colours, links that open the source, stack traces with their framework frames folded, copy for SQL, <em>Fix with Imber</em>, the filter, the clean view
+  and its rules. <strong>Output</strong> brings the run back.
+</p>
+<p>
+  Tomcat's own lines (<code>catalina</code>, <code>localhost</code>, <code>manager</code>) are read too: the timestamp, the level, the thread and the <code>class.method</code> that logged are marked, and
+  the level is understood in the JVM's language — <code>GRAVE</code>, <code>AVVERTENZA</code> and <code>INFORMAZIONI</code> on an Italian machine colour the line like <code>SEVERE</code>, <code>WARNING</code> and <code>INFO</code>. The date
+  of an access-log line is marked as well. The format is recognised by its shape, so a changed <code>timeFormat</code> in Tomcat's <code>logging.properties</code> does not matter.
+</p>
+<p>
+  A log opened in an <strong>editor tab</strong> (any <code>.log</code> file) is coloured the same way: each line takes the colour of its level, the stack trace under an error keeps it, and the
+  timestamp, thread and logger are drawn as the console draws them.
+</p>
+
 <h3>The project's log format</h3>
 <p>
   When the project says how its logs are written, the console reads it instead of guessing. Bennu looks in <code>logback-spring.xml</code>, <code>logback.xml</code>,
-  <code>log4j2-spring.xml</code>, <code>log4j2.xml</code> and the <code>logging.pattern.console</code> of <code>application.properties</code> / <code>.yml</code>, in the project and its
-  modules' <code>src/main/resources</code>. For a pattern like
+  <code>log4j2-spring.xml</code>, <code>log4j2.xml</code>, <code>log4j2.properties</code>, <code>log4j.xml</code>, <code>log4j.properties</code> and the <code>logging.pattern.console</code> of
+  <code>application.properties</code> / <code>.yml</code>, in the project and its modules' <code>src/main/resources</code> and <code>WEB-INF</code>. Properties the file defines
+  (<code>&lt;Property&gt;</code> in Log4j2, <code>&lt;property&gt;</code> in Logback) are substituted, and colour wrappers such as <code>%highlight&lbrace;…&rbrace;</code> are looked through. The <strong>Columns</strong> tab of the clean view
+  says which file the layout came from, or that none was found — in which case Logger and Thread have nothing to work on. For a pattern like
 </p>
 <pre><code>{'%d{yyyy-MM-dd HH:mm:ss} | %-5level | %logger{1} | MDC:[tenant=%X{tenant.id},trace_id=%X{Trace-Id}] | %msg%n'}</code></pre>
 <p>
@@ -226,6 +248,8 @@
     A run of hidden lines is one row, <code>▸ 14 hidden lines</code>, that opens in place.</li>
   <li><strong>Stack traces</strong> keep the exception, every <code>Caused by:</code> and the frames of <em>your</em> code, and fold the rest into <code>▸ 14 framework frames</code> (press to open).
     Your code is the packages Bennu finds in the project's sources; <strong>Also mine</strong> adds more. With no package known nothing folds.</li>
+  <li><strong>MDC</strong> — the <code>key=value</code> entries a layout prints can be hidden all at once (<em>MDC: Hidden</em>) or one key at a time: <strong>right-click a line</strong> and pick <em>Hide MDC “trace_id”</em> for any of its keys, or
+    list the keys in <em>Hidden MDC keys</em>. The entry goes with its comma, so what remains still reads <code>[tenant=acme]</code>; when every entry is gone the empty <code>MDC:[]</code> wrapper goes too.</li>
   <li><strong>Repeats</strong> — identical lines in a row (a pool's heartbeat) become one with <code>×12</code>.</li>
   <li><strong>The level</strong> menu and the <strong>filter</strong> box narrow the console by severity and by text, with the eye on or off.</li>
   <li>The command palette has <em>Console: toggle clean view</em>, <em>show all levels</em> and <em>show only warnings and errors</em>; <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> works from anywhere in Bennu.</li>

@@ -159,6 +159,8 @@
     <tr><td><Kbd action="refresh_graph" size="sm" /></td><td>Refresh graph (same as the fetch button in the graph toolbar)</td></tr>
     <tr><td><Kbd action="pull" size="sm" /></td><td>Pull current branch</td></tr>
     <tr><td><Kbd action="push" size="sm" /></td><td>Push current branch</td></tr>
+    <tr><td><Kbd action="plan_add_push" size="sm" /></td><td>Add the current branch's push to the plan instead of pushing now</td></tr>
+    <tr><td><Kbd action="plan_open" size="sm" /></td><td>Open the plan</td></tr>
     <tr><td><Kbd action="new_branch" size="sm" /></td><td>Create new branch</td></tr>
     <tr><td><Kbd action="stash" size="sm" /></td><td>Stash changes</td></tr>
     <tr><td><Kbd action="stage_all" size="sm" /></td><td>Stage all changes</td></tr>

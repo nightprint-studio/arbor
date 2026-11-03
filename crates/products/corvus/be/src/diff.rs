@@ -207,7 +207,16 @@ fn get_file_blame_by_path(state: &CorvusState, file: String) -> Result<Vec<Blame
     let tab = crate::ephemeral::tab_for(state, &file)?;
     let workdir = repo_path(state, &tab)?;
     let repo = open(state, &tab)?;
-    let rel = crate::mcp_tools::relative_to(&workdir, &file);
+    let mut rel = crate::mcp_tools::relative_to(&workdir, &file);
+    // The workdir is the repository's resolved location; a project opened through a mapped drive,
+    // a junction or a symlink (common on legacy trees) spells the same file differently, so the cut
+    // above leaves the absolute path behind. Resolve the file the same way and cut again.
+    if rel == file.replace('\\', "/") {
+        rel = crate::mcp_tools::relative_to(&workdir, &crate::ephemeral::resolved_path(&file));
+    }
+    if rel.starts_with('/') || rel.chars().nth(1) == Some(':') {
+        return Err(format!("the file is not inside the repository's working directory ({workdir})"));
+    }
     corvus_git::diff::get_file_blame(&repo, &rel).map_err(|e| e.to_string())
 }
 

@@ -35,6 +35,8 @@ use bennu_maven::prelude::{cache_is_fresh, is_newer};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::task::{Task, TaskSpec};
+
 const OSV: &str = "https://api.osv.dev/v1";
 /// Coordinates one request may look up.
 const MAX_COORDS: usize = 60;
@@ -140,7 +142,7 @@ pub struct ProjectAdvisories {
 /// "do I have a CVE" is really asking.
 #[arbor_rpc::handler]
 async fn bennu_project_advisories(
-    _ctx: &BennuState,
+    ctx: &BennuState,
     args: ProjectAdvisoryArgs,
 ) -> Result<ProjectAdvisories, String> {
     let cfg = bennu_core::config::load().maven;
@@ -148,10 +150,23 @@ async fn bennu_project_advisories(
         return Ok(ProjectAdvisories { enabled: false, checked: 0, truncated: false, items: Vec::new() });
     }
     let root = args.root;
+    // Up to four hundred lookups against OSV: seconds on a warm cache, much longer on a cold one. A row only when it
+    // outlasts a couple of seconds — a cached answer comes back before anyone could read it.
+    let task = Task::start(
+        ctx.host_caller().as_ref(),
+        &ctx.event_sink(),
+        TaskSpec::new("Checking dependencies for vulnerabilities", root.as_str())
+            .category("system")
+            .system()
+            .deferred(Duration::from_secs(2)),
+    );
     let report = tokio::task::spawn_blocking(move || crate::dependencies::report_of(&root))
         .await
         .map_err(|e| format!("report: {e}"))?;
-    Ok(project_advisories(&cfg, &report).await)
+    let answer = project_advisories(&cfg, &report).await;
+    task.line(&format!("{} dependencies checked.", answer.checked));
+    task.ok();
+    Ok(answer)
 }
 
 /// Distinct artifacts one project pass will look up.

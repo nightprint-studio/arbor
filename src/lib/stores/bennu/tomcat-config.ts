@@ -20,8 +20,6 @@ export interface TomcatResource {
   /** JNDI name relative to `java:comp/env/` (`jdbc/Gestionale`), or a parameter's name. */
   name: string;
   driver: string;
-  /** A driver jar copied into the server's `lib/` at launch; empty = found on the classpath. */
-  driverJar: string;
   url: string;
   user: string;
   passwordMode: PasswordMode;
@@ -54,6 +52,8 @@ export interface TomcatSettings {
   contextMode: 'guided' | 'raw';
   contextRaw: string;
   resources: TomcatResource[];
+  /** Jars, and folders of jars, copied into the server's `lib/` at launch. */
+  libPaths: string[];
 }
 
 let seq = 0;
@@ -70,7 +70,6 @@ export function newResource(kind: ResourceKind, over: Partial<TomcatResource> = 
     kind,
     name: kind === 'datasource' ? 'jdbc/Nuovo' : kind === 'env' ? 'app/valore' : 'parametro',
     driver: kind === 'datasource' ? 'org.postgresql.Driver' : '',
-    driverJar: '',
     url: '',
     user: '',
     passwordMode: 'secret',
@@ -104,6 +103,7 @@ export function emptyTomcat(): TomcatSettings {
     contextMode: 'guided',
     contextRaw: '',
     resources: [],
+    libPaths: [],
   };
 }
 
@@ -113,7 +113,6 @@ function resourceToDto(r: TomcatResource): TomcatResourceDto {
     kind: r.kind,
     name: r.name,
     driver: r.driver,
-    driver_jar: r.driverJar,
     url: r.url,
     user: r.user,
     password_mode: r.passwordMode,
@@ -137,7 +136,6 @@ function resourceFromDto(d: Partial<TomcatResourceDto>): TomcatResource {
     id: d.id || nextResourceId(),
     name: d.name ?? '',
     driver: d.driver ?? '',
-    driverJar: d.driver_jar ?? '',
     url: d.url ?? '',
     user: d.user ?? '',
     passwordMode: d.password_mode === 'clear' ? 'clear' : 'secret',
@@ -170,6 +168,7 @@ export function tomcatToDto(t: TomcatSettings): TomcatRunConfigDto {
     context_mode: t.contextMode,
     context_raw: t.contextRaw,
     resources: t.resources.map(resourceToDto),
+    lib_paths: t.libPaths,
   };
 }
 
@@ -192,6 +191,7 @@ export function tomcatFromDto(d: Partial<TomcatRunConfigDto> | undefined): Tomca
     contextMode: d.context_mode === 'raw' ? 'raw' : 'guided',
     contextRaw: d.context_raw ?? '',
     resources: (d.resources ?? []).map(resourceFromDto),
+    libPaths: d.lib_paths ?? [],
   };
 }
 

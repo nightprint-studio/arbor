@@ -59,7 +59,7 @@ fn reset_to_commit(state: &CorvusState, tab_id: String, oid: String, mode: Reset
 }
 
 #[arbor_rpc::handler]
-fn create_tag(
+pub(crate) fn create_tag(
     state: &CorvusState,
     tab_id: String,
     name: String,

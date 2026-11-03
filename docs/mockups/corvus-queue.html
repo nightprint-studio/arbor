@@ -1,0 +1,898 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Corvus — Queue, proposta</title>
+<style>
+  /* Values of Arbor's `preset-github-dark`: chrome on --bg-elevated, panels floating on --bg-base. */
+  :root {
+    --bg-base: #0d1117; --bg-elevated: #161b22; --bg-overlay: #1c2128; --bg-hover: #21262d;
+    --border: #30363d; --border-muted: #21262d;
+    --fg: #e6edf3; --fg-muted: #8b949e; --fg-subtle: #6e7681;
+    --accent: #2f81f7; --accent-fg: #79c0ff; --accent-soft: rgba(47,129,247,.15);
+    --success: #3fb950; --success-soft: rgba(63,185,80,.14);
+    --warning: #d29922; --warning-soft: rgba(210,153,34,.15);
+    --danger: #f85149; --danger-soft: rgba(248,81,73,.14);
+    --ws-platform: #39c5cf; --ws-ops: #d29922; --ws-billing: #a371f7;
+    --radius: 8px; --radius-lg: 12px;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: #010409; color: var(--fg); font: 13px/1.45 var(--font); display: flex; flex-direction: column; overflow: hidden; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  svg { flex: none; }
+  kbd { font: 10.5px var(--mono); padding: 0 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; background: var(--bg-base); color: var(--fg-muted); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; } ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
+
+  /* ── mock switcher (not part of the app) ─────────────────────────────────────── */
+  .switch { display: flex; align-items: center; gap: 14px; padding: 8px 14px; background: #010409; border-bottom: 1px solid var(--border-muted); font-size: 12px; color: var(--fg-muted); }
+  .switch b { color: var(--fg); font-weight: 600; letter-spacing: .02em; }
+  .seg { display: flex; gap: 2px; padding: 2px; background: var(--bg-elevated); border: 1px solid var(--border-muted); border-radius: 8px; }
+  .seg button { padding: 3px 11px; border: 0; background: none; border-radius: 6px; color: var(--fg-muted); font-size: 12px; }
+  .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-fg); }
+  .switch .sp { flex: 1; }
+
+  /* ── window ──────────────────────────────────────────────────────────────────── */
+  .win { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-elevated); }
+  .titlebar { height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 12px; color: var(--fg-muted); font-size: 12px; flex: none; }
+  .logo { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #2f81f7, #a371f7); color: #fff; font-weight: 700; font-size: 12px; }
+  .chip { display: flex; align-items: center; gap: 7px; padding: 3px 9px; border-radius: 7px; background: var(--bg-overlay); color: var(--fg); font-size: 12px; }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; }
+  .body { flex: 1; min-height: 0; display: flex; }
+  .rail { width: 40px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 4px; }
+  .rail button { position: relative; width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--fg-muted); }
+  .rail button:hover { background: var(--bg-hover); color: var(--fg); }
+  .rail button.on { background: var(--accent-soft); color: var(--accent-fg); }
+  .rail .badge-dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg-elevated); }
+  .rail .badge-dot.run { animation: pulse 1.6s ease-in-out infinite; }
+  .panels { flex: 1; min-width: 0; display: flex; gap: 6px; padding: 0 6px 6px 0; }
+  .panel { background: var(--bg-base); border-radius: var(--radius-lg); overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+  .statusbar { height: 26px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 12px; color: var(--fg-muted); font-size: 11.5px; }
+  .statusbar .sp { flex: 1; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 2px 10px 2px 8px; border: 1px solid var(--border); border-radius: 99px; background: var(--bg-base); color: var(--fg); cursor: pointer; font-size: 11.5px; }
+  .pill:hover { border-color: var(--fg-subtle); }
+  .pill .d { width: 7px; height: 7px; border-radius: 50%; background: var(--warning); animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  /* ── sidebar ─────────────────────────────────────────────────────────────────── */
+  .side { width: 232px; flex: none; }
+  .ph { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px 0 14px; flex: none; font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--fg-muted); }
+  .ph .sp { flex: 1; }
+  .ibtn { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: var(--fg-muted); }
+  .ibtn:hover { background: var(--bg-hover); color: var(--fg); }
+  .qitem { display: flex; align-items: center; gap: 9px; margin: 1px 6px; padding: 7px 8px; border-radius: 8px; cursor: pointer; color: var(--fg-muted); }
+  .qitem:hover { background: var(--bg-hover); }
+  .qitem.on { background: var(--accent-soft); color: var(--fg); }
+  .qitem .t { flex: 1; min-width: 0; }
+  .qitem b { display: block; font-weight: 500; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qitem small { display: block; font-size: 11px; color: var(--fg-subtle); }
+  .sdot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--fg-subtle); }
+  .sdot.run { background: var(--accent); animation: pulse 1.4s infinite; } .sdot.wait { background: var(--warning); animation: pulse 1.6s infinite; }
+  .sdot.ok { background: var(--success); } .sdot.err { background: var(--danger); }
+  .grp-label { padding: 12px 14px 4px; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--fg-subtle); }
+  .side .foot { margin-top: auto; padding: 10px; border-top: 1px solid var(--border-muted); color: var(--fg-subtle); font-size: 11.5px; }
+
+  /* ── buttons ─────────────────────────────────────────────────────────────────── */
+  .btn { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-overlay); color: var(--fg); font-size: 12.5px; white-space: nowrap; }
+  .btn:hover { background: var(--bg-hover); border-color: var(--fg-subtle); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn.primary:hover { background: #4493f8; }
+  .btn.danger { color: var(--danger); } .btn.ghost { background: none; border-color: transparent; color: var(--fg-muted); }
+  .btn.sm { height: 24px; padding: 0 9px; font-size: 12px; border-radius: 6px; }
+  .btn kbd { background: rgba(0,0,0,.25); border-color: rgba(255,255,255,.18); color: inherit; opacity: .85; }
+  .split { display: inline-flex; position: relative; }
+  .split > .btn:first-child { border-radius: 7px 0 0 7px; } .split > .btn:last-child { border-radius: 0 7px 7px 0; padding: 0 7px; border-left-color: rgba(255,255,255,.25); }
+
+  /* ── queue header ────────────────────────────────────────────────────────────── */
+  .qhead { display: flex; align-items: center; gap: 12px; padding: 12px 16px 10px; flex: none; }
+  .qtitle { font-size: 17px; font-weight: 650; letter-spacing: -.01em; border: 1px solid transparent; border-radius: 6px; padding: 1px 6px; margin-left: -6px; }
+  .qtitle:hover { border-color: var(--border); }
+  .scope { display: flex; align-items: center; gap: 6px; color: var(--fg-muted); font-size: 12px; }
+  .scope .ws { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 99px; background: var(--bg-elevated); border: 1px solid var(--border-muted); }
+  .ws i, .wsdot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .qhead .sp { flex: 1; }
+  .summary { display: flex; align-items: center; gap: 14px; padding: 0 16px 10px; color: var(--fg-muted); font-size: 12px; flex: none; }
+  .summary b { color: var(--fg); font-weight: 600; }
+  .banner { display: flex; align-items: center; gap: 10px; margin: 0 16px 10px; padding: 8px 12px; border-radius: 9px; border: 1px solid; font-size: 12.5px; flex: none; }
+  .banner.err { background: var(--danger-soft); border-color: rgba(248,81,73,.4); } .banner.run { background: var(--accent-soft); border-color: rgba(47,129,247,.4); }
+  .banner .sp { flex: 1; } .banner b { font-weight: 600; }
+
+  /* ── board ───────────────────────────────────────────────────────────────────── */
+  .boardwrap { flex: 1; min-height: 0; overflow: auto; position: relative;
+    background-image: radial-gradient(rgba(230,237,243,.055) 1px, transparent 1.2px); background-size: 22px 22px; }
+  .board { display: flex; align-items: flex-start; padding: 8px 20px 30px; width: max-content; min-height: 100%; }
+  .stage { width: 258px; flex: none; }
+  .stage.fin { padding: 0; }
+  .shead { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 4px 0 2px; }
+  .snum { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: var(--bg-overlay); border: 1px solid var(--border); font: 600 11px var(--mono); color: var(--fg-muted); }
+  .sname { font-weight: 600; font-size: 13px; }
+  .stag { font-size: 10.5px; color: var(--fg-subtle); letter-spacing: .03em; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--border-muted); }
+  .shead .sp { flex: 1; }
+  .scol { display: flex; flex-direction: column; gap: 8px; padding: 8px; border-radius: 12px; background: rgba(22,27,34,.55); border: 1px solid var(--border-muted); min-height: 96px; position: relative; }
+  .stage.fin .scol { border-style: dashed; border-color: var(--border); background: rgba(22,27,34,.25); }
+  .stage.over .scol { border-color: var(--accent); background: var(--accent-soft); }
+  .stage.done-all .scol { border-color: rgba(63,185,80,.3); }
+  .addstep { display: flex; align-items: center; justify-content: center; gap: 7px; height: 32px; border: 1px dashed var(--border); border-radius: 9px; background: none; color: var(--fg-subtle); }
+  .addstep:hover { color: var(--accent-fg); border-color: var(--accent); background: var(--accent-soft); }
+  .addstage { width: 180px; flex: none; margin-left: 14px; margin-top: 34px; height: 96px; border: 1px dashed var(--border); border-radius: 12px; background: none; color: var(--fg-subtle); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+  .addstage:hover { color: var(--accent-fg); border-color: var(--accent); background: var(--accent-soft); }
+
+  /* gate: the connector between two stages — the one thing that says "this starts only if…" */
+  .gate { width: 112px; flex: none; display: flex; flex-direction: column; align-items: center; padding-top: 6px; position: relative; }
+  .gate::before { content: ""; position: absolute; left: 0; right: 0; top: 22px; border-top: 2px solid var(--border); }
+  .gate.open::before { border-color: rgba(63,185,80,.55); } .gate.waiting::before { border-top-style: dashed; border-color: var(--warning); animation: dash 1s linear infinite; background: none; }
+  .gate.blocked::before { border-top-style: dotted; border-color: var(--danger); }
+  .gnode { position: relative; z-index: 1; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--bg-elevated); border: 2px solid var(--border); color: var(--fg-muted); cursor: pointer; }
+  .gnode:hover, .gate.sel .gnode { border-color: var(--accent); color: var(--accent-fg); }
+  .gate.open .gnode { border-color: var(--success); color: var(--success); } .gate.waiting .gnode { border-color: var(--warning); color: var(--warning); background: var(--warning-soft); }
+  .gate.blocked .gnode { border-color: var(--danger); color: var(--danger); }
+  .gate.waiting .gnode::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid var(--warning); opacity: 0; animation: ring 1.8s ease-out infinite; }
+  @keyframes ring { from { opacity: .55; transform: scale(.7); } to { opacity: 0; transform: scale(1.25); } }
+  .glabel { margin-top: 8px; text-align: center; font-size: 11px; line-height: 1.35; color: var(--fg-muted); max-width: 104px; }
+  .glabel b { color: var(--fg); font-weight: 600; display: block; }
+  .gpoll { margin-top: 4px; font: 10.5px var(--mono); color: var(--warning); }
+  .gate .btn { margin-top: 8px; }
+
+  /* step card */
+  .step { position: relative; display: flex; flex-direction: column; gap: 7px; padding: 10px 11px 10px 12px; border-radius: 10px; background: var(--bg-elevated); border: 1px solid var(--border); cursor: default; user-select: none; transition: border-color .12s, background .12s, transform .12s; }
+  .step:hover { border-color: var(--fg-subtle); }
+  .step.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .step::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--wsc, var(--border)); }
+  .step.dragging { opacity: .35; }
+  .step .top { display: flex; align-items: center; gap: 9px; }
+  .kico { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: var(--bg-base); border: 1px solid var(--border-muted); }
+  .kico.push { color: var(--accent-fg); } .kico.mrnew { color: #d2a8ff; } .kico.mrmerge { color: #a371f7; } .kico.pipe { color: var(--success); } .kico.tag { color: var(--warning); } .kico.pull { color: var(--ws-platform); }
+  .step .kind { font-weight: 600; font-size: 12.5px; }
+  .step .st { margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--fg-subtle); }
+  .step .grip { opacity: 0; color: var(--fg-subtle); cursor: grab; margin-left: -4px; }
+  .step:hover .grip { opacity: 1; }
+  .meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); min-width: 0; }
+  .meta b { color: var(--fg); font-weight: 500; }
+  .meta .br { font: 11.5px var(--mono); color: var(--accent-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .detail { font-size: 11.5px; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar { height: 4px; border-radius: 3px; background: var(--bg-hover); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: var(--p, 0%); background: var(--accent); border-radius: 3px; transition: width .15s linear; background-image: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); background-size: 60px 100%; background-repeat: no-repeat; animation: sheen 1.2s linear infinite; }
+  @keyframes sheen { from { background-position: -60px 0; } to { background-position: 260px 0; } }
+  @keyframes dash { to { background-position: 12px 0; } }
+  .step.running { border-color: rgba(47,129,247,.55); }
+  .step.done .kind { color: var(--fg-muted); } .step.done .st { color: var(--success); }
+  .step.failed { border-color: rgba(248,81,73,.6); background: linear-gradient(var(--danger-soft), var(--danger-soft)), var(--bg-elevated); } .step.failed .st { color: var(--danger); }
+  .step.held { opacity: .55; } .step.skipped { opacity: .45; border-style: dashed; }
+  .err-line { font-size: 11.5px; color: #ffa198; font-family: var(--mono); line-height: 1.4; }
+  .acts { display: flex; gap: 6px; }
+  .ghost-drop { height: 3px; border-radius: 3px; background: var(--accent); margin: -5px 0; box-shadow: 0 0 8px var(--accent); }
+  .dragghost { position: fixed; z-index: 90; width: 238px; pointer-events: none; opacity: .92; transform: rotate(1.5deg); box-shadow: 0 14px 34px rgba(1,4,9,.65); }
+
+  .keys { display: flex; align-items: center; gap: 16px; padding: 7px 16px; border-top: 1px solid var(--border-muted); color: var(--fg-subtle); font-size: 11.5px; flex: none; }
+  .keys span { display: inline-flex; gap: 5px; align-items: center; }
+
+  /* ── inspector ───────────────────────────────────────────────────────────────── */
+  .insp { width: 296px; flex: none; }
+  .insp .sec { padding: 4px 14px 12px; }
+  .field { margin-bottom: 11px; } .field label { display: block; font-size: 11px; color: var(--fg-subtle); margin-bottom: 4px; letter-spacing: .03em; }
+  .inp { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-elevated); font-size: 12.5px; }
+  .inp .mono { font-family: var(--mono); font-size: 12px; color: var(--accent-fg); } .inp .sp { flex: 1; } .inp .chev { color: var(--fg-subtle); }
+  .tog { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 12.5px; }
+  .tog .sw { width: 28px; height: 16px; border-radius: 99px; background: var(--bg-hover); border: 1px solid var(--border); position: relative; flex: none; }
+  .tog .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--fg-muted); }
+  .tog.on .sw { background: var(--accent); border-color: var(--accent); } .tog.on .sw::after { left: 14px; background: #fff; }
+  .tog small { display: block; color: var(--fg-subtle); font-size: 11px; }
+  .logbox { margin: 0; padding: 10px; border-radius: 8px; background: #010409; border: 1px solid var(--border-muted); font: 11px/1.55 var(--mono); color: var(--fg-muted); white-space: pre-wrap; }
+  .logbox .e { color: #ffa198; } .logbox .ok { color: var(--success); }
+  .timeline { margin: 4px 0 0; padding: 0; list-style: none; border-left: 2px solid var(--border); margin-left: 6px; }
+  .timeline li { position: relative; padding: 2px 0 8px 14px; font-size: 12px; color: var(--fg-muted); }
+  .timeline li::before { content: ""; position: absolute; left: -6px; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--bg-base); border: 2px solid var(--fg-subtle); }
+  .timeline li.ok::before { border-color: var(--success); background: var(--success); } .timeline li.now::before { border-color: var(--warning); animation: pulse 1.4s infinite; }
+  .timeline li b { color: var(--fg); font-weight: 500; }
+
+  /* ── menus / palette / modal ─────────────────────────────────────────────────── */
+  .scrim { position: absolute; inset: 0; z-index: 50; background: rgba(1,4,9,.55); display: flex; justify-content: center; }
+  .scrim.top { align-items: flex-start; padding-top: 11vh; } .scrim.mid { align-items: center; }
+  .pal { width: 540px; max-height: 70%; display: flex; flex-direction: column; background: var(--bg-overlay); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 60px rgba(1,4,9,.7); overflow: hidden; animation: pop .14s ease-out; }
+  @keyframes pop { from { opacity: 0; transform: translateY(-6px) scale(.985); } }
+  .pal-in { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 48px; border-bottom: 1px solid var(--border); color: var(--fg-muted); }
+  .pal-in input { flex: 1; background: none; border: 0; outline: 0; color: var(--fg); font-size: 15px; }
+  .pal-in .crumb { padding: 2px 9px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-fg); font-size: 12px; }
+  .pal-list { overflow: auto; padding: 6px; }
+  .pal-g { padding: 8px 10px 3px; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--fg-subtle); }
+  .pal-i { display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px 10px; border: 0; background: none; border-radius: 8px; text-align: left; }
+  .pal-i[aria-selected="true"] { background: var(--accent-soft); }
+  .pal-i .t { flex: 1; min-width: 0; } .pal-i b { font-weight: 500; } .pal-i small { display: block; color: var(--fg-subtle); font-size: 11.5px; }
+  .pal-i .r { font: 11px var(--mono); color: var(--fg-subtle); }
+  .pal-i mark { background: none; color: var(--accent-fg); font-weight: 700; }
+  .pal-foot { display: flex; gap: 16px; padding: 8px 14px; border-top: 1px solid var(--border); color: var(--fg-subtle); font-size: 11.5px; }
+  .menu { position: absolute; z-index: 60; min-width: 240px; padding: 5px; background: var(--bg-overlay); border: 1px solid var(--border); border-radius: 11px; box-shadow: 0 16px 40px rgba(1,4,9,.65); animation: pop .12s ease-out; }
+  .menu .pal-i { padding: 7px 9px; } .menu .chk { width: 14px; color: var(--accent-fg); }
+  .menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+  .modal { width: 560px; background: var(--bg-overlay); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 60px rgba(1,4,9,.7); animation: pop .14s ease-out; position: relative; }
+  .mh { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 15px; font-weight: 600; }
+  .mb { padding: 16px 18px 6px; } .mf { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); } .mf .sp { flex: 1; }
+  .commit { display: flex; gap: 9px; padding: 5px 0; font-size: 12.5px; color: var(--fg-muted); } .commit code { font: 11.5px var(--mono); color: var(--accent-fg); }
+
+  /* ── graph (screen 1) ────────────────────────────────────────────────────────── */
+  .grow { display: flex; align-items: center; height: 30px; padding-right: 14px; font-size: 12.5px; border-bottom: 1px solid rgba(33,38,45,.6); }
+  .grow .lane { width: 120px; flex: none; height: 100%; }
+  .grow .msg { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .grow .au { width: 120px; color: var(--fg-subtle); } .grow .when { width: 80px; color: var(--fg-subtle); text-align: right; }
+  .refs { display: inline-flex; gap: 5px; margin-right: 8px; } .ref { font: 11px var(--mono); padding: 0 7px; border-radius: 99px; border: 1px solid; }
+  .ref.local { color: var(--accent-fg); border-color: rgba(47,129,247,.5); background: var(--accent-soft); } .ref.rem { color: var(--fg-muted); border-color: var(--border); }
+  .tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--border-muted); flex: none; }
+  .tabs button { height: 34px; padding: 0 13px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--fg-muted); font-size: 12.5px; display: flex; align-items: center; gap: 7px; }
+  .tabs button.on { color: var(--fg); border-color: var(--accent); }
+  .tabs .badge { font-size: 10.5px; padding: 0 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-fg); }
+
+  /* ── notes page ──────────────────────────────────────────────────────────────── */
+  .notes { padding: 26px 34px 60px; overflow: auto; max-width: 980px; }
+  .notes h2 { margin: 0 0 4px; font-size: 20px; } .notes h3 { margin: 26px 0 8px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-muted); }
+  .notes p { margin: 0 0 8px; color: var(--fg-muted); max-width: 78ch; font-size: 13.5px; line-height: 1.6; } .notes p b, .notes li b { color: var(--fg); }
+  .notes ul { margin: 0; padding-left: 18px; color: var(--fg-muted); font-size: 13.5px; line-height: 1.7; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .nc { padding: 12px 14px; border-radius: 10px; background: var(--bg-elevated); border: 1px solid var(--border-muted); font-size: 12.5px; color: var(--fg-muted); line-height: 1.55; }
+  .nc b { display: block; color: var(--fg); margin-bottom: 3px; font-size: 13px; }
+  .hidden { display: none !important; }
+  .rsplit { display: inline-flex; } .rsplit .rab:first-child { border-radius: 7px 0 0 7px; } .rsplit .rchev { width: 18px; border-radius: 0 7px 7px 0; border-left: 1px solid rgba(121,192,255,.25); }
+  .planchip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-fg); font: 500 11.5px var(--font); }
+  .planchip.alt { background: var(--bg-hover); color: var(--fg-muted); font-family: var(--mono); }
+  .mh .planchip:first-of-type { margin-left: 4px; }
+  .ra { display: flex; align-items: center; gap: 2px; padding: 2px 8px 8px; }
+  .rab { position: relative; width: 30px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--fg-muted); }
+  .rab:hover { background: var(--bg-hover); color: var(--fg); } .rab.on { color: var(--accent-fg); background: var(--accent-soft); }
+  .rbadge { position: absolute; top: -2px; right: -2px; font: 600 9.5px var(--mono); font-style: normal; min-width: 15px; height: 15px; border-radius: 99px; display: grid; place-items: center; background: var(--bg-hover); color: var(--fg); }
+  .rbadge.ahead { background: var(--accent); color: #fff; } .rsep { width: 1px; height: 16px; background: var(--border); margin: 0 5px; }
+  .cb { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border); display: inline-grid; place-items: center; flex: none; background: var(--bg-base); color: #fff; } .cb.on { background: var(--accent); border-color: var(--accent); }
+  .chks { border: 1px solid var(--border-muted); border-radius: 8px; overflow: hidden; } .chkrow { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; font-size: 12.5px; }
+  .chks .chkrow + .chkrow { border-top: 1px solid var(--border-muted); } .chkrow b { display: block; font-weight: 500; } .chkrow small { display: block; color: var(--fg-subtle); font-size: 11.5px; }
+  .pal-i.wsrow { margin-top: 4px; background: rgba(255,255,255,.02); }
+  input.inp, textarea.inp { width: 100%; color: var(--fg); font: inherit; font-size: 12.5px; outline: 0; } input.inp.mono { font: 12px var(--mono); color: var(--accent-fg); }
+  textarea.inp { height: auto; padding: 7px 10px; resize: vertical; display: block; } input.inp:focus, textarea.inp:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .tog[data-tog] { cursor: pointer; }
+  .bpanel { height: 330px; flex: none; border-top: 1px solid var(--border-muted); display: flex; flex-direction: column; background: var(--bg-base); }
+  .bptools { display: flex; align-items: center; gap: 10px; padding: 10px 14px 6px; color: var(--fg-muted); font-size: 12px; }
+  .bptools .sp { flex: 1; }
+  .plist { overflow: auto; padding: 4px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .prow { display: grid; grid-template-columns: 220px 1fr 150px 90px; align-items: center; gap: 14px; padding: 10px 14px; border-radius: 10px; background: var(--bg-elevated); border: 1px solid var(--border-muted); cursor: pointer; }
+  .prow:hover { border-color: var(--fg-subtle); } .prow.on { border-color: rgba(210,153,34,.5); }
+  .prow b { font-weight: 600; font-size: 13px; display: block; } .prow small { color: var(--fg-subtle); font-size: 11.5px; }
+  .strip { display: flex; align-items: center; min-width: 0; }
+  .ph-n { display: flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--border); font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; }
+  .ph-n.ok { border-color: rgba(63,185,80,.5); color: var(--success); background: var(--success-soft); } .ph-n.now { border-color: var(--warning); color: var(--warning); background: var(--warning-soft); }
+  .ph-n.err { border-color: rgba(248,81,73,.5); color: var(--danger); background: var(--danger-soft); }
+  .ph-l { width: 22px; border-top: 2px solid var(--border); } .ph-l.ok { border-color: rgba(63,185,80,.55); } .ph-l.wait { border-top-style: dashed; border-color: var(--warning); }
+  .ph-n.fin { border-style: dashed; }
+  .dep { display: flex; align-items: center; gap: 11px; margin: 4px 0 12px; padding: 10px 12px; border-radius: 9px; background: var(--accent-soft); border: 1px solid rgba(47,129,247,.35); font-size: 12.5px; color: var(--fg-muted); line-height: 1.5; }
+  .dep b { color: var(--fg); font-weight: 600; } .dep u { text-decoration: none; color: var(--accent-fg); } .dep-i { color: var(--accent-fg); }
+  #toast { position: absolute; left: 0; right: 0; bottom: 18px; display: flex; justify-content: center; pointer-events: none; z-index: 70; }
+  .toast { pointer-events: auto; display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 14px; border-radius: 11px; background: var(--bg-overlay); border: 1px solid var(--border); box-shadow: 0 14px 36px rgba(1,4,9,.65); animation: pop .2s ease-out; }
+  .toast > svg { color: var(--success); } .toast b { font-weight: 600; }
+  .bigmodal { width: min(1380px, 100%); height: 100%; display: flex; flex-direction: column; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 30px 80px rgba(1,4,9,.75); overflow: hidden; animation: pop .16s ease-out; }
+  .bigmodal .mh { border-bottom: 0; padding: 12px 16px 10px; } .bigmodal .mh .sp { flex: 1; }
+  .bm-body { flex: 1; min-height: 0; display: flex; gap: 6px; padding: 0 6px 6px; }
+</style>
+</head>
+<body>
+
+<div class="switch">
+  <b>Corvus · Queue</b>
+  <div class="seg" id="scr">
+    <button data-s="entry">1 · Come nascono i nodi</button>
+    <button data-s="plan">2 · Pianificare</button>
+    <button data-s="run">3 · In esecuzione</button>
+    <button data-s="fail">4 · Quando un passo cade</button>
+    <button data-s="notes">5 · Regole</button>
+    <button data-s="tab">6 · Tab nel pannello pipeline</button>
+  </div>
+  <div class="seg hidden" id="ent"><button data-e="push">Push</button><button data-e="mr">Crea MR</button><button data-e="commit">Commit</button></div>
+  <span class="sp"></span>
+  <span>Mock navigabile: nella schermata 2 prova <kbd>A</kbd>, <kbd>G</kbd>, le frecce, trascina una card, <kbd>Ctrl</kbd>+<kbd>Enter</kbd> per far partire la coda.</span>
+</div>
+
+<div class="win" id="win">
+  <div class="titlebar">
+    <span class="logo">A</span>
+    <span class="chip"><i style="background:var(--ws-platform)"></i>Platform<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg></span>
+    <span>api-gateway</span>
+    <span style="margin-left:auto">Ctrl+Shift+P · Command Palette</span>
+  </div>
+  <div class="body">
+    <div class="rail" id="rail"></div>
+    <div class="panels" id="panels"></div>
+  </div>
+  <div class="statusbar">
+    <span id="sb-branch"></span><span>origin ↑2 ↓0</span>
+    <span class="sp"></span>
+    <span id="sb-queue"></span>
+  </div>
+</div>
+
+<script>
+/* ═══ icons ═══════════════════════════════════════════════════════════════════════ */
+const P = {
+  push:'<path d="M12 19V5M5 12l7-7 7 7"/>', pull:'<path d="M12 5v14M19 12l-7 7-7-7"/>',
+  pr:'<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v12"/>',
+  merge:'<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>',
+  play:'<path d="M6 4l14 8-14 8V4z"/>', tag:'<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1"/>',
+  clock:'<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>', check:'<path d="M20 6L9 17l-5-5"/>', x:'<path d="M18 6L6 18M6 6l12 12"/>', plus:'<path d="M12 5v14M5 12h14"/>',
+  flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/>', list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  branch:'<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+  retry:'<path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/>', skip:'<path d="M5 4l10 8-10 8V4zM19 5v14"/>', stop:'<rect x="6" y="6" width="12" height="12" rx="1"/>',
+  grip:'<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>',
+  chev:'<path d="M6 9l6 6 6-6"/>', search:'<circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/>', all:'<path d="M20 6L9 17l-5-5M22 10l-7.5 7.5"/>',
+  tree:'<path d="M3 3h6v6H3zM15 15h6v6h-6zM6 9v9h9"/>', shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>', term:'<path d="M4 17l6-6-6-6M12 19h8"/>',
+  folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', save:'<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8"/>',
+  zap:'<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>', eye:'<path d="M2 12s4-8 10-8 10 8 10 8-4 8-10 8-10-8-10-8z"/><circle cx="12" cy="12" r="3"/>',
+};
+const I = (n, s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[n]}</svg>`;
+
+/* ═══ model ═══════════════════════════════════════════════════════════════════════ */
+const WS = { Platform: '#39c5cf', Ops: '#d29922', Billing: '#a371f7' };
+const REPOS = [
+  { n: 'api-gateway', ws: 'Platform', b: 'feature/auth-v2', c: 'Add OAuth2 PKCE flow' }, { n: 'web-client', ws: 'Platform', b: 'feature/auth-v2', c: 'Use PKCE login client' },
+  { n: 'infra-config', ws: 'Ops', b: 'chore/bump-redis', c: 'Bump redis to 7.2' }, { n: 'billing-service', ws: 'Billing', b: 'main', c: 'Fix proration rounding' },
+  { n: 'docs-site', ws: 'Platform', b: 'main', c: 'Document auth v2' }, { n: 'deploy-scripts', ws: 'Ops', b: 'main', c: 'Add canary step' },
+];
+const wsOf = r => REPOS.find(x => x.n === r).ws;
+const KINDS = {
+  push:    { label: 'Push',          icon: 'push',  hint: 'Pubblica il branch sul remote' },
+  mrnew:   { label: 'Create MR',     icon: 'pr',    hint: 'Apre una merge request' },
+  mrmerge: { label: 'Merge MR',      icon: 'merge', hint: 'Mergia una MR già aperta' },
+  pipe:    { label: 'Run pipeline',  icon: 'play',  hint: 'Lancia una pipeline sul provider' },
+  tag:     { label: 'Tag & push',    icon: 'tag',   hint: 'Crea un tag e lo pubblica' },
+  pull:    { label: 'Pull',          icon: 'pull',  hint: 'Aggiorna il branch locale' },
+};
+const GATES = {
+  all:    { label: 'Fase precedente conclusa', short: 'Quando ha finito', icon: 'all',  hint: 'Default: parte quando tutti i passi sopra sono andati a buon fine' },
+  mr:     { label: 'MR mergiata',              short: 'MR mergiata',      icon: 'merge', hint: 'Aspetta che una MR creata sopra venga mergiata (anche da altri)' },
+  pipe:   { label: 'Pipeline verde',           short: 'Pipeline verde',   icon: 'play',  hint: 'Aspetta che una pipeline passi' },
+  delay:  { label: 'Attesa',                   short: 'Attendi 5 min',    icon: 'clock', hint: 'Dopo la fase precedente aspetta un intervallo' },
+  manual: { label: 'Via libera manuale',       short: 'Aspetta il tuo OK', icon: 'flag', hint: 'Si ferma e ti chiede conferma' },
+};
+let uid = 0;
+const S = (kind, repo, extra = {}) => {
+  const r = REPOS.find(x => x.n === repo), mr = kind === 'mrnew' ? { title: r.c, target: 'main', desc: '', labels: '', draft: false, auto: false } : {}; // MR defaults: last commit subject
+  return { id: 's' + (++uid), kind, repo, branch: r.b, status: 'queued', ...mr, ...extra };
+};
+const gate = (kind, extra = {}) => ({ kind, state: 'idle', ...extra });
+
+function scenario(name) {
+  uid = 0;
+  const st = [
+    { id: 'g1', name: 'Publish', steps: [
+      S('push', 'api-gateway', { detail: '2 commit avanti a origin' }), S('push', 'web-client', { detail: '5 commit avanti a origin' }),
+      S('push', 'infra-config', { detail: '1 commit avanti a origin' })] },
+    { id: 'g2', name: 'Review', gate: gate('all'), steps: [
+      S('mrnew', 'api-gateway', { detail: '→ main · Add OAuth2 PKCE flow' }), S('mrnew', 'web-client', { detail: '→ main · Use PKCE login client' })] },
+    { id: 'g3', name: 'Roll out', gate: gate('mr', { ref: 'api-gateway · Add OAuth2 PKCE flow' }), steps: [
+      S('mrmerge', 'web-client', { detail: 'squash · elimina il branch' }), S('pipe', 'infra-config', { detail: 'deploy-staging' }),
+      S('pipe', 'billing-service', { detail: 'smoke-tests' })] },
+    { id: 'fin', name: 'Finally', finally: true, gate: gate('all'), steps: [
+      S('tag', 'api-gateway', { detail: 'v2.4.0 · annotato', branch: 'main' }), S('pull', 'docs-site', { detail: 'fast-forward', branch: 'main' })] },
+  ];
+  if (name === 'run') {
+    const [a, b, c, f] = st;
+    a.steps.forEach((s, i) => { s.status = 'done'; s.time = ['1.8s', '2.4s', '1.1s'][i]; });
+    b.steps.forEach((s, i) => { s.status = 'done'; s.time = ['0.9s', '1.2s'][i]; s.detail = ['!482 · Add OAuth2 PKCE flow', '!117 · Use PKCE login client'][i]; });
+    b.gate.state = 'open'; c.gate.state = 'waiting'; c.gate.next = 8; c.gate.since = '3m 12s';
+    c.steps.forEach(s => s.status = 'held');
+  }
+  if (name === 'fail') {
+    const [a, b, c, f] = st;
+    a.steps[0].status = 'done'; a.steps[0].time = '1.8s';
+    a.steps[1].status = 'failed'; a.steps[1].error = 'rejected: non-fast-forward\nremote ha 2 commit che non hai in locale';
+    a.steps[2].status = 'done'; a.steps[2].time = '1.1s';
+    b.gate.state = 'blocked'; [b, c].forEach(s => s.steps.forEach(x => x.status = 'held')); c.gate.state = 'blocked';
+    f.gate.state = 'idle';
+  }
+  return st;
+}
+
+let state = { entry: 'push', added: false, mrMode: 'create', mrq: null, screen: 'entry', stages: [], sel: null, menu: null, pal: null, running: false, token: 0, drag: null };
+
+/* ═══ helpers ═════════════════════════════════════════════════════════════════════ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const allSteps = () => state.stages.flatMap(s => s.steps);
+const findStep = id => { for (const s of state.stages) { const i = s.steps.findIndex(x => x.id === id); if (i >= 0) return { stage: s, i, step: s.steps[i] }; } };
+const hl = (t, q) => { if (!q) return esc(t); const i = t.toLowerCase().indexOf(q.toLowerCase()); return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>' + esc(t.slice(i + q.length)); };
+
+/* ═══ chrome ══════════════════════════════════════════════════════════════════════ */
+function renderRail() {
+  const q = state.screen !== 'entry';
+  const run = state.screen === 'run' || state.running;
+  $('#rail').innerHTML = [['branch', 'Branches'], ['tree', 'Graph'], ['pr', 'Merge requests'], ['shield', 'Security'], ['list', 'Pianificazione']]
+    .map(([ic, t]) => { const on = (ic === 'list') === q && (ic === 'list' || (!q && ic === 'tree')); return `<button class="${on ? 'on' : ''}" title="${t}">${I(ic, 17)}${ic === 'list' && (run || state.screen === 'fail') ? `<span class="badge-dot ${run ? 'run' : ''}" style="${state.screen === 'fail' ? 'background:var(--danger)' : ''}"></span>` : ''}</button>`; }).join('')
+    + '<span style="flex:1"></span>' + `<button title="Terminal">${I('term', 17)}</button>`;
+  $('#sb-branch').innerHTML = `${I('branch', 12)} feature/auth-v2`;
+  const sc = state.screen;
+  $('#sb-queue').innerHTML = sc === 'run' || state.running
+    ? `<button class="pill" onclick="go('run')"><span class="d"></span>Release 2.4 · fase 2/3 · in attesa di MR !482</button>`
+    : sc === 'fail' ? `<button class="pill" onclick="go('fail')"><span class="d" style="background:var(--danger);animation:none"></span>Release 2.4 · in pausa · 1 passo fallito</button>`
+    : `<button class="pill" onclick="go('plan')">${I('list', 12)} Pianificazione · 1 pronta</button>`;
+}
+
+/* ═══ screen 1 — where a node is born ═════════════════════════════════════════════ */
+const GRAPH_ROWS = [
+  ['feature/auth-v2', 'Add refresh-token rotation', 'Chris', '2 h', 0, ['local:feature/auth-v2', 'rem:origin/main']],
+  ['', 'Wire PKCE into the login handler', 'Chris', '3 h', 0, []], ['', 'Add OAuth2 PKCE flow', 'Chris', 'ieri', 0, []],
+  ['', 'Merge branch main into feature/auth-v2', 'Chris', 'ieri', 1, []], ['', 'Bump redis client to 5.0.4', 'Sara', 'ieri', 1, ['rem:origin/main']],
+  ['', 'Fix flaky rate-limit test', 'Luca', '2 g', 1, []], ['', 'Release 2.3.1', 'Sara', '3 g', 1, ['tag:v2.3.1']], ['', 'Harden CORS defaults', 'Luca', '4 g', 1, []],
+];
+const laneSvg = i => `<svg class="lane" viewBox="0 0 120 30" preserveAspectRatio="none"><line x1="20" y1="0" x2="20" y2="30" stroke="#2f81f7" stroke-width="2"/><line x1="52" y1="0" x2="52" y2="30" stroke="#3fb950" stroke-width="2" ${GRAPH_ROWS[i][4] ? '' : 'opacity=".35"'}/><circle cx="${GRAPH_ROWS[i][4] ? 52 : 20}" cy="15" r="5" fill="#0d1117" stroke="${GRAPH_ROWS[i][4] ? '#3fb950' : '#2f81f7'}" stroke-width="2.2"/></svg>`;
+/** The Corvus graph behind every overlay, so each modal is seen where it really opens. */
+function graphPanel(overlay, pad = 0, toolbar = '', bottom = '') {
+  return `<div class="panel side"><div class="ph">Branches</div>${toolbar}
+      <div class="qitem on"><span class="wsdot" style="background:var(--accent)"></span><div class="t"><b>feature/auth-v2</b><small>↑2 da pubblicare</small></div></div>
+      <div class="qitem"><span class="wsdot" style="background:var(--success)"></span><div class="t"><b>main</b></div></div>
+      <div class="qitem"><span class="wsdot" style="background:var(--fg-subtle)"></span><div class="t"><b>release/2.3</b></div></div></div>
+    <div class="panel" style="flex:1;position:relative">
+      <div class="tabs"><button class="on">Graph</button><button>Stage <span class="badge">2</span></button><button>Merge requests</button></div>
+      ${GRAPH_ROWS.map((r, i) => `<div class="grow">${laneSvg(i)}<span class="msg"><span class="refs">${r[5].map(x => { const [k, v] = x.split(':'); return `<span class="ref ${k === 'local' ? 'local' : 'rem'}">${v}</span>`; }).join('')}</span>${esc(r[1])}</span><span class="au">${r[2]}</span><span class="when">${r[3]}</span></div>`).join('')}
+      <div style="flex:1"></div>${bottom}
+      ${overlay ? `<div class="scrim mid" style="padding:${pad}px">${overlay}</div>` : ''}<div id="toast"></div></div>`;
+}
+/** Items of the "add to plan" menu every entry point shares. */
+const planMenu = (items, title = 'Aggiungi a Release 2.4') => `<div class="pal-g">${title}</div>${items.map((it, i) => `<button class="pal-i" data-add aria-selected="${i === 0}"><span class="chk">${I(it.ic || 'plus', 14)}</span><div class="t"><b>${it.t}</b><small>${it.d}</small></div>${i === 0 ? '<span class="r">↵</span>' : ''}</button>`).join('')}`;
+const ENTRY = {
+  push:   { toast: 'Push <b>api-gateway</b> aggiunto a <b>Release 2.4 · Publish</b>' },
+  mr:     { toast: 'Aggiunti <b>Push api-gateway</b> (Publish) e <b>Create MR</b> (Review) a <b>Release 2.4</b>' },
+  commit: { toast: 'Commit fatto · <b>Push api-gateway</b> aggiunto a <b>Release 2.4 · Publish</b>' },
+};
+const PLAN_PUSH = [{ t: 'Add push to plan · Publish', d: 'Release 2.4 — in parallelo agli altri push', ic: 'list' }, { t: 'Add push to a new phase…', d: 'dopo una fase a scelta' }];
+const PLAN_MR = [{ t: 'Add to plan · Review', d: 'fase dopo Publish — parte a push finiti', ic: 'list' }, { t: 'Add to plan · new phase…', d: 'per una MR che dipende da un\'altra MR' }];
+
+/** The real RepoActions toolbar (stage · pull · push · stash): Push becomes a split button — the click still pushes, the chevron holds "add to plan". */
+function repoActions(open) {
+  return `<div class="ra"><button class="rab" title="Stage & Commit">${I('check', 14)}<i class="rbadge">2</i></button><span class="rsep"></span>
+    <button class="rab" title="Pull">${I('pull', 14)}</button>
+    <span class="rsplit"><button class="rab on" id="pushbtn" title="Push">${I('push', 14)}<i class="rbadge ahead">2</i></button><button class="rab on rchev" id="pushdd" title="Push options · Ctrl+Shift+Q adds to plan">${I('chev', 11)}</button></span>
+    <span class="rsep"></span><button class="rab" title="Stash">${I('folder', 14)}</button></div>
+    <div class="menu ${open ? '' : 'hidden'}" id="pmenu" style="position:fixed;min-width:320px">
+      <button class="pal-i"><span class="chk">${I('push', 14)}</span><div class="t"><b>Push</b><small>origin/feature/auth-v2 · subito</small></div></button><hr>
+      ${planMenu(PLAN_PUSH)}
+      <div class="pal-foot" style="padding:6px 10px 3px;border:0"><span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Q</kbd></span><span>anche dalla Command Palette: “Plan: add push”</span></div></div>`;
+}
+
+/** The fields of the real CreateMrModal. In plan mode they are the node's parameters, so the user never fills two different forms. */
+function mrFields(v) {
+  const ck = (key, t, h, on) => `<div class="chkrow" data-ck="${key}"><span class="cb ${on ? 'on' : ''}">${on ? I('check', 10) : ''}</span><div><b>${t}</b><small>${h}</small></div></div>`;
+  return `<div class="field"><label>Title *</label><input class="inp" id="mf-title" value="${esc(v.title)}"></div>
+    <div class="field" style="display:flex;gap:6px;align-items:flex-end"><div style="flex:1"><label>Source branch *</label><div class="inp"><span class="mono">${esc(v.source)}</span><span class="sp"></span><span class="chev">${I('chev', 13)}</span></div></div><span style="padding-bottom:6px;color:var(--fg-subtle)">→</span><div style="flex:1"><label>Target branch *</label><input class="inp mono" id="mf-target" value="${esc(v.target)}"></div></div>
+    <div class="field"><label>Description</label><textarea class="inp txt" id="mf-desc" rows="3" placeholder="Describe what this PR does, why the changes are needed…">${esc(v.desc)}</textarea></div>
+    <div class="field"><label>Labels</label><input class="inp" id="mf-labels" value="${esc(v.labels)}" placeholder="bug, enhancement, documentation (comma-separated)"></div>
+    <div class="chks">${ck('draft', 'Create as draft', 'Signals work in progress — cannot be merged until marked ready.', v.draft)}${ck('auto', 'Enable auto-merge', 'Merge automatically once required checks pass', v.auto)}</div>`;
+}
+/** CreateMrModal. mode "create": primary is a split button (Create PR | Add to plan). mode "plan": same form, the primary only adds the node. */
+function mrModalHtml(v, o) {
+  const plan = o.mode === 'plan';
+  const dep = v.source !== 'main' ? `<div class="dep" style="margin-top:12px"><span class="dep-i">${I('push', 15)}</span><div><b>${esc(v.source)} non è ancora sul remote.</b> Aggiungendo alla pianificazione inserisco anche il <u>Push</u>, in una fase prima.</div><div class="tog on" style="margin:0"><span class="sw"></span></div></div>` : '';
+  const chips = plan ? `<span class="sp"></span><span class="planchip">${I('list', 12)} Pianificazione · Release 2.4 · ${o.stageName}</span>${o.progress ? `<span class="planchip alt">${esc(v.repo)} · ${o.progress}</span>` : ''}` : '';
+  const footer = plan
+    ? `<span style="color:var(--fg-subtle);font-size:12px"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> ${o.progress ? 'add &amp; next' : 'to add'}</span><span class="sp"></span><button class="btn" data-mrq="cancel">Cancel</button>${o.progress ? '<button class="btn ghost" data-mrq="skip">Skip this repo</button>' : ''}<button class="btn primary" data-mrq="ok">${I('list', 13)} ${o.edit ? 'Save node' : o.progress ? 'Add to plan &amp; next' : 'Add to plan'}</button>`
+    : `<span style="color:var(--fg-subtle);font-size:12px"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> to create</span><span class="sp"></span><button class="btn">Cancel</button>
+       <span class="split"><button class="btn primary">Create PR</button><button class="btn primary" data-dd aria-label="More">${I('chev', 12)}</button>
+         <div class="menu" style="left:auto;right:0;bottom:36px;top:auto;min-width:340px"><button class="pal-i"><span class="chk" style="color:var(--accent-fg)">${I('pr', 14)}</span><div class="t"><b>Create PR</b><small>subito</small></div></button><hr>${planMenu(PLAN_MR)}</div></span>`;
+  return `<div class="modal" style="width:${plan ? 660 : 580}px"><div class="mh" style="white-space:nowrap">${I('pr', 16)} Create Pull / Merge Request${chips}</div>
+    <div class="mb">${mrFields(v)}${dep}</div><div class="mf">${footer}</div></div>`;
+}
+const mrDefaults = repo => { const r = REPOS.find(x => x.n === repo); return { repo, title: r.c, source: r.b, target: 'main', desc: '', labels: '', draft: false, auto: false }; };
+
+/** The Stage panel's commit form (StageCommitForm): its SplitButton gains the plan options. */
+function stagePanel(open) {
+  const it = (ic, col, t, d, extra = '') => `<button class="pal-i" ${extra}><span class="chk" style="color:${col}">${I(ic, 14)}</span><div class="t"><b>${t}</b>${d ? `<small>${d}</small>` : ''}</div></button>`;
+  return `<div class="bpanel" style="height:270px"><div class="tabs"><button class="on">${I('check', 13)} Stage &amp; Commit <span class="badge">2</span></button></div>
+    <div style="display:flex;flex:1;min-height:0"><div style="flex:1;padding:10px 14px;border-right:1px solid var(--border-muted)"><div class="grp-label" style="padding:0 0 6px">Staged · 2</div>
+      <div class="commit"><code style="color:var(--success)">M</code>src/auth/refresh.rs</div><div class="commit"><code style="color:var(--success)">A</code>src/auth/rotation.rs</div></div>
+    <div style="width:430px;padding:10px 12px;position:relative;display:flex;flex-direction:column;gap:8px">
+      <div class="inp" style="height:76px;align-items:flex-start;padding-top:7px;color:var(--fg-muted)">Rotate refresh tokens on every use</div>
+      <div style="display:flex;align-items:center;gap:10px"><div class="chkrow" style="padding:0"><span class="cb"></span><b style="font-weight:400;color:var(--fg-muted)">Amend last</b></div><span style="flex:1"></span>
+        <span class="split"><button class="btn primary">Commit</button><button class="btn primary" data-dd aria-label="More">${I('chev', 12)}</button></span></div>
+      <div class="menu ${open ? '' : 'hidden'}" style="right:12px;bottom:46px;min-width:370px">
+        ${it('check', 'var(--success)', 'Commit', '')}${it('push', 'var(--accent-fg)', 'Commit &amp; Push', 'origin/feature/auth-v2 · subito')}<hr>
+        <div class="pal-g">Pianificazione · Release 2.4</div>
+        <button class="pal-i" data-add aria-selected="true"><span class="chk">${I('list', 14)}</span><div class="t"><b>Commit &amp; add push to plan</b><small>il commit parte ora, il push va in Publish</small></div><span class="r">↵</span></button>
+        <button class="pal-i" data-commit-mr><span class="chk">${I('pr', 14)}</span><div class="t"><b>Commit, push &amp; MR to plan…</b><small>commit ora; push e merge request in pianificazione</small></div></button></div>
+      <small style="color:var(--fg-subtle);font-size:11px">Il commit parte sempre subito: fotografa lo stage di adesso. In pianificazione vanno solo i passi remoti.</small></div></div></div>`;
+}
+function renderEntry() {
+  const v = state.entry, open = !state.added, plan = state.mrMode === 'plan';
+  const overlay = v === 'mr' && open ? mrModalHtml(mrDefaults('api-gateway'), { mode: plan ? 'plan' : 'create', stageName: 'Review' }) : '';
+  $('#panels').innerHTML = graphPanel(overlay, 0, v === 'push' ? repoActions(open) : '', v === 'commit' ? stagePanel(open) : '');
+  const done = () => { state.added = true; renderEntry(); showToast(ENTRY[v].toast); };
+  document.querySelectorAll('#panels [data-dd]').forEach(b => b.onclick = e => { e.stopPropagation(); b.closest('.split, .bpanel').querySelector('.menu').classList.toggle('hidden'); });
+  document.querySelectorAll('#panels [data-add]').forEach(b => b.onclick = e => { e.stopPropagation(); done(); });
+  document.querySelectorAll('#panels [data-mrq="ok"]').forEach(b => b.onclick = done);
+  document.querySelectorAll('#panels [data-mrq="cancel"]').forEach(b => b.onclick = () => { state.mrMode = 'create'; renderEntry(); });
+  document.querySelectorAll('#panels [data-commit-mr]').forEach(b => b.onclick = e => { e.stopPropagation(); state.entry = 'mr'; state.mrMode = 'plan'; renderEntry(); });
+  const pb = $('#pushbtn'), dd = $('#pushdd'), pm = $('#pmenu');
+  if (dd && pm) { const r = pb.getBoundingClientRect(); pm.style.left = Math.max(8, r.left - 6) + 'px'; pm.style.top = r.bottom + 6 + 'px'; dd.onclick = e => { e.stopPropagation(); pm.classList.toggle('hidden'); }; }
+  $('#ent').classList.remove('hidden');
+  document.querySelectorAll('#ent button').forEach(b => b.setAttribute('aria-pressed', b.dataset.e === v));
+}
+
+/* ── the real CreateMrModal, opened over the plan: "Add to plan" instead of "Create PR" ───────── */
+function openMrPlan(stageId, repos, editId) { state.mrq = { stage: stageId, repos, i: 0, editId }; renderMrq(); }
+function renderMrq() {
+  document.querySelector('.scrim.mr-s')?.remove();
+  const q = state.mrq; if (!q) return;
+  const stage = state.stages.find(s => s.id === q.stage);
+  const v = q.editId ? (() => { const s = findStep(q.editId).step; return { ...s, source: s.branch }; })() : mrDefaults(q.repos[q.i]);
+  const progress = !q.editId && q.repos.length > 1 ? `${q.i + 1} / ${q.repos.length}` : null;
+  const el = document.createElement('div'); el.className = 'scrim mid mr-s';
+  el.innerHTML = mrModalHtml(v, { mode: 'plan', stageName: stage.name, progress, edit: !!q.editId });
+  $('#center').appendChild(el);
+  el.querySelector('#mf-title').focus();
+  el.onclick = e => { const ck = e.target.closest('[data-ck]'); if (ck) { const cb = ck.querySelector('.cb'), on = !cb.classList.contains('on'); cb.classList.toggle('on', on); cb.innerHTML = on ? I('check', 10) : ''; } };
+  el.querySelector('[data-mrq="cancel"]').onclick = () => { state.mrq = null; renderMrq(); };
+  el.querySelector('[data-mrq="skip"]')?.addEventListener('click', () => mrqNext());
+  el.querySelector('[data-mrq="ok"]').onclick = () => mrqSubmit();
+}
+function mrqSubmit() {
+  const q = state.mrq, g = id => document.querySelector('.mr-s #' + id).value, on = k => document.querySelector(`.mr-s [data-ck="${k}"] .cb`).classList.contains('on');
+  const vals = { title: g('mf-title'), target: g('mf-target'), desc: g('mf-desc'), labels: g('mf-labels'), draft: on('draft'), auto: on('auto') };
+  if (q.editId) Object.assign(findStep(q.editId).step, vals);
+  else { const stage = state.stages.find(s => s.id === q.stage), repo = q.repos[q.i]; const s = S('mrnew', repo, vals); stage.steps.push(s); state.sel = s.id; }
+  mrqNext();
+}
+function mrqNext() {
+  const q = state.mrq; q.i++;
+  if (q.editId || q.i >= q.repos.length) { state.mrq = null; renderMrq(); renderPlan(); return; }
+  renderMrq();
+}
+
+function showToast(html) {
+  const t = $('#toast'); if (!t) return;
+  t.innerHTML = `<div class="toast">${I('check', 15)}<span>${html}</span><button class="btn sm" onclick="go('plan')">Apri pianificazione</button><button class="btn sm ghost" onclick="state.added=false;renderEntry()">Annulla</button></div>`;
+}
+
+/* ═══ screens 2-4 — the planner ═══════════════════════════════════════════════════ */
+function stepHtml(s, stage) {
+  const c = WS[wsOf(s.repo)], K = KINDS[s.kind];
+  let status = '', extra = '';
+  if (s.status === 'queued') status = '<span>in coda</span>';
+  if (s.status === 'held') status = `${I('clock', 12)}<span>in attesa</span>`;
+  if (s.status === 'running') { status = `<span style="color:var(--accent-fg)">${Math.round(s.p || 0)}%</span>`; extra = `<div class="bar"><i style="--p:${s.p || 0}%"></i></div>`; }
+  if (s.status === 'done') status = `${I('check', 13)}<span>${s.time || ''}</span>`;
+  if (s.status === 'failed') { status = `${I('x', 13)}<span>fallito</span>`; extra = `<div class="err-line">${esc(s.error.split('\n')[0])}</div><div class="acts"><button class="btn sm" data-act="pullretry" data-id="${s.id}">${I('retry', 12)} Pull &amp; riprova</button><button class="btn sm ghost" data-act="skip" data-id="${s.id}">${I('skip', 12)} Salta</button></div>`; }
+  return `<div class="step ${s.status} ${state.sel === s.id ? 'sel' : ''}" data-id="${s.id}" style="--wsc:${c}">
+    <div class="top"><span class="grip" data-grip>${I('grip', 14)}</span><span class="kico ${s.kind}">${I(K.icon, 14)}</span><span class="kind">${K.label}</span><span class="st">${status}</span></div>
+    <div class="meta"><span class="wsdot" style="background:${c}"></span><b>${s.repo}</b><span class="br">${esc(s.branch)}</span></div>
+    ${s.status === 'running' ? '' : `<div class="detail">${esc(s.kind === 'mrnew' && s.status !== 'done' ? '→ ' + s.target + ' · ' + s.title : (s.detail || ''))}</div>`}${extra}</div>`;
+}
+function gateHtml(stage, idx) {
+  const g = stage.gate, G = GATES[g.kind];
+  const label = g.kind === 'mr' || g.kind === 'pipe' ? `<b>${G.short}</b>${esc(g.ref || 'scegli…')}` : `<b>${G.short}</b>`;
+  const poll = g.state === 'waiting' ? `<div class="gpoll">controllo tra ${g.next ?? 5}s</div><button class="btn sm" data-act="skipwait" data-idx="${idx}">${I('skip', 11)} Salta attesa</button>` : '';
+  const icon = g.state === 'open' ? 'check' : g.state === 'blocked' ? 'x' : G.icon;
+  return `<div class="gate ${g.state} ${state.sel === 'gate:' + stage.id ? 'sel' : ''}" data-gate="${stage.id}"><button class="gnode" data-act="gate" data-stage="${stage.id}" title="Cambia condizione (G)">${I(icon, 15)}</button>
+    <div class="glabel">${label}</div>${poll}</div>`;
+}
+function stageHtml(stage, idx) {
+  const n = state.stages.filter(s => !s.finally).indexOf(stage) + 1;
+  const done = stage.steps.length && stage.steps.every(s => s.status === 'done');
+  return `<div class="stage ${stage.finally ? 'fin' : ''} ${done ? 'done-all' : ''}" data-stage="${stage.id}">
+    <div class="shead"><span class="snum">${stage.finally ? '∞' : n}</span><span class="sname">${stage.name}</span>
+      <span class="stag">${stage.finally ? 'sempre, anche dopo errori' : 'in parallelo'}</span><span class="sp"></span>
+      <button class="ibtn" title="Opzioni fase">${I('chev', 14)}</button></div>
+    <div class="scol">${stage.steps.map(s => stepHtml(s, stage)).join('')}<button class="addstep" data-act="add" data-stage="${stage.id}">${I('plus', 13)} Aggiungi passo <kbd>A</kbd></button></div></div>`;
+}
+function summary() {
+  const steps = allSteps(), repos = new Set(steps.map(s => s.repo)), wss = new Set([...repos].map(wsOf));
+  const gates = state.stages.filter(s => s.gate && s.gate.kind !== 'all' && s.gate.kind !== 'end').length;
+  return `<div class="scope"><span>${steps.length} passi</span>·<span>${repos.size} repo</span>·${[...wss].map(w => `<span class="ws"><i style="background:${WS[w]}"></i>${w}</span>`).join('')}</div>`;
+}
+function renderPlan() {
+  const sc = state.screen, S2 = state.stages, run = sc === 'run' || state.running, fail = sc === 'fail';
+  const regular = S2.filter(s => !s.finally), fin = S2.find(s => s.finally);
+  const board = regular.map((s, i) => (s.gate ? gateHtml(s, i) : '') + stageHtml(s, i)).join('')
+    + `<button class="addstage" data-act="addstage">${I('plus', 18)}<span>Aggiungi fase</span><small style="color:var(--fg-subtle)">parte dopo la precedente</small></button>`
+    + gateHtml(fin, S2.length - 1) + stageHtml(fin, S2.length - 1);
+  const banner = fail ? `<div class="banner err">${I('x', 16)}<div><b>In pausa alla fase 1.</b> <span style="color:var(--fg-muted)">web-client ha rifiutato il push. Le fasi 2 e 3 non partono; "Finally" girerà comunque se fermi la coda.</span></div><span class="sp"></span><button class="btn sm">${I('stop', 12)} Ferma coda</button></div>`
+    : run ? `<div class="banner run">${I('clock', 16)}<div><b>Fase 3 in attesa:</b> <span style="color:var(--fg-muted)">MR !482 (api-gateway) non è ancora mergiata — approvazioni 1/2, pipeline 3/5.</span></div><span class="sp"></span><button class="btn sm" data-act="openmr">${I('eye', 12)} Apri MR</button></div>` : '';
+  const queues = [['Release 2.4', run ? '3 repo · in attesa MR' : fail ? '1 passo fallito' : '10 passi · pronta', run ? 'wait' : fail ? 'err' : '', true],
+    ['Hotfix auth', '2 repo · modello', ''], ['Weekly deps bump', '5 repo · modello', ''], ['Release 2.3.1', 'conclusa ieri · 8 passi', 'ok']];
+  const runBtn = state.running ? `<button class="btn danger" data-act="cancel">${I('stop', 12)} Annulla</button>`
+    : run ? `<button class="btn">${I('clock', 13)} Pausa</button><button class="btn danger">${I('stop', 12)} Ferma</button>`
+    : fail ? `<button class="btn primary" data-act="pullretry-all">${I('retry', 13)} Riprendi <kbd>Ctrl+↵</kbd></button>`
+    : `<button class="btn primary" data-act="run">${I('play', 13)} Avvia <kbd>Ctrl+↵</kbd></button>`;
+  const bigInner = `
+    <div class="panel side"><div class="ph">Pianificazioni<span class="sp"></span><button class="ibtn" title="Nuova coda">${I('plus', 15)}</button></div>
+      <div class="grp-label">Aperta</div>${queues.slice(0, 1).map(q => qi(q)).join('')}
+      <div class="grp-label">Modelli</div>${queues.slice(1, 3).map(q => qi(q)).join('')}
+      <div class="grp-label">Recenti</div>${queues.slice(3).map(q => qi(q)).join('')}
+      <div class="foot">${I('zap', 12)} Ogni coda in esecuzione è un <b style="color:var(--fg)">Job</b> padre nel pannello Jobs.</div></div>
+    <div class="panel" style="flex:1;position:relative" id="center">
+      <div class="qhead"><span class="qtitle">Release 2.4</span>${summary()}<span class="sp"></span>
+        <button class="btn ghost" title="Salva come modello">${I('save', 14)} Salva modello</button>${runBtn}</div>
+      <div class="summary"><span>Stima <b>~6 min</b></span><span>·</span><span><b>${state.stages.filter(s => s.gate && !['all'].includes(s.gate.kind)).length}</b> condizioni di attesa</span><span>·</span><span>Nessun passo parte se quello prima fallisce, tranne <b>Finally</b></span></div>
+      ${banner}
+      <div class="boardwrap"><div class="board" id="board">${board}</div></div>
+      <div class="keys"><span><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> naviga</span><span><kbd>A</kbd> passo</span><span><kbd>G</kbd> condizione</span><span><kbd>Alt</kbd>+<kbd>frecce</kbd> sposta</span><span><kbd>Canc</kbd> rimuovi</span><span style="margin-left:auto"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Q</kbd> aggiungi alla pianificazione</span></div>
+    </div>${inspector()}`;
+  $('#panels').innerHTML = graphPanel(`<div class="bigmodal"><div class="mh">${I('list', 17)} Pianificazione<span class="sp"></span><span style="font-weight:400;font-size:12px;color:var(--fg-subtle)"><kbd>Esc</kbd> chiude · la pianificazione resta salvata</span><button class="ibtn" onclick="go('entry')">${I('x', 15)}</button></div><div class="bm-body">${bigInner}</div></div>`, 18);
+  attachDrag();
+}
+function qi([t, s, k, on]) { return `<div class="qitem ${on ? 'on' : ''}"><span class="sdot ${k}"></span><div class="t"><b>${t}</b><small>${s}</small></div></div>`; }
+
+/** An MR node is edited in the Create PR modal itself (plan mode), so the inspector only summarises it. */
+const mrSummary = s => `<div class="field"><label>Title</label><div class="inp"><span>${esc(s.title)}</span></div></div>
+  <div class="field"><label>Target branch</label><div class="inp"><span class="mono">${esc(s.target)}</span></div></div>
+  ${s.draft || s.auto ? `<div class="field"><label>Opzioni</label><div class="inp"><span>${[s.draft && 'draft', s.auto && 'auto-merge'].filter(Boolean).join(' · ')}</span></div></div>` : ''}
+  <div class="acts" style="margin-bottom:10px"><button class="btn sm" data-act="editmr" data-id="${s.id}">${I('pr', 12)} Edit… <kbd>Enter</kbd></button></div>`;
+function inspector() {
+  const sel = state.sel;
+  if (!sel || sel.startsWith('gate:')) {
+    if (sel && sel.startsWith('gate:')) {
+      const st = state.stages.find(s => 'gate:' + s.id === sel), G = GATES[st.gate.kind];
+      return `<div class="panel insp"><div class="ph">Condizione<span class="sp"></span><button class="ibtn" data-act="close">${I('x', 14)}</button></div><div class="sec">
+        <div class="field"><label>La fase "${st.name}" parte quando</label><div class="inp">${I(G.icon, 14)}<span>${G.label}</span><span class="sp"></span><span class="chev">${I('chev', 13)}</span></div></div>
+        <div class="field"><label>Più la condizione</label><div class="inp"><span class="mono">${esc(st.gate.ref || '—')}</span></div></div>
+        <div class="tog on"><span class="sw"></span><div>Aspetta anche tutti i passi sopra<small>Sempre vero: una fase non parte mai con un errore a monte</small></div></div>
+        <div class="field"><label>Controllo ogni</label><div class="inp"><span>30 s</span></div></div>
+        <div class="field"><label>Rinuncia dopo</label><div class="inp"><span>2 h</span></div></div></div></div>`;
+    }
+    return `<div class="panel insp"><div class="ph">Dettaglio</div><div class="sec" style="color:var(--fg-subtle);font-size:12.5px;line-height:1.6">Seleziona un passo con le frecce, oppure <kbd>A</kbd> per aggiungerne uno alla fase corrente.<br><br>Le <b style="color:var(--fg)">condizioni</b> (i cerchi tra le fasi) si cambiano con <kbd>G</kbd>.</div></div>`;
+  }
+  const { step: s, stage } = findStep(sel), K = KINDS[s.kind], c = WS[wsOf(s.repo)];
+  const log = s.status === 'failed' ? `<pre class="logbox"><span class="e">! [rejected]  ${s.branch} -> ${s.branch} (non-fast-forward)</span>\n<span class="e">error: failed to push some refs to 'origin'</span>\nhint: Updates were rejected because the remote\nhint: contains work that you do not have locally.</pre>`
+    : s.status === 'done' ? `<pre class="logbox"><span class="ok">✓</span> ${s.branch} -> ${s.branch}\n  9f3c1a2..b81d07e  (${s.time})</pre>` : '';
+  return `<div class="panel insp"><div class="ph">${K.label}<span class="sp"></span><button class="ibtn" data-act="close">${I('x', 14)}</button></div><div class="sec">
+    <div class="field"><label>Azione</label><div class="inp">${I(K.icon, 14)}<span>${K.label}</span><span class="sp"></span><span class="chev">${I('chev', 13)}</span></div></div>
+    <div class="field"><label>Repository</label><div class="inp"><span class="wsdot" style="background:${c}"></span><span>${s.repo}</span><span class="sp"></span><span style="color:var(--fg-subtle)">${wsOf(s.repo)}</span></div></div>
+    <div class="field"><label>Branch</label><div class="inp"><span class="mono">${esc(s.branch)}</span></div></div>
+    ${s.kind === 'push' ? `<div class="tog"><span class="sw"></span><div>Force with lease<small>Mai senza questo, mai force semplice</small></div></div>` : ''}
+    ${s.kind === 'mrnew' ? mrSummary(s) : ''}
+    <div class="field" style="margin-top:6px"><label>Parte quando</label>
+      <ul class="timeline"><li class="ok"><b>${stage.gate ? GATES[stage.gate.kind].label : 'La coda parte'}</b></li><li class="${s.status === 'done' ? 'ok' : s.status === 'running' ? 'now' : ''}"><b>${K.label}</b> ${s.repo}</li></ul></div>
+    ${log}${s.status === 'failed' ? `<div class="acts" style="margin-top:10px"><button class="btn primary sm" data-act="pullretry" data-id="${s.id}">${I('retry', 12)} Pull &amp; riprova</button><button class="btn sm" data-act="skip" data-id="${s.id}">Salta</button></div>` : ''}
+    <div class="acts" style="margin-top:14px"><button class="btn sm ghost" data-act="del" data-id="${s.id}">Rimuovi</button></div></div></div>`;
+}
+
+/* ═══ palette / menus ═════════════════════════════════════════════════════════════ */
+function openPalette(stageId) { state.pal = { stage: stageId, q: '', i: 0, kind: null, checked: new Set() }; renderPal(); }
+/** Step 1: the action. Step 2: the repos — several at once, across every workspace; a workspace row toggles all of its repos. */
+function palItems() {
+  const p = state.pal, q = p.q.toLowerCase();
+  if (!p.kind) return Object.entries(KINDS).filter(([k, v]) => v.label.toLowerCase().includes(q)).map(([k, v]) => ({ kind: k, t: v.label, d: v.hint, ic: v.icon }));
+  const out = [];
+  for (const ws of Object.keys(WS)) {
+    const repos = REPOS.filter(r => r.ws === ws && r.n.includes(q)); if (!repos.length) continue;
+    out.push({ all: ws, t: `Tutti i repo di ${ws}`, d: `${repos.length} repo`, ic: 'folder', ws, repos: repos.map(r => r.n) });
+    repos.forEach(r => out.push({ repo: r.n, t: r.n, d: r.b, ic: 'branch', ws }));
+  }
+  return out;
+}
+function renderPal() {
+  document.querySelector('.scrim.pal-s')?.remove();
+  const p = state.pal; if (!p) return;
+  const items = palItems(); p.i = Math.min(p.i, Math.max(0, items.length - 1));
+  const list = items.map((it, i) => {
+    const on = it.all ? it.repos.every(r => p.checked.has(r)) : p.checked.has(it.repo);
+    const box = p.kind ? `<span class="cb ${on ? 'on' : ''}">${on ? I('check', 10) : ''}</span>` : '';
+    return `<button class="pal-i ${it.all ? 'wsrow' : ''}" data-pi="${i}" aria-selected="${i === p.i}">${box}<span style="color:${it.ws ? WS[it.ws] : 'var(--accent-fg)'}">${I(it.ic, 16)}</span><div class="t"><b>${hl(it.t, p.q)}</b><small>${esc(it.d)}</small></div>${!p.kind && i === p.i ? '<span class="r">↵</span>' : ''}</button>`;
+  }).join('');
+  const n = p.checked.size, foot = p.kind
+    ? `<span><kbd>Spazio</kbd> seleziona</span><span><kbd>↵</kbd> aggiungi ${n > 1 ? n + ' passi' : n === 1 ? '1 passo' : 'quello evidenziato'}</span><span><kbd>Esc</kbd> indietro</span>`
+    : `<span><kbd>↑</kbd><kbd>↓</kbd> scegli</span><span><kbd>↵</kbd> avanti</span><span><kbd>Esc</kbd> chiudi</span>`;
+  const el = document.createElement('div'); el.className = 'scrim top pal-s';
+  el.innerHTML = `<div class="pal"><div class="pal-in">${I('search', 16)}${p.kind ? `<span class="crumb">${KINDS[p.kind].label}</span>` : ''}<input id="pin" placeholder="${p.kind ? 'Su quali repository? (anche di workspace diversi)' : 'Cosa deve fare la pianificazione?'}" value="${esc(p.q)}" autocomplete="off"></div>
+    <div class="pal-list">${list || '<div class="pal-g">Nessun risultato</div>'}</div><div class="pal-foot">${foot}</div></div>`;
+  el.onmousedown = e => { if (e.target === el) { state.pal = null; renderPal(); } };
+  $('#center').appendChild(el);
+  const inp = $('#pin'); inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+  inp.oninput = () => { p.q = inp.value; p.i = 0; renderPal(); };
+  el.querySelectorAll('[data-pi]').forEach(b => b.onclick = () => { p.i = +b.dataset.pi; p.kind ? palToggle() : palPick(); });
+}
+function palToggle() {
+  const p = state.pal, it = palItems()[p.i]; if (!it) return;
+  if (it.all) { const all = it.repos.every(r => p.checked.has(r)); it.repos.forEach(r => all ? p.checked.delete(r) : p.checked.add(r)); }
+  else p.checked.has(it.repo) ? p.checked.delete(it.repo) : p.checked.add(it.repo);
+  renderPal();
+}
+function palPick() {
+  const p = state.pal, it = palItems()[p.i]; if (!it) return;
+  if (!p.kind) { p.kind = it.kind; p.q = ''; p.i = 0; return renderPal(); }
+  const picked = p.checked.size ? [...p.checked] : it.all ? it.repos : [it.repo];
+  if (p.kind === 'mrnew') { const sid = p.stage; state.pal = null; renderPal(); return openMrPlan(sid, picked); }
+  const stage = state.stages.find(s => s.id === p.stage); let last;
+  picked.forEach(n => { const r = REPOS.find(x => x.n === n); last = S(p.kind, n, { detail: 'appena aggiunto', branch: r.b }); stage.steps.push(last); });
+  state.sel = last.id; state.pal = null; renderPal(); renderPlan();
+  picked.forEach(() => 0); document.querySelectorAll('.step').forEach(el => { if (picked.includes(findStep(el.dataset.id)?.step.repo) && findStep(el.dataset.id).stage === stage) el.animate([{ transform: 'scale(.92)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 220, easing: 'ease-out' }); });
+}
+function openGateMenu(stageId, anchor) {
+  closeMenu();
+  const st = state.stages.find(s => s.id === stageId), r = anchor.getBoundingClientRect(), host = $('#center').getBoundingClientRect();
+  const m = document.createElement('div'); m.className = 'menu'; m.id = 'gmenu';
+  m.style.left = Math.max(8, r.left - host.left - 100) + 'px'; m.style.top = (r.bottom - host.top + 8) + 'px';
+  m.innerHTML = `<div class="pal-g">La fase "${st.name}" parte quando</div>` + Object.entries(GATES).map(([k, v]) => `<button class="pal-i" data-gk="${k}"><span class="chk">${st.gate.kind === k ? I('check', 14) : ''}</span><span style="color:var(--fg-muted)">${I(v.icon, 15)}</span><div class="t"><b>${v.label}</b><small>${v.hint}</small></div></button>`).join('');
+  $('#center').appendChild(m);
+  m.querySelectorAll('[data-gk]').forEach(b => b.onclick = () => {
+    st.gate.kind = b.dataset.gk; st.gate.ref = ['mr', 'pipe'].includes(st.gate.kind) ? (st.gate.kind === 'mr' ? 'api-gateway · Add OAuth2 PKCE flow' : 'infra-config · deploy-staging') : undefined;
+    closeMenu(); renderPlan();
+  });
+}
+function closeMenu() { document.querySelector('#gmenu')?.remove(); }
+
+/* ═══ interactions ════════════════════════════════════════════════════════════════ */
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]');
+  if (!b) { if (!e.target.closest('.menu')) closeMenu(); const card = e.target.closest('.step'); if (card && state.screen !== 'entry') { state.sel = card.dataset.id; renderPlan(); } return; }
+  const a = b.dataset.act;
+  if (a === 'add') openPalette(b.dataset.stage);
+  if (a === 'editmr') { const f = findStep(b.dataset.id); openMrPlan(f.stage.id, null, b.dataset.id); }
+  if (a === 'gate') { state.sel = 'gate:' + b.dataset.stage; renderPlan(); openGateMenu(b.dataset.stage, document.querySelector(`[data-gate="${b.dataset.stage}"] .gnode`)); }
+  if (a === 'addstage') { const fin = state.stages.pop(); const n = { id: 'n' + Date.now(), name: 'Nuova fase', gate: gate('all'), steps: [] }; state.stages.push(n, fin); renderPlan(); openPalette(n.id); }
+  if (a === 'close') { state.sel = null; renderPlan(); }
+  if (a === 'del') { const f = findStep(b.dataset.id); f.stage.steps.splice(f.i, 1); state.sel = null; renderPlan(); }
+  if (a === 'run') runQueue();
+  if (a === 'cancel') { state.token++; state.running = false; load('plan'); }
+  if (a === 'skipwait') { const st = state.stages.filter(s => !s.finally)[+b.dataset.idx]; st.gate.state = 'open'; if (state.screen === 'run' && !state.running) proceed(+b.dataset.idx, true); }
+  if (a === 'skip') { const f = findStep(b.dataset.id); f.step.status = 'skipped'; renderPlan(); }
+  if (a === 'pullretry' || a === 'pullretry-all') { allSteps().filter(s => s.status === 'failed').forEach(s => { s.status = 'done'; s.time = '2.9s'; delete s.error; }); state.stages.forEach(s => { if (s.gate && s.gate.state === 'blocked') s.gate.state = 'idle'; }); state.screen = 'run'; state.stages.forEach(s => s.steps.forEach(x => { if (x.status === 'held') x.status = 'queued'; })); renderRail(); renderPlan(); proceed(1); }
+});
+document.querySelectorAll('#scr button').forEach(b => b.onclick = () => go(b.dataset.s));
+document.querySelectorAll('#ent button').forEach(b => b.onclick = () => { state.entry = b.dataset.e; state.added = false; state.mrMode = 'create'; renderEntry(); });
+function go(s) { load(s); }
+
+document.addEventListener('keydown', e => {
+  if (state.screen === 'entry' || state.screen === 'notes') return;
+  if (state.mrq) { if (e.key === 'Escape') { state.mrq = null; renderMrq(); e.preventDefault(); } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { mrqSubmit(); e.preventDefault(); } return; }
+  if (state.pal) {
+    const items = palItems(), p = state.pal;
+    if (e.key === 'ArrowDown') { p.i = (p.i + 1) % Math.max(1, items.length); renderPal(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { p.i = (p.i - 1 + items.length) % Math.max(1, items.length); renderPal(); e.preventDefault(); }
+    else if (e.key === ' ' && p.kind) { palToggle(); e.preventDefault(); }
+    else if (e.key === 'Enter') { palPick(); e.preventDefault(); }
+    else if (e.key === 'Escape') { if (p.kind) { p.kind = null; p.q = ''; p.i = 0; } else state.pal = null; renderPal(); e.preventDefault(); }
+    return;
+  }
+  if (document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { if (state.screen === 'plan') runQueue(); e.preventDefault(); return; }
+  if (e.key === 'Escape') { closeMenu(); state.sel = null; renderPlan(); return; }
+  const cols = state.stages.map(s => s.steps);
+  const cur = state.sel && !state.sel.startsWith('gate:') ? findStep(state.sel) : null;
+  const stIdx = cur ? state.stages.indexOf(cur.stage) : 0;
+  if (e.key.toLowerCase() === 'a') { openPalette((cur ? cur.stage : state.stages[0]).id); e.preventDefault(); return; }
+  if (e.key.toLowerCase() === 'g') {
+    // the first stage has no gate: "G" then edits the one that follows it
+    let st = cur ? cur.stage : state.stages[1]; if (!st.gate) st = state.stages[state.stages.indexOf(st) + 1];
+    if (!st || !st.gate) return;
+    state.sel = 'gate:' + st.id; renderPlan(); openGateMenu(st.id, document.querySelector(`[data-gate="${st.id}"] .gnode`)); e.preventDefault(); return;
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && cur && state.screen === 'plan') { cur.stage.steps.splice(cur.i, 1); state.sel = null; renderPlan(); return; }
+  if (e.key === 'Enter' && cur && cur.step.kind === 'mrnew' && state.screen === 'plan') { openMrPlan(cur.stage.id, null, cur.step.id); e.preventDefault(); return; }
+  const dx = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0, dy = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
+  if (!dx && !dy) return; e.preventDefault();
+  if (!cur) { const first = allSteps()[0]; state.sel = first?.id; renderPlan(); return; }
+  if (e.altKey && state.screen === 'plan') {
+    const [s] = cur.stage.steps.splice(cur.i, 1);
+    if (dy) cur.stage.steps.splice(Math.max(0, Math.min(cur.stage.steps.length, cur.i + dy)), 0, s);
+    else { const t = state.stages[Math.max(0, Math.min(state.stages.length - 1, stIdx + dx))]; t.steps.splice(Math.min(cur.i, t.steps.length), 0, s); }
+    renderPlan(); return;
+  }
+  if (dy) { const n = cols[stIdx][cur.i + dy]; if (n) state.sel = n.id; }
+  else { let j = stIdx + dx; while (cols[j] && !cols[j].length) j += dx; if (cols[j]) state.sel = cols[j][Math.min(cur.i, cols[j].length - 1)].id; }
+  renderPlan(); document.querySelector(`[data-id="${state.sel}"]`)?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+});
+
+/* drag: mouse events only — WebView2's native DnD is unreliable in Arbor */
+function attachDrag() {
+  if (state.screen !== 'plan' || state.running) return;
+  document.querySelectorAll('.step').forEach(card => card.addEventListener('mousedown', e => {
+    if (e.button || e.target.closest('button')) return;
+    const sx = e.clientX, sy = e.clientY, id = card.dataset.id; let ghost = null, mark = null, target = null;
+    const move = ev => {
+      if (!ghost) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return; ghost = card.cloneNode(true); ghost.classList.add('dragghost'); document.body.appendChild(ghost); card.classList.add('dragging'); mark = document.createElement('div'); mark.className = 'ghost-drop'; }
+      ghost.style.left = ev.clientX - 120 + 'px'; ghost.style.top = ev.clientY - 20 + 'px';
+      document.querySelectorAll('.stage.over').forEach(x => x.classList.remove('over')); mark.remove(); target = null;
+      const stEl = document.elementsFromPoint(ev.clientX, ev.clientY).find(x => x.classList?.contains('stage')); if (!stEl) return;
+      stEl.classList.add('over');
+      const cards = [...stEl.querySelectorAll('.step:not(.dragging)')]; let idx = cards.length;
+      for (let i = 0; i < cards.length; i++) { const r = cards[i].getBoundingClientRect(); if (ev.clientY < r.top + r.height / 2) { idx = i; break; } }
+      target = { stage: stEl.dataset.stage, idx };
+      cards[idx] ? cards[idx].before(mark) : stEl.querySelector('.addstep').before(mark);
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+      if (!ghost) return; ghost.remove(); state.drag = null;
+      if (target) { const f = findStep(id); const [s] = f.stage.steps.splice(f.i, 1); const to = state.stages.find(x => x.id === target.stage); to.steps.splice(Math.min(target.idx, to.steps.length), 0, s); state.sel = id; }
+      renderPlan();
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  }));
+}
+
+/* ═══ the scheduler, simulated ════════════════════════════════════════════════════ */
+function runQueue() {
+  state.stages.forEach(s => { s.steps.forEach(x => { x.status = 'held'; x.p = 0; }); if (s.gate) s.gate.state = 'idle'; });
+  proceed(0);
+}
+const waitUntil = async (tok, fn) => { while (tok === state.token && !fn()) await sleep(120); return tok === state.token; };
+async function proceed(from, skipGate) {
+  const tok = ++state.token; state.running = true; renderRail(); renderPlan();
+  const list = state.stages;
+  for (let i = from; i < list.length; i++) {
+    const s = list[i];
+    if (s.gate && !(i === from && skipGate)) {
+      if (['mr', 'pipe', 'delay', 'manual'].includes(s.gate.kind)) {
+        s.gate.state = 'waiting'; s.gate.next = 10; renderPlan();
+        if (s.gate.kind !== 'manual') setTimeout(() => { if (tok === state.token) s.gate.state = 'open'; }, 5200);
+        if (!await waitUntil(tok, () => s.gate.state === 'open')) return;
+      }
+    }
+    if (s.gate) s.gate.state = 'open';
+    s.steps.filter(x => x.status !== 'done' && x.status !== 'skipped').forEach(x => { x.status = 'running'; x.p = 0; });
+    renderPlan();
+    await Promise.all(s.steps.filter(x => x.status === 'running').map(async x => {
+      const dur = 1400 + Math.random() * 2200, t0 = Date.now();
+      while (Date.now() - t0 < dur) { if (tok !== state.token) return; x.p = Math.min(99, (Date.now() - t0) / dur * 100); renderPlanLight(); await sleep(140); }
+      x.status = 'done'; x.time = (dur / 1000).toFixed(1) + 's'; renderPlan();
+    }));
+    if (tok !== state.token) return;
+  }
+  state.running = false; renderRail(); renderPlan();
+}
+function renderPlanLight() { document.querySelectorAll('.step.running').forEach(el => { const f = findStep(el.dataset.id); if (!f) return; el.querySelector('.bar i')?.style.setProperty('--p', f.step.p + '%'); const st = el.querySelector('.st span'); if (st) st.textContent = Math.round(f.step.p) + '%'; }); }
+setInterval(() => { let any = false; state.stages.forEach(s => { if (s.gate && s.gate.state === 'waiting') { any = true; s.gate.next = s.gate.next > 1 ? s.gate.next - 1 : 10; } }); if (any) { document.querySelectorAll('.gpoll').forEach(el => { const g = state.stages.find(s => s.id === el.closest('.gate').dataset.gate).gate; el.textContent = `controllo tra ${g.next}s`; }); } }, 1000);
+
+/* ═══ screen 6 — a third tab in the pipelines panel ═════════════════════════════════ */
+function renderTab() {
+  const strip = ph => ph.map(([t, k, gk], i) => (i ? `<span class="ph-l ${gk || ''}"></span>` : '') + `<span class="ph-n ${k || ''} ${t === 'Finally' ? 'fin' : ''}">${k === 'ok' ? I('check', 11) : k === 'now' ? I('clock', 11) : k === 'err' ? I('x', 11) : ''}${t}</span>`).join('');
+  const rows = [
+    ['Release 2.4', 'on', '10 passi · 3 repo · Platform, Ops, Billing', strip([['Publish', 'ok'], ['Review', 'ok', 'ok'], ['Roll out', 'now', 'wait'], ['Finally', '', '']]), '<span style="color:var(--warning)">in attesa MR !482</span>', '3m 12s'],
+    ['Hotfix auth', '', '4 passi · 2 repo · modello', strip([['Publish', ''], ['Review', '', ''], ['Finally', '', '']]), '<span style="color:var(--fg-subtle)">modello</span>', ''],
+    ['Release 2.3.1', '', '8 passi · 4 repo', strip([['Publish', 'ok'], ['Review', 'ok', 'ok'], ['Roll out', 'ok', 'ok'], ['Finally', 'ok', 'ok']]), '<span style="color:var(--success)">conclusa ieri</span>', '7m 40s'],
+  ];
+  $('#panels').innerHTML = `<div class="panel side"><div class="ph">Branches</div>
+      <div class="qitem on"><span class="wsdot" style="background:var(--accent)"></span><div class="t"><b>feature/auth-v2</b><small>↑2 da pubblicare</small></div></div>
+      <div class="qitem"><span class="wsdot" style="background:var(--success)"></span><div class="t"><b>main</b></div></div></div>
+    <div class="panel" style="flex:1;position:relative"><div class="tabs"><button class="on">Graph</button><button>Stage <span class="badge">2</span></button></div>
+      ${GRAPH_ROWS.slice(0, 5).map((r, i) => `<div class="grow">${laneSvg(i)}<span class="msg">${esc(r[1])}</span><span class="au">${r[2]}</span><span class="when">${r[3]}</span></div>`).join('')}
+      <div style="flex:1"></div>
+      <div class="bpanel"><div class="tabs"><button>${I('play', 13)} Pipeline locali</button><button>${I('shield', 13)} CI <span class="badge" style="background:var(--bg-hover);color:var(--fg-muted)">2</span></button><button class="on">${I('list', 13)} Pianificazioni <span class="badge">1</span></button>
+        <span style="flex:1"></span><button class="btn sm ghost" style="margin:auto 0">${I('plus', 12)} Nuova</button></div>
+        <div class="bptools"><span class="ws" style="display:inline-flex;gap:6px;align-items:center;padding:1px 9px;border-radius:99px;border:1px solid var(--border-muted);background:var(--bg-elevated)">${I('eye', 12)} Tutti i workspace</span><span>Le pianificazioni attraversano repo e workspace: qui le vedi qualunque repo sia aperto.</span><span class="sp"></span><kbd>Invio</kbd> apre la modale</div>
+        <div class="plist">${rows.map(r => `<div class="prow ${r[1]}" onclick="go('run')"><div><b>${r[0]}</b><small>${r[2]}</small></div><div class="strip">${r[3]}</div><div>${r[4]}</div><div style="color:var(--fg-subtle);text-align:right;font:12px var(--mono)">${r[5]}</div></div>`).join('')}</div></div></div>`;
+}
+
+/* ═══ screen 5 — rules ════════════════════════════════════════════════════════════ */
+function renderNotes() {
+  $('#panels').innerHTML = `<div class="panel" style="flex:1"><div class="notes">
+    <h2>Come ragiona la coda</h2>
+    <p>Una coda è una <b>sequenza di fasi</b>. Dentro una fase i passi partono insieme; tra una fase e la successiva c'è una <b>condizione</b> (il cerchio sul filo). Non c'è un grafo da disegnare: si legge da sinistra a destra come un treno.</p>
+    <h3>Le regole, tutte qui</h3>
+    <div class="cards">
+      <div class="nc"><b>1 · Una fase parte solo se la precedente è andata bene</b>Sempre. Nessun passo parte con un errore a monte. La condizione sul filo si <i>aggiunge</i> a questa, non la sostituisce.</div>
+      <div class="nc"><b>2 · Le condizioni sono poche e leggibili</b>Fase conclusa · MR mergiata · pipeline verde · attesa · via libera manuale. Ogni attesa controlla il provider ogni 30 s, si può saltare con un clic e rinuncia dopo il timeout.</div>
+      <div class="nc"><b>3 · Finally gira sempre</b>Anche se la coda si ferma o fallisce. Per tag, notifiche, pull finali — ciò che non dipende dal successo.</div>
+      <div class="nc"><b>4 · Un passo che cade ferma la coda, non la uccide</b>Le fasi dopo restano "in attesa". Tre azioni: <i>Pull &amp; riprova</i>, <i>Riprova</i>, <i>Salta</i>. Poi riprendi da dove eri.</div>
+      <div class="nc"><b>5 · Parallelo ≠ concorrente sullo stesso repo</b>Due passi di una stessa fase sullo stesso repo vengono serializzati dietro le quinte (lock per repo). Repo diversi, anche di workspace diversi, corrono davvero in parallelo.</div>
+      <div class="nc"><b>6 · Una coda è un Job</b>Compare nel pannello Jobs con un figlio per passo. Chiudere la finestra non la ferma; uscire dall'app chiede conferma e la mette in pausa.</div>
+    </div>
+    <h3>Come nasce un nodo</h3>
+    <ul><li><b>Push</b> — il pulsante della barra diventa uno SplitButton: il clic spinge come oggi, la freccia ha "Add push to plan" (o <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Q</kbd>, o "Plan: add push" nella Command Palette).</li>
+      <li><b>Create MR</b> — è la modale esistente: il pulsante primario diventa uno SplitButton "Create PR | Add to plan". Se il branch non è sul remote aggiunge anche il Push in una fase prima.</li>
+      <li><b>Commit</b> — il menu del pulsante ha "Commit &amp; add push to plan" e "Commit, push &amp; MR to plan…". Il commit parte subito; solo i passi remoti si pianificano.</li>
+      <li><b>Dalla pianificazione</b> — <kbd>A</kbd> apre la palette (azione → repo). Si scelgono più repo anche di workspace diversi con <kbd>Spazio</kbd>, o tutti quelli di un workspace con una riga; per una MR si apre la stessa modale Create PR, in modalità pianificazione: "Add to plan" al posto di "Create PR", un repo alla volta se ne hai scelti più d'uno. Un nodo MR si riapre con <kbd>Invio</kbd>.</li></ul>
+    <h3>Cosa non c'è, di proposito</h3>
+    <ul><li>Nessuna dipendenza arbitraria tra singoli passi: se serve, si crea una fase. Resta leggibile.</li>
+      <li>Nessun YAML, nessun linguaggio: le code salvate come <b>modelli</b> sono la ricorrenza ("Release", "Hotfix", "Bump dipendenze").</li>
+      <li>Nessuna persistenza dopo riavvio nella prima versione: la coda aperta si salva, l'esecuzione a metà ripartisce da un passo "fallito/interrotto".</li></ul>
+  </div></div>`;
+}
+
+/* ═══ boot ════════════════════════════════════════════════════════════════════════ */
+function load(s) {
+  state.token++; state.running = false; state.pal = null; state.mrq = null; state.mrMode = 'create'; state.sel = null; closeMenu(); state.screen = s;
+  document.querySelectorAll('#scr button').forEach(b => b.setAttribute('aria-pressed', b.dataset.s === s));
+  $('#ent').classList.add('hidden'); if (s === 'entry') state.added = false;
+  if (s === 'plan' || s === 'run' || s === 'fail') { state.stages = scenario(s); if (s === 'fail') state.sel = state.stages[0].steps[1].id; if (s === 'plan') state.sel = state.stages[0].steps[0].id; renderPlan(); }
+  else if (s === 'entry') renderEntry(); else if (s === 'tab') renderTab(); else renderNotes();
+  renderRail();
+}
+load('plan');
+</script>
+</body>
+</html>

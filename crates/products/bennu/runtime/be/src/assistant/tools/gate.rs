@@ -80,7 +80,7 @@ impl ToolHost {
                             continue;
                         }
                         let question = self.access_question(path, &folder, &ask);
-                        self.ask_access(&folder, path, &question)?
+                        self.ask_access(&folder, path, &question, ask.upgrade)?
                     }
                     // A confirmation applies to this call only and is not recorded in the policy, so a
                     // "yes" is the answer — looping back would ask the same question again.
@@ -92,8 +92,14 @@ impl ToolHost {
     }
 
     /// The one prompt for a path outside the allowed scope: no, reading, or reading and writing.
-    pub(super) fn ask_access(&self, folder: &Path, file: &Path, reason: &str) -> Result<(), String> {
-        let request_id = format!("ax-{}", folder.display());
+    ///
+    /// `upgrade` is the question of writing in a folder already opened for reading: anything but a yes leaves the
+    /// folder read-only, and the model is told to adapt.
+    pub(super) fn ask_access(&self, folder: &Path, file: &Path, reason: &str, upgrade: bool) -> Result<(), String> {
+        // Unique per question, not per folder: asking again for the same folder (reading first, then writing) puts a
+        // second card in the thread, and both the panel and the view find a card by this id — with a repeated one the
+        // answer goes to the first card, which nothing waits on any more, and the run stays parked on the second.
+        let request_id = unique_id("ax");
         let block = json!({
             "type": "access",
             "request": {
@@ -101,21 +107,38 @@ impl ToolHost {
                 "folder": folder.display().to_string(),
                 "file": file.file_name().map(|n| n.to_string_lossy().to_string()),
                 "reason": reason,
+                "upgrade": upgrade,
             },
         });
         let answer = self.session.ask(block, "/request/id", &request_id, |b, a| {
             b["request"]["answer"] = a.get("answer").cloned().unwrap_or(json!("denied"));
         });
         match answer.as_ref().and_then(|a| a.get("answer")).and_then(Value::as_str) {
-            Some(word @ ("read" | "write")) => {
-                self.session.policy().grant(folder.to_path_buf(), word == "write");
-                // What a sub-agent was granted is the agent's alone: it is not remembered for the conversation.
-                if self.session.prompt_via.is_none() {
-                    runs::remember_grants(&self.session.conversation_id, self.session.policy().grants.clone());
-                }
+            Some("write") => {
+                self.session.policy().grant(folder.to_path_buf(), true);
+                self.remember_grants();
+                Ok(())
+            }
+            // Writing was the question and the answer is no: the folder stays as it was opened.
+            _ if upgrade => Err(format!(
+                "the user kept {} read-only and did not allow writing there. Adapt: work from what you can read and describe \
+                 the change instead of making it",
+                folder.display()
+            )),
+            Some("read") => {
+                self.session.policy().grant(folder.to_path_buf(), false);
+                self.remember_grants();
                 Ok(())
             }
             _ => Err(format!("the user did not allow access to {}", folder.display())),
+        }
+    }
+
+    /// Keep this conversation's grants for its later runs. What a sub-agent was granted is the agent's alone:
+    /// it is not remembered for the conversation.
+    fn remember_grants(&self) {
+        if self.session.prompt_via.is_none() {
+            runs::remember_grants(&self.session.conversation_id, self.session.policy().grants.clone());
         }
     }
 

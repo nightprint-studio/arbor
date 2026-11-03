@@ -924,6 +924,14 @@ function createAssistantStore() {
 
     /** Which conversation the run in progress belongs to. */
     get runConversationId() { return runConversationId; },
+
+    /**
+     * Whether a run of this conversation is going and so could be waiting for an answer. A question still
+     * unanswered when it is not (cancelled, timed out, or loaded back from disk) has no one to reach.
+     */
+    waitingOn(conversationId: string): boolean {
+      return runId !== null && runConversationId === conversationId;
+    },
   };
 }
 

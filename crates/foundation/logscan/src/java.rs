@@ -29,6 +29,9 @@ impl RuleSet {
     /// instead of reading as twenty unrelated lines.
     pub fn java() -> Self {
         RuleSet::common()
+            // Tomcat's own lines, at column zero, before anything reads their words one by one.
+            .first(FnRule::new("catalina", crate::catalina::catalina_rule))
+            .with(FnRule::new("access-time", crate::catalina::access_time_rule))
             .with(FnRule::new("java-frame", frame_rule))
             .with(FnRule::new("java-name", qualified_rule))
             .continued_by(java_continues)

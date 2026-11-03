@@ -4,6 +4,8 @@
     amend: boolean;
     /** Commit & Push was chosen. Only ever true when `allowPush` is set. */
     push: boolean;
+    /** Commit now, then hand the remote steps to a plan instead of running them. Only set when `allowPlan` is. */
+    plan?: 'push' | 'push_mr';
   }
 </script>
 
@@ -15,7 +17,7 @@
    * form reset, so a failed commit never loses the message.
    */
   import type { Snippet } from 'svelte';
-  import { FileText, GitCommitHorizontal, Upload } from 'lucide-svelte';
+  import { FileText, GitCommitHorizontal, GitPullRequest, ListChecks, Upload } from 'lucide-svelte';
   import SplitButton from '$lib/components/shared/ui/SplitButton.svelte';
   import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
@@ -29,13 +31,15 @@
     template?: string;
     /** Offer *Commit & Push* next to *Commit*. */
     allowPush?: boolean;
+    /** Offer the *…to plan* variants: the commit runs now, the push (and MR) are queued in a plan. */
+    allowPlan?: boolean;
     /** Resolves `true` once the commit landed. */
     onSubmit: (req: CommitRequest) => Promise<boolean>;
     /** Extra buttons next to the commit button (plugin contributions). */
     extra?: Snippet;
   }
 
-  let { stagedCount, template = '', allowPush = false, onSubmit, extra }: Props = $props();
+  let { stagedCount, template = '', allowPush = false, allowPlan = false, onSubmit, extra }: Props = $props();
 
   let message    = $state('');
   let amend      = $state(false);
@@ -61,11 +65,11 @@
     return () => window.removeEventListener('arbor:focus-commit-form', onFocus);
   });
 
-  async function submit(push: boolean) {
+  async function submit(push: boolean, plan?: CommitRequest['plan']) {
     if (!canCommit || committing) return;
     committing = true;
     try {
-      const done = await onSubmit({ message: message.trim(), amend, push: push && allowPush });
+      const done = await onSubmit({ message: message.trim(), amend, push: push && allowPush, plan: allowPlan ? plan : undefined });
       if (done) {
         message = '';
         amend = false;
@@ -120,9 +124,14 @@
         options={[
           { id: 'commit',      label: 'Commit',        icon: GitCommitHorizontal, iconColor: 'var(--success)', action: 'commit' },
           { id: 'commit-push', label: 'Commit & Push', icon: Upload,              iconColor: 'var(--accent)',  action: 'commit_and_push' },
+          ...(allowPlan ? [
+            { id: 'plan-group',       label: 'Plan', group: true },
+            { id: 'commit-plan-push', label: 'Commit & add push to plan', icon: ListChecks,     iconColor: 'var(--accent)', description: 'Commit now; the push joins the plan' },
+            { id: 'commit-plan-mr',   label: 'Commit, push & MR to plan…', icon: GitPullRequest, iconColor: 'var(--accent)', description: 'Commit now; push and merge request join the plan' },
+          ] : []),
         ]}
         onclick={() => submit(false)}
-        onselect={(id) => submit(id === 'commit-push')}
+        onselect={(id) => submit(id === 'commit-push', id === 'commit-plan-push' ? 'push' : id === 'commit-plan-mr' ? 'push_mr' : undefined)}
       />
     {:else}
       <Button variant="primary" disabled={!canCommit || committing} onclick={() => submit(false)}>
