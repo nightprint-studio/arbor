@@ -153,6 +153,8 @@ mod tests {
             path_vars: vec!["id".into()],
             produces: "application/json".into(),
             consumes: "application/json".into(),
+            produces_raw: "MediaType.APPLICATION_JSON_VALUE".into(),
+            consumes_raw: "MediaType.APPLICATION_JSON_VALUE".into(),
             return_type: "ResponseEntity<Order>".into(),
             params: vec![
                 EndpointParam { name: "id".into(), type_text: "long".into(), binding: "path".into(), bound_name: String::new(), required: true },

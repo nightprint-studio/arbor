@@ -16,9 +16,11 @@
     allowInherit?: boolean;
     /** What "inherit" resolves to, in words (`Bearer from Bandi`), shown under the selector. */
     inheritedLabel?: string;
+    /** WS-Security only makes sense in a SOAP envelope, so it is offered only there (or when already chosen). */
+    soap?: boolean;
   }
 
-  let { auth, onchange, allowInherit = true, inheritedLabel = '' }: Props = $props();
+  let { auth, onchange, allowInherit = true, inheritedLabel = '', soap = false }: Props = $props();
 
   const options = $derived([
     ...(allowInherit ? [{ value: 'inherit', label: 'Inherit from the level above' }] : []),
@@ -26,7 +28,7 @@
     { value: 'bearer', label: 'Bearer token' },
     { value: 'basic', label: 'Basic' },
     { value: 'api_key', label: 'API key' },
-    { value: 'ws_security', label: 'WS-Security (SOAP)' },
+    ...(soap || auth.type === 'ws_security' ? [{ value: 'ws_security', label: 'WS-Security (SOAP)' }] : []),
   ]);
 
   function choose(type: string) {

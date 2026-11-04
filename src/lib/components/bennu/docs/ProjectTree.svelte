@@ -77,8 +77,12 @@
 <h2>New files</h2>
 <p>
   <strong>New ›</strong> — from a right-click, from the Project header's <strong>＋</strong>, or from the tool-window menu —
-  offers the same three entries wherever you open it: a typed file, a plain file, and a directory. A file is created in the
+  offers the same entries wherever you open it: a typed file, a plain file, an <strong>HTTP File</strong>, and a directory. A file is created in the
   chosen directory, opened and revealed in the tree; an existing file is never overwritten.
+</p>
+<p>
+  <strong>New › HTTP File</strong> asks for a name (<code>requests</code> is offered; the <code>.http</code> extension is added when you leave it out) and creates a
+  <code>.http</code> file with a starter request and a <code>###</code> separator, ready to run from the editor. <code>.http</code> and <code>.rest</code> files wear their own icon in the tree and on tabs.
 </p>
 <Callout variant="tip" title="Creating beside the pom">
   Right-click the <strong>empty space</strong> below the last row: that targets the <strong>project root</strong>, rather

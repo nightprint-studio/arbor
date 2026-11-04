@@ -608,6 +608,16 @@ pub struct AddParameterPreview {
     /// The parameters the method takes today, each written `Type name` — the positions the new one
     /// can go before.
     pub parameters: Vec<String>,
+    /// The method's name.
+    #[serde(default)]
+    pub method: String,
+    /// When the caret is on a call and several signatures take that many arguments: each, written
+    /// `name(Type a)`. The dialog asks which; the answer comes back as `overload`.
+    #[serde(default)]
+    pub overloads: Vec<String>,
+    /// The parameter the caret is inside, when it is in a declaration's parameter list.
+    #[serde(default)]
+    pub caret_parameter: Option<usize>,
 }
 
 /// A source file that has to be renamed along with the type it declares.

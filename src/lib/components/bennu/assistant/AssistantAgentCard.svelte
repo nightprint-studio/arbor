@@ -82,7 +82,7 @@
     border-radius: var(--radius-lg);
     transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
   }
-  /* Running: the animated border (assistant-motion.css) carries the card; a soft glow lifts it off the thread. */
+  /* Running: the animated border (imber-motion.css) carries the card; a soft glow lifts it off the thread. */
   .card:not(.ended) { box-shadow: 0 4px 18px color-mix(in srgb, var(--accent) 14%, transparent); }
   /* Settled: a quiet border with a coloured left edge, the way the other receipts in the thread are drawn. */
   .card.ended {

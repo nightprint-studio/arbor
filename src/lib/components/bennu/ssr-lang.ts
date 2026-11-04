@@ -34,8 +34,11 @@
  * would couple two things that run at different times for different reasons.
  */
 
-import { StreamLanguage, type StreamParser } from '@codemirror/language';
-import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
+import { HighlightStyle, StreamLanguage, syntaxHighlighting, type StreamParser } from '@codemirror/language';
+import { Prec } from '@codemirror/state';
+import { tags as t } from '@lezer/highlight';
+import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
+import { SSR_EXAMPLES } from './ssr-examples';
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
 import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -43,7 +46,72 @@ import type { SsrDialect } from '$lib/ipc/bennu/ssr';
 
 /** The words that begin a clause. Nothing in Java begins with one, which is what lets a line
  *  starting with them be read as a clause rather than as code. */
-const CLAUSES = ['or', 'in', 'group', 'use'];
+const CLAUSES = ['or', 'in', 'group', 'use', 'as', 'inside'];
+
+/** What `as` accepts: how the pattern's text is to be read. */
+const AS_KINDS = [
+  ['local', 'a local variable declaration'],
+  ['param', 'a method or constructor parameter'],
+  ['field', 'a field'],
+  ['member', 'a method, field or nested type of a class body'],
+  ['statement', 'a statement'],
+  ['expression', 'an expression'],
+  ['class', 'a class, interface, enum or record'],
+  ['catch', 'a catch clause'],
+] as const;
+
+/** What `inside` accepts: where the match must live (the nearest enclosing declaration). */
+const INSIDE_KINDS = [
+  ['method', 'inside a method'],
+  ['constructor', 'inside a constructor'],
+  ['initializer', 'inside a static or instance initializer'],
+  ['lambda', 'inside a lambda'],
+  ['class', 'a member or code of a class'],
+  ['interface', 'a member of an interface'],
+  ['enum', 'a member of an enum'],
+  ['record', 'a member of a record'],
+  ['anonymous', 'inside an anonymous class'],
+  ['body', 'method, constructor, initializer or lambda'],
+  ['type', 'class, interface, enum, record or anonymous'],
+] as const;
+
+/** The holes worth suggesting when the query binds none yet — the conventional names of the run holes. */
+const HOLE_SUGGESTIONS = [
+  ['mods...$', 'zero or more modifiers and annotations'],
+  ['body...$', 'the statements of a block'],
+  ['stmts...$', 'a run of statements'],
+  ['members...$', 'the members of a class body'],
+  ['params...$', 'the parameters of a method'],
+  ['args...$', 'the arguments of a call'],
+] as const;
+
+/** Java's reserved words, coloured and offered in a Java query. */
+const JAVA_KEYWORDS = new Set([
+  'new', 'final', 'static', 'public', 'private', 'protected', 'abstract', 'class', 'interface', 'enum', 'extends',
+  'implements', 'return', 'throw', 'throws', 'try', 'catch', 'finally', 'if', 'else', 'for', 'while', 'do', 'switch',
+  'case', 'default', 'break', 'continue', 'instanceof', 'this', 'super', 'null', 'true', 'false', 'void', 'var',
+  'int', 'long', 'double', 'float', 'boolean', 'char', 'byte', 'short', 'synchronized', 'import', 'package',
+]);
+
+/**
+ * The colours of the language's own additions.
+ *
+ * A hole, a constraint and a mistake used the Lezer tags `special(variableName)` and `invalid`, which the editor's
+ * shared highlight style does not distinguish from a plain name — so `$a$` looked exactly like the code around it,
+ * which is the one thing this language must not allow. The query field carries its own style, above the shared one,
+ * with the theme's variables: the accent for a hole, the annotation colour for a node kind.
+ */
+const ssrHighlight = Prec.highest(syntaxHighlighting(HighlightStyle.define([
+  {
+    tag: t.special(t.variableName),
+    color: 'var(--accent)',
+    fontWeight: '700',
+    background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+    borderRadius: '3px',
+  },
+  { tag: t.labelName, color: 'var(--syntax-annotation, #bbb529)' },
+  { tag: t.invalid, color: 'var(--error)', textDecoration: 'underline wavy var(--error)' },
+])));
 
 /** What `group` accepts besides a capture. */
 const GROUP_KEYS = [
@@ -161,9 +229,9 @@ export function capturesIn(text: string): string[] {
  *     little language (`@type & Order+`, `!~get*`, `#string_literal`), and its operators want
  *     colouring apart from the name they constrain.
  */
-const parser: StreamParser<{ atLineStart: boolean; inConstraint: boolean }> = {
+const parser: StreamParser<{ atLineStart: boolean; inConstraint: boolean; clauseArg: boolean }> = {
   name: 'bennu-ssr',
-  startState: () => ({ atLineStart: true, inConstraint: false }),
+  startState: () => ({ atLineStart: true, inConstraint: false, clauseArg: false }),
 
   token(stream, state) {
     if (stream.sol()) {
@@ -171,8 +239,16 @@ const parser: StreamParser<{ atLineStart: boolean; inConstraint: boolean }> = {
       // A constraint cannot span lines — an unclosed `$` is someone mid-typing, and carrying the
       // mode to the next line would paint the whole rest of the query as one.
       state.inConstraint = false;
+      state.clauseArg = false;
     }
     if (stream.eatSpace()) return null;
+
+    // What follows `as` / `inside` is a word from a fixed list (`local`, `method`…), told apart from code.
+    if (state.clauseArg) {
+      if (stream.match(/^[a-z]+/)) return 'labelName';
+      stream.next();
+      return null;
+    }
 
     // ── inside `$x: … $` ───────────────────────────────────────────────────────
     if (state.inConstraint) {
@@ -203,6 +279,7 @@ const parser: StreamParser<{ atLineStart: boolean; inConstraint: boolean }> = {
         // a receiver.
         if (stream.match(new RegExp(`^${word}(?=\\s)`))) {
           state.atLineStart = false;
+          state.clauseArg = word === 'as' || word === 'inside';
           return 'keyword';
         }
       }
@@ -229,6 +306,20 @@ const parser: StreamParser<{ atLineStart: boolean; inConstraint: boolean }> = {
       }
       stream.eat('$');
       return named ? 'variableName.special' : 'invalid';
+    }
+
+    // The code around the holes. A string is a string in both languages; the rest is Java's only in a Java query —
+    // a page query is markup, where `class` is an attribute name and not a keyword.
+    if (stream.match(/^"(?:[^"\\]|\\.)*"?/) || stream.match(/^'(?:[^'\\]|\\.)*'?/)) return 'string';
+    if (queryDialect !== 'jsp') {
+      if (stream.match(/^\d[\w.]*/)) return 'number';
+      if (stream.match(/^@[A-Za-z_]\w*/)) return 'meta';
+      const word = stream.match(/^[A-Za-z_]\w*/);
+      if (word) {
+        const text = (word as RegExpMatchArray)[0];
+        if (JAVA_KEYWORDS.has(text)) return 'keyword';
+        return /^[A-Z]/.test(text) ? 'typeName' : null;
+      }
     }
 
     stream.next();
@@ -266,11 +357,47 @@ function classify(context: CompletionContext) {
     if (typeAt) return { kind: 'type' as const, from: context.pos - typeAt[1].length };
   }
 
-  // The start of a line — a clause keyword.
+  // A hole being typed (an odd number of `$` so far on the line): the names the query already uses.
+  const hole = /\$([A-Za-z0-9_]*)$/.exec(head);
+  if (hole && (head.match(/\$/g)?.length ?? 0) % 2 === 1) {
+    return { kind: 'variable' as const, from: context.pos - hole[1].length };
+  }
+
+  // The word after `as`, and the words after `inside` (a comma-separated list).
+  const asKind = /^\s*as\s+([a-z]*)$/.exec(head);
+  if (asKind) return { kind: 'asKind' as const, from: context.pos - asKind[1].length };
+  const insideKind = /^\s*inside\s+(?:[a-z]+\s*,\s*)*([a-z]*)$/.exec(head);
+  if (insideKind) return { kind: 'insideKind' as const, from: context.pos - insideKind[1].length };
+
+  // The start of a line — a clause keyword, a template, or the first word of the pattern.
   const clause = /^(\s*)([a-z]*)$/.exec(head);
   if (clause) return { kind: 'clause' as const, from: context.pos - clause[2].length };
 
   return null;
+}
+
+/** Templates the user saved, offered next to the built-in ones. Set by the modal. */
+let savedTemplates: { title: string; query: string; dialect: SsrDialect }[] = [];
+
+export function setSavedTemplates(list: { title: string; query: string; dialect: SsrDialect }[]): void {
+  savedTemplates = list;
+}
+
+/** The templates of the language being written, as completions that replace the line with the whole query. */
+function templateCompletions(): Completion[] {
+  const mine = SSR_EXAMPLES
+    .filter((ex) => (ex.dialect ?? 'java') === queryDialect)
+    .map((ex) => ({ title: ex.title, query: ex.query, detail: 'template' }));
+  const own = savedTemplates
+    .filter((s) => s.dialect === queryDialect)
+    .map((s) => ({ title: s.title, query: s.query, detail: 'your template' }));
+  return [...own, ...mine].map((tpl) => ({
+    label: tpl.title,
+    detail: tpl.detail,
+    type: 'text',
+    boost: -3,
+    apply: tpl.query,
+  }));
 }
 
 /** The two denotations, offered wherever a constraint can go. */
@@ -284,7 +411,7 @@ async function complete(context: CompletionContext): Promise<CompletionResult | 
   if (!where) return null;
   // An explicit Ctrl+Space always answers; typing only answers once there is something to
   // narrow by, so the menu does not open on every space.
-  if (!context.explicit && where.from === context.pos && where.kind !== 'group') return null;
+  if (!context.explicit && where.from === context.pos && !['group', 'variable', 'asKind', 'insideKind'].includes(where.kind)) return null;
 
   switch (where.kind) {
     case 'clause':
@@ -295,8 +422,41 @@ async function complete(context: CompletionContext): Promise<CompletionResult | 
           { label: 'in', type: 'keyword', detail: 'scope it to a path' },
           { label: 'group', type: 'keyword', detail: 'count, instead of listing' },
           { label: 'use of', type: 'keyword', detail: 'every use of a member' },
+          ...(queryDialect === 'jsp'
+            ? []
+            : [
+                { label: 'as', type: 'keyword', detail: 'how to read the pattern: local, param, field…' },
+                { label: 'inside', type: 'keyword', detail: 'where the match lives: method, lambda, class…' },
+              ] as Completion[]),
+          ...(queryDialect === 'jsp'
+            ? []
+            : [...JAVA_KEYWORDS].sort().map((label): Completion => ({ label, type: 'keyword', boost: -2 }))),
+          ...templateCompletions(),
         ],
       };
+
+    case 'variable': {
+      // The holes the query already has — typing the same name twice is how two places are made to match the same thing.
+      const names = capturesIn(context.state.doc.toString());
+      return {
+        from: where.from,
+        options: [
+          ...names.map((name) => ({ label: `${name}$`, type: 'variable', detail: 'already in the query' })),
+          // The conventional names of the holes that stand for more than a name; Java only.
+          ...(queryDialect === 'jsp'
+            ? []
+            : HOLE_SUGGESTIONS.filter(([label]) => !names.includes(label.replace('...$', ''))).map(
+                ([label, detail]): Completion => ({ label, type: 'variable', detail, boost: -1 }),
+              )),
+        ],
+      };
+    }
+
+    case 'asKind':
+      return { from: where.from, options: AS_KINDS.map(([label, detail]) => ({ label, type: 'enum', detail })) };
+
+    case 'insideKind':
+      return { from: where.from, options: INSIDE_KINDS.map(([label, detail]) => ({ label, type: 'enum', detail })) };
 
     case 'group': {
       // The captures the query itself binds — the completion nobody could get from a manual.
@@ -353,7 +513,7 @@ export const ssrQueryLanguage: LanguageDescriptor = {
   id: 'bennu-ssr',
   // Never called: `cmExtension` takes precedence, and this language has no tree-sitter grammar.
   createParser: () => Promise.reject(new Error('the query language is a stream mode')),
-  cmExtension: StreamLanguage.define(parser),
+  cmExtension: [StreamLanguage.define(parser), ssrHighlight],
   // Highlighting comes from `cmExtension`, so there is no tree-sitter leaf to classify — the same
   // answer `cmLang` gives for every CM-only language.
   classify: () => null,
@@ -370,7 +530,7 @@ export const ssrQueryLanguage: LanguageDescriptor = {
 export const ssrReplacementLanguage: LanguageDescriptor = {
   id: 'bennu-ssr-replacement',
   createParser: () => Promise.reject(new Error('the query language is a stream mode')),
-  cmExtension: StreamLanguage.define(parser),
+  cmExtension: [StreamLanguage.define(parser), ssrHighlight],
   classify: () => null,
   intel: {
     completion: (context: CompletionContext) => {

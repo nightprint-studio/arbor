@@ -2,16 +2,16 @@
  * The verbs of the window, once. The keyboard handler, the palette, the toolbar and the context menus all
  * call these, so a verb is one thing with one behaviour — not four slightly different ones.
  */
-import { openPath } from '@tauri-apps/plugin-opener';
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
-import { openBennuWindow } from '$lib/ipc/app';
 import { curlExport, requestGet } from '$lib/ipc/hirundo';
 import { hirundoDetected, pathToTemplate } from '$lib/stores/hirundo/detected.svelte';
 import { hirundoRunner } from '$lib/stores/hirundo/runner.svelte';
 import { hirundoSse } from '$lib/stores/hirundo/sse.svelte';
 import { hirundoStore, type RequestTab } from '$lib/stores/hirundo/workspace.svelte';
 import { hirundoUiStore } from '$lib/stores/hirundo/ui.svelte';
-import { blankSoapRequest } from './request-model';
+import { blankSoapRequest, isStreamRequest } from './request-model';
+import { missingRequired } from './editor/completions';
 
 function tab(): RequestTab | null {
   return hirundoStore.active;
@@ -26,6 +26,34 @@ async function copy(text: string, done: string) {
   }
 }
 
+/** The endpoint Bennu detected in the code that this request is for (same method, same path), if any. */
+export function detectedEndpointOf(t: RequestTab) {
+  const path = pathOf(t.request.url);
+  return hirundoDetected.groups
+    .flatMap((g) => g.endpoints)
+    .find((e) => pathToTemplate(e.path) === path && (e.methods.length === 0 || e.methods.some((m) => m.toUpperCase() === t.request.method))) ?? null;
+}
+
+/** The detected endpoint of a request together with the Bennu project it was found in. */
+export function detectedMatchOf(t: RequestTab) {
+  const path = pathOf(t.request.url);
+  for (const g of hirundoDetected.groups) {
+    const endpoint = g.endpoints.find((e) => pathToTemplate(e.path) === path && (e.methods.length === 0 || e.methods.some((m) => m.toUpperCase() === t.request.method)));
+    if (endpoint) return { root: g.root, endpoint };
+  }
+  return null;
+}
+
+/** The file of a saved request tab, or `null` (with a hint) when there is none yet. */
+function tabFile(id: string | null): string | null {
+  const t = hirundoStore.tabs.find((x) => x.id === id);
+  if (!t?.path || !hirundoStore.project) {
+    toastStore.show('Save the request first: its file is its address.', 'info');
+    return null;
+  }
+  return `${hirundoStore.project.replace(/[\\/]+$/, '')}/.hirundo/collections/${t.path}`;
+}
+
 /** The path part of a request URL: no scheme, host or `{{baseUrl}}` prefix, no query. */
 export function pathOf(url: string): string {
   const noQuery = url.split('?')[0];
@@ -34,7 +62,15 @@ export function pathOf(url: string): string {
 }
 
 export const hirundoCommands = {
-  send: () => void hirundoStore.send(),
+  /** Send; first ask when the request still has fields marked required that are empty. */
+  send() {
+    const t = tab();
+    if (!t) return;
+    const missing = missingRequired(t.request);
+    if (missing.length) hirundoUiStore.open({ kind: 'confirm-send', missing });
+    else if (isStreamRequest(t.request)) hirundoCommands.startStream();
+    else void hirundoStore.send();
+  },
   cancel: () => void hirundoStore.cancel(),
 
   /** An unsaved request goes into the first collection; with none, the user is asked to make one. */
@@ -64,7 +100,33 @@ export const hirundoCommands = {
   exportHttp: (path: string) => hirundoUiStore.open({ kind: 'http-export', path }),
   closeTab() {
     const t = tab();
-    if (t) hirundoStore.closeTab(t.id);
+    if (t) hirundoStore.closeTabs('one', t.id);
+  },
+  /** Copy the file (request) or folder (collection) behind a row of the collections tree. */
+  copyNodePath(path: string) {
+    const project = hirundoStore.project;
+    if (!project) return;
+    void copy(`${project.replace(/[\\/]+$/, '')}/.hirundo/collections/${path}`, 'Path copied.');
+  },
+  closeOtherTabs: () => hirundoStore.closeTabs('others'),
+  closeTabsToRight: () => hirundoStore.closeTabs('right'),
+  closeAllTabs: () => hirundoStore.closeTabs('all'),
+  closeSavedTabs: () => hirundoStore.closeTabs('saved'),
+  moveTabLeft: () => hirundoStore.moveActive(-1),
+  moveTabRight: () => hirundoStore.moveActive(1),
+  renameTab(id: string | null = hirundoStore.activeId) {
+    const t = hirundoStore.tabs.find((x) => x.id === id);
+    if (t) hirundoUiStore.open({ kind: 'rename-tab', id: t.id, name: t.request.name });
+  },
+  /** Copy the file of a request tab (the clicked one, or the active one). */
+  copyTabPath(id: string | null = hirundoStore.activeId) {
+    const file = tabFile(id);
+    if (file) void copy(file, 'Path of the request file copied.');
+  },
+  async revealTab(id: string | null = hirundoStore.activeId) {
+    const file = tabFile(id);
+    if (!file) return;
+    try { await revealItemInDir(file); } catch (e) { toastStore.show(String(e), 'error'); }
   },
 
   /** Pretty-print a JSON body; anything that is not JSON is left alone, and said so. */
@@ -117,32 +179,12 @@ export const hirundoCommands = {
     void copy(`${root}/.hirundo/collections/${t.path}`, 'Path of the request file copied.');
   },
 
-  /** Imber lives in Bennu: hand it the request, the answer and what failed as one prompt, and open Bennu. */
-  async askImber() {
-    const t = tab();
-    if (!t) return;
-    const r = t.response;
-    const failed = t.report?.checks.filter((x) => !x.passed).map((x) => `- ${x.line}${x.detail ? ` (${x.detail})` : ''}`).join('\n');
-    const prompt = [
-      'Look at this HTTP request and its answer.',
-      '',
-      `${t.request.method} ${t.request.url}`,
-      r ? `Answer: ${r.status} ${r.status_text} in ${r.time_ms} ms\n\n${r.body.slice(0, 4000)}` : 'It has not been sent yet.',
-      failed ? `\nFailed checks:\n${failed}` : '',
-    ].join('\n');
-    await copy(prompt, 'Prompt copied — paste it in Imber.');
-    void openBennuWindow();
-  },
-
   /** The controller of a request, when Bennu knows it: opens its source file in the default editor. */
   async goToController() {
     const t = tab();
     if (!t) return;
     if (!hirundoDetected.groups.length) await hirundoDetected.refresh();
-    const path = pathOf(t.request.url);
-    const hit = hirundoDetected.groups
-      .flatMap((g) => g.endpoints)
-      .find((e) => pathToTemplate(e.path) === path && (e.methods.length === 0 || e.methods.some((m) => m.toUpperCase() === t.request.method)));
+    const hit = detectedEndpointOf(t);
     if (!hit) {
       toastStore.show('Bennu has no endpoint for this URL in the chosen projects.', 'info');
       return;
@@ -178,6 +220,9 @@ export const hirundoCommands = {
   environments: () => hirundoUiStore.open({ kind: 'environments' }),
   workspaces: () => hirundoUiStore.open({ kind: 'workspaces' }),
   findRequest: () => hirundoUiStore.openSearch(),
+  /** The folder picker straight away: the project is the folder you choose. */
+  openFolder: () => hirundoUiStore.open({ kind: 'open-folder' }),
+  newProject: () => hirundoUiStore.open({ kind: 'new-project' }),
   openProject: () => hirundoUiStore.open({ kind: 'project-picker' }),
   schedule: (id: string | null = null) => hirundoUiStore.open({ kind: 'schedule', id }),
 };

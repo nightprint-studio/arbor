@@ -919,6 +919,12 @@ impl<'a> FileWalker<'a> {
                 // found by a source walk — and left every `@Ann` spelling the old name.
                 "annotation" | "marker_annotation" => self.on_annotation_name(&n),
                 "field_access" => self.on_field_access(&n, root, symbols),
+                // `Foo.class`: the grammar types the name as a `type_identifier` (so the arm below
+                // sees it); this arm is for the day it is a plain `identifier`.
+                "class_literal" => self.on_class_literal(&n),
+                // `{@link Foo}`, `@see Foo`, `@throws Foo`: a name in a comment is a use of the type
+                // all the same, and a rename that leaves it behind leaves a dangling link.
+                "block_comment" => self.on_javadoc(&n),
                 "identifier" => self.on_bare_identifier(&n),
                 "type_identifier" => self.on_type_identifier(&n),
                 _ => {}
@@ -935,6 +941,18 @@ impl<'a> FileWalker<'a> {
     /// reference names no method of its own, and the type it names is already recorded as a type
     /// use by the walk.
     fn on_method_reference(&mut self, node: &Node, root: &Node, symbols: &FileSymbols) {
+        // The qualifier of `Foo::bar` and `Foo::new` is a use of the type `Foo` — and the grammar
+        // reads it as a plain `identifier` (an expression that could equally be a variable), so the
+        // `type_identifier` arm never sees it. This must come first: `Foo::new` has no method name
+        // and returns below, which is exactly the spelling that went uncounted.
+        let first = {
+            let mut cur = node.walk();
+            let first = node.named_children(&mut cur).next();
+            first
+        };
+        if let Some(qualifier) = first {
+            self.note_type_qualifier(&qualifier);
+        }
         let Some((qualifier, name_node)) = method_reference_parts(node) else {
             return;
         };
@@ -957,6 +975,50 @@ impl<'a> FileWalker<'a> {
         if self.records_owner(&owner) {
             let usage = self.usage_at(&name_node);
             self.edges.push((DeclKey::Method { owner, name }, usage));
+        }
+    }
+
+    /// `Foo.class` whose `Foo` came out as an `identifier` rather than a `type_identifier`.
+    fn on_class_literal(&mut self, node: &Node) {
+        let Some(first) = node.named_child(0) else {
+            return;
+        };
+        if first.kind() != "identifier" {
+            return;
+        }
+        let Some(text) = self.node_text(&first) else {
+            return;
+        };
+        self.attempted += 1;
+        let Some(binary) = self.resolve_type_simple(&text) else {
+            return;
+        };
+        self.resolved += 1;
+        if self.records_owner(&binary) {
+            let usage = self.usage_at(&first);
+            self.edges.push((DeclKey::Type { binary }, usage));
+        }
+    }
+
+    /// The types a Javadoc comment names — see [`javadoc_type_refs`].
+    fn on_javadoc(&mut self, node: &Node) {
+        let Some(text) = self.node_text(node) else {
+            return;
+        };
+        if !text.starts_with("/**") {
+            return;
+        }
+        let base = node.start_byte();
+        for (path, start, end) in javadoc_type_refs(&text) {
+            self.attempted += 1;
+            let Some(binary) = self.resolve_type_simple(&path) else {
+                continue;
+            };
+            self.resolved += 1;
+            if self.records_owner(&binary) {
+                let usage = self.usage_span(base + start, base + end);
+                self.edges.push((DeclKey::Type { binary }, usage));
+            }
         }
     }
 
@@ -2516,6 +2578,43 @@ pub(crate) fn is_member_selector_node(node: &Node) -> bool {
 ///
 /// `None` for `Foo::new`: a constructor reference names no method, and `new` is not even a named
 /// node, so the "last named child" would be the qualifier itself.
+/// The type names a Javadoc comment links to — `{@link X}`, `{@linkplain X}`, `@see X`,
+/// `@throws X`, `@exception X` — each as (the path as written, the byte span of its LAST segment
+/// within `text`). A member after `#` is not part of the name, and a package in front of the type is
+/// not the type: only the last segment is what a rename has to move.
+pub(crate) fn javadoc_type_refs(text: &str) -> Vec<(String, usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while let Some(rel) = text[i..].find('@') {
+        let at = i + rel;
+        i = at + 1;
+        let tag: String = text[i..].chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+        if !matches!(tag.as_str(), "link" | "linkplain" | "see" | "throws" | "exception") {
+            continue;
+        }
+        let mut j = i + tag.len();
+        while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+            j += 1;
+        }
+        let start = j;
+        while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || matches!(bytes[j], b'_' | b'$' | b'.')) {
+            j += 1;
+        }
+        let path = text[start..j].trim_end_matches('.');
+        let Some(first) = path.chars().next() else { continue };
+        if !(first.is_ascii_alphabetic() || first == '_' || first == '$') {
+            continue;
+        }
+        let end = start + path.len();
+        let last_start = path.rfind('.').map_or(start, |d| start + d + 1);
+        if last_start < end {
+            out.push((path.to_string(), last_start, end));
+        }
+    }
+    out
+}
+
 pub(crate) fn method_reference_parts<'a>(node: &Node<'a>) -> Option<(Node<'a>, Node<'a>)> {
     let mut cur = node.walk();
     let children: Vec<Node<'a>> = node.named_children(&mut cur).collect();
@@ -2990,6 +3089,108 @@ mod tests {
             .collect();
         let index = build_reference_index(&src, &resolver, &project_types);
         (index, resolver, project_types)
+    }
+
+    // ── every way a type is written ──────────────────────────────────────────────────────────────
+
+    /// The ways a project type `A` is spelled inside another class's body, one use each.
+    const TYPE_SPELLINGS: &[(&str, &str)] = &[
+        ("class literal", "Object x = A.class;"),
+        ("array class literal", "Object x = A[].class;"),
+        ("constructor reference", "Object x = A::new;"),
+        ("method reference", "Object x = A::val;"),
+        ("instanceof", "boolean x(Object o) { return o instanceof A; }"),
+        ("cast", "Object x(Object o) { return (A) o; }"),
+        ("generic argument", "java.util.List<A> x;"),
+        ("annotation", "@A int x;"),
+        ("static qualifier", "Object x = A.val();"),
+        ("javadoc link", "/** See {@link A}. */ void x() {}"),
+        ("javadoc link to a member", "/** See {@link A#val()}. */ void x() {}"),
+        ("javadoc see", "/** @see A */ void x() {}"),
+        ("javadoc throws", "/** @throws A if it fails */ void x() {}"),
+    ];
+
+    fn type_uses_in_b(snippet: &str, incremental: bool) -> usize {
+        let b = format!("package p; public class B {{ {snippet} }}");
+        let files = [("A.java", "package p; public class A { public static String val() { return \"\"; } }"), ("B.java", b.as_str())];
+        let key = DeclKey::Type { binary: "p/A".into() };
+        let (index, resolver, pt) = index_of(&files);
+        if !incremental {
+            return index.usages_of(&key).iter().filter(|u| u.file == "B.java").count();
+        }
+        let src: Vec<SourceFile> =
+            files.iter().map(|(p, s)| SourceFile { path: p.to_string(), source: s.to_string() }).collect();
+        let built = build_reference_index_incremental(&src, &resolver, &pt, None, &|_, _| {});
+        built.index.usages_of(&key).iter().filter(|u| u.file == "B.java").count()
+    }
+
+    #[test]
+    fn every_spelling_of_a_type_is_a_use_of_it() {
+        for (what, snippet) in TYPE_SPELLINGS {
+            assert_eq!(type_uses_in_b(snippet, false), 1, "{what}: {snippet}");
+        }
+    }
+
+    #[test]
+    fn the_incremental_index_sees_the_same_uses_as_the_full_scan() {
+        for (what, snippet) in TYPE_SPELLINGS {
+            assert_eq!(type_uses_in_b(snippet, true), type_uses_in_b(snippet, false), "{what}: {snippet}");
+        }
+    }
+
+    /// A class that lives in another package and reaches the file only through its `import` — how a
+    /// dependency's class is spelled — must be a use in every spelling, the class literal included.
+    /// The generic argument is the control: if it counts and a class literal does not, the defect is in
+    /// how that one spelling is walked, not in resolving the name.
+    #[test]
+    fn an_imported_class_is_a_use_in_every_spelling_including_the_class_literal() {
+        let spellings = [
+            ("generic argument (control)", "java.util.List<X> a;"),
+            ("class literal", "Object a = X.class;"),
+            ("array class literal", "Object a = X[].class;"),
+            ("class literal then a call", "String a = X.class.getName();"),
+            ("class literal as an argument", "Object a = java.util.Objects.requireNonNull(X.class);"),
+        ];
+        for (what, snippet) in spellings {
+            let b = format!("package q; import lib.X; public class B {{ {snippet} }}");
+            let files = [("X.java", "package lib; public class X { }"), ("B.java", b.as_str())];
+            let (index, _r, _pt) = index_of(&files);
+            let uses = index.usages_of(&DeclKey::Type { binary: "lib/X".into() });
+            assert_eq!(uses.iter().filter(|u| u.file == "B.java").count(), 1, "{what}: {snippet}");
+        }
+    }
+
+    #[test]
+    fn a_qualified_this_names_the_class() {
+        let a = "package p; public class A { class In { Object x = A.this; } }";
+        let (index, _r, _pt) = index_of(&[("A.java", a)]);
+        assert_eq!(index.usages_of(&DeclKey::Type { binary: "p/A".into() }).len(), 1);
+    }
+
+    #[test]
+    fn a_variable_named_like_the_type_is_not_a_use_of_it() {
+        // `a::val` — here `a` is a parameter.
+        let b = "package p; public class B { Object x(A a) { return a::val; } }";
+        let files = [("A.java", "package p; public class A { public String val() { return \"\"; } }"), ("B.java", b)];
+        let (index, _r, _pt) = index_of(&files);
+        let uses = index.usages_of(&DeclKey::Type { binary: "p/A".into() });
+        assert_eq!(uses.len(), 1, "only the parameter's declared type: {uses:?}");
+    }
+
+    #[test]
+    fn javadoc_names_are_read_by_their_last_segment() {
+        let text = "/** See {@link p.q.Foo#bar()}, {@linkplain Baz label}, @see Qux and x@y.com\n * @throws java.io.IOException if it fails */";
+        let got: Vec<(String, &str)> =
+            javadoc_type_refs(text).into_iter().map(|(p, s, e)| (p, &text[s..e])).collect();
+        assert_eq!(
+            got,
+            [
+                ("p.q.Foo".to_string(), "Foo"),
+                ("Baz".to_string(), "Baz"),
+                ("Qux".to_string(), "Qux"),
+                ("java.io.IOException".to_string(), "IOException"),
+            ]
+        );
     }
 
     #[test]

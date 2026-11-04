@@ -37,7 +37,8 @@ function clampParkedMax(n: number): number {
  *  swap their look without every callsite knowing about the store. */
 function applyAttribute(style: WindowControlsStyle) {
   if (typeof document === 'undefined') return;
-  document.documentElement.dataset.windowControls = style;
+  // `crescenti` is the mac trio: global rules keyed on `data-window-controls="mac"` keep working.
+  document.documentElement.dataset.windowControls = style === 'windows' ? 'windows' : 'mac';
 }
 
 function applyFontScale(scale: number) {
@@ -98,7 +99,9 @@ function createAppearanceStore() {
   async function loadConfig() {
     try {
       const cfg = await getAppearanceConfig();
-      windowControlsStyle = (cfg.window_controls_style === 'windows' ? 'windows' : 'mac');
+      windowControlsStyle = cfg.window_controls_style === 'windows' || cfg.window_controls_style === 'crescenti'
+        ? cfg.window_controls_style
+        : 'mac';
       fontScale           = clampScale(cfg.font_scale);
       useThemeFonts       = !!cfg.use_theme_fonts;
       activityBarPosition = normalisePosition(cfg.activity_bar_position);

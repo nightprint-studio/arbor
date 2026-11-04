@@ -38,13 +38,21 @@ export const forgetRecentProject = (product: string, path: string) =>
 export const pinRecentProject = (product: string, path: string, pinned: boolean) =>
   invoke<void>('pin_recent_project', { product, path, pinned });
 
+/** Where in the project a request should land — passed along with the path, consumed once. A product acts on
+ *  the parts it understands (Corvus: `commit`, `branch`). */
+export interface OpenContext { file?: string; commit?: string; branch?: string }
+
+/** Pull the context parked with this product's open-intent, if any. */
+export const takeOpenContext = (product: string) =>
+  invoke<OpenContext | null>('take_open_context', { product });
+
 /**
  * Park "open this project" for a product. Pair it with `openProduct`: the
  * product's shell pulls the path as it mounts, so the click lands on the
  * project rather than on an empty product.
  */
-export const setOpenIntent = (product: string, path: string) =>
-  invoke<void>('set_open_intent', { product, path });
+export const setOpenIntent = (product: string, path: string, context?: OpenContext) =>
+  invoke<void>('set_open_intent', { product, path, context: context ?? null });
 
 /** Pull this product's parked project path, if any. Returns null once consumed. */
 export const takeOpenIntent = (product: string) =>
@@ -54,22 +62,23 @@ export const takeOpenIntent = (product: string) =>
  *  whose shell has long since done its mount-time pull. */
 export const OPEN_INTENT_EVENT = 'arbor://open-intent';
 
-export interface OpenIntentPayload { product: string; path: string }
+export interface OpenIntentPayload { product: string; path: string; context?: OpenContext | null }
 
 /**
  * Run `open` whenever this product is asked to open a project — once as the
  * shell mounts (the parked intent) and then on every later request. Returns a
  * disposer. The intent is consumed either way, so it can never fire twice.
  */
-export function onOpenIntent(product: string, open: (path: string) => void): () => void {
-  void takeOpenIntent(product).then((p) => { if (p) open(p); }).catch(() => {});
+export function onOpenIntent(product: string, open: (path: string, context?: OpenContext) => void): () => void {
+  void takeOpenIntent(product).then(async (p) => { if (p) open(p, (await takeOpenContext(product).catch(() => null)) ?? undefined); }).catch(() => {});
   let un: (() => void) | null = null;
   let disposed = false;
   void listen<OpenIntentPayload>(OPEN_INTENT_EVENT, (e) => {
     if (e.payload?.product !== product) return;
     // Consume the parked copy so a later mount doesn't re-open it.
     void takeOpenIntent(product).catch(() => {});
-    open(e.payload.path);
+    void takeOpenContext(product).catch(() => {});
+    open(e.payload.path, e.payload.context ?? undefined);
   }).then((off) => {
     if (disposed) off();
     else un = off;

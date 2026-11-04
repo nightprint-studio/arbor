@@ -1,72 +1,88 @@
 <script lang="ts">
   /**
-   * HttpImportModal — a `.http` / `.rest` file (IntelliJ's HTTP Client format) becomes requests. Browse to the
-   * file, or paste its text; the modal lists the requests it holds with what could not be carried over
-   * (JavaScript response handlers are read and reported, never run), and the ticked ones are saved into a
-   * collection. Given a *file*, `< ./body.json` bodies are read from beside it, and the environments of the
-   * `http-client.env.json` next to it (and its private twin) can come along.
+   * HttpImportModal — a `.http` / `.rest` file (IntelliJ's HTTP Client format) becomes requests, in the shared
+   * `ImportShell`: the text in the editor, what it holds on the right. JavaScript response handlers are read and
+   * reported, never run. Given a *file*, `< ./body.json` bodies are read from beside it, and the environments
+   * of the `http-client.env.json` next to it (and its private twin) can come along.
    */
-  import { onMount } from 'svelte';
-  import { FileText, FolderSearch } from 'lucide-svelte';
+  import { FileText } from 'lucide-svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
-  import Button from '$lib/components/shared/ui/Button.svelte';
   import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
   import FormSection from '$lib/components/shared/ui/FormSection.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
-  import Textarea from '$lib/components/shared/ui/Textarea.svelte';
-  import Modal from '$lib/components/shared/Modal.svelte';
-  import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
-  import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
-  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
+  import { languageForPath } from '$lib/components/bennu/languages';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { httpEnvImport, httpImport, requestSave } from '$lib/ipc/hirundo';
   import { hirundoStore } from '$lib/stores/hirundo/workspace.svelte';
   import type { HttpEntry } from '$lib/types/hirundo';
   import { methodColor } from '../request-model';
+  import ImportShell from './ImportShell.svelte';
+  import { lineError, positionFromMessage, type TextError } from './import-diagnostics';
 
   let { onClose }: { onClose: () => void } = $props();
 
-  let source = $state('');
-  let el = $state<HTMLTextAreaElement | undefined>(undefined);
-  let browsing = $state(false);
+  const EXAMPLE = `@host = https://httpbin.org
+
+### Get something
+GET {{host}}/get
+Accept: application/json
+
+### Login
+POST {{host}}/post
+Content-Type: application/json
+
+{ "user": "bob" }
+`;
+  const language = languageForPath('requests.http');
+
+  let text = $state('');
+  let filePath = $state('');
+  /** The text as it was when read from `filePath`: while unedited, the backend reads the file itself so `< ./body.json` resolves beside it. */
+  let fileText = $state('');
   let reading = $state(false);
   let error = $state('');
-  let entries = $state<HttpEntry[] | null>(null);
+  let errorAt = $state<TextError | null>(null);
+  let entries = $state<HttpEntry[]>([]);
   let picked = $state<boolean[]>([]);
   let collection = $state(hirundoStore.active?.parent ?? hirundoStore.tree[0]?.path ?? '');
   let withEnvs = $state(true);
   let saving = $state(false);
 
-  onMount(() => el?.focus());
-
   const collections = $derived(hirundoStore.tree.map((c) => ({ value: c.path, label: c.name })));
   const count = $derived(picked.filter(Boolean).length);
-  /** The folder of the file, when the source is a path (one line, no braces). */
-  const folder = $derived.by(() => {
-    const s = source.trim();
-    return s && !s.includes('\n') && !/^https?:/.test(s) ? s.replace(/[\\/][^\\/]*$/, '') : '';
-  });
+  /** The folder of the file the text was read from, so its environments can come along. */
+  const folder = $derived(filePath.replace(/[\\/][^\\/]*$/, ''));
 
-  async function read() {
-    if (!source.trim() || reading) return;
+  async function read(source: string, shown: string) {
     reading = true;
     error = '';
-    entries = null;
+    errorAt = null;
     try {
       entries = (await httpImport(source)).entries;
       picked = entries.map(() => true);
     } catch (e) {
+      entries = [];
       error = String(e);
+      const at = positionFromMessage(shown, error);
+      errorAt = at === null ? lineError(shown, error) : { message: error, from: at, to: Math.min(shown.length, at + 1) };
     } finally {
       reading = false;
     }
   }
 
+  // Read as it is typed or pasted, after a pause: the list on the right follows the text.
+  $effect(() => {
+    const t = text;
+    if (!t.trim()) { entries = []; picked = []; error = ''; errorAt = null; return; }
+    const timer = setTimeout(() => void read(filePath && t === fileText ? filePath : t, t), 350);
+    return () => clearTimeout(timer);
+  });
+
   async function save() {
     const project = hirundoStore.project;
-    if (!project || !entries || !collection || saving) return;
+    if (!project || !entries.length || !collection || saving) return;
     saving = true;
     error = '';
     try {
@@ -89,83 +105,62 @@
       saving = false;
     }
   }
-
-  function onKey(e: KeyboardEvent) {
-    if (browsing || !(e.ctrlKey || e.metaKey) || e.key !== 'Enter') return;
-    e.preventDefault();
-    if (entries) void save(); else void read();
-  }
 </script>
 
-<svelte:window onkeydown={onKey} />
-
-<Modal {onClose} width="700px" height="620px" ariaLabel="Import a .http file">
-  {#snippet header()}
-    <ModalHeader {onClose}>
-      <FileText size={14} />
-      <span class="modal-title">Import a .http file</span>
-    </ModalHeader>
-  {/snippet}
-
-  <div class="hi">
-    <FormSection label="Source" hint="The path of a .http or .rest file, or its text." first>
-      <Textarea bind:value={source} bind:element={el} minRows={5} maxRows={9} framed placeholder={'### Login\nPOST {{host}}/api/login\nContent-Type: application/json\n\n{ "user": "bob" }'} />
-      <div class="hi-row"><Button variant="outline" size="sm" onclick={() => (browsing = true)}>{#snippet iconStart()}<FolderSearch size={13} />{/snippet}Browse…</Button></div>
-    </FormSection>
-
-    {#if error}<div class="hi-pad"><Alert variant="error" compact text={error} dismissible onclose={() => (error = '')} /></div>{/if}
-
-    {#if entries}
-      <FormSection label={`Found · ${entries.length}`}>
-        {#if entries.length === 0}
-          <EmptyState message="No request found" compact />
-        {:else}
-          <div class="hi-list">
-            {#each entries as entry, i (i)}
-              <div class="hi-row2">
-                <Checkbox checked={picked[i]} onchange={(v) => (picked[i] = v)} ariaLabel={entry.title} />
-                <span class="hi-method" style:color={methodColor(entry.request.method)}>{entry.request.method}</span>
-                <b class="hi-name">{entry.title}</b>
-                <code class="hi-url">{entry.request.url}</code>
-                {#each entry.warnings as w (w)}<span class="hi-warn">{w}</span>{/each}
-              </div>
-            {/each}
-          </div>
-        {/if}
-        {#if folder}<Checkbox checked={withEnvs} label="Also import the environments of http-client.env.json beside the file" onchange={(v) => (withEnvs = v)} />{/if}
-        <FormField label="Save into"><Select value={collection} options={collections} onchange={(v) => (collection = v)} /></FormField>
-      </FormSection>
-    {/if}
-  </div>
-
-  {#snippet footer()}
-    {#if entries}
-      <ModalFooter hint="to import">
-        <Button variant="ghost" onclick={() => (entries = null)}>Back</Button>
-        <Button variant="primary" loading={saving} disabled={count === 0 || !collection} onclick={() => void save()}>{`Add ${count} request${count === 1 ? '' : 's'}`}</Button>
-      </ModalFooter>
+<ImportShell
+  title="Import a .http file"
+  icon={FileText}
+  {language}
+  bind:text
+  placeholder={'### Login\nPOST {{host}}/api/login\nContent-Type: application/json\n\n{ "user": "bob" }'}
+  modes={['paste', 'file', 'example']}
+  example={EXAMPLE}
+  fileExtensions={['http', 'rest']}
+  fileTitle="Choose the .http file"
+  onFile={(p) => { filePath = p; fileText = text; }}
+  {reading}
+  {error}
+  {errorAt}
+  sideTitle="Requests found"
+  sideCount={entries.length || undefined}
+  primaryLabel={`Add ${count} request${count === 1 ? '' : 's'}`}
+  primaryDisabled={count === 0 || !collection}
+  primaryLoading={saving}
+  onPrimary={() => void save()}
+  {onClose}
+>
+  {#snippet side()}
+    {#if entries.length === 0}
+      <div class="hi-empty"><EmptyState message={text.trim() ? 'No request found' : 'Nothing to import yet'} description="The requests of the file appear here as soon as it reads." compact /></div>
     {:else}
-      <ModalFooter hint="to read">
-        <Button variant="ghost" onclick={onClose}>Cancel</Button>
-        <Button variant="primary" loading={reading} disabled={!source.trim()} onclick={() => void read()}>Read</Button>
-      </ModalFooter>
+      <div class="hi-list">
+        {#each entries as entry, i (i)}
+          <div class="hi-item">
+            <Checkbox checked={picked[i]} onchange={(v) => (picked[i] = v)} ariaLabel={entry.title} />
+            <span class="hi-method" style:color={methodColor(entry.request.method)}>{entry.request.method}</span>
+            <span class="hi-text"><b class="hi-name">{entry.title}</b><code class="hi-url">{entry.request.url}</code></span>
+            {#each entry.warnings as w (w)}<Alert variant="warning" compact text={w} />{/each}
+          </div>
+        {/each}
+      </div>
+      <div class="hi-target">
+        <FormSection label="Where">
+          {#if folder}<Checkbox checked={withEnvs} label="Also import the environments of http-client.env.json beside the file" onchange={(v) => (withEnvs = v)} />{/if}
+          <FormField label="Save into"><Select value={collection} options={collections} onchange={(v) => (collection = v)} /></FormField>
+        </FormSection>
+      </div>
     {/if}
   {/snippet}
-</Modal>
-
-{#if browsing}
-  <FileExplorerModal mode="file" extensions={['http', 'rest']} title="Choose the .http file" onConfirm={(p: string) => { browsing = false; source = p; void read(); }} onCancel={() => (browsing = false)} onClose={() => (browsing = false)} />
-{/if}
+</ImportShell>
 
 <style>
-  .hi { display: flex; flex-direction: column; gap: 4px; padding: 4px 16px 12px; overflow: auto; height: 100%; }
-  .hi-row { display: flex; gap: 8px; margin-top: 6px; }
-  .hi-pad { padding: 4px 0; }
-  .hi-list { display: flex; flex-direction: column; max-height: 230px; overflow: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
-  .hi-row2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--border-subtle); }
-  .hi-row2:last-child { border-bottom: none; }
-  .hi-method { font: 600 10px var(--font-mono); width: 44px; }
+  .hi-empty { flex: 1; display: grid; place-items: center; }
+  .hi-list { flex: 1; min-height: 0; overflow: auto; }
+  .hi-item { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--border-subtle); }
+  .hi-method { font: 600 10px var(--font-mono); width: 44px; flex: none; }
+  .hi-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
   .hi-name { font-size: var(--font-size-sm); }
-  .hi-url { font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
-  .hi-warn { flex-basis: 100%; font-size: var(--font-size-xs); color: var(--warning); padding-left: 52px; }
+  .hi-url { font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hi-item > :global(.alert) { flex-basis: 100%; }
+  .hi-target { border-top: 1px solid var(--border-subtle); padding: 0 12px 8px; }
 </style>

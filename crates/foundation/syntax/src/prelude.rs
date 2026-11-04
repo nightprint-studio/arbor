@@ -9,5 +9,5 @@ pub use crate::outline::{
     node_path_at, node_path_at_with, outline, outline_with, Injection, OutlineOptions, SyntaxNode,
     SyntaxTree,
 };
-pub use crate::pattern::{Arity, Capture, Match, Pattern};
+pub use crate::pattern::{Arity, Capture, HoleForms, Match, Pattern};
 pub use crate::range::ByteRange;

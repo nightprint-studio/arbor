@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextLength } from './assistant-typewriter';
+import { nextLength } from './imber-typewriter';
 
 describe('the pace of the assistant\'s text', () => {
   it('shows at least a character a frame while something is waiting', () => {

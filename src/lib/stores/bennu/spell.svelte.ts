@@ -16,6 +16,11 @@ import { SvelteSet } from 'svelte/reactivity';
 import { spellStatus as ipcStatus, downloadDictionaries as ipcDownload, dictAdd as ipcDictAdd, type SpellStatus } from '$lib/ipc/bennu/spell';
 import { getBennuConfig, setBennuConfig } from '$lib/ipc/bennu/config';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+import { withTimeout } from '$lib/utils/with-timeout';
+
+/** How long the backend gets to say which dictionaries are installed. It is a file-existence check:
+ *  silence for this long means the backend is not serving (yet), not that the answer is slow. */
+const STATUS_TIMEOUT_MS = 8000;
 
 function createBennuSpellStore() {
   /**
@@ -52,6 +57,11 @@ function createBennuSpellStore() {
   let status = $state<SpellStatus | null>(null);
   /** Whether {@link loadStatus} has ever succeeded — see `statusKnown`. */
   let known = $state(false);
+  /** Why the last {@link loadStatus} failed, or null — what the Spelling page shows instead of waiting. */
+  let statusError = $state<string | null>(null);
+  /** A status request is in flight. */
+  let statusLoading = $state(false);
+  let statusInflight: Promise<void> | null = null;
   let downloading = $state(false);
   let progress = $state<string | null>(null);
   // Bumped whenever the dictionaries change (download / add-word) so the editor's
@@ -113,22 +123,35 @@ function createBennuSpellStore() {
      * happened before the backend was up.
      */
     get statusKnown() { return known; },
+    /** The reason the last status request failed or timed out; null after a success. */
+    get statusError() { return statusError; },
+    get statusLoading() { return statusLoading; },
 
     /**
      * Refresh the install status from the BE.
      *
-     * A failure leaves the last known answer alone instead of writing "not installed" over it.
-     * This runs at window mount, which is a moment the backend may not be serving yet — and the
-     * old behaviour turned one early rejection into a permanent fact, since nothing ever asked
-     * again. Callers that show the answer ask on mount, which is the retry.
+     * A failure leaves the last known answer alone instead of writing "not installed" over it —
+     * but it is no longer silent: it is kept in `statusError`, so a screen can say the backend did
+     * not answer and offer to ask again. The call is bounded by a timeout, because an IPC to a
+     * backend that is not serving yet does not reject, it just never returns — and a store waiting
+     * on it stays on "asking…" forever. Concurrent callers share one request.
      */
-    async loadStatus() {
-      try {
-        status = await ipcStatus();
-        known = true;
-      } catch {
-        // Deliberately nothing: an unanswered question is not a "no".
-      }
+    loadStatus(): Promise<void> {
+      if (statusInflight) return statusInflight;
+      statusLoading = true;
+      statusInflight = (async () => {
+        try {
+          status = await withTimeout(ipcStatus(), STATUS_TIMEOUT_MS, 'The Bennu backend');
+          known = true;
+          statusError = null;
+        } catch (e) {
+          statusError = e instanceof Error ? e.message : String(e);
+        } finally {
+          statusLoading = false;
+          statusInflight = null;
+        }
+      })();
+      return statusInflight;
     },
 
     /** Download the EN + IT dictionaries (job-like; progress via events). Surfaces a failure as a

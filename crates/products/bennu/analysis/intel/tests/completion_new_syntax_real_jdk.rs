@@ -170,3 +170,21 @@ fn an_ambiguous_name_gets_its_call_when_the_candidates_agree() {
     assert_eq!(item.insert_text.as_deref(), Some("ByteArrayOutputStream()"));
     assert!(item.auto_import.is_none(), "ambiguous: nothing is imported silently");
 }
+
+/// A name the file already reaches — here, a class of its own package — is never imported, even when a class of the same name
+/// lives in another package: that import would not compile (a single-type import shadows the package's own class).
+#[test]
+fn a_name_the_file_already_reaches_is_not_imported_from_another_package() {
+    let Some(items) = complete_with(
+        &[
+            ("com/acme/Twin.java", "package com.acme;\npublic class Twin { }\n"),
+            ("com/other/Twin.java", "package com.other;\npublic class Twin { }\n"),
+        ],
+        "Twi| t;",
+    ) else {
+        return;
+    };
+    for item in items.iter().filter(|i| i.label == "Twin") {
+        assert!(item.auto_import.is_none(), "{:?}", item.auto_import);
+    }
+}

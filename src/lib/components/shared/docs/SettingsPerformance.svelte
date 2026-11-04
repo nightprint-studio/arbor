@@ -88,6 +88,13 @@
     terminal's shell. It ends when you stop it.</li>
 </ul>
 <p>
+  On Windows every command-line program gets a <em>console host</em> (<code>conhost</code>), so the last table would
+  list as many of them as programs. They are gathered into one collapsed row, <strong>Console hosts (N)</strong>, with
+  their combined CPU and memory; opened, each one reads <em>conhost → program</em> when the program it serves is known.
+  Whether the group is open survives the refresh every second. Nothing in it can be stopped from here — closing a host
+  closes that program's console. Other systems have none, and nothing is grouped.
+</p>
+<p>
   Bennu keeps loaded only what is in use. A project's index and language servers start when it is
   on screen; one that has gone ten minutes without being on screen or asked about — by you or by an
   AI client — gives back its index, framework models and library data, and its language servers

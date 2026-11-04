@@ -73,6 +73,7 @@ import {
 import { directoryKeys, relativeKey } from '$lib/components/bennu/tree-expansion';
 import { findNode, graftChildren, hasUnloaded, nextUnloadedOnTheWay, openAndUnlisted } from './tree-graft';
 import type { ProjectSession } from '$lib/ipc/bennu/config';
+import { composeSnapshot, inStoredOrder } from './session-snapshot';
 import type { ProjectInfo, SourceEdit, TreeNode } from '$lib/types/bennu';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 // MOCK — remove when bennu-be serves real data.
@@ -208,6 +209,23 @@ function createProjectStore() {
   const sessions = new Map<string, StashedSession>();
   // The workspace member roots (canonical), in switch order. Always includes the active root.
   let workspaceRoots = $state<string[]>([]);
+  /**
+   * Members of the stored workspace that did NOT open at restore — the backend was not routable yet,
+   * a drive was unplugged, a directory was moved. They keep their stored session here and in every
+   * snapshot: dropping them (as a snapshot of only the live members did) turned one slow start into
+   * the loss of that project's tabs and caret the next time anything was saved.
+   */
+  let unopened: ProjectSession[] = [];
+  /** The stored workspace's own order and the project it wanted on screen — for a retry. */
+  let restoreOrder: string[] = [];
+  let wantedRoot = '';
+  /**
+   * A restore is running: the flat state is half built (no project, some members), so it is not
+   * the session. A snapshot taken now — by a window close, a workspace switch, a debounce that
+   * fires — would be an empty or partial one that overwrites the real thing. `snapshotSession`
+   * answers `null` for the duration.
+   */
+  let restoring = false;
   // Every build manifest of every workspace project (`bennu_project_modules`), keyed by root. What the
   // rail and the tool windows read — NOT `project.kind`, which stays the single primary kind that
   // drives the Java index. A root with no entry yet is represented by its primary kind alone (see
@@ -483,9 +501,11 @@ function createProjectStore() {
   /** Build the active workspace's session snapshot from the live flat state (active project) +
    *  the stashed sessions (the other members). Pure — used both to persist and to flush the live
    *  state into the workspace store before a workspace switch. Empty for the demo / no project. */
-  function snapshotSession(): { active_project: string; projects: ProjectSession[] } {
+  function snapshotSession(): { active_project: string; projects: ProjectSession[] } | null {
     const activeRoot = project?.root;
-    if (!activeRoot || isDemo) return { active_project: '', projects: [] };
+    // Mid-restore, demo and nothing-on-screen each have their own answer — see `composeSnapshot`.
+    const early = composeSnapshot({ restoring, isDemo, activeRoot, live: [], unopened, wantedRoot, canon: canonPath });
+    if (restoring || isDemo || !activeRoot) return early;
     // The ACTIVE root comes from the live flat state, the rest from their stashed sessions.
     // `workspaceRoots` always includes the active root.
     const roots = workspaceRoots.includes(activeRoot) ? workspaceRoots : [activeRoot];
@@ -514,7 +534,7 @@ function createProjectStore() {
         ...treeExpansionStore.snapshot(r),
       };
     });
-    return { active_project: activeRoot, projects };
+    return composeSnapshot({ restoring, isDemo, activeRoot, live: projects, unopened, wantedRoot, canon: canonPath });
   }
 
   // Persist the active workspace's session (open tabs + active tab per project) debounced, so the
@@ -528,7 +548,8 @@ function createProjectStore() {
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
       if (!project || isDemo) return;
-      workspacesStore.saveActiveSession(snapshotSession());
+      const snap = snapshotSession();
+      if (snap) workspacesStore.saveActiveSession(snap);
     }, delay);
   }
   /** How long the caret must sit still before its position is worth a write. */
@@ -566,6 +587,18 @@ function createProjectStore() {
    *  Demo paths are served from the mock (no IPC). */
   async function ensureLoaded(path: string): Promise<boolean> {
     if (sources.has(path)) return true;
+    // One read per file at a time. A double click, or a go-to racing a tree click, used to start two
+    // reads of the same file; the slower one then wrote the disk text over whatever had been typed
+    // in the buffer after the first landed, and both ended in a tab-open.
+    const running = loadingFiles.get(path);
+    if (running) return running;
+    const read = loadFromDisk(path);
+    loadingFiles.set(path, read);
+    try { return await read; } finally { loadingFiles.delete(path); }
+  }
+  const loadingFiles = new Map<string, Promise<boolean>>();
+
+  async function loadFromDisk(path: string): Promise<boolean> {
     // MOCK — demo files never touch the backend.
     if (isDemoPath(path)) {
       const res = demoReadFile(path);
@@ -661,14 +694,15 @@ function createProjectStore() {
    * Shared by a workspace restore and by moving a project into the live workspace, which are the
    * same act: a stored session becoming a live one.
    */
-  async function openMember(p: ProjectSession, warm: boolean): Promise<string | null> {
+  async function openMember(p: ProjectSession, warm: boolean, quiet = false): Promise<string | null> {
     let info;
     try {
       info = await ipcOpenProject(p.root, warm);
     } catch (err) {
       // Not awaited: the status question is a round-trip, and the rest of the workspace should
       // not wait on explaining one project that is not coming.
-      void projectHealthStore.explainFailedOpen(p.root, err);
+      // A retry is silent: it asks again about a project the user was already told about.
+      if (!quiet) void projectHealthStore.explainFailedOpen(p.root, err);
       return null;
     }
     const root = canonPath(info.root);
@@ -1354,6 +1388,7 @@ function createProjectStore() {
         // background — awaiting it here is what made opening lag.
         applyProject(info, null, false); // resets the flat state + source cache
         sessions.clear();                // a fresh workspace: drop the previous members
+        unopened = [];
         workspaceRoots = [project!.root];
         forgetModules();
         loadTreeInto(project!.root);
@@ -1393,13 +1428,57 @@ function createProjectStore() {
       return true;
     },
 
+    /** Whether some member of the stored workspace is still waiting to open. */
+    get hasUnopened() { return unopened.length > 0; },
+
+    /** Forget a stored member that did not open — the user removed it (or located it elsewhere). */
+    forgetUnopened(root: string) {
+      const key = canonPath(root);
+      unopened = unopened.filter((u) => canonPath(u.root) !== key);
+    },
+
+    /**
+     * Ask again for the members that did not open at restore — silently, and keeping the stored
+     * order. Called when the backend announces itself (it is spawned lazily, so the first attempt can
+     * lose that race) and after a restore that left some behind. If nothing is on screen yet the
+     * remembered project is shown as soon as it opens. Resolves to whether anything was retried.
+     */
+    async retryUnopened(): Promise<boolean> {
+      if (restoring || unopened.length === 0) return false;
+      restoring = true;
+      try {
+        const pending = unopened;
+        unopened = [];
+        for (const p of pending) {
+          // eslint-disable-next-line no-await-in-loop
+          const root = await openMember(p, !project && canonPath(p.root) === wantedRoot, true);
+          if (!root) unopened.push(p);
+        }
+        // Back in the order the workspace was stored in.
+        workspaceRoots = inStoredOrder(workspaceRoots, restoreOrder);
+        if (!project && workspaceRoots.length > 0) {
+          const target = workspaceRoots.includes(wantedRoot) ? wantedRoot : workspaceRoots[0];
+          if (target !== wantedRoot) void ipcActivateProject(target).catch(() => {});
+          loadSession(sessions.get(target)!);
+          if (activeFilePath) await ensureLoaded(activeFilePath);
+        }
+      } finally {
+        restoring = false;
+      }
+      persistWorkspace();
+      return true;
+    },
+
     /** Take a stored session into the live workspace as a background member — the project stays
      *  where it is on screen. For moving a project into the workspace that is showing. Resolves to
      *  whether it opened. */
     async attachMember(p: ProjectSession): Promise<boolean> {
       if (workspaceRoots.includes(canonPath(p.root))) return true;
       const root = await openMember(p, false);
-      if (root) persistWorkspace();
+      if (root) {
+        unopened = unopened.filter((u) => canonPath(u.root) !== root);
+        persistWorkspace();
+      }
       return root !== null;
     },
 
@@ -1552,6 +1631,7 @@ function createProjectStore() {
     /** Clear the active view entirely (no project / tabs) — used when the workspace store activates
      *  a freshly-created empty workspace. Persistence-free; the store owns the write. */
     clearAll() {
+      unopened = [];
       sessions.clear();
       workspaceRoots = [];
       forgetModules();
@@ -1572,6 +1652,19 @@ function createProjectStore() {
      *  vanished directory is announced with Locate / Remove, anything else is logged; nothing opened
      *  leaves the window empty (no demo fallback). Persistence-free — the store persists after. */
     async loadWorkspace(projects: ProjectSession[], active: string) {
+      restoring = true;
+      unopened = [];
+      wantedRoot = canonPath(active);
+      restoreOrder = projects.map((p) => canonPath(p.root));
+      try {
+        await this.loadWorkspaceMembers(projects, active);
+      } finally {
+        restoring = false;
+      }
+    },
+
+    /** The body of {@link loadWorkspace}, which only adds the "a restore is running" bracket around it. */
+    async loadWorkspaceMembers(projects: ProjectSession[], active: string) {
       sessions.clear();
       workspaceRoots = [];
       forgetModules();
@@ -1587,7 +1680,8 @@ function createProjectStore() {
       const wanted = canonPath(active);
       for (const p of projects) {
         // eslint-disable-next-line no-await-in-loop
-        await openMember(p, canonPath(p.root) === wanted);
+        const opened = await openMember(p, canonPath(p.root) === wanted);
+        if (!opened) unopened.push(p); // keeps its stored tabs — see `unopened`
       }
       if (!workspaceRoots.length) return; // nothing opened (all gone / BE down)
       // Activate the remembered active project (or the first that opened), then load its active file.

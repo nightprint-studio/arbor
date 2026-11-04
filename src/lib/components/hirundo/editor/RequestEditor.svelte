@@ -13,6 +13,11 @@
   import AuthEditor from './AuthEditor.svelte';
   import BodyEditor from './BodyEditor.svelte';
   import KeyValueEditor from './KeyValueEditor.svelte';
+  import VariableBanner from './VariableBanner.svelte';
+  import { headerNameSuggest, headerValueSuggest } from './completions';
+  import { createVariableContext } from './variable-context.svelte';
+  import { hirundoSchemas } from '$lib/stores/hirundo/schemas.svelte';
+  import { detectedMatchOf } from '../hirundo-commands';
   import RequestBar from './RequestBar.svelte';
   import RequestToolbar from './RequestToolbar.svelte';
   import TestsEditor from './TestsEditor.svelte';
@@ -20,6 +25,12 @@
   let { tab }: { tab: RequestTab } = $props();
 
   const r = $derived(tab.request);
+  const vctx = createVariableContext(() => tab.path);
+
+  // A request that is a detected endpoint knows the shape of its body and of its answer: Bennu read the DTOs.
+  const match = $derived(detectedMatchOf(tab));
+  $effect(() => { if (match) hirundoSchemas.load(match.root, match.endpoint.id); });
+  const schemas = $derived(match ? hirundoSchemas.of(match.root, match.endpoint.id) : null);
   const count = (rows: { enabled: boolean; key: string }[]) => rows.filter((x) => x.enabled && x.key).length;
 
   const items = $derived<TabItem[]>([
@@ -61,23 +72,27 @@
 </script>
 
 <div class="re">
-  <RequestBar {tab} />
-  <RequestToolbar {tab} />
+  <!-- Three levels, each on its own ground: the bar and its verbs (raised), the sections (tabs), the editor (base). -->
+  <div class="re-top">
+    <RequestBar {tab} />
+    <RequestToolbar {tab} vars={vctx.vars} />
+    <VariableBanner {tab} known={vctx.known} />
+  </div>
   <div class="re-tabs">
     <Tabs {items} value={hirundoUiStore.editorTab} variant="underline" size="sm" ariaLabel="Request sections" onSelect={(id) => hirundoUiStore.setEditorTab(id as EditorTab)} />
   </div>
 
   <div class="re-body">
     {#if hirundoUiStore.editorTab === 'params'}
-      <KeyValueEditor rows={r.params} bulk={hirundoUiStore.bulk} onchange={(rows) => edit(() => (tab.request.params = rows))} />
+      <KeyValueEditor rows={r.params} bulk={hirundoUiStore.bulk} onToggleBulk={hirundoUiStore.toggleBulk} suggestValue={(_k, t, c) => headerValueSuggest('', t, c, vctx.vars)} onchange={(rows) => edit(() => (tab.request.params = rows))} />
     {:else if hirundoUiStore.editorTab === 'headers'}
-      <KeyValueEditor rows={r.headers} bulk={hirundoUiStore.bulk} keyPlaceholder="Header" onchange={(rows) => edit(() => (tab.request.headers = rows))} />
+      <KeyValueEditor rows={r.headers} bulk={hirundoUiStore.bulk} onToggleBulk={hirundoUiStore.toggleBulk} keyPlaceholder="Header" suggestKey={(t, c) => headerNameSuggest(t, c, vctx.vars)} suggestValue={(k, t, c) => headerValueSuggest(k, t, c, vctx.vars)} onchange={(rows) => edit(() => (tab.request.headers = rows))} />
     {:else if hirundoUiStore.editorTab === 'auth'}
-      <AuthEditor auth={r.auth} inheritedLabel={inherited} onchange={(a) => edit(() => (tab.request.auth = a))} />
+      <AuthEditor auth={r.auth} soap={r.body.kind === 'soap'} inheritedLabel={inherited} onchange={(a) => edit(() => (tab.request.auth = a))} />
     {:else if hirundoUiStore.editorTab === 'body'}
-      <BodyEditor body={r.body} soap={r.soap} bulk={hirundoUiStore.bulk} onchange={(b) => edit(() => (tab.request.body = b))} onsoap={(x) => edit(() => (tab.request.soap = x))} />
+      <BodyEditor body={r.body} soap={r.soap} requestSchema={schemas?.request ?? null} bulk={hirundoUiStore.bulk} onchange={(b) => edit(() => (tab.request.body = b))} onsoap={(x) => edit(() => (tab.request.soap = x))} />
     {:else if hirundoUiStore.editorTab === 'tests'}
-      <TestsEditor {tab} />
+      <TestsEditor {tab} responseSchema={schemas?.response ?? null} />
     {:else}
       <div class="re-docs">
         <Textarea bind:value={tab.request.docs} minRows={10} maxRows={30} framed ariaLabel="Notes" placeholder="Notes about this request — Markdown." onkeydown={() => hirundoStore.touch(tab)} />
@@ -88,7 +103,8 @@
 
 <style>
   .re { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-  .re-tabs { padding: 0 8px; border-bottom: 1px solid var(--border-subtle); }
+  .re-top { background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); flex: none; }
+  .re-tabs { padding: 0 8px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-base); flex: none; }
   .re-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
   .re-docs { padding: 12px; }
 </style>

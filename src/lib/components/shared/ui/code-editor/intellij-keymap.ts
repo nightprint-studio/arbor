@@ -25,6 +25,7 @@ import { deleteLine, moveLineDown, moveLineUp, redo } from '@codemirror/commands
 import { selectNextOccurrence } from '@codemirror/search';
 
 import { duplicateSelection } from './commands';
+import { convertCaseInView } from './case-command';
 
 /**
  * The IntelliJ editing bindings. Returns a fresh array so a host can splice, filter or
@@ -56,5 +57,8 @@ export function intellijEditingKeymap(): KeyBinding[] {
     // of the same thing. An alias, not a second feature.
     { key: 'Mod-Shift-ArrowUp', run: moveLineUp, preventDefault: true },
     { key: 'Mod-Shift-ArrowDown', run: moveLineDown, preventDefault: true },
+    // Next naming style for the selection, or the name at the caret (`fooBar` → `FooBar` → `foo_bar` …). IntelliJ's
+    // `Ctrl+Shift+U` is taken by Imber here, and `Ctrl+Alt+<letter>` is dropped by Chromium on IT/DE/FR/ES layouts.
+    { key: 'Mod-Shift-w', run: (view) => convertCaseInView(view, 'cycle'), preventDefault: true },
   ];
 }

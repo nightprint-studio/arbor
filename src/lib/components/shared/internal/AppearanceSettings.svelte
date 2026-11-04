@@ -72,6 +72,7 @@
 
   const WC_OPTIONS = [
     { value: 'mac',     label: 'Mac-inspired',  description: 'Coloured trio on the left, with the zoom menu.' },
+    { value: 'crescenti', label: 'Crescenti',    description: 'Mac-inspired, with the glyphs always visible.'  },
     { value: 'windows', label: 'Windows',       description: 'Flat rectangular controls on the right.'        },
   ];
 

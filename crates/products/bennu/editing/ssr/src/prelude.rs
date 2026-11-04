@@ -6,15 +6,15 @@
 
 // The language: parsing a query, and everything it parses to.
 pub use crate::query::{
-    parse as parse_query, Alternative, Ask, Constraint, Denotes, GroupBy, NamedConstraint, Query,
-    QueryError,
+    parse as parse_query, Alternative, Ask, Constraint, DeclKind, Denotes, Enclosure, GroupBy,
+    NamedConstraint, Query, QueryError,
 };
 
 // Running one: compiling the alternatives, searching a file, and the name resolution this crate
 // asks the caller for.
 pub use crate::engine::{
-    compile, glob_matches, line_of, preview_of, search_file, Denotation, Hit, HitCapture, NoTypes,
-    Subject, TypeOracle,
+    compile, compile_with, glob_matches, line_of, preview_of, search_file, Denotation, Hit,
+    HitCapture, NoTypes, Subject, TypeOracle, JAVA_FORMS,
 };
 
 // The table `group` asks for.

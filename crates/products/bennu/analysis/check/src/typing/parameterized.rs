@@ -74,6 +74,57 @@ pub(crate) fn parameterized_mismatch(
     refused.then(|| Refusal { found: value_text, expected: target_text.to_string() })
 }
 
+/// The definite refusal of `val` passed where a method declares `target` — the same rule for a
+/// parameter known by its RESOLVED type, where there is no text to read.
+///
+/// That costs the wildcards: the engine collapses `? extends B` and `? super B` onto `B`, and flags
+/// the result, so a parameter with a wildcard anywhere in it is not judged at all (which is also the
+/// safe answer — a wildcard admits more than the bare name says). What is left is the plain case, and
+/// the one that matters: `Consumer<String>` handed to a `Consumer<Integer>`. A type variable, an
+/// unreadable class and a capture on either side leave the position unjudged, as everywhere here.
+pub(crate) fn argument_mismatch(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    target: &TypeRef,
+    val: Node,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Option<Refusal> {
+    if target.type_args.is_empty() || target.dims > 0 || target.names_a_wildcard() {
+        return None;
+    }
+    let ctx = Ctx { root, source, symbols, resolver, cache };
+    let value_text = written_value_type(val, source.as_bytes())?;
+    let value = ctx.type_ref(&value_text)?;
+    if value.dims > 0 || value.type_args.is_empty() {
+        return None;
+    }
+    let seen = seen_as(resolver, &value, &target.binary_name)?;
+    if seen.type_args.len() != target.type_args.len() {
+        return None;
+    }
+    let refused = target
+        .type_args
+        .iter()
+        .zip(&seen.type_args)
+        .any(|(expected, actual)| concrete(expected, resolver) && concrete(actual, resolver) && !same_type(expected, actual));
+    refused.then(|| Refusal { found: value_text, expected: rendered(target) })
+}
+
+/// A resolved type as a message writes it: simple names, arguments in angle brackets.
+fn rendered(t: &TypeRef) -> String {
+    let name = t.binary_name.rsplit(['/', '$']).next().unwrap_or(&t.binary_name);
+    let mut out = name.to_string();
+    if !t.type_args.is_empty() {
+        out.push('<');
+        out.push_str(&t.type_args.iter().map(rendered).collect::<Vec<_>>().join(", "));
+        out.push('>');
+    }
+    out.push_str(&"[]".repeat(t.dims as usize));
+    out
+}
+
 /// Whether the written argument `written` contains the actual argument `actual` — `None` when it
 /// cannot be told.
 fn contains(written: &str, actual: &TypeRef, ctx: &Ctx) -> Option<bool> {

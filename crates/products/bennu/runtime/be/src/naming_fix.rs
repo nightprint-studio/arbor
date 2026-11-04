@@ -49,7 +49,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use bennu_core::prelude::BennuState;
 use bennu_intel::prelude::TypeRename;
-use bennu_naming::prelude::{Target, Violation};
+use bennu_naming::prelude::{
+    detect_conventions, is_generated, Detected, LanguageRules, NamingConfig, Target, Violation,
+};
 use bennu_proto::prelude::RenameEdit;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -135,6 +137,35 @@ pub struct NamingFixPlan {
     /// Whether the user stopped it. The partial plan is still returned and still valid — it is
     /// simply not everything.
     pub cancelled: bool,
+    /// The convention this plan was judged by, and where it came from.
+    pub convention: ConventionReport,
+}
+
+/// Where a plan's rules came from, and what they are — shown in the review so a fix never rewrites a
+/// project by a rule nobody told the person about.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConventionReport {
+    /// `configured` (the project's own switch is on), `detected` (read off the project's code, the
+    /// standard where that was inconclusive) or `standard` (the language's community standard).
+    pub source: &'static str,
+    /// Whether the project has a configured convention to choose.
+    pub configured_available: bool,
+    pub rules: Vec<ConventionUse>,
+}
+
+/// One rule the plan applied.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConventionUse {
+    /// The language pack's id (`java`, `rust`, …).
+    pub pack: String,
+    pub target: String,
+    pub convention: String,
+    /// `configured`, `detected` or `standard` — a detected report can still use the standard for a
+    /// kind the code did not settle.
+    pub origin: &'static str,
+    /// For a detected rule: the share of the decisive names that follow it, and how many there were.
+    pub share: Option<f32>,
+    pub votes: usize,
 }
 
 /// Args for [`bennu_naming_fix_plan`] and [`bennu_cancel_naming_fix`].
@@ -149,6 +180,10 @@ pub struct NamingFixArgs {
     /// Ignored for a project-wide fix, which reads from disk.
     #[serde(default)]
     pub source: Option<String>,
+    /// Which convention to judge by: `configured`, `detected` or `standard`. Absent means the
+    /// project's own when it has one, else what its code does.
+    #[serde(default)]
+    pub convention: Option<String>,
 }
 
 // ── handlers ────────────────────────────────────────────────────────────────────
@@ -181,7 +216,11 @@ fn bennu_naming_fix_plan(ctx: &BennuState, args: NamingFixArgs) -> Result<Naming
         );
     };
 
-    let mut run = Run::default();
+    // The rules first: the project's own when it has them, else what its code does, else the standard.
+    // A fix is available whether or not the continuous check is on — that check is a different switch.
+    let (config, convention) = resolve_fix_rules(&args.root, args.convention.as_deref(), &progress);
+    let mut run = Run { config, root: args.root.clone(), ..Run::default() };
+    run.plan.convention = convention;
     match &args.file {
         Some(file) => {
             let scanned = match &args.source {
@@ -222,6 +261,178 @@ fn bennu_naming_fix_plan(ctx: &BennuState, args: NamingFixArgs) -> Result<Naming
     Ok(plan)
 }
 
+// ── which convention a fix judges by ─────────────────────────────────────────────
+
+/// How many files the detection reads. A convention shows in a few hundred files as clearly as in a
+/// few thousand, and this pass runs before the fix can start.
+const DETECTION_FILES: usize = 600;
+
+/// Most names kept per kind while detecting — more adds time and no information.
+const DETECTION_NAMES: usize = 4_000;
+
+/// The rules a fix runs under, and the report that says so.
+///
+/// `choice` is what the review asked for. The project's own convention wins when it has one and
+/// nothing else was asked for; otherwise what its code does ([`detect_conventions`]), kind by kind,
+/// with the language's standard wherever the code does not settle it. Always something: "Fix naming"
+/// is not a feature that needs configuring first.
+fn resolve_fix_rules(
+    root: &str,
+    choice: Option<&str>,
+    progress: &dyn Fn(&str, usize, usize),
+) -> (NamingConfig, ConventionReport) {
+    let configured = crate::naming::config_for_root(root);
+    let available = configured.enabled;
+    let want = match choice {
+        Some("standard") => "standard",
+        Some("detected") => "detected",
+        Some("configured") if available => "configured",
+        _ if available => "configured",
+        _ => "detected",
+    };
+    if want == "configured" {
+        let rules = configured
+            .rules
+            .iter()
+            .flat_map(|(pack, rules)| {
+                rules.0.iter().filter(|(_, c)| !c.is_off()).map(move |(target, convention)| ConventionUse {
+                    pack: pack.clone(),
+                    target: target.to_string(),
+                    convention: convention.to_string(),
+                    origin: "configured",
+                    share: None,
+                    votes: 0,
+                })
+            })
+            .collect();
+        let report = ConventionReport { source: "configured", configured_available: true, rules };
+        return (configured, report);
+    }
+    let detected = if want == "detected" { detect_in_project(root, progress) } else { HashMap::new() };
+    let present = crate::naming::languages_present(root);
+    auto_rules(&configured.ignore, &detected, &present, want, available)
+}
+
+/// The standard rules of every pack, with `detected` laid over them where the code settled a kind.
+/// The report lists only the languages `present` in the project (all of them if none could be told).
+fn auto_rules(
+    ignore: &[String],
+    detected: &HashMap<&'static str, Vec<Detected>>,
+    present: &std::collections::BTreeSet<&'static str>,
+    source: &'static str,
+    configured_available: bool,
+) -> (NamingConfig, ConventionReport) {
+    let mut rules = std::collections::BTreeMap::new();
+    let mut uses = Vec::new();
+    for pack in bennu_naming::prelude::packs() {
+        let mut pack_rules = LanguageRules::from_pairs(pack.standard.iter().copied());
+        let found = detected.get(pack.id).map(Vec::as_slice).unwrap_or(&[]);
+        for d in found {
+            if pack.supports(d.target) {
+                pack_rules.0.insert(d.target, d.convention);
+            }
+        }
+        if present.is_empty() || present.contains(pack.id) {
+            for (target, convention) in &pack_rules.0 {
+                let hit = found.iter().find(|d| d.target == *target);
+                uses.push(ConventionUse {
+                    pack: pack.id.to_string(),
+                    target: target.to_string(),
+                    convention: convention.to_string(),
+                    origin: if hit.is_some() { "detected" } else { "standard" },
+                    share: hit.map(|d| d.share),
+                    votes: hit.map_or(0, |d| d.votes),
+                });
+            }
+        }
+        rules.insert(pack.id.to_string(), pack_rules);
+    }
+    // The ignore globs are about places, not conventions: a path the project excluded stays excluded.
+    let config = NamingConfig {
+        enabled: true,
+        inherit: false,
+        ignore: ignore.to_vec(),
+        rules,
+        overrides: Vec::new(),
+    };
+    (config, ConventionReport { source, configured_available, rules: uses })
+}
+
+/// What the project's own code says about each kind of name, per language pack.
+fn detect_in_project(
+    root: &str,
+    progress: &dyn Fn(&str, usize, usize),
+) -> HashMap<&'static str, Vec<Detected>> {
+    let mut budget = DETECTION_FILES;
+    let mut files = Vec::new();
+    collect_checkable(std::path::Path::new(root), &mut files, &mut budget);
+    let encoding = crate::index_service::resolve_index_encoding(root);
+    let total = files.len();
+    let mut names: HashMap<&'static str, std::collections::BTreeMap<Target, Vec<String>>> = HashMap::new();
+    for (done, file) in files.into_iter().enumerate() {
+        if cancelled() {
+            break;
+        }
+        if done % 16 == 0 {
+            progress("detecting", done, total);
+        }
+        let Some(pack) = bennu_naming::prelude::pack_for_path(&file) else { continue };
+        let Some(scanned) = read_project_source(&file, &encoding) else { continue };
+        if is_generated(&file, &scanned.text) {
+            continue;
+        }
+        let per_target = names.entry(pack.id).or_default();
+        for declared in bennu_naming::prelude::declarations(&file, &scanned.text) {
+            let list = per_target.entry(declared.target).or_default();
+            if list.len() < DETECTION_NAMES {
+                list.push(declared.name);
+            }
+        }
+    }
+    progress("detecting", total, total);
+    names.into_iter().map(|(pack, per_target)| (pack, detect_conventions(&per_target))).collect()
+}
+
+/// Annotations that write a field's or getter's NAME into JSON, XML or the database when they are
+/// given no explicit one.
+const NAME_FROM_JAVA: &[&str] =
+    &["@JsonProperty", "@JsonAlias", "@SerializedName", "@XmlElement", "@XmlAttribute", "@Column", "@JoinColumn"];
+
+/// A reason to leave `violation` alone because renaming it would change something outside the code.
+///
+/// `@JsonProperty` with no argument takes the Java name as the JSON key: rename the field and every
+/// client of that API sees a different payload, with no compile error to say so. With an explicit
+/// name (`@JsonProperty("user_name")`) the Java name is free to change, so only the bare form is
+/// refused. Looks at the annotations in front of the declaration, back to the previous `;`, `{` or `}`.
+fn relies_on_java_name(source: &str, violation: &Violation) -> Option<String> {
+    if !matches!(violation.target, Target::Field | Target::Method) {
+        return None;
+    }
+    let head = source.get(..violation.start)?;
+    let from = head.rfind(['{', '}', ';']).map_or(0, |i| i + 1);
+    let declaration = &head[from..];
+    for annotation in NAME_FROM_JAVA {
+        let Some(at) = declaration.find(annotation) else { continue };
+        let after = &declaration[at + annotation.len()..];
+        if after.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+            continue; // `@JsonPropertyOrder` is another annotation
+        }
+        let named = after
+            .trim_start()
+            .strip_prefix('(')
+            .and_then(|args| args.split(')').next())
+            .is_some_and(|args| args.contains('"'));
+        if !named {
+            return Some(format!(
+                "serialisation: {annotation} takes the Java name as the key it writes, so renaming it \
+                 changes the JSON / XML / column other systems read. Give it an explicit name first, \
+                 then rename"
+            ));
+        }
+    }
+    None
+}
+
 // ── the run ─────────────────────────────────────────────────────────────────────
 
 /// A type violation waiting for the batched pass, with its resolved binary name.
@@ -242,6 +453,9 @@ struct Run {
     /// The byte ranges already spoken for, per file. An index rather than a scan of `plan.edits`,
     /// because a project-wide fix accumulates thousands of them and the check runs per edit.
     taken: HashMap<String, Vec<(usize, usize)>>,
+    /// What this run judges names by — see [`resolve_fix_rules`].
+    config: NamingConfig,
+    root: String,
 }
 
 impl Run {
@@ -276,7 +490,7 @@ impl Run {
     /// because the text they were found in is not the text the editor would apply edits to. See
     /// [`read_project_source`].
     fn read_file(&mut self, file: &str, source: &str, non_compliant: bool) {
-        let violations = crate::naming::violations_for(file, source);
+        let violations = crate::naming::violations_with(&self.root, file, source, &self.config);
         if violations.is_empty() {
             return;
         }
@@ -292,6 +506,10 @@ impl Run {
                 continue;
             }
             if let Some(reason) = collision(&violation, &claimed, source) {
+                self.refuse(file, line, &violation, reason);
+                continue;
+            }
+            if let Some(reason) = relies_on_java_name(source, &violation) {
                 self.refuse(file, line, &violation, reason);
                 continue;
             }
@@ -877,6 +1095,67 @@ mod tests {
         let local = violation_of(Target::Local, "source_directory", "sourceDirectory", true);
         let claimed = claims(std::slice::from_ref(&local));
         assert!(collision(&local, &claimed, "private String sourceDirectory;").is_some());
+    }
+
+    fn field_violation(source: &str, name: &str) -> Violation {
+        let start = source.rfind(name).expect("the name");
+        Violation { start, end: start + name.len(), ..violation_of(Target::Field, name, "userName", false) }
+    }
+
+    #[test]
+    fn a_field_whose_annotation_writes_its_java_name_is_refused() {
+        let bare = "class A { @JsonProperty private String user_name; }";
+        assert!(relies_on_java_name(bare, &field_violation(bare, "user_name")).is_some());
+        let column = "class A { @Column(nullable = false) private String user_name; }";
+        assert!(relies_on_java_name(column, &field_violation(column, "user_name")).is_some());
+    }
+
+    #[test]
+    fn an_explicit_name_frees_the_java_name() {
+        let named = "class A { @JsonProperty(\"user_name\") private String user_name; }";
+        assert!(relies_on_java_name(named, &field_violation(named, "user_name")).is_none());
+        let col = "class A { @Column(name = \"user_name\") private String user_name; }";
+        assert!(relies_on_java_name(col, &field_violation(col, "user_name")).is_none());
+    }
+
+    #[test]
+    fn another_annotation_or_another_declaration_is_not_a_reason() {
+        let order = "class A { @JsonPropertyOrder private String user_name; }";
+        assert!(relies_on_java_name(order, &field_violation(order, "user_name")).is_none());
+        // The annotation belongs to the PREVIOUS field: the `;` ends its reach.
+        let previous = "class A { @JsonProperty int a; private String user_name; }";
+        assert!(relies_on_java_name(previous, &field_violation(previous, "user_name")).is_none());
+        // And only members are looked at.
+        let local = "class A { void m() { @Column int user_name; } }";
+        let mut v = field_violation(local, "user_name");
+        v.target = Target::Local;
+        assert!(relies_on_java_name(local, &v).is_none());
+    }
+
+    #[test]
+    fn the_standard_covers_a_pack_and_a_detected_kind_replaces_it() {
+        let detected = HashMap::from([(
+            "java",
+            vec![Detected {
+                target: Target::Method,
+                convention: bennu_naming::prelude::Convention::LowerSnake,
+                votes: 40,
+                share: 0.9,
+            }],
+        )]);
+        let present = std::collections::BTreeSet::from(["java"]);
+        let (config, report) = auto_rules(&[], &detected, &present, "detected", false);
+        assert!(config.enabled);
+        let java = &config.rules["java"];
+        assert_eq!(java.convention_for(Target::Method), bennu_naming::prelude::Convention::LowerSnake);
+        // A kind the code did not settle keeps the language's standard.
+        assert_eq!(java.convention_for(Target::Type), bennu_naming::prelude::Convention::Pascal);
+        let method = report.rules.iter().find(|r| r.pack == "java" && r.target == "method").unwrap();
+        assert_eq!((method.origin, method.votes), ("detected", 40));
+        let ty = report.rules.iter().find(|r| r.pack == "java" && r.target == "type").unwrap();
+        assert_eq!(ty.origin, "standard");
+        // Only the languages the project has.
+        assert!(report.rules.iter().all(|r| r.pack == "java"));
     }
 
     #[test]

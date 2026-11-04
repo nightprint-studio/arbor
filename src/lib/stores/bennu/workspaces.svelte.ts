@@ -20,6 +20,7 @@
 
 import { getBennuWorkspaces, setBennuWorkspaces } from '$lib/ipc/bennu/config';
 import type { BennuWorkspace, ProjectSession } from '$lib/ipc/bennu/config';
+import { createWriteQueue } from './session-snapshot';
 import { projectStore } from './project.svelte';
 
 /** Palette size — mirrors Corvus's `--ws-color-0 … --ws-color-11` theme vars. */
@@ -95,7 +96,12 @@ function createWorkspacesStore() {
   const active = $derived(workspaces.find((w) => w.id === activeId) ?? null);
 
   /** The write itself, awaited by [`flush`] so a close can wait for it. */
-  function write(): Promise<void> {
+  // Writes go out one at a time, each snapshotting at the moment it is sent. Two in flight can be
+  // handled out of order by the backend (it serves each request on its own thread), and then the
+  // OLDER snapshot is the one left on disk.
+  const write = createWriteQueue(sendWrite);
+
+  function sendWrite(): Promise<void> {
     return setBennuWorkspaces({
       active_id: activeId,
       // Snapshot the reactive proxies to plain data before crossing the IPC boundary.
@@ -122,6 +128,18 @@ function createWorkspacesStore() {
       persistTimer = undefined;
       void write();
     }, 300);
+  }
+
+  /**
+   * Copy the live editor session into the active workspace — before a switch, a move, a close.
+   *
+   * Skipped while the live state is not a session (a restore is half done: `snapshotSession` says
+   * `null`). Writing it anyway is how a window closed during boot, or a switch away from a workspace
+   * that had not finished loading, replaced a real session with an empty one.
+   */
+  function flushLiveSession() {
+    const snap = projectStore.snapshotSession();
+    if (activeId && snap) patchWorkspace(activeId, snap);
   }
 
   /** Replace the workspace with `id` via a mapper (reassigns the array for reactivity). */
@@ -197,7 +215,7 @@ function createWorkspacesStore() {
      *  then drives projectStore to reopen the target's project set. No-op if already active. */
     async switchTo(id: string) {
       if (id === activeId || !workspaces.some((w) => w.id === id)) return;
-      if (activeId) patchWorkspace(activeId, projectStore.snapshotSession()); // flush current
+      flushLiveSession(); // flush current
       activeId = id;
       const target = workspaces.find((w) => w.id === id)!;
       await projectStore.loadWorkspace($state.snapshot(target.projects) as ProjectSession[], target.active_project);
@@ -207,7 +225,7 @@ function createWorkspacesStore() {
     /** Create a new empty workspace and switch to it. The active view is cleared; the user then
      *  opens / adds projects into it. Returns the new id. */
     async create(name: string, colorIdx?: number): Promise<string> {
-      if (activeId) patchWorkspace(activeId, projectStore.snapshotSession()); // flush current
+      flushLiveSession(); // flush current
       const id = newId();
       workspaces = [
         ...workspaces,
@@ -261,7 +279,7 @@ function createWorkspacesStore() {
     async moveProject(fromId: string, root: string, toId: string, toIndex: number): Promise<void> {
       if (!workspaces.some((w) => w.id === fromId) || !workspaces.some((w) => w.id === toId)) return;
       // The live workspace's tabs and member order first, so what is moved is what is on screen.
-      if (activeId) patchWorkspace(activeId, projectStore.snapshotSession());
+      flushLiveSession();
       const source = workspaces.find((w) => w.id === fromId)!;
       const session = source.projects.find((p) => p.root === root);
       if (!session) return;
@@ -310,6 +328,9 @@ function createWorkspacesStore() {
      *  closes it (projectStore persists); otherwise — an inactive workspace, or a remembered project
      *  that never opened because its directory is gone — it edits the stored member list directly. */
     removeProjectFrom(id: string, root: string) {
+      // A remembered project that never opened is also held by the live store, which would write it
+      // back with the next snapshot.
+      if (id === activeId) projectStore.forgetUnopened(root);
       if (id === activeId && projectStore.workspaceRoots.includes(root)) {
         projectStore.closeProject(root); // live path → saveActiveSession persists
         return;
@@ -370,7 +391,12 @@ function createWorkspacesStore() {
       // (`arbor://bennu-be-up`), because the spawn is lazy and the mount can lose that race. Once a
       // read has succeeded there is nothing to redo — re-reading would reopen the projects under
       // the user, discarding whatever they have changed since.
-      if (restored) return;
+      if (restored) {
+        // The backend announcing itself after a restore that could not reach it: ask again for the
+        // projects that did not open.
+        void projectStore.retryUnopened();
+        return;
+      }
       // Retried, because "the backend is not up yet" and "there is nothing saved" are different
       // answers and only one of them means the file is empty. `bennu-be` is spawned lazily as the
       // window opens; on a release build that spawn is slower than a debug one, which is how this
@@ -413,6 +439,13 @@ function createWorkspacesStore() {
       const act = workspaces.find((w) => w.id === store.active_id) ?? workspaces[0];
       activeId = act.id;
       await projectStore.loadWorkspace($state.snapshot(act.projects) as ProjectSession[], act.active_project);
+      // Members that did not open — typically the backend lost the race — get a few more tries.
+      for (let i = 0; i < 3 && projectStore.hasUnopened; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, RESTORE_RETRY_MS * 3));
+        // eslint-disable-next-line no-await-in-loop
+        await projectStore.retryUnopened();
+      }
     },
 
     /**
@@ -428,7 +461,7 @@ function createWorkspacesStore() {
         persistTimer = undefined;
       }
       if (!restored) return;
-      if (activeId) patchWorkspace(activeId, projectStore.snapshotSession());
+      flushLiveSession();
       await write();
     },
   };

@@ -65,7 +65,10 @@
   {/if}
 
   {#if hirundoSse.items.length === 0}
-    <EmptyState message="No events yet" description="Listen to the open request: the events of a text/event-stream response show here as they arrive." compact />
+    <div class="sp-empty">
+      <EmptyState message="No events yet" description="Listen to the open request: the events of a text/event-stream response show here as they arrive." compact />
+      {#if !hirundoSse.running}<Button variant="primary" disabled={!hirundoStore.active} onclick={() => hirundoStore.active && void hirundoSse.start(hirundoStore.active)}>Listen</Button>{/if}
+    </div>
   {:else}
     <ul class="sp-list" bind:this={listEl}>
       {#each hirundoSse.items as m, i (i)}
@@ -95,6 +98,7 @@
 
 <style>
   .sp { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .sp-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; }
   .sp-top { display: flex; align-items: center; gap: 6px; padding: 8px 10px; }
   .sp-spacer { flex: 1; }
   .sp-title { margin: 0; padding: 0 12px 4px; font-size: var(--font-size-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

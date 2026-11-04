@@ -64,7 +64,6 @@ macro_rules! invoke_handlers {
             $crate::commands::fs_commands::fs_watch_file_start,
             $crate::commands::fs_commands::fs_watch_file_stop,
             // File Explorer "Open in Arbor" delegation (window focus + emit)
-            $crate::commands::fs_git_commands::fs_open_in_arbor,
             // Deep-link router (arbor:// URLs)
             $crate::commands::deep_link_commands::deep_link_ready,
             $crate::commands::deep_link_commands::dispatch_deep_link,
@@ -154,6 +153,7 @@ macro_rules! invoke_handlers {
             $crate::commands::recents_commands::pin_recent_project,
             $crate::commands::recents_commands::set_open_intent,
             $crate::commands::recents_commands::take_open_intent,
+            $crate::commands::recents_commands::take_open_context,
             // Launcher window (JetBrains-Toolbox-like home screen)
             $crate::window::launcher::open_launcher_window,
             // Tabbed container: the workspace products in a single window

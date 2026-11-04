@@ -627,6 +627,21 @@ fn an_override_met_twice_through_the_receiver_is_not_ambiguous() {
     assert!(d.is_empty(), "{d:?}");
 }
 
+/// Parameterized types are invariant: a `Comparator<Integer>` is not the `Comparator<String>` that
+/// `SortList<String>.sort` takes. Wildcards, raw types and the same arguments are all fine.
+#[test]
+fn a_parameterized_argument_must_have_the_parameters_type_arguments() {
+    let d = diags("SortList<String> l = null; Comparator<Integer> c = null; l.sort(c);");
+    one(&d, &["Argument 1 of `sort`", "Comparator<Integer>", "Comparator<String>"]);
+    // The same arguments, a raw value, `null` and a lambda say nothing wrong.
+    assert!(diags("SortList<String> l = null; Comparator<String> c = null; l.sort(c);").is_empty());
+    assert!(diags("SortList<String> l = null; Comparator c = null; l.sort(c);").is_empty());
+    assert!(diags("SortList<String> l = null; l.sort(null);").is_empty());
+    assert!(diags("SortList<String> l = null; l.sort((a, b) -> 0);").is_empty());
+    // A `new` that spells its arguments is judged like a variable.
+    one(&diags("SortList<String> l = null; l.sort(new Comparator<Integer>());"), &["Comparator<Integer>"]);
+}
+
 /// A method that declares its own `T` is not bound by the receiver's, and neither is a raw receiver.
 #[test]
 fn a_shadowed_or_raw_type_variable_is_never_substituted() {

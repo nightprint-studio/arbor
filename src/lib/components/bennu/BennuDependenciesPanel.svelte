@@ -32,7 +32,7 @@
    * a "via …" line to every transitive row, and an expandable detail on declared ones.
    */
   import {
-    Library, Package, Layers, LocateFixed, ShieldAlert, Workflow, TriangleAlert, Eye,
+    Library, Package, Layers, LocateFixed, ShieldAlert, Workflow, TriangleAlert, Eye, RotateCw,
   } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
@@ -120,13 +120,34 @@
         // After the report: the badges name artifacts the classpath (or the lockfile) now knows the
         // versions of.
         if (!cargo) void dependenciesStore.loadAdvisories(path, node);
+        if (!cargo && !node) void dependenciesStore.checkStale(projectStore.workspaceRoots);
         if (node) void dependenciesStore.loadOutdated(path);
       });
     }, 200);
   });
 
   function resolveTree() {
-    if (root) void dependenciesStore.loadTree(root, true, targetKind === 'Node');
+    const path = root;
+    if (!path) return;
+    const node = targetKind === 'Node';
+    // The report is read again behind the tree, so the two halves of this panel are drawn from the
+    // repository as it is NOW. Left alone, the report kept the classpath of the last time it was read:
+    // the tree said `1.0.7` and "Pulled in transitively" still said `1.0.6`.
+    void dependenciesStore
+      .loadTree(path, true, node)
+      .then(() => dependenciesStore.load(path, true, node))
+      .then(() => dependenciesStore.checkStale(projectStore.workspaceRoots));
+  }
+
+  /** Maven and Gradle keep a persisted classpath that a reload replaces; Cargo and Node do not. */
+  const canReload = $derived(targetKind === 'Maven' || targetKind === 'Gradle');
+  /** This project's classpath is older than the disk — see `bennu_dependencies_stale`. */
+  const staleEntry = $derived(dependenciesStore.staleFor(root));
+
+  /** Drop the cached classpath, the library jar pool and the index, and resolve again. */
+  function reloadDependencies() {
+    if (!root) return;
+    void dependenciesStore.reload([staleEntry ?? { root, tool: isGradle ? 'gradle' : 'maven' }]);
   }
 
   /** A dependency matches by what it is, and — once the tree is resolved — by what it pulls in: searching
@@ -264,6 +285,18 @@
         >
           {#if dependenciesStore.treeLoading}<Spinner size={12} />{:else}<Workflow size={13} />{/if}
         </IconButton>
+        {#if canReload}
+          <IconButton
+            tooltip={dependenciesStore.reloading
+              ? 'Reloading the dependencies…'
+              : 'Reload dependencies — drop the cached classpath, re-read the local repository and rebuild the index'}
+            size={24}
+            onclick={reloadDependencies}
+            disabled={dependenciesStore.reloading}
+          >
+            {#if dependenciesStore.reloading}<Spinner size={12} />{:else}<RotateCw size={13} />{/if}
+          </IconButton>
+        {/if}
         {#if !isCargo}
           <IconButton tooltip="Known vulnerabilities…" size={24} onclick={() => bennuUiStore.openVulnerabilities()}>
             <ShieldAlert size={13} />
@@ -292,6 +325,21 @@
             {#snippet iconStart()}<Layers size={12} />{/snippet}
             Show all
           </Button>
+        </div>
+      {/if}
+      {#if staleEntry && canReload}
+        <div class="dep-notice">
+          <Alert variant="warning" compact>
+            The libraries this project was resolved from changed on disk (a module was installed, or a
+            pom edited), so the editor's classpath is older than what is listed here. Reload to bring
+            completion, go-to and the library index in line.
+          </Alert>
+          <div class="dep-notice-act">
+            <Button variant="secondary" size="sm" loading={dependenciesStore.reloading} onclick={reloadDependencies}>
+              {#snippet iconStart()}<RotateCw size={12} />{/snippet}
+              Reload dependencies
+            </Button>
+          </div>
         </div>
       {/if}
       {#if report.unreadable.length > 0}

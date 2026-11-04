@@ -8,10 +8,12 @@
  */
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import { endpointsDetected } from '$lib/ipc/hirundo';
+import { requiredPaths, skeletonText } from '$lib/components/hirundo/editor/schema';
+import type { EndpointSchema } from '$lib/types/hirundo';
 import { getBennuWorkspaces } from '$lib/ipc/bennu/config';
 import { ensureBackend } from '$lib/ipc/rpc';
 import type { DetectedEndpoint, HttpRequest } from '$lib/types/hirundo';
-import { blankRequest } from '$lib/components/hirundo/request-model';
+import { blankRequest, sampleFor } from '$lib/components/hirundo/request-model';
 import { hirundoStore } from './workspace.svelte';
 
 export interface BennuProject {
@@ -34,23 +36,58 @@ export function pathToTemplate(path: string): string {
   return path.replace(/\{([^}/]+)\}/g, '{{$1}}');
 }
 
-/** A request for a detected endpoint: method, URL on `{{baseUrl}}`, its query parameters, a JSON body if it takes one. */
-export function endpointToRequest(e: DetectedEndpoint): HttpRequest {
+/** The media types of a `produces` / `consumes` value, one by one. */
+function mediaTypes(text: string | undefined): string[] {
+  return (text ?? '').split(',').map((m) => m.trim()).filter(Boolean);
+}
+
+/**
+ * A request for a detected endpoint: method, URL on `{{baseUrl}}` (path variables as `{{id}}`, which the
+ * request then asks you to fill in), its query parameters with their Java type and whether they are required,
+ * headers and a JSON body when it takes one, `Accept` from what it produces and `Content-Type` from what it
+ * consumes. A stream (`text/event-stream`) is said in the notes, since that is listened to, not awaited.
+ */
+export function endpointToRequest(e: DetectedEndpoint, schema: EndpointSchema | null = null): HttpRequest {
   const request = blankRequest(`${e.controller}.${e.handler}`);
   request.method = (e.methods[0]?.toUpperCase() ?? 'GET') as HttpRequest['method'];
   request.url = `{{baseUrl}}${pathToTemplate(e.path.startsWith('/') ? e.path : `/${e.path}`)}`;
+  const notes: string[] = [];
   for (const p of e.params) {
     const binding = p.binding.toLowerCase();
+    const label = `${p.type_text} · ${p.required ? 'required' : 'optional'}`;
     if (binding.includes('body')) {
-      request.body = { kind: 'json', text: '{\n  \n}', form: [] };
+      request.body = { kind: 'json', text: schema?.request ? skeletonText(schema.request) : '{\n  \n}', form: [] };
+      notes.push(`Body: ${p.type_text}`);
+      const required = requiredPaths(schema?.request);
+      if (required.length) notes.push(`Required in the body: ${required.join(', ')}`);
+    } else if (binding.includes('part')) {
+      request.body = { kind: 'multipart', text: '', form: [{ key: p.name, value: '', description: label, enabled: p.required }] };
     } else if (binding.includes('param') || binding.includes('query')) {
-      request.params.push({ key: p.name, value: '', description: `${p.type_text}${p.required ? '' : ' (optional)'}`, enabled: p.required });
+      request.params.push({ key: p.name, value: sampleFor(p.type_text), description: label, enabled: p.required });
     } else if (binding.includes('header')) {
-      request.headers.push({ key: p.name, value: '', description: p.type_text, enabled: p.required });
+      request.headers.push({ key: p.name, value: sampleFor(p.type_text), description: label, enabled: p.required });
+    } else if (binding.includes('cookie')) {
+      request.headers.push({ key: 'Cookie', value: `${p.name}=${sampleFor(p.type_text)}`, description: label, enabled: p.required });
+    } else if (binding.includes('path')) {
+      // A path variable is a row of its own in Params (marked path, required, with its type and a sample), and the
+      // URL names it as a variable that the row's value fills in.
+      request.params.push({ key: `path:${p.name}`, value: sampleFor(p.type_text), description: `path · ${p.type_text} · required`, enabled: true });
+      notes.push(`Path variable {{${p.name}}}: ${p.type_text}`);
     }
   }
-  if (e.produces) request.headers.push({ key: 'Accept', value: e.produces, description: '', enabled: true });
-  request.docs = `${e.controller}#${e.handler} → ${e.return_type}\n\n${e.file}`;
+  const accept = mediaTypes(e.produces);
+  if (accept.length) request.headers.push({ key: 'Accept', value: accept.join(', '), description: 'what the handler produces', enabled: true });
+  const consumes = mediaTypes(e.consumes);
+  if (consumes.length && request.body.kind !== 'none') request.headers.push({ key: 'Content-Type', value: consumes[0], description: 'what the handler consumes', enabled: true });
+  if (accept.length === 1 && accept[0] === 'text/event-stream') request.settings.stream = true;
+  if (accept.includes('text/event-stream')) notes.push('This endpoint streams Server-Sent Events: listen to it with Ctrl+Shift+L instead of waiting for an answer.');
+  request.docs = [
+    `${e.methods[0]?.toUpperCase() ?? 'GET'} ${e.path}`,
+    `${e.controller}#${e.handler}(${e.params.map((p) => `${p.type_text} ${p.name}`).join(', ')}) → ${e.return_type}`,
+    ...(notes.length ? ['', ...notes.map((n) => `- ${n}`)] : []),
+    '',
+    e.file,
+  ].join('\n');
   return request;
 }
 
@@ -108,6 +145,8 @@ function createHirundoDetected() {
     get groups() { return groups; },
     get loading() { return loading; },
     get unavailable() { return unavailable; },
+    /** The Bennu project an endpoint was found in. */
+    rootOf: (e: DetectedEndpoint) => groups.find((g) => g.endpoints.some((x) => x.id === e.id && x.file === e.file))?.root ?? null,
     refresh, choose, loadCandidates,
   };
 }

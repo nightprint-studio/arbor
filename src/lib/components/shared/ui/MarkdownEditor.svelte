@@ -30,6 +30,7 @@
   import { EditorView } from '@codemirror/view';
   import type { Extension } from '@codemirror/state';
   import type { CompletionSource } from '@codemirror/autocomplete';
+  import { markdownFormatState, sameFormat, type FormatState } from '$lib/utils/markdown-format';
   import {
     createMarkdownExtensions,
     goToHeading,
@@ -79,6 +80,12 @@
      * characters is cut — this is for acting on a passage, not for copying a document.
      */
     onSelection?: (selection: { text: string; x: number; y: number } | null) => void;
+    /**
+     * What the caret is in — bold, a list item, a heading, a code block — whenever that changes.
+     * For a host's formatting toolbar to show its toggles pressed. Called only when the state
+     * differs from the last one reported, so a caret moving through plain text costs nothing.
+     */
+    onFormatState?: (state: FormatState) => void;
     /** Extra extensions, read when the document is (re)built — a vault's wikilinks, the
      *  formatting keymap. Build them once per document, not per render. */
     extensions?: Extension[];
@@ -101,6 +108,7 @@
     onSelection,
     extensions,
     completionSources,
+    onFormatState,
   }: Props = $props();
 
   let hostEl = $state<HTMLDivElement | undefined>(undefined);
@@ -135,6 +143,14 @@
   function mount(host: HTMLElement, doc: string) {
     // The document this view belongs to, for as long as it lives — see the note above.
     const key = docKey;
+    let lastFormat: FormatState | null = null;
+    const reportFormat = (state: EditorState) => {
+      if (!onFormatState) return;
+      const next = markdownFormatState(state);
+      if (lastFormat && sameFormat(lastFormat, next)) return;
+      lastFormat = next;
+      onFormatState(next);
+    };
     view = new EditorView({
       parent: host,
       state: EditorState.create({
@@ -153,6 +169,7 @@
           ),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChange?.(u.state.doc.toString(), key);
+            if (u.docChanged || u.selectionSet) reportFormat(u.state);
             if (u.selectionSet && onSelection) {
               const range = u.state.selection.main;
               if (range.empty) {
@@ -181,6 +198,7 @@
         ],
       }),
     });
+    if (view) reportFormat(view.state);
   }
 
   // Rebuild on a new document, and only then. `text` and `readOnly` are read untracked: the

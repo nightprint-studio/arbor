@@ -443,11 +443,15 @@ where
                 // deliver its `HostResponse`.
                 let out = Arc::clone(&out);
                 let dispatch = Arc::clone(&dispatch);
+                let timing = RequestTiming::start(&params);
                 pool.execute(Box::new(move || {
+                    timing.began();
                     let result = dispatch_caught(&*dispatch, &method, params);
+                    timing.ran();
                     if let Ok(mut w) = out.lock() {
                         let _ = write_frame(&mut *w, &Frame::Response { id, result });
                     }
+                    timing.report(&method);
                 }));
             }
             Frame::HostResponse { id, result } => {
@@ -466,6 +470,96 @@ where
         let _ = tx.send(Err("shell disconnected".to_string()));
     }
     Ok(())
+}
+
+/// Opt-in per-request timing for a backend, to tell "the handler is slow" from "the request waited for a
+/// worker" from "the answer was slow to write" — the three look the same from the frontend.
+///
+/// Off unless `ARBOR_BE_PERF=<ms>` is set: then every request taking at least that long end to end is
+/// reported on **stderr** (stdout is the protocol channel) as
+/// `[perf] method wait=… run=… write=… in_flight=… req=…KB`. `in_flight` is how many requests were running
+/// when this one started — a pile of them is what typing looks like when stale requests are never cancelled.
+/// When off it is one atomic load per request.
+struct RequestTiming {
+    threshold: Option<Duration>,
+    enqueued: Option<std::time::Instant>,
+    marks: Mutex<[Option<std::time::Instant>; 2]>,
+    in_flight: AtomicUsize,
+    request_kb: usize,
+}
+
+/// Requests running right now, counted only while timing is on.
+static PERF_RUNNING: AtomicUsize = AtomicUsize::new(0);
+
+fn perf_threshold() -> Option<Duration> {
+    static T: std::sync::OnceLock<Option<Duration>> = std::sync::OnceLock::new();
+    *T.get_or_init(|| {
+        let ms: u64 = std::env::var("ARBOR_BE_PERF").ok()?.trim().parse().ok()?;
+        (ms > 0).then(|| Duration::from_millis(ms))
+    })
+}
+
+/// Rough size of a request: the length of its strings. The source text is what makes a request big, and
+/// serialising it again to count would distort what is being measured.
+fn approx_bytes(v: &Value) -> usize {
+    match v {
+        Value::String(s) => s.len(),
+        Value::Array(a) => a.iter().map(approx_bytes).sum(),
+        Value::Object(o) => o.values().map(approx_bytes).sum(),
+        _ => 0,
+    }
+}
+
+impl RequestTiming {
+    fn start(params: &Value) -> Self {
+        let threshold = perf_threshold();
+        let on = threshold.is_some();
+        Self {
+            threshold,
+            enqueued: on.then(std::time::Instant::now),
+            marks: Mutex::new([None, None]),
+            in_flight: AtomicUsize::new(0),
+            request_kb: if on { approx_bytes(params) / 1024 } else { 0 },
+        }
+    }
+
+    /// The handler is about to run: the queue wait is over.
+    fn began(&self) {
+        if self.threshold.is_none() {
+            return;
+        }
+        self.in_flight.store(PERF_RUNNING.fetch_add(1, Ordering::AcqRel) + 1, Ordering::Relaxed);
+        self.marks.lock().unwrap_or_else(|e| e.into_inner())[0] = Some(std::time::Instant::now());
+    }
+
+    /// The handler returned.
+    fn ran(&self) {
+        if self.threshold.is_none() {
+            return;
+        }
+        PERF_RUNNING.fetch_sub(1, Ordering::AcqRel);
+        self.marks.lock().unwrap_or_else(|e| e.into_inner())[1] = Some(std::time::Instant::now());
+    }
+
+    /// The answer is written: say how long each part took, if the whole was slow enough to matter.
+    fn report(&self, method: &str) {
+        let (Some(threshold), Some(enqueued)) = (self.threshold, self.enqueued) else { return };
+        let total = enqueued.elapsed();
+        if total < threshold {
+            return;
+        }
+        let marks = *self.marks.lock().unwrap_or_else(|e| e.into_inner());
+        let (Some(began), Some(ran)) = (marks[0], marks[1]) else { return };
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        eprintln!(
+            "[perf] {method} wait={:.1}ms run={:.1}ms write={:.1}ms in_flight={} req={}KB",
+            ms(began.duration_since(enqueued)),
+            ms(ran.duration_since(began)),
+            ms(ran.elapsed()),
+            self.in_flight.load(Ordering::Relaxed),
+            self.request_kb,
+        );
+    }
 }
 
 /// Run one dispatch, converting a panic into the error the caller gets back.

@@ -137,6 +137,11 @@ export const panelsOverrides: Record<string, SceneOverride> = {
 
 export const panelsExtras: ExtraScene[] = [
   {
+    id: 'shared/internal/imber/ImberChatPanel',
+    load: framed(() => import('./ImberChatDemo.svelte'), 460, 640),
+    settle: 600,
+  },
+  {
     id: 'corvus/imber/ImberPanel',
     load: framed(() => import('$lib/components/corvus/imber/ImberPanel.svelte'), 460, 780),
     setup: seedImber,

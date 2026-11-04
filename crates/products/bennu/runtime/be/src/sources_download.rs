@@ -57,6 +57,35 @@ pub fn sources_jar_sibling(jar: &Path) -> Option<PathBuf> {
     Some(jar.with_file_name(sib))
 }
 
+/// The `-sources.jar` of a dependency jar **that exists on disk**, wherever its build tool put it.
+///
+/// Maven keeps it beside the jar. Gradle does not: its cache is `files-2.1/<group>/<artifact>/<version>/<hash>/`
+/// with one hash directory per file, so the sources of `foo-1.0.jar` sit in a *sibling directory* of
+/// the one holding the jar. Looking only beside the jar found nothing there, and every library that
+/// came through Gradle read as having no sources however many had been downloaded.
+pub fn sources_jar_for(jar: &Path) -> Option<PathBuf> {
+    let sibling = sources_jar_sibling(jar)?;
+    if sibling.is_file() {
+        return Some(sibling);
+    }
+    let in_gradle_cache = jar.components().any(|c| c.as_os_str() == "files-2.1");
+    if !in_gradle_cache {
+        return None;
+    }
+    let name = sibling.file_name()?.to_owned();
+    let version_dir = jar.parent()?.parent()?;
+    std::fs::read_dir(version_dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path().join(&name))
+        .find(|candidate| candidate.is_file())
+}
+
+/// Every dependency jar's sources jar that is on disk now, in jar order.
+pub fn available_sources(dep_jars: &[String]) -> Vec<PathBuf> {
+    dep_jars.iter().filter_map(|jar| sources_jar_for(Path::new(jar))).collect()
+}
+
 /// Whether `binary` names a genuinely JDK-only type (`java/…`, `sun/…`, …) — so the "Download
 /// sources" affordance is NOT offered for it (a JDK class's sources come from `src.zip`, never
 /// Maven). Note `javax/` and `jakarta/` are deliberately EXCLUDED: those are largely third-party
@@ -116,17 +145,7 @@ fn nested_forms(binary: &str) -> Vec<String> {
 /// jars) as a [`JavaSourceZip`]. The cached pool the decompiled-tab go-to consults for REAL library
 /// source before falling back to a stub. A dep with no sources jar simply isn't in the pool.
 pub fn open_dep_source_zips(dep_jars: &[String]) -> Vec<JavaSourceZip> {
-    let mut out = Vec::new();
-    for jar in dep_jars {
-        if let Some(sib) = sources_jar_sibling(Path::new(jar)) {
-            if sib.is_file() {
-                if let Ok(zip) = JavaSourceZip::open(&sib) {
-                    out.push(zip);
-                }
-            }
-        }
-    }
-    out
+    available_sources(dep_jars).iter().filter_map(|sources| JavaSourceZip::open(sources).ok()).collect()
 }
 
 /// Run `mvn dependency:get` for the sources artifact, in the project dir (so the project's
@@ -217,6 +236,40 @@ mod tests {
     fn gav_none_for_a_path_that_is_not_repository_shaped() {
         assert!(gav_from_m2_jar(Path::new("C:/tmp/spring-core-5.3.20.jar")).is_none());
         assert!(gav_from_m2_jar(Path::new("C:/proj/module/target/classes")).is_none());
+    }
+
+    /// A scratch directory, emptied on the way in.
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("bennu-sources-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn maven_sources_are_found_beside_the_jar() {
+        let dir = scratch("maven");
+        let jar = dir.join("foo-1.0.jar");
+        std::fs::write(&jar, b"").unwrap();
+        assert!(sources_jar_for(&jar).is_none(), "not on disk yet");
+        std::fs::write(dir.join("foo-1.0-sources.jar"), b"").unwrap();
+        assert_eq!(sources_jar_for(&jar), Some(dir.join("foo-1.0-sources.jar")));
+    }
+
+    /// Gradle's cache gives each file its own hash directory: the sources are NOT beside the jar.
+    #[test]
+    fn gradle_sources_are_found_in_a_sibling_hash_directory() {
+        let dir = scratch("gradle");
+        let version = dir.join("files-2.1").join("org.acme").join("foo").join("1.0");
+        let (jar_dir, src_dir) = (version.join("aaa111"), version.join("bbb222"));
+        std::fs::create_dir_all(&jar_dir).unwrap();
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let jar = jar_dir.join("foo-1.0.jar");
+        std::fs::write(&jar, b"").unwrap();
+        assert!(sources_jar_for(&jar).is_none());
+        std::fs::write(src_dir.join("foo-1.0-sources.jar"), b"").unwrap();
+        assert_eq!(sources_jar_for(&jar), Some(src_dir.join("foo-1.0-sources.jar")));
+        assert_eq!(available_sources(&[jar.display().to_string()]).len(), 1);
     }
 
     #[test]

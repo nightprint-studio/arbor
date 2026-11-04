@@ -106,6 +106,14 @@
   Leave <em>method name</em> empty and the derived name is used; write one and the method arrives with its <code>@Query</code> spelled out, since a name Spring Data
   cannot parse is no longer a derived query.
 </p>
+<p>
+  The operation — <strong>find</strong>, <strong>count</strong>, <strong>exists</strong> or a derived <strong>delete</strong> — is chosen where the dialog is opened
+  (the repository's <em>Add query method</em> menu, the palette, Alt+Enter); the small switch at the top of the dialog can still change it.
+  The dialog is one screen: the method name (empty: built from the conditions, shown live), then the switches <em>Distinct</em>, <em>@Query</em>, <em>Sort</em>, the result type and a limit,
+  then one line per condition — property, operator, value, case — where an empty value is a method parameter and a typed one is written into the query.
+  <kbd>Alt</kbd> + <kbd>Ins</kbd> adds a condition, <kbd>Alt</kbd> + <kbd>↑</kbd>/<kbd>↓</kbd> moves the row (Spring Data reads them left to right),
+  <kbd>Ctrl</kbd> + <kbd>Enter</kbd> adds the method; <em>Order by</em> and <em>Projection</em> are folded until needed.
+</p>
 <table>
   <thead><tr><th>Returns</th><th>Worth knowing</th></tr></thead>
   <tbody>

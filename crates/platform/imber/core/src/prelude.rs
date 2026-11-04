@@ -4,7 +4,7 @@
 //! `imber_core::prelude::...`.
 
 // What the assistant may touch.
-pub use crate::access::{normalize, Ask, Decision, Grant, Op, Policy, Scope, MAX_UNASKED_DELETE_FILES};
+pub use crate::access::{normalize, AccessFilter, Ask, Decision, Grant, Op, Policy, Scope, MAX_UNASKED_DELETE_FILES};
 
 // How much the agent decides for itself, and the rule for opening a file the build named.
 pub use crate::autonomy::{

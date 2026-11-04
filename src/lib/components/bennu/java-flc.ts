@@ -13,6 +13,7 @@ import { flcComplete, type FlcReply } from '$lib/ipc/bennu/flc';
 import { flcFeedbackQueue, flcLearnQueue } from './flc-feedback';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
+import { timed } from './perf';
 
 /** What the editor hands back about a suggestion: where it came from and how sure it was — never its text. */
 export type FlcMeta = Pick<FlcReply, 'origin' | 'confidence' | 'context'>;
@@ -23,7 +24,7 @@ export const javaFlcSource = async (view: EditorView, pos: number): Promise<Inli
   const path = projectStore.activeFilePath;
   if (!path || !path.toLowerCase().endsWith('.java')) return null;
   const src = view.state.doc.toString();
-  const reply = await flcComplete(path, src, makeU16ToByte(src)(pos)).catch(() => null);
+  const reply = await timed('ghost text round trip', () => flcComplete(path, src, makeU16ToByte(src)(pos)).catch(() => null));
   if (!reply || !reply.text) return null;
   const meta: FlcMeta = { origin: reply.origin, confidence: reply.confidence, context: reply.context };
   // a block written out from the class (a constructor, `toString`…) comes as the WHOLE declaration, from the first character of the line:

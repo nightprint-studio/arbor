@@ -59,7 +59,7 @@
     <div class="cp-top">
       <FilterInput bind:value={query} placeholder="Filter requests…" ariaLabel="Filter requests" />
       <IconButton tooltip="New collection" shortcut="Ctrl+Shift+N" size={26} bordered onclick={hirundoCommands.newCollection}><Library size={14} /></IconButton>
-      <Dropdown items={importItems} width="260px">
+      <Dropdown items={importItems} width="260px" position="fixed">
         {#snippet trigger({ open, toggle })}
           <IconButton tooltip="Import…" size={26} bordered active={open} ariaHasPopup ariaExpanded={open} onclick={toggle}><Download size={14} /></IconButton>
         {/snippet}

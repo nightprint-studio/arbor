@@ -9,6 +9,8 @@
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
+  import MarkdownToolbar from '$lib/components/shared/ui/MarkdownToolbar.svelte';
+  import { NO_FORMAT } from '$lib/utils/markdown-format';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
@@ -76,6 +78,16 @@
         {#snippet iconStart()}<Settings size={14} />{/snippet}
       </Button>
       <Button variant="primary" block>block</Button>
+    </div>
+  </section>
+
+  <section>
+    <h2>MarkdownToolbar — nothing active, caret in bold + a task list, disabled, table hidden</h2>
+    <div class="col">
+      <MarkdownToolbar onCommand={() => {}} />
+      <MarkdownToolbar onCommand={() => {}} state={{ ...NO_FORMAT, bold: true, list: 'task', heading: 2 }} />
+      <MarkdownToolbar onCommand={() => {}} disabled />
+      <MarkdownToolbar onCommand={() => {}} hide={['table']} state={{ ...NO_FORMAT, codeBlock: true }} />
     </div>
   </section>
 

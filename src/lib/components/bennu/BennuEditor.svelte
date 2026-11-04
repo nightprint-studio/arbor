@@ -37,6 +37,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
   import { fileEncodingOverride, reinterpretFile } from './encoding/reinterpret';
+  import { stopwatch, timed } from './perf';
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { editorToolbarButtons, EDITOR_TOOLBAR_POINT } from '$lib/contributions/editor-toolbar';
   import { firePluginAction } from '$lib/ipc/plugin';
@@ -59,6 +60,8 @@
   import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import MarkdownEditor from '$lib/components/shared/ui/MarkdownEditor.svelte';
+  import MarkdownToolbar from '$lib/components/shared/ui/MarkdownToolbar.svelte';
+  import { markdownFormatKeymap, NO_FORMAT, type EditorCommand, type FormatState } from '$lib/utils/markdown-format';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import {
     lspSemanticTokens, lspCodeActions, lspCodeLenses, lspExecuteCommand, lspExpandMacro,
@@ -76,7 +79,9 @@
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import { ChevronDown, Regex as RegexIcon } from 'lucide-svelte';
+  import { CASE_LABELS, CASE_STYLES as CASE_MENU_STYLES, type CaseStyle } from '$lib/utils/case-convert';
   import { bennuRegexStore } from '$lib/stores/bennu/regex.svelte';
+  import { shouldRememberCaret } from '$lib/stores/bennu/session-snapshot';
   import { literalUnderCaret, regexRequestFor, type EditorAccess } from './regex/open-in-tester';
   // The tab strip draws the same icons the project tree does — the shared file-type set, and
   // the lettered ring for a Java type's kind.
@@ -275,6 +280,7 @@
     coordsAtByteOffset: (byteOffset: number) => { x: number; y: number } | null;
     setCaretAtCoords: (x: number, y: number) => boolean;
     wordAtCaret: () => string | null;
+    convertCase: (style: CaseStyle | 'cycle') => boolean;
     refAtCaret: () => string | null;
     caretByteOffset: () => number;
     /** Select a byte range — what a click in the syntax-tree panel does over here. */
@@ -709,7 +715,11 @@
     // Remembered across restarts (debounced hard in the store — this runs on every arrow key).
     // The live `viewStates` snapshot is finer while the window is open; this is the part that
     // survives closing it.
-    projectStore.rememberCaret(path, line, col);
+    // Not every report is the reader's: a restored tab mounts BEFORE its text arrives, and loading it
+    // reports the caret at 1:1 — which, remembered, replaced the position the restore below was about to
+    // read, so the tab came back at the top. Only a user's own move, or a position the restore has
+    // already dealt with (`restoredCaretFor`), is worth keeping.
+    if (shouldRememberCaret(info?.user, restoredCaretFor, path)) projectStore.rememberCaret(path, line, col);
 
     // And the history. Whether this event is an arrival, reading or transit is the flow's
     // question, not this one's — see `nav-flow.ts`.
@@ -782,32 +792,59 @@
   let restoredCaretFor: string | null = null;
   /** The tab the guard above was last about. */
   let restoreSeenTab: string | null = null;
+  /** The tab whose editor was mounted on an empty document, its text arriving afterwards. */
+  let textArrivedLate: string | null = null;
   // Tabs whose remembered scroll has been dealt with, so a later report of theirs is the reader's
   // own scrolling and worth persisting. Before that the editor reports the 0 of a fresh mount.
   const scrollArmed = new Set<string>();
+
+  /**
+   * Put a restored tab's caret and scroll back. The editor of the tab may not be mounted yet, and its
+   * layout is not measured until a frame after the text lands — so a restore that finds either missing
+   * tries again for a few frames instead of doing nothing, which is what "the file opens at the top
+   * every now and then" looked like.
+   */
+  function applyRestoredView(
+    path: string, caret: { line: number; col: number } | null, atTop: boolean, scroll: number, attempt = 0,
+  ) {
+    if (activePath !== path) return;
+    const ed = editorComp;
+    if (!ed) {
+      if (attempt < 30) requestAnimationFrame(() => applyRestoredView(path, caret, atTop, scroll, attempt + 1));
+      return;
+    }
+    if (caret && !atTop) ed.scrollToLineCol(caret.line, caret.col);
+    // After the caret, which centres its line: the remembered offset is where the page really was.
+    if (scroll > 0) {
+      requestAnimationFrame(() => { if (activePath === path) editorComp?.restoreScrollTop(scroll); });
+    }
+  }
   $effect(() => {
     const path = activePath;
     const source = path ? projectStore.sourceOf(path) : '';
     // Leaving a tab ends its activation: coming back to it — from another project, or from a project with no
     // tab at all — is a new one. Without this the guard still held the old path, the restore was skipped as
     // "already done", and the tab came back at the top.
-    if (path !== restoreSeenTab) { restoreSeenTab = path; restoredCaretFor = null; }
+    if (path !== restoreSeenTab) { restoreSeenTab = path; restoredCaretFor = null; textArrivedLate = null; }
+    // The editor mounts as soon as the tab is shown, which on a project switch can be before its text is read:
+    // it was then created on an empty document, and the snapshot it was given (caret, scroll) clamped to 0.
+    if (path && !source && !isPreviewTab) textArrivedLate = path;
     if (!path || !source || isPreviewTab || historyPending) return;
     if (restoredCaretFor === path) return;
-    if (viewStates.has(path)) { scrollArmed.add(path); return; }
+    // A live snapshot is the finer answer — unless the view never saw the text it describes.
+    if (viewStates.has(path) && textArrivedLate !== path) { scrollArmed.add(path); restoredCaretFor = path; return; }
     restoredCaretFor = path;
     const caret = projectStore.caretOf(path);
     const scroll = caret?.scroll ?? 0;
     const atTop = !caret || (caret.line === 1 && caret.col === 1);
-    if (atTop && scroll <= 0) { scrollArmed.add(path); return; }
+    if (atTop && scroll <= 0) { scrollArmed.add(path); return; } // nothing remembered: `restoredCaretFor` is already set above
     void tick().then(() => {
       scrollArmed.add(path);
       if (activePath !== path) return;
       // No history call here: restoring the caret is not a navigation. It only moves where the
       // reader is settled in this tab, which is what the next jump records as its origin.
-      if (caret && !atTop) editorComp?.scrollToLineCol(caret.line, caret.col);
+      applyRestoredView(path, caret, atTop, scroll);
       // After the caret, which centres its line: the remembered offset is where the page really was.
-      if (scroll > 0) editorComp?.restoreScrollTop(scroll);
     });
   });
 
@@ -927,7 +964,14 @@
   /** The live-preview editor, for the one thing only it can do: land on a heading in a file
    *  that a link has just opened. Typed by what is asked of it rather than by the component,
    *  so this stays a contract and not a handle to poke at. */
-  let mdComp = $state<{ goToAnchor(slug: string): boolean } | null>(null);
+  let mdComp = $state<{
+    goToAnchor(slug: string): boolean;
+    exec(command: EditorCommand): boolean;
+  } | null>(null);
+  /** What the caret is in, for the formatting strip's pressed buttons. */
+  let mdFormat = $state<FormatState>(NO_FORMAT);
+  /** The `Alt` formatting chords, shared with Garrulus. Module-stable so the editor is not rebuilt. */
+  const mdExtensions = [markdownFormatKeymap];
 
   /**
    * Every file in the project, for the link completion behind `[…](`.
@@ -1209,7 +1253,9 @@
     // shared Problems-panel store (so the active-file section updates live and stays correct after
     // you switch away).
     const runFull = () => {
-      void ipcDiagnostics(path, src, true)
+      // `live`: if a newer request for this file is already queued behind this one, the backend skips it
+      // (it fails with a "superseded" error, swallowed below like any other failure — see `ipcDiagnostics`).
+      void timed('diagnostics (full) round trip', () => ipcDiagnostics(path, src, true, true))
         .then((ds) => {
           if (cancelled) return;
           fullDone = true;
@@ -2185,9 +2231,12 @@
     void revision;
     void indexed;
     const src = editorComp?.getValue() ?? '';
+    // A library source view is under no project: its uses are in the index of the project it was
+    // opened from, which the backend needs to be told (the open project's root does as well).
+    const origin = isDecompiledView ? (decompiledCtx?.originFile ?? projectStore.project?.root) : undefined;
     let cancelled = false;
     const t = setFocusedTimeout(() => {
-      void ipcUsageCounts(path, src)
+      void ipcUsageCounts(path, src, origin)
         .then((marks) => {
           if (cancelled || activePath !== path) return;
           pushLenses(marks.map((mark) => ({ kind: 'usages' as const, mark })));
@@ -4140,6 +4189,11 @@
     );
   }
 
+  /** Convert the selection (or the identifier at each caret) to a naming style; `'cycle'` moves it one step round. */
+  export function convertCase(style: CaseStyle | 'cycle') {
+    if (!editorComp?.convertCase(style)) toastStore.show('Put the caret in a name, or select the text to convert', 'info');
+  }
+
   /** Format just the selected code of a Java buffer — `formatDocument` already narrows to a selection. */
   export async function formatSelection() {
     if (!selectionBytes()) {
@@ -4618,7 +4672,7 @@
     const resolvable = path.toLowerCase().endsWith('.java') || isLspFileOf(path);
     if (!resolvable) return false;
     const source = editorComp.getValue();
-    const target = await ipcDeclaration(path, source, offset).catch(() => null);
+    const target = await timed('go-to: declaration', () => ipcDeclaration(path, source, offset).catch(() => null));
     if (!target) return false;
     // On the declaration's own name span (same file, offset inside [start,end))? → usages.
     if (isSamePath(target.file, path) && offset >= target.start && offset < target.end) {
@@ -4758,7 +4812,7 @@
   async function tryGoToLibraryMember(offset: number): Promise<boolean> {
     const path = activePath;
     if (!path || !editorComp || !isJavaFile) return false;
-    const loc = await ipcLibraryDeclaration(path, editorComp.getValue(), offset).catch(() => null);
+    const loc = await timed('go-to: library member', () => ipcLibraryDeclaration(path, editorComp!.getValue(), offset).catch(() => null));
     if (!loc) return false;
     // Tracked with the same origin project, so the opened view is read-only and itself navigable.
     // No download banner: that needs the TYPE name to re-resolve the artifact, and the word under
@@ -4784,8 +4838,21 @@
     // only uses the origin to choose one), so it is a complete answer rather than a degraded one.
     const originFile = decompiledCtx?.originFile ?? projectStore.project?.root;
     if (!originFile || !editorComp) return false;
-    const loc = await ipcLibraryDeclaration(originFile, editorComp.getValue(), offset).catch(() => null);
+    const source = editorComp.getValue();
+    const loc = await ipcLibraryDeclaration(originFile, source, offset).catch(() => null);
     if (!loc) return false;
+    // On the declaration's own name: nowhere to go, so the uses — what the gesture does on the name of
+    // a project declaration — rather than a jump to where the caret already is.
+    const word = editorComp.wordAtCaret();
+    if (
+      word &&
+      isSamePath(loc.file, activePath ?? '') &&
+      offset >= loc.offset &&
+      offset <= loc.offset + new TextEncoder().encode(word).length
+    ) {
+      await runFindUsages(source, offset, editorComp.coordsAtByteOffset(offset), word);
+      return true;
+    }
     // The target is another library view — track it (same origin project) so it's read-only and
     // itself navigable. A chained target doesn't carry the type name for the download button, so its
     // banner is suppressed (canDownload: false); the initial go-to tab keeps its download banner.
@@ -4893,7 +4960,7 @@
   async function tryGoToFrameworkExt(offset: number): Promise<boolean> {
     const path = activePath;
     if (!path || !editorComp) return false;
-    const targets = await extNavigate(path, editorComp.getValue(), offset).catch(() => []);
+    const targets = await timed('go-to: framework extensions', () => extNavigate(path, editorComp!.getValue(), offset).catch(() => []));
     if (targets.length === 0) return false;
     if (targets.length > 1) {
       const at = editorComp.coordsAtByteOffset(offset);
@@ -4955,6 +5022,13 @@
    *  for **Ctrl+click**, where a click on any random token shouldn't pop a toast (IntelliJ
    *  stays quiet there); an explicit **Ctrl+B / palette** invocation keeps the feedback. */
   async function resolveDefinition(action: string, offset?: number, silent = false) {
+    // The same gesture on the same spot while its chain is still running (a double Ctrl+B, a
+    // double Ctrl+Click) is the same question asked twice: running it again opened the target
+    // twice and pushed two history stops for one jump.
+    const chainKey = `${activePath}\0${offset ?? ''}\0${action}`;
+    if (chainKey === resolvingKey) return;
+    resolvingKey = chainKey;
+    const done = stopwatch('go-to: whole chain');
     // The whole resolution behind one in-progress mark. It is a chain of round trips —
     // and the last of them, a library type, has to be found on the classpath and read
     // out of an archive — so it can run for seconds with nothing on screen changing.
@@ -4964,9 +5038,13 @@
     try {
       await resolveDefinitionIn(action, offset, silent);
     } finally {
+      if (resolvingKey === chainKey) resolvingKey = null;
+      done(action);
       bennuUiStore.endNavigation(token);
     }
   }
+  /** The go-to chain currently in flight, so an identical repeat can be dropped. */
+  let resolvingKey: string | null = null;
 
   /** The body of {@link resolveDefinition} — every resolution step, in order. */
   async function resolveDefinitionIn(action: string, offset?: number, silent = false) {
@@ -5307,7 +5385,15 @@
         ],
       },
     ];
-    const items: MenuItem[] = [navigate, env, generate, save, past]
+    const caseMenu: MenuItem[] = [{
+      id: 'convert-case', label: 'Convert Case', icon: CaseSensitive,
+      children: [
+        { id: 'case-cycle', label: 'Next case', shortcut: 'Ctrl+Shift+W' },
+        sep('sep-case'),
+        ...CASE_MENU_STYLES.map((s) => ({ id: `case:${s}`, label: CASE_LABELS[s] }) as MenuItem),
+      ],
+    }];
+    const items: MenuItem[] = [navigate, env, generate, caseMenu, save, past]
       .filter((group) => group.length > 0)
       .flatMap((group, i) => (i === 0 ? group : [sep('sep' + i), ...group]));
     bennuContextMenuStore.show(e.clientX, e.clientY, items, onEditorMenuSelect, { actions: quick });
@@ -5351,12 +5437,17 @@
   }
 
   function onEditorMenuSelect(id: string) {
+    if (id.startsWith('case:')) {
+      convertCase(id.slice(5) as CaseStyle);
+      return;
+    }
     if (id.startsWith('gen:')) {
       bennuUiStore.openCodeGenerator(id.slice(4));
       return;
     }
     switch (id) {
       case 'cut': editorComp?.cutSelection(); break;
+      case 'case-cycle': convertCase('cycle'); break;
       case 'copy': editorComp?.copySelection(); break;
       case 'paste': void editorComp?.pasteClipboard(); break;
       case 'imber': showAssistantMenu(editorMenuAt.x, editorMenuAt.y); break;
@@ -5756,9 +5847,22 @@
          buffer — every change goes through `onInput` like the code editor's, so dirty state,
          Ctrl+S and autosave are unchanged. No editor context menu: every entry on it (go to
          declaration, find usages, the refactorings) is about code. -->
+    <!-- The same formatting strip Garrulus's notes have: toggles that follow the caret, the same
+         commands as the Alt chords. The table button is left out — the toolbar above has a sized
+         grid picker of its own. -->
+    <div class="md-format">
+      <MarkdownToolbar
+        state={mdFormat}
+        disabled={isDecompiledView || isBuiltinTemplate}
+        hide={['table']}
+        onCommand={(cmd) => mdComp?.exec(cmd)}
+      />
+    </div>
     <div class="ed-editor-wrap">
       <MarkdownEditor
         bind:this={mdComp}
+        extensions={mdExtensions}
+        onFormatState={(s) => (mdFormat = s)}
         docKey={mdDocKey}
         text={projectStore.sourceOf(activePath)}
         docPath={activePath}
@@ -5819,6 +5923,7 @@
           problemMarkers={bennuSettingsStore.showProblemMarkers}
           stableGutter
           highlightActiveLine={bennuSettingsStore.highlightCurrentLine}
+          caret={bennuSettingsStore.caret}
           folding={bennuSettingsStore.foldingEnabled}
           foldBlockComments={bennuSettingsStore.foldBlockComments}
           completion={{
@@ -6065,7 +6170,7 @@
 
   .ed-tabs {
     display: flex; align-items: stretch;
-    height: 32px; min-height: 32px;
+    height: var(--tab-strip-height); min-height: var(--tab-strip-height);
     background: var(--bg-base);
     border-bottom: 1px solid var(--border-subtle);
   }
@@ -6139,6 +6244,12 @@
   .ed-sources-banner .ed-tbtn:disabled { opacity: 0.6; cursor: default; }
   .ed-sources-banner .ed-tbtn.primary:disabled:hover { filter: none; }
 
+  .md-format {
+    display: flex; align-items: center; flex: none;
+    height: 28px; padding: 0 8px;
+    background: var(--bg-base);
+    border-bottom: 1px solid var(--border-subtle);
+  }
   .ed-editor-wrap { flex: 1; display: flex; min-width: 0; min-height: 0; position: relative; }
   /* The modal body is a block box (see the note at the call site): this is the flex context the
      preview needs to fill it. */

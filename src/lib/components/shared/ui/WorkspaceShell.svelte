@@ -90,7 +90,7 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
-    background: var(--bg-elevated);
+    background: var(--chrome-fill);
   }
 
   /* Inset container holding the sidebars + main column. The gap + bottom/side

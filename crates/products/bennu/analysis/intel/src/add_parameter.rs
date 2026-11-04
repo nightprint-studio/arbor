@@ -54,6 +54,9 @@ pub struct NewParameter {
     pub default_value: String,
     /// The position it takes: the index of the parameter it goes **before**, or `None` for last.
     pub before: Option<usize>,
+    /// Which overload is meant, when the caret is on a call and several declarations take that many
+    /// arguments: an index into [`AddParameterPlan::overloads`]. `None` asks the plan to list them.
+    pub overload: Option<usize>,
 }
 
 /// Where the caret's call stands in relation to the parameter being added.
@@ -79,10 +82,21 @@ pub struct AddParameterPlan {
     /// The files whose declaration gained the parameter, so a caller can add the imports its type needs
     /// where it is written.
     pub declaration_files: Vec<String>,
+    /// The method's name.
+    pub method: String,
+    /// The declarations a call could mean, each written `name(Type a, Type b)` — only when the caret is
+    /// on a call and more than one signature takes that many arguments, so the dialog can ask which.
+    pub overloads: Vec<String>,
+    /// The parameter the caret is on, when it is inside a declaration's parameter list: the dialog
+    /// offers to insert before it.
+    pub caret_parameter: Option<usize>,
 }
 
 /// What one declaration of the method looks like.
 struct DeclSite {
+    /// Where the whole declaration starts (modifiers and annotations included) — the Javadoc sits
+    /// just before it.
+    decl_start: usize,
     owner: String,
     file: String,
     name_start: usize,
@@ -181,6 +195,11 @@ pub fn add_parameter_plan(
     java_files: &[PlanFile],
     level: LangLevel,
 ) -> Option<AddParameterPlan> {
+    // A caret anywhere in a declaration's signature — modifiers, return type, parameter list, throws —
+    // means that method; classification wants the caret on its name.
+    let snap = signature_caret(source, offset);
+    let caret_parameter = snap.as_ref().and_then(|s| s.parameter);
+    let offset = snap.as_ref().map_or(offset, |s| s.name_start);
     let target = classify_target(index, file, source, offset, resolver, project_types, level)?;
     let RenameTarget::Member { key: DeclKey::Method { owner, name } } = &target else {
         return None;
@@ -212,12 +231,27 @@ pub fn add_parameter_plan(
     let on_declaration =
         sites.iter().find(|s| s.file == file && s.name_start <= offset && offset <= s.name_end);
     let call = if on_declaration.is_none() { call_at(source, offset) } else { None };
-    let (arity, signature): (usize, Option<Vec<String>>) = match (on_declaration, &call, anchor) {
+    let (arity, mut signature): (usize, Option<Vec<String>>) = match (on_declaration, &call, anchor) {
         (Some(d), _, _) => (d.params.len(), Some(d.params.iter().map(|p| p.ty.clone()).collect())),
         (None, Some(c), Anchor::Caret) => (c.argc, None),
         (None, Some(c), Anchor::ExtraArgument) => (c.argc.checked_sub(1)?, None),
         _ => return None,
     };
+
+    // From a call, the signatures that could be meant. More than one and the call alone cannot say —
+    // the dialog lists them; once one is chosen the plan proceeds as if started on that declaration.
+    let from_call = signature.is_none();
+    let candidates = distinct_signatures(&sites, arity);
+    let overloads: Vec<String> = if from_call && candidates.len() > 1 {
+        candidates.iter().map(|sig| render_signature(name, &sites, arity, sig)).collect()
+    } else {
+        Vec::new()
+    };
+    if from_call {
+        if let Some(chosen) = param.overload.and_then(|i| candidates.get(i)) {
+            signature = Some(chosen.clone());
+        }
+    }
 
     // Per owner, the declarations of that arity — narrowed to the one with this signature where the
     // declaration was the starting point and an owner has several.
@@ -264,6 +298,12 @@ pub fn add_parameter_plan(
         for s in &matched {
             let (at, text) = declaration_insertion(s, insert, &decl_text);
             edits.push(insertion(&s.file, at, text, EditReason::Declaration, false));
+            // The Javadoc names its parameters in order; the new one is documented where it now sits.
+            let doc = text_of(&s.file, file, source, java_files)
+                .and_then(|t| javadoc_param_edit(t, s.decl_start, &s.params, insert, param.name.trim()));
+            if let Some((at, text)) = doc {
+                edits.push(insertion(&s.file, at, text, EditReason::Declaration, false));
+            }
         }
         blocked = call_edits(
             index,
@@ -311,7 +351,174 @@ pub fn add_parameter_plan(
         ),
         parameters,
         declaration_files,
+        method: name.clone(),
+        overloads,
+        caret_parameter,
     })
+}
+
+/// Where the caret stands inside a method declaration's signature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureCaret {
+    /// The start of the method's name — the offset the rest of the engine classifies from.
+    pub name_start: usize,
+    /// The index of the parameter the caret is inside, if it is inside the parameter list.
+    pub parameter: Option<usize>,
+}
+
+/// If `offset` is in a method declaration's signature (from its first modifier to just before the
+/// body), where that is. `None` in a body, between members, or outside any method.
+pub fn signature_caret(source: &str, offset: usize) -> Option<SignatureCaret> {
+    let tree = bennu_java::prelude::parse_java(source)?;
+    let at = offset.min(source.len());
+    let mut cur = tree.root_node().descendant_for_byte_range(at, at);
+    while let Some(n) = cur {
+        match n.kind() {
+            "method_declaration" => {
+                let name = n.child_by_field_name("name")?;
+                let params = n.child_by_field_name("parameters")?;
+                let signature_end = n.child_by_field_name("body").map_or(n.end_byte(), |b| b.start_byte());
+                if at < n.start_byte() || at >= signature_end {
+                    return None;
+                }
+                let mut c = params.walk();
+                let parameter = params
+                    .named_children(&mut c)
+                    .filter(|p| matches!(p.kind(), "formal_parameter" | "spread_parameter"))
+                    .position(|p| p.start_byte() <= at && at <= p.end_byte());
+                return Some(SignatureCaret { name_start: name.start_byte(), parameter });
+            }
+            // A body, a lambda or a class body between the caret and any method: not a signature.
+            "block" | "lambda_expression" | "class_body" | "interface_body" | "enum_body" => return None,
+            _ => cur = n.parent(),
+        }
+    }
+    None
+}
+
+/// The distinct parameter-type lists of the declarations taking `arity` parameters, in the order the
+/// declarations were found.
+fn distinct_signatures(sites: &[DeclSite], arity: usize) -> Vec<Vec<String>> {
+    let mut out: Vec<Vec<String>> = Vec::new();
+    for s in sites.iter().filter(|s| s.params.len() == arity) {
+        let sig: Vec<String> = s.params.iter().map(|p| p.ty.clone()).collect();
+        if !out.contains(&sig) {
+            out.push(sig);
+        }
+    }
+    out
+}
+
+/// `name(Type a, Type b)` for the first declaration with this signature.
+fn render_signature(name: &str, sites: &[DeclSite], arity: usize, sig: &[String]) -> String {
+    let site = sites
+        .iter()
+        .find(|s| s.params.len() == arity && s.params.iter().map(|p| p.ty.as_str()).eq(sig.iter().map(String::as_str)));
+    let params: Vec<String> = match site {
+        Some(s) => s.params.iter().map(|p| format!("{} {}", p.ty, p.name).trim().to_string()).collect(),
+        None => sig.to_vec(),
+    };
+    format!("{name}({})", params.join(", "))
+}
+
+/// One line of a Javadoc comment, with its offset into the file.
+struct DocLine<'a> {
+    start: usize,
+    body: &'a str,
+}
+
+impl DocLine<'_> {
+    /// The text after the leading `*`.
+    fn content(&self) -> &str {
+        self.body.trim_start().trim_start_matches('*').trim()
+    }
+
+    /// The line's indentation and star, ready to prefix a new line: `"   * "`.
+    fn prefix(&self) -> String {
+        let star = self.body.find('*').unwrap_or(0);
+        format!("{}* ", &self.body[..star])
+    }
+}
+
+/// Where a Javadoc `@param` line for the new parameter goes, and what to write — an insertion at the
+/// start of a line. `None` when the declaration has no Javadoc, or one that is a single line.
+///
+/// The line follows the one for the parameter before it, else precedes the one for the parameter it
+/// goes before, else joins the other `@param`s, else comes before the first other tag, else ends the
+/// description (after a blank ` *` line).
+fn javadoc_param_edit(
+    text: &str,
+    decl_start: usize,
+    params: &[ParamInfo],
+    insert: usize,
+    new_name: &str,
+) -> Option<(usize, String)> {
+    let trimmed = text.get(..decl_start)?.trim_end();
+    if !trimmed.ends_with("*/") {
+        return None;
+    }
+    let comment_start = trimmed.rfind("/**")?;
+    let comment = &trimmed[comment_start..];
+    // A `*/` before the end means the nearest `/**` belongs to an older comment.
+    if comment[..comment.len() - 2].contains("*/") || !comment.contains('\n') {
+        return None;
+    }
+
+    let mut lines: Vec<DocLine> = Vec::new();
+    let mut at = comment_start;
+    for raw in comment.split_inclusive('\n') {
+        lines.push(DocLine { start: at, body: raw.trim_end_matches(['\n', '\r']) });
+        at += raw.len();
+    }
+    let last = lines.len() - 1;
+    // Text sharing the closing line (` * foo */`) leaves no line of its own to insert before.
+    if !lines[last].body.trim_start().starts_with("*/") {
+        return None;
+    }
+
+    // (name, first line, last line) of every @param; the first line carrying any other tag.
+    let mut entries: Vec<(String, usize, usize)> = Vec::new();
+    let mut first_other_tag: Option<usize> = None;
+    let mut open: Option<usize> = None;
+    for (i, l) in lines.iter().enumerate().take(last) {
+        let c = l.content();
+        if let Some(rest) = c.strip_prefix("@param") {
+            entries.push((rest.split_whitespace().next().unwrap_or("").to_string(), i, i));
+            open = Some(entries.len() - 1);
+        } else if c.starts_with('@') {
+            first_other_tag.get_or_insert(i);
+            open = None;
+        } else if let Some(k) = open {
+            if !c.is_empty() {
+                entries[k].2 = i;
+            }
+        }
+    }
+    let entry_of = |name: &str| entries.iter().find(|(n, _, _)| n == name).map(|(_, s, e)| (*s, *e));
+
+    let after_previous = if insert > 0 {
+        params.get(insert - 1).and_then(|p| entry_of(&p.name)).map(|(_, end)| end + 1)
+    } else {
+        None
+    };
+    let before_next = params.get(insert).and_then(|p| entry_of(&p.name)).map(|(start, _)| start);
+    let after_last = entries.last().map(|(_, _, end)| end + 1);
+    let target = after_previous.or(before_next).or(after_last).or(first_other_tag);
+
+    let doc = format!("@param {new_name} the {new_name}");
+    match target {
+        Some(i) => Some((lines[i].start, format!("{}{doc}\n", lines[i].prefix()))),
+        None => {
+            // The end of the description, set off from it by a blank line when there is one.
+            let described = lines[..last].iter().enumerate().any(|(i, l)| {
+                let c = if i == 0 { l.body.trim_start_matches("/**").trim() } else { l.content() };
+                !c.is_empty()
+            });
+            let prefix = lines[last].prefix();
+            let gap = if described { format!("{}\n", prefix.trim_end()) } else { String::new() };
+            Some((lines[last].start, format!("{gap}{prefix}{doc}\n")))
+        }
+    }
 }
 
 /// The refusals that do not need a single call site looked at.
@@ -331,8 +538,8 @@ fn refusal_before_edits(
     }
     if ambiguous && !from_declaration {
         return Some(format!(
-            "Several overloads of `{name}` take {arity} parameter{} — put the caret on the declaration \
-             of the one to change.",
+            "Several overloads of `{name}` take {arity} parameter{} — choose which one to change, or put the caret on its \
+             declaration.",
             if arity == 1 { "" } else { "s" }
         ));
     }
@@ -507,6 +714,7 @@ fn read_sites(owner: &str, file: &str, text: &str, spans: &[(usize, usize)]) -> 
         let mut taken: HashSet<String> = infos.iter().map(|p| p.name.clone()).collect();
         collect_declared_names(method, bytes, &mut taken);
         out.push(DeclSite {
+            decl_start: method.start_byte(),
             owner: owner.to_string(),
             file: file.to_string(),
             name_start: start,
@@ -608,6 +816,7 @@ mod tests {
             name: name.to_string(),
             default_value: default.to_string(),
             before: None,
+            overload: None,
         }
     }
 
@@ -802,6 +1011,109 @@ mod tests {
         assert_eq!(default_value_for("byte"), "(byte) 0");
         assert_eq!(default_value_for("String"), "null");
         assert_eq!(default_value_for("List<Order>"), "null");
+    }
+
+    // ── caret anywhere in the signature ────────────────────────────────────────────────────────
+
+    #[test]
+    fn a_caret_in_the_parameter_list_means_that_method() {
+        let files = [("A.java", A)];
+        let at = A.find("int a)").unwrap() + 5;
+        let plan = plan_with(&files, "A.java", at, &param("String", "label", "null"), Anchor::Caret).expect("a plan");
+        assert!(plan.plan.blocked.is_none(), "{:?}", plan.plan.blocked);
+        assert_eq!(plan.caret_parameter, Some(0));
+        assert_eq!(plan.method, "total");
+        assert!(applied(&files, &plan)["A.java"].contains("int total(int a, String label)"));
+    }
+
+    #[test]
+    fn a_caret_on_the_return_type_is_in_the_signature_and_one_in_the_body_is_not() {
+        assert_eq!(signature_caret(A, A.find("int total").unwrap()).map(|s| s.parameter), Some(None));
+        assert!(signature_caret(A, A.find("return a").unwrap() + 2).is_none());
+        assert!(signature_caret(A, A.find("class A").unwrap()).is_none());
+    }
+
+    #[test]
+    fn a_parameter_goes_in_the_middle_and_its_javadoc_follows() {
+        let src = "package p;\npublic class A {\n  /**\n   * Adds.\n   * @param a the a\n   * @param b the b\n   * @return sum\n   */\n  int add(int a, int b) { return a + b; }\n  int use() { return add(1, 2); }\n}\n";
+        let files = [("A.java", src)];
+        let mut p = param("long", "c", "0");
+        p.before = Some(1);
+        let plan = plan_with(&files, "A.java", src.find("add(int").unwrap() + 1, &p, Anchor::Caret).expect("a plan");
+        assert!(plan.plan.blocked.is_none(), "{:?}", plan.plan.blocked);
+        let text = &applied(&files, &plan)["A.java"];
+        assert!(text.contains("int add(int a, long c, int b)"), "{text}");
+        assert!(text.contains("add(1, 0, 2)"), "{text}");
+        assert!(text.contains("   * @param a the a\n   * @param c the c\n   * @param b the b\n"), "{text}");
+    }
+
+    #[test]
+    fn a_parameter_at_the_front_is_documented_first() {
+        let src = "package p;\npublic class A {\n  /**\n   * @param a the a\n   */\n  int f(int a) { return a; }\n}\n";
+        let files = [("A.java", src)];
+        let mut p = param("int", "z", "0");
+        p.before = Some(0);
+        let plan = plan_with(&files, "A.java", src.find("f(int").unwrap(), &p, Anchor::Caret).unwrap();
+        let text = &applied(&files, &plan)["A.java"];
+        assert!(text.contains("int f(int z, int a)"), "{text}");
+        assert!(text.contains("   * @param z the z\n   * @param a the a\n"), "{text}");
+    }
+
+    #[test]
+    fn javadoc_edit_cases() {
+        let info = |name: &str| ParamInfo { start: 0, end: 0, ty: "int".into(), name: name.into() };
+        // A description only: the new line is set off by a blank one.
+        let doc = "/**\n * Does it.\n */\nvoid m() {}";
+        let (at, text) = javadoc_param_edit(doc, doc.find("void").unwrap(), &[], 0, "x").unwrap();
+        let mut out = doc.to_string();
+        out.insert_str(at, &text);
+        assert_eq!(out, "/**\n * Does it.\n *\n * @param x the x\n */\nvoid m() {}");
+        // Before the first other tag when there is no @param.
+        let doc = "/**\n * Does it.\n * @return one\n */\nint m() {}";
+        let (at, text) = javadoc_param_edit(doc, doc.find("int m").unwrap(), &[], 0, "x").unwrap();
+        let mut out = doc.to_string();
+        out.insert_str(at, &text);
+        assert_eq!(out, "/**\n * Does it.\n * @param x the x\n * @return one\n */\nint m() {}");
+        // After a multi-line @param of the previous parameter.
+        let doc = "/**\n * @param a first\n *          continued\n */\nvoid m(int a) {}";
+        let (at, text) = javadoc_param_edit(doc, doc.find("void").unwrap(), &[info("a")], 1, "b").unwrap();
+        let mut out = doc.to_string();
+        out.insert_str(at, &text);
+        assert_eq!(out, "/**\n * @param a first\n *          continued\n * @param b the b\n */\nvoid m(int a) {}");
+        // No Javadoc, a one-line one, or someone else's comment: nothing.
+        assert!(javadoc_param_edit("void m() {}", 0, &[], 0, "x").is_none());
+        let one = "/** One line. */\nvoid m() {}";
+        assert!(javadoc_param_edit(one, one.find("void").unwrap(), &[], 0, "x").is_none());
+        let plain = "// note\nvoid m() {}";
+        assert!(javadoc_param_edit(plain, plain.find("void").unwrap(), &[], 0, "x").is_none());
+    }
+
+    // ── which overload ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn from_a_call_the_overloads_are_listed_and_one_can_be_chosen() {
+        let src = "package p;\npublic class A {\n  int f(int a) { return a; }\n  int f(String a) { return 0; }\n  int use() { return f(1); }\n}\n";
+        let files = [("A.java", src)];
+        let at = src.rfind("f(1)").unwrap();
+        let plan = plan_with(&files, "A.java", at, &param("int", "c", "0"), Anchor::Caret).unwrap();
+        assert!(plan.plan.blocked.is_some());
+        assert_eq!(plan.overloads, ["f(int a)", "f(String a)"]);
+
+        let mut chosen = param("int", "c", "0");
+        chosen.overload = Some(0);
+        let plan = plan_with(&files, "A.java", at, &chosen, Anchor::Caret).unwrap();
+        assert!(plan.plan.blocked.is_none(), "{:?}", plan.plan.blocked);
+        let text = &applied(&files, &plan)["A.java"];
+        assert!(text.contains("int f(int a, int c)"), "{text}");
+        assert!(text.contains("int f(String a)"), "{text}");
+    }
+
+    #[test]
+    fn a_single_signature_is_not_a_question() {
+        let files = [("A.java", A)];
+        let at = A.find("total(1)").unwrap() + 2;
+        let plan = plan_with(&files, "A.java", at, &param("int", "scale", "10"), Anchor::Caret).unwrap();
+        assert!(plan.overloads.is_empty());
     }
 
     #[test]

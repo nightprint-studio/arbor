@@ -137,6 +137,9 @@ pub struct Endpoint {
     pub produces: String,
     /// `consumes = …` when written.
     pub consumes: String,
+    /// `produces = …` / `consumes = …` as the annotation spells them (`{MediaType.A_VALUE, Api.JSON}`), for a reader that can resolve a constant of the project.
+    pub produces_raw: String,
+    pub consumes_raw: String,
     /// The handler's return type as written (`ResponseEntity<Order>`, `void`).
     pub return_type: String,
     /// Its parameters, in declaration order.
@@ -736,6 +739,8 @@ mod tests {
             path_vars: vec!["id".into()],
             produces: String::new(),
             consumes: String::new(),
+            produces_raw: String::new(),
+            consumes_raw: String::new(),
             return_type: "String".into(),
             params: Vec::new(),
         };

@@ -109,7 +109,8 @@
     padding: 0 8px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--bg-overlay);
+    /* Translucent, not an opaque overlay: the pill sits on the tinted chrome and must let the veil through. */
+    background: color-mix(in srgb, var(--text-primary) 6%, transparent);
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
     font-size: var(--font-size-xs);
@@ -122,17 +123,17 @@
   button.cp { cursor: pointer; }
   button.cp:hover,
   button.cp.cp-open {
-    background: var(--bg-hover);
+    background: color-mix(in srgb, var(--text-primary) 12%, transparent);
     border-color: var(--border-focus);
   }
 
   /* Read-only is a standing warning, not a transient one. */
   .cp.cp-ro {
     border-color: color-mix(in srgb, var(--warning) 42%, transparent);
-    background: color-mix(in srgb, var(--warning) 10%, var(--bg-overlay));
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
   }
   button.cp.cp-ro:hover {
-    background: color-mix(in srgb, var(--warning) 18%, var(--bg-overlay));
+    background: color-mix(in srgb, var(--warning) 20%, transparent);
   }
 
   /* A BAR, not a dot, and the shape is the point.

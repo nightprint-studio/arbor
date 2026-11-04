@@ -36,6 +36,9 @@ pub struct AddParameterArgs {
     /// The index of the parameter it goes before. Absent: last.
     #[serde(default)]
     pub before: Option<usize>,
+    /// Which overload is meant, an index into the `overloads` of a previous answer. Absent: ask.
+    #[serde(default)]
+    pub overload: Option<usize>,
 }
 
 /// Args for [`bennu_add_parameter_for_call`].
@@ -68,6 +71,7 @@ fn bennu_add_parameter_plan(
         name: args.name,
         default_value,
         before: args.before,
+        overload: args.overload,
     };
     let plan = IndexService::global().plan_add_parameter(
         &args.file,
@@ -79,7 +83,13 @@ fn bennu_add_parameter_plan(
     );
     // The dialog asks while the user is still typing — a half-written type is not an error, it is
     // a preview that says so.
-    Ok(plan.map(|p| AddParameterPreview { parameters: p.parameters, preview: preview_of(p.plan) }))
+    Ok(plan.map(|p| AddParameterPreview {
+        parameters: p.parameters,
+        method: p.method,
+        overloads: p.overloads,
+        caret_parameter: p.caret_parameter,
+        preview: preview_of(p.plan),
+    }))
 }
 
 /// The edits that add the parameter a call is already passing — the *Add parameter* quick fix.
@@ -96,14 +106,10 @@ fn bennu_add_parameter_for_call(
     Ok(plan.plan.files.into_iter().flat_map(|f| f.edits).map(wire_edit).collect())
 }
 
-/// Whether `offset` is on the name of a method declaration — where *Add parameter…* is offered.
-pub(crate) fn on_method_declaration_name(source: &str, offset: usize) -> bool {
-    let Some(tree) = bennu_java::prelude::parse_java(source) else { return false };
-    let at = offset.min(source.len());
-    let Some(node) = tree.root_node().descendant_for_byte_range(at, at) else { return false };
-    node.parent().is_some_and(|p| {
-        p.kind() == "method_declaration" && p.child_by_field_name("name").is_some_and(|n| n.id() == node.id())
-    })
+/// Whether `offset` is in a method declaration's signature — its modifiers, return type, name,
+/// parameter list or `throws` — where *Add parameter…* is offered.
+pub(crate) fn in_method_signature(source: &str, offset: usize) -> bool {
+    bennu_intel::prelude::signature_caret(source, offset).is_some()
 }
 
 /// The last argument of the call whose name is at `at` — the one a *wrong number of arguments* error

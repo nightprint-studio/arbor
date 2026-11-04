@@ -219,6 +219,19 @@ fn check(pack: &Pack, rules: &LanguageRules, declarations: Vec<Declared>) -> Vec
     out
 }
 
+/// Every declaration of a grammar-backed file, whatever its names look like.
+///
+/// For callers that want to read how a project names things (see [`crate::detect`]) rather than judge
+/// it. Empty for a path no pack claims and for a server-backed pack, whose declarations come from an
+/// outline this function cannot fetch.
+pub fn declarations(path: &str, source: &str) -> Vec<Declared> {
+    let Some(pack) = pack_for_path(path) else { return Vec::new() };
+    match &pack.source {
+        DeclSource::Grammar(walk) => declarations_in(*walk, source),
+        DeclSource::Symbols(_) => Vec::new(),
+    }
+}
+
 /// Parse `source` with `walk`'s grammar and collect every declaration it recognises.
 ///
 /// One parse, one walk, and the pack is asked about each node exactly once — the same shape

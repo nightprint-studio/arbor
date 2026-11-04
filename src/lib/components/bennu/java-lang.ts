@@ -27,12 +27,13 @@
 
 import { Parser, Language, type Node } from 'web-tree-sitter';
 import {
-  makeU16ToByte, makeByteToU16, renderDoc, createCompletionRequests,
+  makeU16ToByte, makeByteToU16, renderDoc, createCompletionRequests, COMPLETION_IMPORT_EVENT,
   type LanguageDescriptor, type TokenClass, type CompletionSource,
   type InlineCompletionSource,
 } from '$lib/components/shared/ui/code-editor';
 import { toCompletion } from './completion-item';
 import { offersFallbackWords, shouldAskForCompletion } from './java-completion-trigger';
+import { timed } from './perf';
 import { javaKeywordsAt } from './java-keywords';
 import {
   boostForRank, FALLBACK, RESOLVED, TEMPLATE,
@@ -327,7 +328,13 @@ async function applyAutoImport(view: EditorView, fqn: string): Promise<void> {
   }
   if (!edit) return; // no import needed (same package / already imported / java.lang)
   const b2u = makeByteToU16(src);
-  view.dispatch({ changes: { from: b2u(edit.start), to: b2u(edit.end), insert: edit.replacement } });
+  // Tagged so the editor's history folds it into the completion it belongs to: one Ctrl+Z takes back
+  // the name and its import together (see `completionAwareHistory`). The caret is not touched — the
+  // import is above it, so CodeMirror maps the selection through the insertion by itself.
+  view.dispatch({
+    changes: { from: b2u(edit.start), to: b2u(edit.end), insert: edit.replacement },
+    userEvent: COMPLETION_IMPORT_EVENT,
+  });
 }
 
 /** Java's backend completion requests, paced to the typing — one for the whole window's editors. */
@@ -442,7 +449,7 @@ const javaCompletionSource: CompletionSource = async (
   try {
     items = await completionRequests.request(
       key,
-      () => ipcCompletion(path, byteOffset, src, caseSensitive),
+      () => timed('completion round trip', () => ipcCompletion(path, byteOffset, src, caseSensitive), () => `${(src.length / 1024).toFixed(0)}KB`),
       ctx.explicit,
     );
   } catch {

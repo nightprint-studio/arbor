@@ -18,10 +18,17 @@
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { todoScan } from '$lib/ipc/bennu';
+  import { bennuCommentMarkersStore } from '$lib/stores/bennu/comment-markers.svelte';
+  import { toneOf } from './comment-markers/markers';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import type { TodoItem } from '$lib/types/bennu';
 
-  const KINDS = ['TODO', 'FIXME', 'XXX', 'HACK'] as const;
+  /** The filter chips: the words the editor colours (settings), upper-cased as the scan reports them. */
+  const kinds = $derived(
+    bennuCommentMarkersStore.caseSensitive
+      ? bennuCommentMarkersStore.keywords
+      : bennuCommentMarkersStore.keywords.map((w) => w.toUpperCase()),
+  );
 
   let items = $state<TodoItem[]>([]);
   /** The scan stopped at its cap, so the list is the first part of a longer one. */
@@ -31,9 +38,12 @@
   const hiddenKinds = new SvelteSet<string>();
 
   let lastRoot: string | null = null;
+  let lastWords = '';
   $effect(() => {
     const root = projectStore.project?.root ?? null;
-    if (root !== lastRoot) { lastRoot = root; void refresh(); }
+    // A change of the word list or of the case rule is a different question, so it scans again.
+    const words = `${bennuCommentMarkersStore.caseSensitive}|${bennuCommentMarkersStore.keywords.join(',')}`;
+    if (root !== lastRoot || words !== lastWords) { lastRoot = root; lastWords = words; void refresh(); }
   });
 
   export async function refresh() {
@@ -41,7 +51,7 @@
     if (!root) { items = []; truncated = false; return; }
     loading = true;
     try {
-      const scan = await todoScan(root);
+      const scan = await todoScan(root, bennuCommentMarkersStore.keywords, bennuCommentMarkersStore.caseSensitive);
       items = scan.items;
       truncated = scan.truncated;
     } catch {
@@ -106,9 +116,9 @@
   </BottomPanelHeader>
 
   <div class="todo-bar">
-    {#each KINDS as k (k)}
+    {#each kinds as k (k)}
       <button
-        class="chip k-{k.toLowerCase()}"
+        class="chip tone-{toneOf(k)}"
         class:off={hiddenKinds.has(k)}
         type="button"
         onclick={() => toggleKind(k)}
@@ -143,7 +153,7 @@
           <div transition:collapse>
             {#each group as t, i (i)}
               <button class="row" type="button" onclick={() => open(t)} oncontextmenu={(e) => onRowContextMenu(t, e)}>
-                <span class="tag k-{t.kind.toLowerCase()}">{t.kind}</span>
+                <span class="tag tone-{toneOf(t.kind)}">{t.kind}</span>
                 <span class="row-text">{t.text || '—'}</span>
                 <span class="row-line">{t.line}</span>
               </button>
@@ -166,10 +176,13 @@
   }
   .chip.off { opacity: 0.4; }
   .chip-n { font-weight: 600; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-  .k-todo { color: var(--info); }
-  .k-fixme { color: var(--warning); }
-  .k-xxx { color: var(--error); }
-  .k-hack { color: var(--text-secondary); }
+  /* The same tone → colour table the editor paints the marker with. */
+  .tone-accent { color: var(--accent); }
+  .tone-danger { color: var(--danger); }
+  .tone-warning { color: var(--warning); }
+  .tone-info { color: var(--info); }
+  .tone-success { color: var(--success); }
+  .tone-muted { color: var(--text-muted); }
 
   .state { display: flex; align-items: center; gap: 7px; padding: 12px 14px; font-size: var(--font-size-sm); color: var(--text-secondary); }
   .todo-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--text-disabled); }

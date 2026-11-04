@@ -70,10 +70,20 @@ export interface HirundoPaletteActions {
   requestSettings: () => void;
   diff: () => void;
   closeTab: () => void;
+  closeOtherTabs: () => void;
+  closeTabsToRight: () => void;
+  closeAllTabs: () => void;
+  closeSavedTabs: () => void;
+  moveTabLeft: () => void;
+  moveTabRight: () => void;
+  renameTab: () => void;
+  revealTab: () => void;
   findRequest: () => void;
   openRequest: (path: string) => void;
   environments: () => void;
   switchEnvironment: (id: string) => void;
+  openFolder: () => void;
+  newProject: () => void;
   openProject: () => void;
   openRecent: (path: string) => void;
   showSection: (id: SidebarSection) => void;
@@ -86,7 +96,6 @@ export interface HirundoPaletteActions {
   startStream: () => void;
   exportHttp: (path: string) => void;
   toggleBottom: () => void;
-  askImber: () => void;
   goToController: () => void;
   copyLink: () => void;
   saveAs: () => void;
@@ -138,10 +147,17 @@ export function buildHirundoPalette(query: string, ctx: HirundoPaletteContext, a
     { id: 'diff', title: 'Compare with the previous response', icon: 'FileCode', when: req, action: () => run(a.diff) },
     { id: 'settings', title: 'Request settings…', subtitle: 'Timeout, redirects, TLS', icon: 'Settings2', when: req, action: () => run(a.requestSettings) },
     { id: 'save-as', title: 'Save as…', icon: 'Save', when: req, action: () => run(a.saveAs) },
-    { id: 'imber', title: 'Ask Imber about this request', subtitle: 'Copies a prompt with the request, the answer and the failed checks', icon: 'Sparkles', when: req, action: () => run(a.askImber) },
     { id: 'controller', title: 'Go to the controller', subtitle: 'Opens the source Bennu found for this URL', icon: 'Code2', when: req, action: () => run(a.goToController) },
     { id: 'link', title: 'Copy the request file path', icon: 'Link', when: req, action: () => run(a.copyLink) },
     { id: 'close', title: 'Close the tab', icon: 'Square', shortcut: 'Ctrl+W', when: req, action: () => run(a.closeTab) },
+    { id: 'close-others', title: 'Close the other tabs', icon: 'Square', when: req, action: () => run(a.closeOtherTabs) },
+    { id: 'close-right', title: 'Close the tabs to the right', icon: 'Square', when: req, action: () => run(a.closeTabsToRight) },
+    { id: 'close-all', title: 'Close all tabs', icon: 'Square', when: req, action: () => run(a.closeAllTabs) },
+    { id: 'close-saved', title: 'Close the tabs without changes', icon: 'Square', when: req, action: () => run(a.closeSavedTabs) },
+    { id: 'rename-tab', title: 'Rename the request', icon: 'Pencil', shortcut: 'F2', when: req, action: () => run(a.renameTab) },
+    { id: 'tab-left', title: 'Move the tab left', icon: 'ArrowLeft', shortcut: 'Ctrl+Shift+PageUp', when: req, action: () => run(a.moveTabLeft) },
+    { id: 'tab-right', title: 'Move the tab right', icon: 'ArrowRight', shortcut: 'Ctrl+Shift+PageDown', when: req, action: () => run(a.moveTabRight) },
+    { id: 'reveal-tab', title: 'Show the request file in the file explorer', icon: 'FolderOpen', when: req, action: () => run(a.revealTab) },
   ];
 
   const project: Raw[] = [
@@ -153,6 +169,8 @@ export function buildHirundoPalette(query: string, ctx: HirundoPaletteContext, a
     ...ctx.workspaces.map((w): Raw => ({ id: `ws:${w.id}`, title: `Switch to workspace ${w.name}`, icon: 'Layers', when: true, action: () => run(() => a.switchWorkspace(w.id)) })),
     { id: 'schedule', title: 'New schedule…', subtitle: 'Run a collection on a timetable', icon: 'Clock', when: open && ctx.collections.length > 0, action: () => run(a.newSchedule) },
     ...ctx.collections.map((c): Raw => ({ id: `run:${c.path}`, title: `Run ${c.name}`, subtitle: 'Send every request and run the tests', icon: 'Play', when: open, action: () => run(() => a.runCollection(c.path)) })),
+    { id: 'open-folder', title: 'Open a folder as a project…', subtitle: 'A project is a folder with a .hirundo folder inside it', icon: 'FolderTree', when: true, action: () => run(a.openFolder) },
+    { id: 'new-project', title: 'New project…', subtitle: 'Choose where it lives and name it', icon: 'FolderTree', shortcut: 'Ctrl+Shift+P', when: true, action: () => run(a.newProject) },
     { id: 'open-project', title: 'Open a project…', icon: 'FolderTree', shortcut: 'Ctrl+Shift+O', when: true, action: () => run(a.openProject) },
     ...ctx.recents.map((p): Raw => ({ id: `recent:${p}`, title: `Open ${p.split(/[\\/]/).filter(Boolean).pop() ?? p}`, subtitle: p, icon: 'FolderTree', when: true, action: () => run(() => a.openRecent(p)) })),
   ];

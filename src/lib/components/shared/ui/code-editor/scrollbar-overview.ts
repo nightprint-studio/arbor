@@ -17,7 +17,7 @@
  */
 
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
-import type { Extension } from '@codemirror/state';
+import { Facet, type EditorState, type Extension } from '@codemirror/state';
 import { forEachDiagnostic } from '@codemirror/lint';
 import { ensureSyntaxTree } from '@codemirror/language';
 import { highlightTree } from '@lezer/highlight';
@@ -88,7 +88,23 @@ function diagnosticSignature(view: EditorView): string {
   forEachDiagnostic(view.state, (d, from) => {
     sig += `${from}:${d.severity[0]};`;
   });
+  for (const m of extraMarks(view.state)) sig += `${m.line}:${m.cls};`;
   return sig;
+}
+
+/** A mark on the strip that is not a diagnostic: the line it points at and the class that colours it. */
+export interface OverviewMark { line: number; cls: string }
+
+/**
+ * Sources of extra marks (a TODO in a comment, a changed block…), each read from the editor state so it stays
+ * in step with whatever the source holds. The class is added next to `cm-overview-mark`; the source styles it.
+ */
+export const overviewMarkSource = Facet.define<(state: EditorState) => readonly OverviewMark[]>();
+
+function extraMarks(state: EditorState): OverviewMark[] {
+  const out: OverviewMark[] = [];
+  for (const source of state.facet(overviewMarkSource)) out.push(...source(state));
+  return out;
 }
 
 export function scrollbarOverview(): Extension {
@@ -255,6 +271,15 @@ export function scrollbarOverview(): Extension {
           this.marks.appendChild(mark);
           this.markLines.push({ frac, line });
         });
+        for (const m of extraMarks(this.view.state)) {
+          if (m.line < 1 || m.line > doc.lines) continue;
+          const frac = (m.line - 0.5) / total;
+          const mark = document.createElement('div');
+          mark.className = `cm-overview-mark ${m.cls}`;
+          mark.style.top = `${frac * 100}%`;
+          this.marks.appendChild(mark);
+          this.markLines.push({ frac, line: m.line });
+        }
       }
 
       /** Show the preview lens for `line`, vertically anchored near the pointer. */

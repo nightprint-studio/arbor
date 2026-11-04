@@ -2,12 +2,12 @@
   "meta": {
     "title": "Bennu a confronto",
     "fonts": "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap",
-    "eyebrow": "Settima stesura · solo l'editor · 31 ottobre 2026",
+    "eyebrow": "Ottava stesura · solo l'editor · 4 novembre 2026",
     "h1": "Bennu a confronto",
-    "standfirst": "\n      Bennu contro IntelliJ IDEA Ultimate e Community, Eclipse, VS Code con il Java pack e NetBeans:\n      funzione per funzione, area per area, e sugli assi delle stesure precedenti. Rifatta due giorni dopo\n      l'ultimo aggiornamento, con tutto il lavoro di questi giorni sul completamento — il ghost text locale, i livelli che\n      imparano dal progetto, il popup dopo <code>new</code> — e con le etichette «nuova» ripulite: <b>lo è solo ciò che è\n      entrato in questa stesura</b>. La regola resta quella che vale nei due sensi: <b>un voto si muove solo se il\n      repository, o il tuo uso, lo dimostra</b>.\n    ",
+    "standfirst": "\n      Bennu contro IntelliJ IDEA Ultimate e Community, Eclipse, VS Code con il Java pack e NetBeans:\n      funzione per funzione, area per area, e sugli assi delle stesure precedenti. Rifatta quattro giorni dopo la settima, dopo giorni di lavoro intenso\n      — generatori di codice, Bevy, Node, un client HTTP, il formatter, le lingue nelle stringhe — e con un criterio in più: <b>conta solo ciò che è stabile</b>.\n      Compila, ha test che passano, oppure è già in uso da qualche giorno senza difetti segnalati. Quello che è stato scritto ma non ancora provato nell'app sta in una\n      sezione a parte, <a href=\"#inarrivo\">In arrivo</a>, e non entra nei punteggi. La regola vale nei due sensi: <b>un voto si muove solo se il repository, o il tuo uso, lo dimostra</b>.\n    ",
     "footer": [
-      "<b>Fonti e limiti.</b> La colonna di Bennu è letta dal codice del ramo <code>feature/bennu</code> al 31 ottobre (ultimo commit <code>bdce8ad9</code>, più il lavoro di questi giorni non committato), dal\n      <code>CHANGELOG</code>, dai conteggi sul repository (<code>#[test]</code> e macro MCP contati nel sorgente, test frontend eseguiti), dalle misure registrate sui corpora e dalle parole del\n      maintainer sulla UI/UX e sul ghost text. Le assenze — Change Signature, Introduce Parameter, estrai interfaccia, Gradle, hot-swap delle\n      classi, coverage, bookmark, macro, informazioni dall'app Spring viva — sono state cercate nel sorgente. Le colonne degli altri IDE,\n      RustRover e Spring Tools compresi, vengono da conoscenza generale delle versioni rilasciate e non sono state riverificate su\n      un'installazione. Fanno eccezione la sezione «Assistente AI» (ricerca web del 29 ottobre, fonti per lo più secondarie) e la riga del ghost text: per IntelliJ la documentazione ufficiale\n      lo lega all'abbonamento Ultimate e altre fonti JetBrains lo dicono disponibile a tutti, quindi la colonna Community (1) è la lettura prudente, non una certezza. «?» vuol dire che non ho trovato\n      niente di affidabile. Le matrici non sono esaustive: l'assenza di una riga non è un giudizio.",
-      "Stesure precedenti: <code>docs/arbor-a-confronto.html</code> (2 settembre, tutta la suite), la scheda\n      «Bennu Against the Field» (9 settembre), la quarta stesura (11 settembre), la quinta (15 settembre) e la sesta (20–29 ottobre), nella storia git del file. Gli aggiornamenti della sesta sono ancora in questa pagina, piegati.\n      Il confronto con Corvus non è stato rifatto: secondo il maintainer, dall'ultima valutazione non ha avuto altro che correzioni,\n      oltre ai cinque tool MCP."
+      "<b>Fonti e limiti.</b> <b>Criterio di stabilità di questa stesura:</b> un voto o un'etichetta «nuova» si dà solo a ciò che è dimostrato stabile — compila, ha test che passano (il maintainer dichiara il check del workspace e 1.039 test frontend verdi) e/o è già stato usato da qualche giorno senza difetti aperti. Il lavoro scritto ma mai provato nell'app reale, o aggiunto oggi, è in «In arrivo» e non pesa. I difetti che il maintainer tiene aperti (gli usi di <code>X.class</code> su classi di libreria, cinque test già rossi) non contano come stabili. <b>Questa stesura è stata fatta leggendo il codice, il <code>CHANGELOG</code> e la storia git: non ho lanciato niente (né cargo, né yarn, né l'app).</b> La colonna di Bennu è letta dal codice del ramo <code>feature/bennu</code> al 4 novembre (ultimo commit <code>df6fd932</code>, più il lavoro non ancora committato), dal\n      <code>CHANGELOG</code>, dai conteggi sul repository (<code>#[test]</code> e macro MCP contati nel sorgente, test frontend eseguiti), dalle misure registrate sui corpora e dalle parole del\n      maintainer sulla UI/UX e sul ghost text. Le assenze — Change Signature, Introduce Parameter, estrai interfaccia, Gradle, hot-swap delle\n      classi, coverage, bookmark, macro, informazioni dall'app Spring viva — sono state cercate nel sorgente. Le colonne degli altri IDE,\n      RustRover e Spring Tools compresi, vengono da conoscenza generale delle versioni rilasciate e non sono state riverificate su\n      un'installazione. Fanno eccezione la sezione «Assistente AI» (ricerca web del 29 ottobre, fonti per lo più secondarie) e la riga del ghost text: per IntelliJ la documentazione ufficiale\n      lo lega all'abbonamento Ultimate e altre fonti JetBrains lo dicono disponibile a tutti, quindi la colonna Community (1) è la lettura prudente, non una certezza. «?» vuol dire che non ho trovato\n      niente di affidabile. Le matrici non sono esaustive: l'assenza di una riga non è un giudizio.",
+      "Stesure precedenti: <code>docs/arbor-a-confronto.html</code> (2 settembre, tutta la suite), la scheda\n      «Bennu Against the Field» (9 settembre), la quarta stesura (11 settembre), la quinta (15 settembre), la sesta (20–29 ottobre) e la settima (31 ottobre), nella storia git del file. Gli aggiornamenti della sesta sono ancora in questa pagina, piegati.\n      Il confronto con Corvus non è stato rifatto. Imber dentro Corvus (assistente git, esecutore dei Plan, annulla, pianificazioni) è un'altra superficie e non è conteggiata qui."
     ]
   },
   "tools": [
@@ -46,7 +46,7 @@
         {
           "area": "Completamento di riga intera (ghost text)",
           "note": "Il resto della riga in grigio, con Tab per accettarlo: un modello da 12,5 milioni di parametri che gira in locale (ONNX, adattato al tuo codice), sotto una cascata di livelli deterministici — argomenti abituali, cosa segue cosa, chiamate su una variabile, annotazioni, formattazione del progetto — e i controlli di Bennu che scartano ciò che inventa nomi o metodi. Impara da ciò che fai (tenuto, accorciato, riscritto) se lo accendi, e mostra cosa tiene in una finestra dove ogni riga si può togliere. Resta più debole dove la riga dipende da molto contesto, e in questi giorni ha avuto regressioni che il confronto non ha misurato. Per gli altri: IntelliJ Ultimate ha il suo completamento di riga intera in locale (documentazione ufficiale: solo con l'abbonamento Ultimate, e le fonti non concordano su Community). VS Code con il Java pack non ha niente del genere per Java — IntelliCode dà una lista ordinata, il completamento di riga intera è per altri linguaggi — e con Copilot sarebbe un altro prodotto, a pagamento e nel cloud: questa scheda confronta ciò che il pacchetto include.",
-          "then": null,
+          "then": 3,
           "scores": {"bennu": 3, "iu": 4, "ice": 1, "ecl": 1, "vsc": 1, "nb": 1},
           "weight": {"legacy": 1, "boot": 2}
         },
@@ -80,7 +80,7 @@
         },
         {
           "area": "Iniezione di linguaggio nelle stringhe",
-          "note": "// language=sql e @Language: SQL e JPQL colorati, completati e (SQL) controllati sul database, anche nei text block. Niente JSON, regex o HTML nelle stringhe, e niente refactoring dentro la stringa.",
+          "note": "// language=sql e @Language: SQL e JPQL colorati, completati e (SQL) controllati sul database, anche nei text block. Niente JSON, regex o HTML nelle stringhe, e niente refactoring dentro la stringa. Le altre lingue nelle stringhe (regex, Lua, HTML, JS, CSS, JSON, XML, YAML, shell) e il Regex Tester sono nel sorgente dal 4 novembre, non provati: non contano (vedi «In arrivo»).",
           "then": 3,
           "scores": {"bennu": 3, "iu": 5, "ice": 3, "ecl": 1, "vsc": 2, "nb": 2},
           "weight": {"legacy": 2, "boot": 2}
@@ -142,7 +142,7 @@
         {
           "area": "JPA e HQL",
           "note": "Entità, repository, derived query controllate, JPQL colorato e completato con i parametri controllati, gutter entità ↔ repository, generatori. I nomi di campo dentro una JPQL si controllano contro il modello dal 28 ottobre (scritto, non ancora provato: il voto non si muove finché non lo è); le native si controllano contro il database. Non ha il diagramma delle entità né una finestra Persistence.",
-          "then": 3,
+          "then": 4,
           "scores": {"bennu": 4, "iu": 5, "ice": 1, "ecl": 4, "vsc": 1, "nb": 3},
           "weight": {"legacy": 2, "boot": 3}
         },
@@ -195,9 +195,9 @@
         },
         {
           "area": "Gradle, Ant, altri application server",
-          "note": "Assente: Maven e Tomcat soltanto.",
+          "note": "Un progetto con <code>settings.gradle[.kts]</code> o <code>build.gradle[.kts]</code> si apre come uno Maven: finestra Gradle con i progetti, i plugin e i task letti dagli script, ogni task parte nella console di esecuzione, classpath risolto (45 test nel crate). Tomcat si avvia come configurazione di run, anche sotto debugger. Mancano Ant e gli altri application server, e i task sono letti dagli script, non dal Gradle in esecuzione: 2, non di più. Committato dal 31 ottobre, usato da pochi giorni.",
           "then": 0,
-          "scores": {"bennu": 0, "iu": 5, "ice": 3, "ecl": 4, "vsc": 3, "nb": 5},
+          "scores": {"bennu": 2, "iu": 5, "ice": 3, "ecl": 4, "vsc": 3, "nb": 5},
           "weight": {"legacy": 0, "boot": 2}
         },
         {
@@ -231,7 +231,7 @@
         {
           "area": "Profiling",
           "note": "Registra un'esecuzione Java con Flight Recorder o si attacca a una JVM già in corso, un comando Node e un binario Rust con samply; ogni scheda ha ricerca e filtri per package, la memoria dice chi alloca e accredita i byte ai tuoi metodi, e due registrazioni si confrontano metodo per metodo, anche dall'agente. IntelliJ Ultimate ha un profiler maturo; la Community non ne ha. Non 5: un thread dump non l'ho trovato nel sorgente.",
-          "then": 0,
+          "then": 4,
           "scores": {"bennu": 4, "iu": 5, "ice": 0, "ecl": 2, "vsc": 2, "nb": 4},
           "weight": {"legacy": 0.5, "boot": 0.5}
         },
@@ -299,14 +299,14 @@
         {
           "area": "Percorso della chiave in YAML e .properties",
           "note": "Barra di stato con tutti i livelli sopra il cursore (liste comprese), ognuno cliccabile; chiavi colorate per radice. IntelliJ ha il percorso, non il colore per radice.",
-          "then": 4,
+          "then": 5,
           "scores": {"bennu": 5, "iu": 5, "ice": 5, "ecl": 2, "vsc": 4, "nb": 2},
           "weight": {"legacy": 1, "boot": 1}
         },
         {
           "area": "SQL nei log di esecuzione",
           "note": "Una riga di Hibernate show_sql o di MyBatis è colorata, e un clic copia lo statement con un avviso. Gli altri mostrano il testo piatto.",
-          "then": 4,
+          "then": 5,
           "scores": {"bennu": 5, "iu": 1, "ice": 1, "ecl": 1, "vsc": 1, "nb": 1},
           "weight": {"legacy": 1, "boot": 2}
         },
@@ -320,7 +320,7 @@
         {
           "area": "Nuovo progetto da procedura guidata",
           "note": "Una procedura guidata con i suoi generatori: Maven e Gradle, Spring Boot (scaricato dall'API di Initializr), Quarkus, applicazione web, Rust e Node con il loro strumento ufficiale; scrive in una cartella d'appoggio e poi rinomina, quindi un errore non lascia niente. Non 5: manca l'archetype Maven vero e proprio e la scelta del JDK dal modulo.",
-          "then": 0,
+          "then": 4,
           "scores": {"bennu": 4, "iu": 5, "ice": 3, "ecl": 4, "vsc": 4, "nb": 4},
           "weight": {"legacy": 1, "boot": 2}
         },
@@ -369,7 +369,7 @@
         {
           "area": "File scratch",
           "note": "Un file fuori dal progetto per provare una query o uno snippet, con la sintassi giusta. In Bennu non c'è per il codice; c'è nella finestra di Picus, accanto, dove una scheda di query è un blocco appunti che si ricorda fra le sessioni. Per questo 2 e non 0.",
-          "then": 0,
+          "then": 2,
           "scores": {"bennu": 2, "iu": 5, "ice": 5, "ecl": 1, "vsc": 3, "nb": 1},
           "weight": {"legacy": 0.5, "boot": 0.5}
         },
@@ -401,14 +401,14 @@
         },
         {
           "area": "Superficie per agenti AI",
-          "note": "33 tool MCP di Bennu con permessi per prodotto, percorso e azione; la suite ne espone 49, con Corvus (commit di ciò che è in stage, mai push) e Tyto, e autorizzazioni a tempo.",
+          "note": "54 tool MCP di Bennu (33 nella stesura precedente) con permessi per prodotto, percorso e azione; la suite ne espone 72, con Corvus (commit di ciò che è in stage, mai push) e Tyto, e autorizzazioni a tempo. I ventuno in più sono per la maggior parte nuovi di questi giorni (liste di endpoint, bean, entità, e il gioco Bevy) e non provati: il voto non si muove.",
           "then": 4,
           "scores": {"bennu": 4, "iu": 4, "ice": 3, "ecl": 1, "vsc": 5, "nb": 1},
           "weight": {"legacy": 1, "boot": 1}
         },
         {
           "area": "Client HTTP e prove di API",
-          "note": "File .http con variabili ed esecuzione dal gutter. Bennu ha il pannello degli endpoint, non un client.",
+          "note": "File .http con variabili ed esecuzione dal gutter. Bennu ha il pannello degli endpoint, non un client. Il supporto ai .http (parser, ▶ nel gutter, file d'ambiente compatibili con IntelliJ) e il client Hirundo su cui gira sono nel sorgente dal 4 novembre, mai provati nell'app: restano a 0 finché non reggono (vedi «In arrivo»).",
           "then": 0,
           "scores": {"bennu": 0, "iu": 5, "ice": 0, "ecl": 1, "vsc": 4, "nb": 1},
           "weight": {"legacy": 0.5, "boot": 2}
@@ -430,7 +430,7 @@
         {
           "area": "Assistente AI nell'editor",
           "note": "Imber: agente con gli strumenti di Bennu (indice, rename, build, test, debug, servizi), sotto-agenti, copia isolata, tetto di spesa. La completion mentre scrivi è la riga «Completamento di riga intera»; Imber parla solo con i modelli di Anthropic. Dettaglio nella sezione «Assistente AI».",
-          "then": 3,
+          "then": 4,
           "scores": {"bennu": 4, "iu": 5, "ice": 4, "ecl": 3, "vsc": 5, "nb": 1},
           "weight": {"legacy": 1, "boot": 2}
         },
@@ -444,13 +444,13 @@
         {
           "area": "Monitor dei processi e della memoria",
           "note": "Un elenco dei processi di Arbor con memoria e CPU, il dettaglio per backend e per progetto sotto intestazioni (indice, classi e librerie, language server, ciò che Bennu ha imparato), e un avviso oltre una soglia. È una stima, non una misura, e la riga dice quanto manca al totale reale. 5 perché la scala è «il migliore del gruppo»: VS Code ha il Process Explorer e IntelliJ un indicatore di memoria, ma nessuno dei due spiega la memoria per progetto e per struttura. Colonne degli altri da conoscenza generale, non riverificate.",
-          "then": null,
+          "then": 5,
           "scores": {"bennu": 5, "iu": 3, "ice": 3, "ecl": 2, "vsc": 3, "nb": 2},
           "weight": {"legacy": 0.5, "boot": 0.5}
         },
         {
           "area": "Maturità",
-          "note": "11.262 test Rust dichiarati (<code>#[test]</code> contati nel sorgente: non eseguiti tutti) e 665 frontend, eseguiti il 31 ottobre (78 file, tutti verdi); due corpora misurati; un utente solo, che però lo usa ogni giorno. Tre test di <code>bennu-be</code> e due di <code>bennu-intel</code> falliscono già senza il lavoro di questi giorni e non sono stati toccati.",
+          "note": "12.514 test Rust dichiarati (<code>#[test]</code> contati nel sorgente: non eseguiti da chi scrive la pagina) e 1.039 frontend, tutti verdi secondo il maintainer (119 file); il check del workspace compila, sempre secondo lui. Due corpora misurati il 31 ottobre; un utente solo, che però lo usa ogni giorno. Cinque test già rossi prima (<code>flc_profile</code>, <code>entities</code>, <code>tree_watch</code>, <code>postfix</code>, <code>add_parameter</code>) restano rossi e tengono la riga a 2, insieme al difetto aperto sugli usi di <code>X.class</code> in una classe di libreria, non riprodotto.",
           "then": 2,
           "scores": {"bennu": 2, "iu": 5, "ice": 5, "ecl": 4, "vsc": 4, "nb": 3},
           "weight": {"legacy": 2, "boot": 2}
@@ -465,12 +465,15 @@
       "title": "In breve",
       "kicker": "tre righe",
       "blocks": [
+{"t":"callout","tone":"green","html":"\n      <b>Aggiornamento del 4 novembre: un voto si muove, e quasi tutto il lavoro nuovo aspetta di essere stabile.</b>\n      <p>Dal 31 ottobre i commit sono sei e il sorgente è cresciuto di decine di migliaia di righe: generatori di codice, il client Bevy, i pacchetti Node, un client HTTP con i file <code>.http</code>, il formatter configurabile, le lingue dentro le stringhe, il Regex Tester, la conversione di encoding, la ricerca strutturale rifatta. Questa stesura segue una regola in più: <b>si dà credito solo a ciò che è stabile</b>. Il resto è elencato nella sezione <a href=\"#inarrivo\">In arrivo</a> con il perché non pesa.</p>\n      <ul>\n        <li><b>Totale {{total:bennu}} su {{max}}, il {{pct:bennu}}%</b>, contro 194 su 295 (66%): sale di due punti, tutti da una riga.</li>\n        <li><b>Gradle, Ant, altri application server: 0 → 2.</b> Un progetto Gradle si apre, ha la sua finestra con progetti, plugin e task, i task partono nella console, il classpath si risolve (crate <code>build/gradle</code>, 45 test, <code>BennuGradlePanel.svelte</code>, <code>runtime/be/src/gradle.rs</code>); Tomcat si avvia come configurazione di run. Committato dal 31 ottobre e in uso da pochi giorni: 2, non 3 — i task sono letti dagli script e non dal Gradle vero, e mancano Ant e gli altri server. IntelliJ Community resta a 3, Ultimate a 5.</li>\n        <li><b>Non si muove nient'altro.</b> Né l'iniezione di linguaggio nelle stringhe, né il client HTTP, né la sicurezza delle dipendenze Node, né i generatori, né il formatter: tutto è dell'ultimo commit (4 novembre) o ancora non committato, mai provato nell'app. Gli assi non si muovono; <b>Funziona davvero</b> resta 7.5 e la UI/UX 8.5, perché il maintainer non ha dato un giudizio nuovo.</li>\n        <li><b>Completion resta 5, ma è il voto meno protetto.</b> Il messaggio del commit del 2 novembre parla di «prove» sul completamento «non ancora stabili», e le correzioni alle method reference sono di oggi. Non ho una regressione dimostrata, quindi non lo abbasso; se l'uso ne mostra una, scende.</li>\n        <li><b>Maturità resta 2.</b> Il codice è cresciuto (12.514 <code>#[test]</code> in tutto, 8.996 nei crate di Bennu, contro 8.402; 1.039 test frontend verdi secondo il maintainer), ma cinque test già rossi restano rossi e un difetto sugli usi di <code>X.class</code> su classi di libreria non è riprodotto.</li>\n        <li><b>Le etichette «nuova» della settima stesura sono tolte.</b> L'unica «nuova» di questa stesura marca le voci di «In arrivo», che non hanno un voto.</li>\n        <li><b>Come è stata fatta:</b> leggendo il <code>CHANGELOG</code>, la storia git e il sorgente (conteggio dei test, dei tool MCP, delle cartelle). Niente è stato lanciato: né build, né test, né l'app. Le colonne degli altri IDE non sono cambiate.</li>\n      </ul>\n    "},
+{"t":"details","cls":"past","summary":"L'aggiornamento della stesura precedente (31 ottobre), com'era","blocks":[
         {
           "t": "callout",
           "tone": "green",
           "html": "\n      <b>Aggiornamento del 31 ottobre: nasce il ghost text locale, la scheda arriva a {{areas}} aree, e il maintainer rivede sette righe e un asse.</b>\n      <p>Dal 29 ottobre il lavoro è stato quasi tutto sul completamento. Un modello da 12,5 milioni di parametri, che gira in locale e si adatta al tuo codice, disegna il resto della riga;\n        sotto di lui una cascata di livelli deterministici — argomenti abituali (anche con variabili diverse da un punto all'altro), cosa segue cosa, chiamate su una variabile, annotazioni,\n        formattazione, il tipo che il progetto crea sotto un nome — e i controlli di Bennu che scartano ciò che inventa. Se lo accendi impara da ciò che fai con i suggerimenti, e una finestra mostra\n        cosa ha imparato, riga per riga. In più: il popup dopo <code>new</code> scrive parentesi, diamond e corpo anonimo, il selettore <kbd>Ctrl</kbd>+<kbd>Tab</kbd> è stato rifatto,\n        le impostazioni sono un albero a tre livelli, e il monitor dei processi dice dov'è la memoria di Bennu.</p>\n      <ul>\n        <li><b>Totale {{total:bennu}} su {{max}}, il {{pct:bennu}}%</b>, contro 172 su 280 (61%) di prima. Sale di 22 punti: 10 da sei righe già in scheda riviste dal maintainer (con il codice a fianco), 12 da quattro righe che stavolta si contano — due nuove (ghost text, monitor) e due nate dalla divisione di «Coverage e profiling».\n          Il totale che la scheda precedente scriveva in un punto (170) era quello di prima della riga «Assistente AI»; il 172 era giusto, e la pagina lo calcola.</li>\n        <li><b>Funziona davvero sale da 7.0 a 7.5</b>, per giudizio del maintainer: quello che deve fare lo fa, e i difetti che emergono sono nel tuning del completamento, dell'apprendimento e dell'assistente, non nelle basi. Gli altri cinque assi non si muovono; la UI/UX resta 8.5 (soggettiva, e vicina al 9).</li>\n        <li><b>Righe riviste, con la ragione scritta in ciascuna:</b> <b>Profiling</b> 0 → 4 (la riga «Coverage e profiling» è divisa: coverage resta 0, il profiler c'è da tempo); <b>Nuovo progetto da procedura guidata</b> 0 → 4 (la procedura c'è, con Spring, Quarkus, Maven, Gradle, Rust e Node);\n          <b>File scratch</b> 0 → 2 (c'è in Picus, accanto); <b>JPA e HQL</b> 3 → 4; <b>Percorso della chiave in YAML</b> 4 → 5; <b>SQL nei log di esecuzione</b> 4 → 5 (nessun altro li colora); <b>Assistente AI nell'editor</b> 3 → 4.</li>\n        <li><b>Completamento di riga intera (ghost text): nuova, 3.</b> Non 4: il maintainer segnala che in questi giorni, in alcuni punti, suggerisce peggio di prima (parametri di metodo, un <code>if</code> con l'eccezione),\n          e non c'è una misura che dica quanto. IntelliJ Ultimate ha il suo, in locale; VS Code con il Java pack non ha niente del genere per Java (con Copilot sarebbe un altro prodotto, a pagamento): 1.</li>\n        <li><b>Monitor dei processi e della memoria: nuova, 5</b>, perché la scala è «il migliore del gruppo»: VS Code ha il Process Explorer e IntelliJ un indicatore, ma nessuno spiega la memoria per progetto e per struttura. È una stima, non una misura.</li>\n        <li><b>Completion resta 5</b>: quello che è arrivato è provato dai test, non ancora dall'uso (la build con le ultime correzioni è di oggi).</li>\n        <li><b>Le etichette «nuova» e «era» delle stesure precedenti sono tolte.</b> Le righe del 28 e del 29 ottobre sono ora righe; i voti sono confrontati con la stesura del 29 ottobre. Gli aggiornamenti di allora restano qui sotto, piegati.</li>\n        <li><b>Non rimisurati:</b> il peso complessivo e le righe del 15 settembre. <b>Rimisurati oggi:</b> i corpora di falsi positivi (49 su Commons Lang, 0 su Commons Collections), che tengono gli errori di compilazione a 4. I test sono contati nel sorgente (11.262 <code>#[test]</code>) ed eseguiti solo per le parti toccate;\n          i 665 test frontend sono stati eseguiti, tutti verdi. Cinque test già rotti prima (tre in <code>bennu-be</code>, due in <code>bennu-intel</code>) non sono stati toccati.</li>\n      </ul>\n    "
-        },
-        {
+        }
+        ]},
+{
           "t": "details",
           "cls": "past",
           "summary": "Gli aggiornamenti della stesura precedente (20–29 ottobre), com'erano",
@@ -519,7 +522,7 @@
       "blocks": [
         {
           "t": "p",
-          "html": "La base di confronto per gli assi resta la quinta stesura del 15 settembre, con la stessa scala e le stesse righe. Per le righe della scheda, da questa stesura, il riferimento è\n      quella del 29 ottobre: le righe nuove sono solo quelle entrate oggi, e dove una cella dice «era» è il voto di allora."
+          "html": "La base di confronto per gli assi resta la quinta stesura del 15 settembre, con la stessa scala e le stesse righe. Per le righe della scheda il riferimento è la settima stesura (31 ottobre): dove una cella dice «era» è il voto di allora, e «nuova» marca solo ciò che è entrato in questa stesura. Da questa stesura vale anche un criterio di stabilità: un voto sale solo per ciò che compila, ha test che passano e/o è in uso da qualche giorno senza difetti aperti; il resto sta in «In arrivo» e non pesa."
         },
         {
           "t": "list",
@@ -538,9 +541,9 @@
           "rows": [
             {
               "cells": [
-                "Il codice del ramo <code>feature/bennu</code> al 31 ottobre: l'ultimo commit (<code>bdce8ad9</code>) e il lavoro di questi giorni, <b>non ancora committato</b>",
+                "Il codice del ramo <code>feature/bennu</code> al 4 novembre: l'ultimo commit (<code>df6fd932</code>, di oggi) e il lavoro <b>non ancora committato</b>",
                 "Se una funzione c'è: handler, componenti, test",
-                "Se funziona nell'uso: la build con le ultime correzioni è di oggi e non è stata ancora usata"
+                "Se funziona nell'uso: ciò che è del 4 novembre non è stato provato nell'app. Compilazione e test li dichiara il maintainer; io non ho lanciato niente"
               ]
             },
             {
@@ -581,16 +584,16 @@
           "t": "facts",
           "items": [
             {
-              "b": "55 → 62",
-              "small": "crate di Bennu, contati con <code>Cargo.toml</code> (nuovi in questi giorni: i crate del completamento e dell'apprendimento)"
+              "b": "55 → 66",
+              "small": "crate di Bennu, contati con <code>Cargo.toml</code> (nuovi dal 31 ottobre: generatori, Node, Gradle, client Bevy)"
             },
-            {"b": "6.110 → 8.402", "small": "funzioni <code>#[test]</code> nei crate di Bennu (6.523 il 26 ottobre)"},
+            {"b": "6.110 → 8.996", "small": "funzioni <code>#[test]</code> nei crate di Bennu, contate nel sorgente e non eseguite da chi scrive (8.402 il 31 ottobre)"},
             {
-              "b": "123 → 665",
-              "small": "test frontend (<code>it</code>/<code>test</code>), in 78 file <code>.test.ts</code>; eseguiti il 31 ottobre, tutti verdi (il 26 ottobre erano 248, in 21 file)"
+              "b": "123 → 1.039",
+              "small": "test frontend, in 119 file <code>.test.ts</code>; tutti verdi secondo il maintainer, non rieseguiti qui (665 il 31 ottobre, in 78 file)"
             },
-            {"b": "57 → 70", "small": "pagine di documentazione in-app di Bennu (file <code>.svelte</code> della sua cartella docs)"},
-            {"b": "32 → 33", "small": "tool MCP di Bennu; la suite ne espone 49, con Corvus (8) e Tyto (8) — contati dalle macro, con lo stesso metodo per tutti"},
+            {"b": "57 → 74", "small": "pagine di documentazione in-app di Bennu (file <code>.svelte</code> della sua cartella docs)"},
+            {"b": "32 → 54", "small": "tool MCP di Bennu (33 il 31 ottobre); la suite ne espone 72, con Corvus (10) e Tyto (8) — contati dalle macro, con lo stesso metodo per tutti"},
             {
               "b": "non ricontato",
               "small": "righe aggiunte dal 15 settembre: il lavoro di questi giorni è in gran parte non committato, e un conteggio sui commit lo mancherebbe"
@@ -694,8 +697,8 @@
         },
         {
           "t": "chart",
-          "aria": "Bennu, voti in decimi dal 15 settembre al 31 ottobre",
-          "title": "Bennu, 15 settembre → 31 ottobre",
+          "aria": "Bennu, voti in decimi dal 15 settembre al 4 novembre",
+          "title": "Bennu, 15 settembre → 4 novembre",
           "from": "15 settembre",
           "to": "oggi",
           "rows": [
@@ -709,7 +712,7 @@
         {"t": "h3", "html": "Perché ogni asse si è mosso, o no"},
         {
           "t": "p",
-          "html": "In questa stesura si muove un solo asse rispetto a quella del 29 ottobre: «Funziona davvero». Qui sotto, per ciascuno, cosa è successo in questi due giorni e cosa lo tiene dov'è."
+          "html": "In questa stesura nessun asse si muove rispetto alla settima (31 ottobre): il maintainer non ha dato un giudizio nuovo, e il lavoro di questi giorni non è ancora stabile abbastanza da spostarne uno. Le spiegazioni qui sotto sono quelle della settima stesura, riletta: nessun fatto di novembre le cambia."
         },
         {
           "t": "axes",
@@ -810,12 +813,12 @@
       "blocks": [
         {
           "t": "p",
-          "html": "Le 56 aree della stesura precedente, con «Coverage e profiling» divisa in due, più due righe nuove: il completamento di riga intera (il ghost text) e il monitor dei processi e della memoria.\n      Sotto il voto di Bennu trovi quello della stesura del 29 ottobre quando è cambiato; «nuova» marca la riga che allora non c'era."
+          "html": "Le 56 aree della stesura precedente, con «Coverage e profiling» divisa in due, più due righe nuove: il completamento di riga intera (il ghost text) e il monitor dei processi e della memoria.\n      Sotto il voto di Bennu trovi quello della stesura del 31 ottobre quando è cambiato; «nuova» marcherebbe una riga che allora non c'era — in questa stesura nessuna riga entra, perché il lavoro nuovo non è ancora stabile (vedi «In arrivo»)."
         },
         {
           "t": "callout",
           "tone": "blue",
-          "html": "\n      <b>Da 172 su 280 (61%) a {{total:bennu}} su {{max}} ({{pct:bennu}}%).</b>\n      <p>Sulle righe che c'erano, sei voti salgono — il maintainer li ha rivisti con il codice a fianco: procedura guidata, scratch, JPA, percorso della chiave, SQL nei log, assistente — per dieci punti; quasi tutti riconoscono funzioni che c'erano e che la scheda non vedeva (la procedura guidata era segnata come assente).\n        Le quattro righe che prima non si contavano (ghost text 3, monitor 5, profiling 4 — staccato da «Coverage e profiling», dove il profiler c'era da tempo — e coverage 0) pesano gli altri dodici. Le 35 righe del 15 settembre restano 135 su 175 (77%): <b>nessun voto di allora è cambiato</b>.</p>\n    "
+          "html": "\n      <b>Da 194 su 295 (66%) a {{total:bennu}} su {{max}} ({{pct:bennu}}%).</b>\n      <p>Un solo voto sale: <b>Gradle, Ant, altri application server</b> da 0 a 2, due punti. Le 35 righe del 15 settembre passano da 135 a 137 su 175 (78%): è la prima volta che una di loro cambia dalla quinta stesura, e cambia per una funzione che nel frattempo è stata costruita e committata. Le altre righe non si muovono, comprese quelle che il lavoro di novembre sfiora (iniezione nelle stringhe, client HTTP, sicurezza delle dipendenze, generazione di codice, Rust): vale la regola della stabilità.</p>\n    "
         },
         {
           "t": "legend",
@@ -824,7 +827,7 @@
         {"t": "board", "caption": "Totali, subtotali e percentuali sono calcolati dalla pagina sulle righe che vedi, non scritti a mano."},
         {
           "t": "callout",
-          "html": "\n      <b>Senza pesi: sulle 35 righe di allora Bennu supera IntelliJ Community di tredici punti; su tutta la scheda è a quattro punti sotto.</b>\n      <p>Sulle righe di allora, 135 contro 122; su tutta la scheda, {{total:bennu}} contro {{total:ice}}. Community continua a prendere i suoi punti sul Java di tutti i giorni: refactoring,\n        debugger, coverage, Gradle — e sulle righe che Bennu non ha, dove ha spesso 3, 4 o 5 (segnalibri, split, sincronizzazione, client HTTP). Bennu li prende dove Community ha zero — Struts e JSP,\n        Jakarta EE, i controlli sui framework, gli encoding, il database, il profiler. Sul ghost text Community ha 1: la documentazione di JetBrains lo lega all'abbonamento Ultimate,\n        e le fonti non concordano. Aggiungere righe che mancano <em>deve</em> abbassare il totale; la sezione successiva pesa le righe, perché due strumenti con totali vicini e poche righe in comune dicono poco.</p>\n    "
+          "html": "\n      <b>Senza pesi: sulle 35 righe di allora Bennu supera IntelliJ Community di quindici punti; su tutta la scheda è a due punti sotto.</b>\n      <p>Sulle righe di allora, 137 contro 122; su tutta la scheda, {{total:bennu}} contro {{total:ice}}. Community continua a prendere i suoi punti sul Java di tutti i giorni: refactoring,\n        debugger, coverage, Gradle — e sulle righe che Bennu non ha, dove ha spesso 3, 4 o 5 (segnalibri, split, sincronizzazione, client HTTP). Bennu li prende dove Community ha zero — Struts e JSP,\n        Jakarta EE, i controlli sui framework, gli encoding, il database, il profiler. Sul ghost text Community ha 1: la documentazione di JetBrains lo lega all'abbonamento Ultimate,\n        e le fonti non concordano. Aggiungere righe che mancano <em>deve</em> abbassare il totale; la sezione successiva pesa le righe, perché due strumenti con totali vicini e poche righe in comune dicono poco.</p>\n    "
         }
       ]
     },
@@ -858,7 +861,7 @@
         {
           "t": "callout",
           "tone": "blue",
-          "html": "\n      <b>Cosa dicono.</b>\n      <p>Per il monolite legacy Bennu resta secondo, ma si avvicina: {{legacy:bennu}}% contro l'{{legacy:iu}}% di Ultimate e il {{legacy:ice}}% di Community (prima 72%, 86%, 67%). Per il servizio Spring Boot sale al secondo posto, al 69%,\n        appena sopra Community (68%) e dietro Ultimate (90%); prima era terzo a pari merito con VS Code, al 64%. Il salto viene dalle righe riviste — la procedura guidata pesa 2 nel servizio nuovo, il percorso della chiave e l'SQL nei log 1 — e dal ghost text, che\n        ha peso 2 lì; l'abbassamento dei segnalibri a peso 0 toglie una riga a zero dal conto di tutti.</p>\n      <p>Il dato utile è lo stesso di allora: le funzioni sui framework non spostano più la distanza da Ultimate, perché su\n        quelle Bennu è già davanti. La spostano le righe generaliste a zero o a tre — Change Signature, debugger, coverage —\n        e il tempo.</p>\n    "
+          "html": "\n      <b>Cosa dicono.</b>\n      <p>Per il monolite legacy Bennu resta secondo, ma si avvicina: {{legacy:bennu}}% contro l'{{legacy:iu}}% di Ultimate e il {{legacy:ice}}% di Community (nella settima stesura, uguali: Gradle non pesa nel monolite). Per il servizio Spring Boot è secondo, al 70%, appena sopra Community (68%) e dietro Ultimate (90%); il punto in più viene da Gradle, che nel servizio nuovo pesa 2 (la stesura precedente lo dava al 69%). Il salto viene dalle righe riviste — la procedura guidata pesa 2 nel servizio nuovo, il percorso della chiave e l'SQL nei log 1 — e dal ghost text, che\n        ha peso 2 lì; l'abbassamento dei segnalibri a peso 0 toglie una riga a zero dal conto di tutti.</p>\n      <p>Il dato utile è lo stesso di allora: le funzioni sui framework non spostano più la distanza da Ultimate, perché su\n        quelle Bennu è già davanti. La spostano le righe generaliste a zero o a tre — Change Signature, debugger, coverage —\n        e il tempo.</p>\n    "
         }
       ]
     },
@@ -870,11 +873,11 @@
       "blocks": [
         {
           "t": "p",
-          "html": "Le matrici del 15 settembre, aggiornate. Una riga con l'etichetta blu e lo sfondo verde è entrata in questa stesura; le etichette\n      delle stesure precedenti sono state tolte: quelle righe oggi sono semplicemente righe."
+          "html": "Le matrici del 15 settembre, aggiornate. In questa stesura nessuna riga delle matrici entra: ciò che è nuovo è in «In arrivo». Le etichette della settima stesura sono state tolte."
         },
         {
           "t": "legend",
-          "html": "\n      <span><b style=\"color:var(--hi)\">✓</b> c'è e regge</span>\n      <span><b style=\"color:var(--mid)\">◐</b> a metà, dietro un plugin, o fragile</span>\n      <span><b style=\"color:var(--lo)\">✗</b> non c'è</span>\n      <span><span class=\"tag new\">31 ott</span> riga di questa stesura</span>\n    "
+          "html": "\n      <span><b style=\"color:var(--hi)\">✓</b> c'è e regge</span>\n      <span><b style=\"color:var(--mid)\">◐</b> a metà, dietro un plugin, o fragile</span>\n      <span><b style=\"color:var(--lo)\">✗</b> non c'è</span>\n    "
         },
         {"t": "h3", "html": "Navigazione e comprensione"},
         {
@@ -928,29 +931,21 @@
             {
               "f": "Il popup dopo <code>new</code> scrive parentesi, diamond e corpo anonimo",
               "why": "<code>new ArrayList</code> → <code>ArrayList&lt;&gt;()</code>, un'interfaccia → <code>Nome() {}</code>; anche per un nome che esiste due volte (quello del JDK e quello di una libreria), se i due si scrivono allo stesso modo. Provato dai test sul JDK vero; il maintainer lo ha segnalato mancante prima della correzione, e la build di oggi non è ancora stata usata.",
-              "tag": "31 ott",
-              "chg": true,
               "v": "pyyy"
             },
             {
               "f": "Il tipo che il progetto crea sotto un nome",
               "why": "Scritto <code>val bao</code>, il ghost text disegna <code> = new ByteArrayOutputStream();</code> se il progetto lo fa quasi sempre; dopo <code>new</code> il popup mette quel tipo in cima anche con la sola <code>B</code>. Un tipo che compare con due nomi alla pari non viene proposto.",
-              "tag": "31 ott",
-              "chg": true,
               "v": "pppn"
             },
             {
               "f": "Argomenti che il progetto ripete, anche con variabili di nome diverso",
               "why": "Una chiamata annidata come <code>new Factory().crea(variabile)</code>, scritta in dieci punti con dieci variabili, conta come un solo modello e si riempie con la variabile più vicina del tipo giusto. Se l'argomento è un tipo generico, il tipo segue la chiamata che lo contiene.",
-              "tag": "31 ott",
-              "chg": true,
               "v": "pppn"
             },
             {
               "f": "Il resto della riga, da un modello locale e da livelli che conoscono il progetto",
               "why": "Vedi la riga «Completamento di riga intera» nella scheda. Un modello da 12,5 milioni di parametri in locale (circa 270 MB dopo la correzione, 580 prima), con i controlli che scartano i nomi inventati; impara da ciò che accetti, solo se lo accendi.",
-              "tag": "31 ott",
-              "chg": true,
               "v": "pyyp"
             },
             {"f": "Ricorda cosa hai scelto, per tipo dichiarante", "v": "yypn"},
@@ -1267,7 +1262,7 @@
             {"f": "Compilazione e avvio per modulo, senza <code>ClassNotFoundException</code>", "v": "yyyy"},
             {"f": "Stato dell'indice nel footer, build fallita dichiarata, progetto spostato ritrovabile", "v": "yypp"},
             {"f": "Albero del progetto che segue i cambi esterni e si ripara al focus", "v": "yyyp"},
-            {"f": "Modello Gradle", "v": "nyyy"},
+            {"f": "Modello Gradle", "why": "Finestra con progetti, plugin e task letti dagli script; classpath risolto. Non interroga un Gradle in esecuzione.", "v": "pyyy"},
             {"f": "Cargo: workspace, run, test, add, toolchain, outdated", "v": "ynpn"},
             {"group": "Test"},
             {"f": "Runner con catalogo, albero e report (JUnit, cargo)", "v": "yyyy"},
@@ -1549,7 +1544,7 @@
         },
         {
           "t": "callout",
-          "html": "\n      <b>Dove Bennu è davanti, e dove no.</b>\n      <p>Davanti solo sul gioco: il pannello dei componenti di Bevy non ha un equivalente negli altri due. Alla pari sulle\n        funzioni che passano da rust-analyzer. Dietro sulla coverage, che manca come per Java. È un confronto più corto di\n        quelli Java perché l'intelligenza di fondo è la stessa in tutte e tre le colonne: ciò che cambia è il contorno.</p>\n    "
+          "html": "\n      <b>Dove Bennu è davanti, e dove no.</b>\n      <p>Davanti solo sul gioco: il pannello dei componenti di Bevy non ha un equivalente negli altri due. Alla pari sulle\n        funzioni che passano da rust-analyzer. Il client Bevy Remote ha avuto aggiunte di oggi (schermo, input, statistiche, console, il derive per il gioco): sono in «In arrivo» e non cambiano questo confronto finché non sono usate. Dietro sulla coverage, che manca come per Java. È un confronto più corto di\n        quelli Java perché l'intelligenza di fondo è la stessa in tutte e tre le colonne: ciò che cambia è il contorno.</p>\n    "
         }
       ]
     },
@@ -1584,12 +1579,16 @@
         }
       ]
     },
+    {"id":"inarrivo","nav":"In arrivo","title":"In arrivo, non ancora stabile","kicker":"scritto, non provato: non conta","blocks":[{"t":"p","html":"Questa sezione elenca ciò che è entrato nel repository dal 31 ottobre e che <b>non pesa</b> in nessun voto. Il criterio: un lavoro conta quando compila, ha test che passano e/o è in uso da qualche giorno senza difetti aperti. Qui c'è invece ciò che è stato scritto e non provato nell'app (o aggiunto oggi), e ciò che il maintainer ha indicato come non ancora stabile. L'etichetta «nuova» marca quello che è entrato in questa stesura; nessuna di queste voci ha un punteggio."},{"t":"table","head":[["Cosa","Dove vive, cosa c'è nel codice","Perché non pesa, e quale riga toccherebbe"]],"rows":[{"cells":["<b>Supporto ai file <code>.http</code> e client Hirundo</b> <span class=\"tag new\">nuova</span>","Hirundo è un prodotto a parte (<code>crates/products/hirundo</code>, circa 8.000 righe e 177 test); in Bennu ci sono il parser, il ▶ nel gutter, i file d'ambiente compatibili con IntelliJ e «Nuovo › File HTTP» (<code>src/lib/components/bennu/http</code>).","Commit di oggi (<code>df6fd932</code>), mai provato nell'app; il maintainer lo cita fra le cose da non contare. La riga «Client HTTP» resta 0."]},{"cells":["<b>Formatter Java configurabile</b> <span class=\"tag new\">nuova</span>","Pagina di impostazioni con anteprima, stile da <code>.editorconfig</code> o rilevato dal progetto, per progetto: <code>editing/intentions/src/format</code> (145 test) e <code>format-options.ts</code> con il suo test.","Commit di oggi, non provato. Non ha una riga in scheda: sarebbe un'aggiunta a «Template e generazione di codice», che resta 4."]},{"cells":["<b>Generatori di codice</b> <span class=\"tag new\">nuova</span>","Un crate (<code>editing/generate</code>, 181 test) e una modale per generatore con anteprima e un solo undo: sicurezza Spring, convertitori Hibernate e Jackson, client HTTP (RestClient, WebClient, JDK, Apache), mapper DTO, builder, value member, scheletro di test, comando Tauri, scheletro Bevy, client HTTP Rust (reqwest, ureq), ratatui, SOAP → Java e CXF REST → client.","Commit di oggi. I test passano secondo il maintainer, ma nessun generatore è stato usato su codice vero. Se reggono, «Template e generazione di codice» è la riga che si muove."]},{"cells":["<b>Lingue nelle stringhe e Regex Tester</b> <span class=\"tag new\">nuova</span>","<code>// language=</code> per regex, Lua, HTML, JavaScript, CSS, JSON, XML, YAML e shell; una modale per provare una regex con un motore proprio compatibile con Java, scritto in TypeScript (<code>src/lib/components/bennu/regex</code>: motore, spiegazione, libreria).","Commit di oggi, non provato. «Iniezione di linguaggio nelle stringhe» resta 3."]},{"cells":["<b>Client Bevy Remote: albero, schermo, input, statistiche</b> <span class=\"tag new\">nuova</span>","Albero di entità, risorse e stati, dettaglio in basso, screenshot con clic, input registrabile, console; il crate <code>bennu/bevy-remote</code> (43 test) e il derive <code>bevy-remote-derive</code>; i tool <code>brp_*</code> dell'agente.","Il pannello Bevy esisteva già; le aggiunte sono di oggi. La sezione «Rust e Bevy» non cambia; i tool MCP in più non spostano «Superficie per agenti AI»."]},{"cells":["<b>Dipendenze Node e vulnerabilità npm</b> <span class=\"tag new\">nuova</span>","Pannello di npm, pnpm, Yarn e workspace con la versione del lockfile, release più nuove e OSV; finestra Node con gli script (crate <code>build/npm</code>, 36 test).","Commit di oggi, non provato. «Sicurezza delle dipendenze» resta 3: sarebbe l'estensione di una riga che oggi vale per Maven."]},{"cells":["<b>Conversione e reinterpretazione dell'encoding</b> <span class=\"tag new\">nuova</span>","Riscrivere un file, una cartella o il progetto in un altro encoding (UTF-8 con o senza BOM, UTF-16, Cp1252, ISO-8859), con backup e annulla: <code>runtime/be/src/encoding_convert.rs</code>.","Commit di oggi. «Encoding legacy» è già 5, il massimo della scala: non c'è dove salire."]},{"cells":["<b>Ricerca e sostituzione strutturale, rifatta</b> <span class=\"tag new\">nuova</span>","Modale con modelli, ricerche salvate e recenti, campo colorato con completamento (<code>src/lib/components/bennu/ssr</code>, 73 test nel crate <code>editing/ssr</code>).","Il frontend della modale non è ancora committato. Non ha una riga in scheda."]},{"cells":["<b>Modale dei metodi di query JPA, rifatta</b> <span class=\"tag new\">nuova</span>","Find, count, exists e delete scelti all'apertura, nome del metodo in tempo reale, interruttori su una riga.","Non committata, appena scritta. «JPA e HQL» resta 4."]},{"cells":["<b>Ritocchi dell'editor</b> <span class=\"tag new\">nuova</span>","Cursore con stile, spessore e lampeggio nelle impostazioni; <code>TODO</code> e <code>FIXME</code> colorati nei commenti; barra di formattazione nel markdown, condivisa con Garrulus; tornare a dove eri quando cambi progetto; sessione che sopravvive a un riavvio; cronologia di undo su disco.","Per la maggior parte non committati (<code>caret.ts</code>, <code>comment-markers</code>, <code>session-snapshot.ts</code> non sono nel repository). «Ergonomia dell'editor» resta 4."]},{"cells":["<b>Correzioni a go-to, librerie e dipendenze</b> <span class=\"tag new\">nuova</span>","Sorgenti scaricati fuori da Bennu e layout di Gradle, «N usi» nei file di libreria, dipendenze Maven riallineate dopo l'install di un modulo fratello, method reference nel completamento (<code>method_reference.rs</code>, <code>tests/method_reference_completion.rs</code>).","In parte nel working tree, non provate. Il maintainer tiene aperto un difetto: gli usi di <code>X.class</code> su classi di libreria non si riproducono. Non alzano niente e non abbassano niente."]},{"cells":["<b>Aggiungi parametro in qualunque punto dell'elenco</b> <span class=\"tag new\">nuova</span>","Il cursore può stare su modificatori, tipo, nome o elenco, e il parametro va prima, in mezzo o in fondo (<code>add_parameter.rs</code>, in modifica).","Il test <code>add_parameter</code> è fra i rossi segnalati dal maintainer. «Cambiare la firma di un metodo» resta 2."]},{"cells":["<b>Misure di prestazioni, opt-in</b> <span class=\"tag new\">nuova</span>","<code>runtime/be/src/perf.rs</code> e <code>perf.ts</code>.","Non tracciati da git, non provati."]},{"cells":["<b>Strumenti MCP e skill di Imber; Imber in Corvus</b> <span class=\"tag new\">nuova</span>","Tool di lettura di endpoint, bean, entità, job e chiavi di configurazione; skill di Imber; in Corvus l'assistente git, l'esecutore dei Plan, annulla e pianificazioni.","Imber dentro Corvus è un altro prodotto e non è conteggiato qui. I tool MCP sono contati (54 per Bennu) ma «Superficie per agenti AI» resta 4."]}]},{"t":"callout","tone":"blue","html":"\n      <b>Cosa lo farebbe contare.</b> Per ciascuna voce, qualche giorno di uso senza un difetto aperto: allora la riga corrispondente si rivede con il codice a fianco, e il voto sale solo se c'è un dato (un test che gira, una misura) oltre alla lettura. I conteggi di test accanto alle voci (177, 181, 145, 73, 43, 36) sono <code>#[test]</code> contati nel sorgente, non eseguiti da chi scrive la pagina.\n    "}]},
     {
       "id": "salito",
       "nav": "Cosa è salito",
       "title": "Cosa è salito",
       "kicker": "riga per riga, con la prova",
       "blocks": [
+{"t":"p","html":"In questa stesura sale una riga sola. Il resto del lavoro dal 31 ottobre è in «In arrivo» e non pesa. Ogni voto ha un posto nel repository dove andare a guardarlo; se una prova non regge, la riga scende."},
+{"t":"table","head":[["Riga","Movimento","La prova"]],"rows":[{"cells":["<b>Gradle, Ant, altri application server</b>",{"h":"0 → 2","cls":"n2"},"Il crate <code>crates/products/bennu/build/gradle</code> (modello del progetto, script, task, catalog delle versioni; 45 test), <code>runtime/be/src/gradle.rs</code> e <code>gradle_classpath.rs</code> sul backend, <code>BennuGradlePanel.svelte</code> e <code>BennuGradleModuleSection.svelte</code> nel frontend; commit <code>f839f73e</code> (31 ottobre) e <code>bf96910e</code> (2 novembre). Tomcat come configurazione di run: <code>build/tomcat</code>, commit del 2 e 3 novembre. <b>Non 3:</b> i task sono letti dagli script e non dal Gradle in esecuzione, mancano Ant e gli altri application server, e l'uso è di pochi giorni."]}]},
+{"t":"details","cls":"past","summary":"Le salite della stesura precedente (31 ottobre), com'erano","blocks":[
         {
           "t": "p",
           "html": "In questa stesura salgono sei righe già in scheda e un asse, per giudizio del maintainer con il codice a fianco, ed entrano quattro righe che prima non si contavano. Ognuna ha un posto nel repository dove andare a guardarla; se una prova non regge, la riga scende."
@@ -1700,8 +1699,9 @@
               ]
             }
           ]
-        },
-        {
+        }
+        ]},
+{
           "t": "details",
           "cls": "past",
           "summary": "Le salite della stesura precedente (15 settembre → 29 ottobre), com'erano",
@@ -1836,6 +1836,9 @@
           "t": "table",
           "head": [["Riga o asse", "Oggi", "Cosa servirebbe"]],
           "rows": [
+{"cells":["<b>Tutto il lavoro di «In arrivo»</b>",{"h":"invariato","cls":"n2"},"Qualche giorno di uso senza difetti aperti, e per i generatori, il client HTTP, il formatter e le lingue nelle stringhe almeno un caso reale riuscito a mano per ciascuno. Poi si riguarda la riga: «Client HTTP e prove di API» (0), «Iniezione di linguaggio» (3), «Template e generazione di codice» (4), «Sicurezza delle dipendenze» (3)."]},
+{"cells":["<b>Completion</b> (scheda)",{"h":"5","cls":"n2"},"Una settimana senza correzioni al completamento. Oggi è il voto meno protetto della scheda: il commit del 2 novembre chiama «non ancora stabili» le prove sul completamento, e le method reference sono state corrette oggi."]},
+{"cells":["<b>Maturità</b> (scheda)",{"h":"2","cls":"n2"},"Cinque test già rossi da sistemare (<code>flc_profile</code>, <code>entities</code>, <code>tree_watch</code>, <code>postfix</code>, <code>add_parameter</code>) e il difetto sugli usi di <code>X.class</code> in una classe di libreria da riprodurre. Il numero di test sale (12.514, 1.039 frontend), ma più codice scritto in una settimana non è più maturità."]},
             {
               "cells": [
                 "<b>Completamento di riga intera</b> (scheda)",
@@ -1888,8 +1891,8 @@
             {
               "cells": [
                 "<b>Gradle, Ant, altri server</b>",
-                {"h": "0", "cls": "n2"},
-                "Un modello Gradle. Non serve al target legacy; è l'unico zero su una riga che un team generalista apre ogni giorno."
+                {"h": "2", "cls": "n2"},
+                "Oggi 2. Per il 3: i task e il classpath dal Gradle vero (Tooling API) e non dagli script, i test e il debug lanciati da Gradle. Ant e gli altri application server non servono al target legacy; Tomcat c'è."
               ]
             },
             {
@@ -1932,7 +1935,7 @@
         {"t": "h3", "html": "Difetti aperti, con il loro numero"},
         {
           "t": "callout",
-          "html": "\n      <ul>\n        <li><b>La tornata di completamento di questi giorni non è stata usata.</b> Il popup dopo <code>new</code> (anche per i nomi doppi), gli argomenti come modelli con variabili, il tipo generico che segue la chiamata attorno, il tipo creato sotto un nome e il controllo dei nomi inventati senza il <code>;</code> sono stati scritti e provati con test sintetici; la build che li contiene è di oggi. Se un caso del maintainer non torna, la riga scende.</li>\n        <li><b>Il ghost text ha regressioni segnalate e non misurate.</b> Parametri con chiamate annidate e un <code>if</code> con l'eccezione, in punti in cui prima funzionava. Non c'è un confronto con e senza apprendimento dalle correzioni, che è la prima cosa da sospettare: la calibrazione abbassa la confidenza di ciò che raramente tieni.</li>\n        <li><b>L'azzeramento di ciò che Bennu ha imparato lasciava intatte tre tabelle</b> (cosa segue cosa, chiamate su una variabile, layout) e non rileggeva il progetto: corretto in questa stesura, non ancora riverificato nell'app.</li>\n        <li><b>Il modello da 270 MB è una misura a banco.</b> Sei suggerimenti sul modello da solo, non il backend con un progetto aperto per ore.</li>\n        <li><b>Il lavoro Bennu ↔ Picus è provato dal maintainer, non dai test.</b> Il 28 ottobre lo ha usato su un database suo; i test scritti per il rendering dei mapper,\n          l'estrazione delle query, le derived query con <code>_</code> e i file di credenziali Google non sono stati lanciati da chi scrive la pagina. Il login IAM di Google per Cloud SQL\n          non è stato provato. Il confronto entità ↔ tabella taceva già sui campi convertiti, embedded e sulle colonne dei join; sui nomi di join di default resta una stima.</li>\n        <li><b>Difetti emersi il 28 ottobre usando, tutti corretti:</b> «no usages» su un campo di una classe Lombok; una derived query con <code>_</code> (<code>findById_Codice</code>) segnalata come errata;\n          una lista di query che validava il testo di prima di una modifica; uno statement MyBatis che risultava valido senza essere stato chiesto al server; il quadratino bianco e la scrollbar doppia\n          dell'editor; l'anteprima della scrollbar con i colori sbagliati sui pom.</li>\n        <li><b>Il conteggio dei riferimenti sul backend è fatto, non provato.</b> Chiudere Picus non spegne più il suo backend finché una finestra lo usa, e chiudere l'ultima lo spegne. La finestra che lo prende in prestito è registrata per etichetta: un prodotto aperto come tab nel contenitore tiene il backend finché il contenitore resta aperto.</li>\n        <li><b>Il lavoro del 20 ottobre è committato, ma senza una verifica di questa pagina.</b> Il pannello Changes riscritto sul visualizzatore dei diff di Corvus, il\n          visualizzatore spostato in <code>shared/internal/diff/</code> (cinque componenti, quattro file che li importano),\n          il nuovo handler <code>get_workdir_file_diff</code> in Corvus, <code>git_repo_root_by_path</code> al posto di\n          <code>fs_repo_root</code> di Sitta, il job «Indexing project» a ogni re-index. Il rischio principale era un import mancato dopo lo spostamento dei file; il commit c'è e lo usi, ma i test non sono stati rieseguiti qui.</li>\n        <li><b>Misura sui corpora, rifatta il 31 ottobre: non è a zero.</b> Sul codice che compila, ogni errore stampato è un falso positivo. <b>Commons Lang: 49</b> (46 <code>argument-type</code>, uno ciascuno <code>final-assignment</code>, <code>override-overrides-nothing</code> e <code>syntax-error</code>);\n          <b>Commons Collections: 0</b>. Quasi tutti i 49 sono in due forme: un tipo annotazione passato dove si aspetta <code>Annotation</code> (ogni <code>@interface</code> lo è, e il controllo non lo sa), e un overload\n          giudicato ambiguo o fuori dai bound dove javac lo accetta. Le correzioni sono arrivate lo stesso giorno: <b>dopo, Commons Lang e Commons Collections sono a 0</b> (le cause: i tipi annotazione che implementano <code>Annotation</code>, gli overload <code>private</code> contati come candidati, <code>int[]</code> preso per <code>Object[]</code>, i bound di un tipo variabile). La condizione scritta per il 5 è quindi soddisfatta sul corpus di riferimento; il voto resta 4 finché il maintainer non lo conferma, perché Spring Framework, provato dopo, dà ancora migliaia di segnalazioni (la separazione per modulo non c'è nei progetti Gradle) e non è stato ancora affrontato.\n          <b>Guava: 6.089</b>, ma non è confrontabile: l'albero contiene le due varianti (<code>guava</code> e <code>android</code>) con le stesse classi due volte, e le sue dipendenze non si risolvono; lo strumento lo dice, e le due cifre non vanno sommate. Il corpus di riferimento della pagina resta Commons Lang, con h2.</li>\n        <li><b>Difetti di base corretti nelle ultime settimane:</b> errori non segnalati dentro le lambda (nome non dichiarato, metodo\n          inesistente, argomenti), «indietro» e «avanti» che non atterravano dove eri, due falsi positivi, un avvio che chiedeva un\n          <code>mvn clean package</code> a mano. Ognuno con il suo test; nessuno era visibile ai test di prima.</li>\n        <li><b>h2, misura del 9 settembre, invariata.</b> Extract method 99,5%, extract variable 99,6%, declaration-to-var\n          99,0%, inline method 97,9%, inline variable con un unico errore di sintassi.</li>\n        <li><b>Il peso non è stato rimisurato</b> da quando i crate sono diventati 55.</li>\n        <li><b>Create method in un altro file</b> non seleziona il segnaposto: il protocollo di quella cura non lo porta. Non riverificato in questa stesura.</li>\n      </ul>\n    "
+          "html": "\n      <ul>\n        <li><b>Tutto ciò che è nato dal 31 ottobre è non provato nell'app.</b> Generatori, client HTTP e file <code>.http</code>, formatter, lingue nelle stringhe, Regex Tester, Node, encoding, ricerca strutturale, la modale JPA, il cursore, TODO/FIXME, il ripristino al cambio progetto, la barra markdown: compilano e hanno test (il maintainer dichiara il check del workspace e 1.039 test frontend verdi), ma nessuno è stato usato abbastanza da essere detto stabile. Perciò non hanno un voto.</li>\n        <li><b>Difetti noti e aperti:</b> gli usi di <code>X.class</code> su classi di libreria non si riproducono; cinque test (<code>flc_profile</code>, <code>entities</code>, <code>tree_watch</code>, <code>postfix</code>, <code>add_parameter</code>) sono rossi già prima del lavoro di novembre, secondo il maintainer.</li>\n        <li><b>La tornata di completamento di questi giorni non è stata usata.</b> Il popup dopo <code>new</code> (anche per i nomi doppi), gli argomenti come modelli con variabili, il tipo generico che segue la chiamata attorno, il tipo creato sotto un nome e il controllo dei nomi inventati senza il <code>;</code> sono stati scritti e provati con test sintetici; la build che li contiene è di oggi. Se un caso del maintainer non torna, la riga scende.</li>\n        <li><b>Il ghost text ha regressioni segnalate e non misurate.</b> Parametri con chiamate annidate e un <code>if</code> con l'eccezione, in punti in cui prima funzionava. Non c'è un confronto con e senza apprendimento dalle correzioni, che è la prima cosa da sospettare: la calibrazione abbassa la confidenza di ciò che raramente tieni.</li>\n        <li><b>L'azzeramento di ciò che Bennu ha imparato lasciava intatte tre tabelle</b> (cosa segue cosa, chiamate su una variabile, layout) e non rileggeva il progetto: corretto in questa stesura, non ancora riverificato nell'app.</li>\n        <li><b>Il modello da 270 MB è una misura a banco.</b> Sei suggerimenti sul modello da solo, non il backend con un progetto aperto per ore.</li>\n        <li><b>Il lavoro Bennu ↔ Picus è provato dal maintainer, non dai test.</b> Il 28 ottobre lo ha usato su un database suo; i test scritti per il rendering dei mapper,\n          l'estrazione delle query, le derived query con <code>_</code> e i file di credenziali Google non sono stati lanciati da chi scrive la pagina. Il login IAM di Google per Cloud SQL\n          non è stato provato. Il confronto entità ↔ tabella taceva già sui campi convertiti, embedded e sulle colonne dei join; sui nomi di join di default resta una stima.</li>\n        <li><b>Difetti emersi il 28 ottobre usando, tutti corretti:</b> «no usages» su un campo di una classe Lombok; una derived query con <code>_</code> (<code>findById_Codice</code>) segnalata come errata;\n          una lista di query che validava il testo di prima di una modifica; uno statement MyBatis che risultava valido senza essere stato chiesto al server; il quadratino bianco e la scrollbar doppia\n          dell'editor; l'anteprima della scrollbar con i colori sbagliati sui pom.</li>\n        <li><b>Il conteggio dei riferimenti sul backend è fatto, non provato.</b> Chiudere Picus non spegne più il suo backend finché una finestra lo usa, e chiudere l'ultima lo spegne. La finestra che lo prende in prestito è registrata per etichetta: un prodotto aperto come tab nel contenitore tiene il backend finché il contenitore resta aperto.</li>\n        <li><b>Il lavoro del 20 ottobre è committato, ma senza una verifica di questa pagina.</b> Il pannello Changes riscritto sul visualizzatore dei diff di Corvus, il\n          visualizzatore spostato in <code>shared/internal/diff/</code> (cinque componenti, quattro file che li importano),\n          il nuovo handler <code>get_workdir_file_diff</code> in Corvus, <code>git_repo_root_by_path</code> al posto di\n          <code>fs_repo_root</code> di Sitta, il job «Indexing project» a ogni re-index. Il rischio principale era un import mancato dopo lo spostamento dei file; il commit c'è e lo usi, ma i test non sono stati rieseguiti qui.</li>\n        <li><b>Misura sui corpora, rifatta il 31 ottobre: non è a zero.</b> Sul codice che compila, ogni errore stampato è un falso positivo. <b>Commons Lang: 49</b> (46 <code>argument-type</code>, uno ciascuno <code>final-assignment</code>, <code>override-overrides-nothing</code> e <code>syntax-error</code>);\n          <b>Commons Collections: 0</b>. Quasi tutti i 49 sono in due forme: un tipo annotazione passato dove si aspetta <code>Annotation</code> (ogni <code>@interface</code> lo è, e il controllo non lo sa), e un overload\n          giudicato ambiguo o fuori dai bound dove javac lo accetta. Le correzioni sono arrivate lo stesso giorno: <b>dopo, Commons Lang e Commons Collections sono a 0</b> (le cause: i tipi annotazione che implementano <code>Annotation</code>, gli overload <code>private</code> contati come candidati, <code>int[]</code> preso per <code>Object[]</code>, i bound di un tipo variabile). La condizione scritta per il 5 è quindi soddisfatta sul corpus di riferimento; il voto resta 4 finché il maintainer non lo conferma, perché Spring Framework, provato dopo, dà ancora migliaia di segnalazioni (la separazione per modulo non c'è nei progetti Gradle) e non è stato ancora affrontato.\n          <b>Guava: 6.089</b>, ma non è confrontabile: l'albero contiene le due varianti (<code>guava</code> e <code>android</code>) con le stesse classi due volte, e le sue dipendenze non si risolvono; lo strumento lo dice, e le due cifre non vanno sommate. Il corpus di riferimento della pagina resta Commons Lang, con h2.</li>\n        <li><b>Difetti di base corretti nelle ultime settimane:</b> errori non segnalati dentro le lambda (nome non dichiarato, metodo\n          inesistente, argomenti), «indietro» e «avanti» che non atterravano dove eri, due falsi positivi, un avvio che chiedeva un\n          <code>mvn clean package</code> a mano. Ognuno con il suo test; nessuno era visibile ai test di prima.</li>\n        <li><b>h2, misura del 9 settembre, invariata.</b> Extract method 99,5%, extract variable 99,6%, declaration-to-var\n          99,0%, inline method 97,9%, inline variable con un unico errore di sintassi.</li>\n        <li><b>Il peso non è stato rimisurato</b> da quando i crate sono diventati 55.</li>\n        <li><b>Create method in un altro file</b> non seleziona il segnaposto: il protocollo di quella cura non lo porta. Non riverificato in questa stesura.</li>\n      </ul>\n    "
         }
       ]
     },
@@ -1946,6 +1949,8 @@
         {
           "t": "steps",
           "items": [
+{"b":"Usare il lavoro di «In arrivo» e dire cosa regge","span":"Generatori, client HTTP, formatter, lingue nelle stringhe, Node: ognuno con qualche giorno di uso e un difetto aperto o nessuno. È il passo che fa entrare le righe in scheda; senza non si muove un voto."},
+{"b":"Sistemare i cinque test rossi e riprodurre il difetto di <code>X.class</code>","span":"Tengono la Maturità a 2 e sono la prima cosa che una nuova stesura guarda."},
             {
               "b": "Usare la tornata di completamento sul codice vero, e misurare il ghost text con e senza apprendimento",
               "span": "È il passo che decide se Completion resta 5 e se il ghost text sale a 4. Un caso scritto per ogni regressione segnalata, gli stessi file tenuti fuori, due configurazioni."
@@ -1990,7 +1995,7 @@
               "b": "Eval di espressioni Java nel debugger",
               "span": "Oggi i watch seguono percorsi. È il passo che trasforma il pannello delle variabili in un posto dove fare domande."
             },
-            {"b": "Gradle", "span": "Ultimo perché al tuo target non serve."}
+            {"b": "Gradle: i task dal Gradle vero", "span": "Il 2 di oggi legge gli script; per il 3 serve interrogare Gradle. Ant e gli altri server restano ultimi: al tuo target non servono."}
           ]
         }
       ]

@@ -36,6 +36,7 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   assistant_review_apply: { key: 'Enter', ctrl: true, shift: true, description: "Review and apply Imber's isolated copy (Bennu)", group: 'Navigation' },
   assistant_next_mode:    { key: 'q',     ctrl: true, shift: true, description: 'Imber: next permission mode (Bennu)',               group: 'Navigation' },
   // Whenever the panel is on screen. Ctrl+Shift+U is Corvus's "unstage all" — another window.
+  convert_case:           { key: 'w',     ctrl: true, shift: true, description: 'Convert case: next naming style for the selection or the name at the caret (Bennu)', group: 'Navigation' },
   assistant_expand:       { key: 'u',     ctrl: true, shift: true, description: 'Imber: expand the panel over the editor, or restore it (Bennu)', group: 'Navigation' },
   // Voice dictation (Bennu), one chord for both habits: HOLD it to talk (records while it is down and sends on
   // release), TAP it to leave the microphone open and tap again to stop - the mic button does the same.

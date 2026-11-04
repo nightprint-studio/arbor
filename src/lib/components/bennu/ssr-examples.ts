@@ -15,6 +15,8 @@ export interface SsrExample {
   /** Why it is worth having, in one line. */
   why: string;
   query: string;
+  /** What it rewrites to, when the example is a refactoring and not only a question. */
+  replacement?: string;
   /** The language it is written in. Absent means Java, which is what every example was. */
   dialect?: 'java' | 'jsp' | 'jsp-java';
 }
@@ -59,6 +61,166 @@ export const SSR_EXAMPLES: SsrExample[] = [
     title: 'Every string literal in one package',
     why: 'the table names a DAO layer touches, roughly',
     query: '$s: #string_literal$\nin src/main/java/com/acme/dao\ngroup $s$',
+  },
+
+  // ── rewrites ──────────────────────────────────────────────────────────────
+  //
+  // Each of these carries its replacement, and each was run against a one-line sample of its own
+  // before it was written down here — a template that matches nothing teaches the wrong thing.
+  // A hole can also stand for a whole statement or member (`{ $body...$ }`), for the parameters of a
+  // method (`m($params...$)`) and — in front of a declaration — for any modifiers and annotations
+  // (`$mods...$`); `as` says whether a declaration is a local, a parameter or a field, and `inside`
+  // where it lives. The templates below that use them were written against the real engine's tests.
+  {
+    title: 'Diamond instead of the repeated type',
+    why: '`new ArrayList<String>()` → `new ArrayList<>()`, the arguments kept',
+    query: 'new ArrayList<$t$>($a...$)',
+    replacement: 'new ArrayList<>($a...$)',
+  },
+  {
+    title: 'Constant first in equals',
+    why: 'null-safe: `name.equals("admin")` → `"admin".equals(name)`',
+    query: '$x$.equals("$lit$")',
+    replacement: '"$lit$".equals($x$)',
+  },
+  {
+    title: 'Boxing constructors',
+    why: '`new Integer(5)` → `Integer.valueOf(5)`, for the types the JDK deprecated',
+    query: 'new $t: ~Integer|Long|Double$($v$)',
+    replacement: '$t$.valueOf($v$)',
+  },
+  {
+    title: 'System.out left in the code',
+    why: 'to the logger — adjust the receiver to the one your project uses',
+    query: 'System.out.println($msg$)',
+    replacement: 'log.info($msg$)',
+  },
+  {
+    title: 'printStackTrace',
+    why: 'the stack trace goes to the log, with a message and the exception',
+    query: '$e$.printStackTrace()',
+    replacement: 'log.error("Unexpected error", $e$)',
+  },
+  {
+    title: 'if (c) return true; else return false;',
+    why: 'the whole statement becomes `return c;`',
+    query: 'if ($c$) { return true; } else { return false; }',
+    replacement: 'return $c$;',
+  },
+  {
+    title: 'size() == 0',
+    why: '→ `isEmpty()`; the same shape with `> 0` is the next one',
+    query: '$l$.size() == 0',
+    replacement: '$l$.isEmpty()',
+  },
+  {
+    title: 'size() > 0',
+    why: '→ `!isEmpty()`',
+    query: '$l$.size() > 0',
+    replacement: '!$l$.isEmpty()',
+  },
+  {
+    title: 'length() == 0 on a string',
+    why: '→ `isEmpty()`; narrow with `$s: String$` when other types have a length()',
+    query: '$s$.length() == 0',
+    replacement: '$s$.isEmpty()',
+  },
+  {
+    title: 'A null check that picks a default',
+    why: '`x == null ? d : x` → `Objects.requireNonNullElse(x, d)`',
+    query: '$a$ == null ? $b$ : $a$',
+    replacement: 'Objects.requireNonNullElse($a$, $b$)',
+  },
+  {
+    title: 'Arrays.asList',
+    why: '→ `List.of(…)`; the result is immutable, so read the matches before replacing',
+    query: 'Arrays.asList($a...$)',
+    replacement: 'List.of($a...$)',
+  },
+  {
+    title: 'stream().collect(Collectors.toList())',
+    why: '→ `.toList()` (Java 16+) — the same result, shorter, unmodifiable',
+    query: '$s$.stream().map($f$).collect(Collectors.toList())',
+    replacement: '$s$.stream().map($f$).toList()',
+  },
+  {
+    title: 'StringBuffer where nobody shares it',
+    why: '→ `StringBuilder`; check the matches for fields used across threads first',
+    query: 'new StringBuffer($a...$)',
+    replacement: 'new StringBuilder($a...$)',
+  },
+  {
+    title: 'final on local variables',
+    why: 'takes `final` off locals, keeps the other modifiers and the annotations — fields are not locals, so they stay',
+    query: '$pre...$ final $post...$ $t$ $n$ = $v$;\nas local',
+    replacement: '$pre$ $post$ $t$ $n$ = $v$;',
+  },
+  {
+    title: 'final on parameters',
+    why: 'the same for method and constructor parameters — run it after the one for locals to clear both',
+    query: '$pre...$ final $post...$ $t$ $n$\nas param',
+    replacement: '$pre$ $post$ $t$ $n$',
+  },
+  {
+    title: 'Parameters without final',
+    why: 'adds `final` where a parameter has no modifier at all',
+    query: '$t$ $n$\nas param',
+    replacement: 'final $t$ $n$',
+  },
+  {
+    title: 'Locals declared inside a lambda',
+    why: '`inside` says where a match lives: here the nearest enclosing thing is a lambda',
+    query: '$mods...$ $t$ $n$ = $v$;\nas local\ninside lambda',
+  },
+  {
+    title: 'Empty catch blocks',
+    why: 'the exception is swallowed — `group enclosing` names the methods',
+    query: 'catch ($t$ $e$) { }\ngroup enclosing',
+  },
+  {
+    title: 'Loops over a list by index',
+    why: 'the candidates for a for-each; `$body...$` is the whole body, whatever it holds',
+    query: 'for (int $i$ = 0; $i$ < $l$.size(); $i$++) { $body...$ }',
+  },
+  {
+    title: 'Injected fields, by type',
+    why: 'every `@Autowired` field — the census before moving to constructor injection',
+    query: '@Autowired $mods...$ $t$ $n$;\nas field\ngroup $t$',
+  },
+  {
+    title: 'Classes by what they extend',
+    why: '`$mods...$` accepts any modifiers and annotations, `$members...$` any body',
+    query: '$mods...$ class $c$ extends $b$ { $members...$ }\ngroup $b$',
+  },
+  {
+    title: 'Classes by the interface they implement',
+    why: 'the implementations of each interface, counted',
+    query: '$mods...$ class $c$ implements $i$ { $members...$ }\ngroup $i$',
+  },
+  {
+    title: 'Subclasses of one type',
+    why: 'a type constraint on the superclass; the index decides, and what it cannot read is marked undecided',
+    query: '$mods...$ class $c$ extends $b: com.acme.BaseDao+$ { $members...$ }',
+  },
+  {
+    title: 'JPA entities',
+    why: 'every class annotated `@Entity`, per file — add `@Table(…)` to the pattern to narrow',
+    query: '@Entity $mods...$ class $c$ { $members...$ }\ngroup file',
+  },
+  {
+    title: 'Entity relations',
+    why: 'the `@ManyToOne` fields, with or without arguments, by target type',
+    query: '@ManyToOne $mods...$ $t$ $n$;\nas field\nor @ManyToOne($args...$) $mods...$ $t$ $n$;\nas field\ngroup $t$',
+  },
+  {
+    title: 'Where the code sleeps',
+    why: 'every `Thread.sleep`, per file — usually a test waiting for something',
+    query: 'Thread.sleep($ms$)\ngroup file',
+  },
+  {
+    title: 'Where the code asks for the clock',
+    why: 'every `Calendar.getInstance()` — the list a java.time migration starts from',
+    query: 'Calendar.getInstance()\ngroup file',
   },
 
   // ── pages ─────────────────────────────────────────────────────────────────

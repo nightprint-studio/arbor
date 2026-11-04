@@ -18,6 +18,22 @@ html, body { height: 100vh; overflow: hidden; }
    left to reclaim it. Stamped by utils/platform.ts::watchFullscreen. */
 :root[data-os="mac"][data-fullscreen="true"] { --mac-traffic-gutter: 0px; }
 
+/*
+ * The product veil — ONE vertical gradient behind ALL the chrome: title bar, both activity rails, the strips
+ * around the floating panels, the status bar. `--product-tint` (set on the root by `routes/+page.svelte`) is
+ * mixed at 14% into `--bg-elevated` at the top and fades to the plain neutral by 360px down; stops are in
+ * pixels so the veil is a fixed physical size on any window.
+ *
+ * Every chrome surface paints `--chrome-fill`, and `fixed` anchors the gradient to the VIEWPORT, not to the box:
+ * every surface shows the same slice of it, so there are no seams between the bar, the rail and the gaps, and
+ * no wrapper has to span them. Without a tint the mix is the neutral itself: `--chrome-fill` is then exactly a flat
+ * `--bg-elevated`, as before.
+ */
+:root {
+  --chrome-bg: linear-gradient(180deg, color-mix(in srgb, var(--product-tint, var(--bg-elevated)) 14%, var(--bg-elevated)) 0, var(--bg-elevated) 360px);
+  --chrome-fill: var(--bg-elevated) var(--chrome-bg) no-repeat fixed;
+}
+
 /* ---- Design Tokens ---- */
 :root {
   /* ── Theme-injected color vars (dark defaults for FOUC prevention) ──────
@@ -51,6 +67,9 @@ html, body { height: 100vh; overflow: hidden; }
 
   /* Accents */
   --accent:          #3d7fff;
+  /* The text caret of the code editors: the foreground nudged toward the accent. NOT the accent itself —
+     the current line and the selection are accent washes, and a caret of their colour disappears in them. */
+  --editor-caret:    color-mix(in srgb, var(--text-primary) 88%, var(--accent));
   --accent-hover:    #5590ff;
   --accent-active:   #3d68bc;
   --accent-subtle:   rgba(77, 120, 204, 0.15);
@@ -207,6 +226,10 @@ html, body { height: 100vh; overflow: hidden; }
   --radius-md: 6px;
   --radius-lg: 10px;
   --radius-xl: 14px;
+
+  /* Height of a document-tab strip (`<Tabs variant="panel">`) — one value so a Corvus repo tab, a Bennu file
+     tab and a Garrulus note tab sit at the same height. */
+  --tab-strip-height: 32px;
 
   /* Scrollbar geometry */
   --scrollbar-width:  6px;

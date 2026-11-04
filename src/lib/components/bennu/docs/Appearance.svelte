@@ -53,6 +53,10 @@
   <strong>Customize Activity Bar…</strong> — from the command palette, the title bar's gear, or the button on the Appearance page — decides what is on the two icon rails
   and in what order: one tab per rail, and in each the top cluster (the tool windows) and the bottom one (the dock toggles).
 </p>
+<p>
+  The default order of the right rail starts with the build tools the project has — <strong>Maven</strong>, <strong>Gradle</strong>, <strong>Cargo</strong>, <strong>Node</strong> — then <strong>Tests</strong>, then the rest.
+  A tool that appears later (a new build tool, a plugin) takes its place in that order relative to its neighbours, even if you have rearranged the rail before; your own order and hidden tools are never overwritten.
+</p>
 <ul>
   <li>Drag the handle to reorder within a cluster.</li>
   <li>The eye hides a tool. It stays reachable — every one has a shortcut and a palette entry — it just stops taking a slot.</li>

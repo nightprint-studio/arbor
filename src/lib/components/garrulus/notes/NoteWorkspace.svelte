@@ -22,6 +22,7 @@
    */
   import { Eye, Pencil, Save } from 'lucide-svelte';
   import type { EditorView } from '@codemirror/view';
+  import { NO_FORMAT, type FormatState } from '$lib/utils/markdown-format';
   import MarkdownToolbar from '$lib/components/shared/ui/MarkdownToolbar.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
@@ -31,6 +32,7 @@
   import NoteTabStrip from './NoteTabStrip.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
+  import { registerNoteEditor } from './note-commands';
   import { garrulusNotesStore } from '$lib/stores/garrulus/notes.svelte';
   import { garrulusUiStore } from '$lib/stores/garrulus/ui.svelte';
   import { garrulusVaultStore } from '$lib/stores/garrulus/vault.svelte';
@@ -39,12 +41,21 @@
    *  Session-shaped and shared by every tab, like the eye button in the shared
    *  markdown modal. */
   let reading = $state(false);
+  /** What the caret is in — the toolbar's pressed buttons. */
+  let format = $state<FormatState>(NO_FORMAT);
   /** The tab a close was asked for while it had unsaved bytes. */
   let closing = $state<string | null>(null);
   let editorRef = $state<{
     focus: () => void;
     exec: (c: (v: EditorView) => boolean) => boolean;
   } | null>(null);
+
+  // The palette's formatting verbs run on whichever editor is on screen.
+  $effect(() => {
+    const ref = editorRef;
+    if (!ref) return;
+    return registerNoteEditor((cmd) => ref.exec(cmd));
+  });
 
   const open = $derived(garrulusNotesStore.open);
   const note = $derived(garrulusNotesStore.active);
@@ -168,7 +179,7 @@
     <div class="gnw-head">
       <span class="gnw-path" use:tooltip={note.path}>{note.path}</span>
       <span class="gnw-spacer"></span>
-      <MarkdownToolbar disabled={reading} onCommand={(cmd) => editorRef?.exec(cmd)} />
+      <MarkdownToolbar state={format} disabled={reading} onCommand={(cmd) => editorRef?.exec(cmd)} />
       <span class="gnw-count">{words} {words === 1 ? 'word' : 'words'}</span>
       <span class="gnw-state">
         {#if note.saving}
@@ -203,6 +214,7 @@
       readOnly={reading}
       onChange={(path, text) => garrulusNotesStore.setText(path, text)}
       onBlur={(path) => void garrulusNotesStore.save(path)}
+      onFormatState={(s) => (format = s)}
     />
   {/if}
 </div>

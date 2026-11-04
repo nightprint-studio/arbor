@@ -250,13 +250,17 @@ export const fsGitUnstage = (paths: string[]) => sitta<void>('fs_git_unstage', {
 export const fsGitDiscard = (paths: string[]) => sitta<void>('fs_git_discard', { paths });
 /** Append paths to the repo's `.gitignore` (anchored, folders get a trailing slash). */
 export const fsGitIgnore  = (paths: string[]) => sitta<void>('fs_git_ignore',  { paths });
-/** Resolve the repo containing `path` (via corvus-be), then bring the main Arbor
- *  window forward to open it (delegating the heavy git operations — diff / log /
- *  blame — to Arbor's UI). Rejects when `path` isn't inside a git repository. */
-export async function fsOpenInArbor(path: string): Promise<void> {
+/** Resolve the repo containing `path` (via corvus-be), then take the user to it in **Corvus** — the heavy git
+ *  operations (diff / log / blame / MR) live in its UI. It goes through the same door as every other "open a
+ *  project in a product" (`openProjectIn`): with Corvus already open, as a window or as a tab of the
+ *  container, that one comes forward; a new window is built only when Corvus is not open anywhere.
+ *  `context` says where to land (a commit, a branch). Rejects when `path` isn't inside a git repository. */
+export async function fsOpenInArbor(path: string, context?: { file?: string; commit?: string; branch?: string }): Promise<void> {
   const root = await getRepoRoot(path);
   if (!root) throw new Error('not inside a git repository');
-  return invoke<void>('fs_open_in_arbor', { repoRoot: root });
+  // Imported on use: the launcher machinery pulls in window and store modules this file must not depend on at load.
+  const { openProjectIn } = await import('$lib/utils/open-product');
+  await openProjectIn('corvus', root.replace(/[\\/]+$/, ''), context);
 }
 
 /** One changed file in the staged or unstaged list. */

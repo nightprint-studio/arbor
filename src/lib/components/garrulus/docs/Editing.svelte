@@ -55,12 +55,16 @@
 <h2>The formatting strip</h2>
 <p>
   The thin toolbar above a note runs the same commands as the keyboard, and each tooltip shows
-  its chord: <kbd>Alt</kbd>+<kbd>B</kbd> bold, <kbd>Alt</kbd>+<kbd>I</kbd> italic,
+  its chord. The buttons are <b>toggles that follow the caret</b>: bold is drawn pressed while the caret is inside bold
+  text, the heading picker shows the level of the line, and the list, task, quote and code-block buttons light up for the
+  line you are on — pressing one again removes the format (a code block loses its fences, a link its brackets and URL).
+  The strip is the same one Bennu's markdown tabs have. Chords: <kbd>Alt</kbd>+<kbd>B</kbd> bold, <kbd>Alt</kbd>+<kbd>I</kbd> italic,
   <kbd>Alt</kbd>+<kbd>C</kbd> code, <kbd>Alt</kbd>+<kbd>S</kbd> strikethrough,
   <kbd>Alt</kbd>+<kbd>H</kbd> highlight, <kbd>Alt</kbd>+<kbd>L</kbd> link,
   <kbd>Alt</kbd>+<kbd>Q</kbd> quote (a second press makes it a callout, a third removes it),
   <kbd>Alt</kbd>+<kbd>T</kbd> task, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> table. Pressing
-  a chord again on formatted text takes the formatting off.
+  a chord again on formatted text takes the formatting off. Every action is also in the command palette under
+  <i>Format</i>.
 </p>
 
 <h2>Tags and fields</h2>

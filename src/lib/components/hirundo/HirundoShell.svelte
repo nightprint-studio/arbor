@@ -97,13 +97,18 @@
       return;
     }
 
-    if (hirundoUiStore.anyModalOpen || hirundoStore.pending) {
+    if (hirundoUiStore.anyModalOpen || hirundoStore.pending || hirundoStore.closeConfirm) {
       if (mod && key === 'k' && hirundoUiStore.paletteOpen) { hirundoUiStore.closePalette(); e.preventDefault(); }
       return;
     }
 
     if (e.key === 'Escape' && hirundoStore.active?.sending) { c.cancel(); e.preventDefault(); return; }
     if (e.key === 'Escape' && hirundoSse.running) { void hirundoSse.stop(); e.preventDefault(); return; }
+    if (e.key === 'F2' && !e.defaultPrevented && hirundoStore.active && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+      c.renameTab();
+      e.preventDefault();
+      return;
+    }
     if (!mod) return;
 
     const open = !!hirundoStore.project;
@@ -112,6 +117,7 @@
 
     if (key === 'k' && !e.shiftKey) hirundoUiStore.togglePalette();
     else if (e.shiftKey && key === 'o') c.openProject();
+    else if (e.shiftKey && key === 'p') c.newProject();
     else if (e.shiftKey && key === 'n' && open) c.newCollection();
     else if (e.shiftKey && key === 's' && has) c.saveAs();
     else if (e.key === 'Enter' && has) c.send();
@@ -129,6 +135,8 @@
     else if (!e.shiftKey && key === 'w' && has) c.closeTab();
     else if (!e.shiftKey && key === 'b') hirundoUiStore.toggleSidebar();
     else if (!e.shiftKey && key === 'j') hirundoUiStore.toggleBottom();
+    else if (e.shiftKey && e.key === 'PageDown' && has) c.moveTabRight();
+    else if (e.shiftKey && e.key === 'PageUp' && has) c.moveTabLeft();
     else if (e.key === 'PageDown') hirundoStore.step(1);
     else if (e.key === 'PageUp') hirundoStore.step(-1);
     else if (!e.shiftKey && open) {
@@ -201,7 +209,7 @@
 
 <style>
   .shell { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg-base); overflow: hidden; }
-  .content-area { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding-top: 6px; background: var(--bg-elevated); }
+  .content-area { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding-top: 6px; background: var(--chrome-fill); }
   .main-col { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden; gap: 4px; }
   .card { display: flex; flex-shrink: 0; min-width: 0; min-height: 0; background: var(--bg-base); border-radius: var(--radius-lg); overflow: hidden; }
   .card.grow { flex: 1; }

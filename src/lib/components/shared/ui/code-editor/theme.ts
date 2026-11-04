@@ -137,13 +137,8 @@ export const codeEditorTheme = EditorView.theme(
     '.cm-activeLine': {
       backgroundColor: 'color-mix(in srgb, var(--accent) 9%, var(--bg-hover) 55%)',
     },
-    // Caret: a 2px bright accent bar (the default 1px sliver is hard to spot against
-    // the code). Both the steady + the drop cursor track it.
-    '.cm-cursor, .cm-dropCursor': {
-      borderLeftColor: 'var(--accent)',
-      borderLeftWidth: '2px',
-    },
-    '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--accent)' },
+    // The caret (shape, colour, blink) is `caret.ts`, installed with the preferences: it is a user
+    // setting, and an accent bar on the accent-tinted current line was nearly invisible.
     // Selection: a clearly-visible accent wash (the faint `--accent-subtle` was hard
     // to see against the code). Focused selection is a touch stronger.
     '.cm-selectionBackground, .cm-content ::selection': {

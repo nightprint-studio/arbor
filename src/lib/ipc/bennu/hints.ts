@@ -78,6 +78,6 @@ export interface UsageCount {
  *
  *  Java-only; resolves to `[]` while the index is still building or for a file no project owns.
  *  Wire: `bennu_usage_counts` — `{ file, source }`. */
-export function usageCounts(file: string, source: string): Promise<UsageCount[]> {
-  return bennu('bennu_usage_counts', { args: { file, source } });
+export function usageCounts(file: string, source: string, originFile?: string): Promise<UsageCount[]> {
+  return bennu('bennu_usage_counts', { args: { file, source, origin_file: originFile } });
 }

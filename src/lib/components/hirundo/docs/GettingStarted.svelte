@@ -8,6 +8,17 @@
   that know whether they are your laptop or production, auth that you set once, and tests you can run again.
 </p>
 
+<h2>What a project is, and how to make one</h2>
+<p>
+  A <b>project</b> is a folder with a <code>.hirundo</code> folder inside it — usually the root of the repository whose API you call, so the requests live
+  next to the code. Open one with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> (recent projects, or browse for a folder; a folder without <code>.hirundo</code> becomes a project the first time you save something),
+  or make one with <b>New project…</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>): choose where it lives and, if you like, a name — a new folder of that name is created inside it.
+  The empty window, the menu, the workspace switcher and the command palette all offer both.
+</p>
+<p>
+  Every project you open joins the <b>active workspace</b>, a named group of projects you switch between from the title bar; <i>Add project…</i> in the switcher adds one to a chosen workspace.
+</p>
+
 <h2>A project, and what Hirundo keeps in it</h2>
 <p>
   Open a folder with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>. Hirundo writes a <code>.hirundo/</code> folder inside
@@ -37,6 +48,12 @@
   settings, run and delete (<kbd>Del</kbd>) — whatever fits what the row is.
 </p>
 
+<p>
+  Open requests are tabs: drag one to reorder it (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd>/<kbd>PageDown</kbd>). A right click on a tab offers Close, Close Others, Close All,
+  Close to the Right, Close Without Changes, Rename (<kbd>F2</kbd>, the request is renamed in its file), Duplicate, Copy Path and Show in File Explorer; closing several tabs at once asks first when
+  some hold unsaved changes. The same verbs are in the command palette.
+</p>
+
 <h2>Workspaces</h2>
 <p>
   Like Bennu and Corvus, Hirundo groups projects in <b>workspaces</b>: the switcher in the title bar lists each workspace with its projects,
@@ -63,7 +80,7 @@
 
 <h2>Bulk edit, cURL, code</h2>
 <ul>
-  <li><b>Bulk edit</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>) shows params, headers, form fields and variables as text: paste
+  <li><b>Bulk edit</b> (the toggle in the header of each table, or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>) shows params, headers, form fields and variables as text: paste
     <code>key: value</code> lines, <code>k=v&amp;k2=v2</code>, or a block of headers copied from a browser.</li>
   <li><b>cURL</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd>) turns a pasted <code>curl</code> command — Chrome's “Copy as cURL” included —
     into a request, and copies the open request as one, with variables filled in or kept.</li>
@@ -120,11 +137,6 @@
   The endpoints Bennu's index holds — Spring request mappings, grouped by controller — for the Bennu projects you choose in the
   <i>Projects</i> menu (only those are read; until you choose, it is the Bennu project that is also this window's project). Enter opens an
   endpoint as a new request: method, URL on <code>&#123;&#123;baseUrl&#125;&#125;</code>, its query parameters and the shape of its body, taken from the code.
-  A project must have been opened in Bennu once so that its index exists. <i>Go to the controller</i> in the request toolbar opens the source
-  of the endpoint a URL matches.
+  A project must have been opened in Bennu once so that its index exists. <i>Go to the controller</i> appears in the request toolbar only for a request that matches a detected endpoint, and opens its source.
 </p>
 
-<h2>Imber</h2>
-<p>
-  <i>Ask Imber</i> in the toolbar copies a prompt with the request, its answer and the failed checks and opens Bennu, where Imber lives: paste it there.
-</p>

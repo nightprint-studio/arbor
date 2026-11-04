@@ -31,8 +31,26 @@
   </div>
 </div>
 <dl class="meta-grid">
-  <dt>Templates</dt>
-  <dd>A menu on the query bar; each entry says what it is for, not just what it is called.</dd>
+  <dt>The left column</dt>
+  <dd>
+    <strong>Templates</strong> (each says what it is for and shows its query), the queries you ran lately (<strong>Recent</strong>) and the ones you named and kept
+    (<strong>Saved</strong>), with a filter. A click fills the field and nothing runs until <kbd>Ctrl</kbd> + <kbd>Enter</kbd>. The column can be dragged wider. The
+    templates are also offered by the query field's completion, next to the ones you saved.
+  </dd>
+  <dt>Language</dt>
+  <dd>
+    <em>Java</em>, <em>JSP</em> and <em>Java in JSP</em> are offered only when the project has pages; a Java-only project has no selector.
+  </dd>
+  <dt>Where</dt>
+  <dd>
+    The whole project, a module, the current directory or the current file. It is the language's own <code>in</code> clause, written for you — a query that
+    has its own <code>in</code> keeps it.
+  </dd>
+  <dt>Holes</dt>
+  <dd>
+    The holes the query binds are chips under the field: a click inserts one at the caret (in the replacement when that is where you were typing), and
+    <em>hole</em> adds a new one. A syntax error is underlined in the field with its message, and a replacement naming a hole the query does not bind is underlined too.
+  </dd>
   <dt>Export</dt>
   <dd>CSV, JSON or a Markdown table, to the clipboard or a file — whichever shape is on screen, so a grouped query exports the table, not the places it summarised.</dd>
   <dt>The line under the results</dt>
@@ -62,8 +80,11 @@
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd></td><td>Opens it</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Enter</kbd></td><td>Runs the query</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd>, or <kbd>Ctrl</kbd> + <kbd>Space</kbd></td><td>Completions</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>With Replace on, previews the changes</td></tr>
+    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>F3</kbd> / <kbd>Shift</kbd> + <kbd>F3</kbd></td><td>Walk the matches (F3 also from the query field); the file beside them follows</td></tr>
+    <tr><td><kbd>Space</kbd> or <kbd>F2</kbd> on a result</td><td>Shows its preview (again to hide it; <kbd>Esc</kbd> hides it too)</td></tr>
     <tr><td><kbd>Enter</kbd> on a result</td><td>Opens that place and closes the dialog</td></tr>
-    <tr><td><kbd>Esc</kbd></td><td>Closes</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Stops a running search; otherwise closes</td></tr>
   </tbody>
 </table>
 
@@ -72,9 +93,15 @@
 <pre><code>pattern:      $a$ == null ? null : $a$.$m$()
 replacement:  Optional.ofNullable($a$).map(X::$m$)</code></pre>
 <ol class="step-list">
-  <li><em>Preview</em> shows the before and after of every file the rewrite would touch.</li>
-  <li><em>Apply</em> writes what the preview showed.</li>
+  <li><em>Preview changes</em> lists every file the rewrite would touch with only the changed lines (and a little context), numbered, with how many lines come and go.</li>
+  <li>Untick the files you do not want; <em>Replace selected</em> writes the ticked ones, and <em>Replace all files</em> from its menu writes every one.</li>
 </ol>
+<p>
+  <strong>Hover preview.</strong> Rest the pointer on a result for a moment (or press <kbd>Space</kbd> / <kbd>F2</kbd> on the selected one) and a card shows the
+  code around the match, a few lines either side, the match itself marked. With <strong>Replace</strong> on and the changes previewed, it shows instead
+  what that match becomes — the changed lines with their neighbours, before and after. The file is read only when the card appears, and kept.
+</p>
+<p>Results are grouped by file, collapsible, with the match underlined on its line. A running search can be stopped (<kbd>Esc</kbd>): what had arrived stays, marked partial.</p>
 <Callout variant="info" title="Always two steps">
   A structural replace rewrites places you did not look at, and its whole advantage over a textual one is precision — worth something only if you can check.
 </Callout>

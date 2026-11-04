@@ -34,7 +34,7 @@
   {#if type?.confirm_mutating}
     <Badge variant="tone" tone="warning" size="sm" tooltip={`${type.name} asks before POST, PUT, PATCH and DELETE`}>{#snippet icon()}<Lock size={10} />{/snippet}protected</Badge>
   {/if}
-  <Dropdown {items} width="270px" direction="down">
+  <Dropdown {items} width="270px" direction="down" position="fixed">
     {#snippet trigger({ open, toggle })}
       <Button variant="outline" size="sm" ariaExpanded={open} ariaHaspopup="menu" ariaLabel="Environment" onclick={toggle}>
         {#snippet iconStart()}<span class="es-dot" style:background={color}></span>{/snippet}

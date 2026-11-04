@@ -64,6 +64,7 @@
   import { bennuPanelSizes } from '$lib/stores/bennu/panel-sizes.svelte';
   import { bennuRailsStore, BENNU_MANDATORY, type RailSection } from '$lib/stores/bennu/rails.svelte';
   import { applyRailOrder } from '$lib/utils/rail-order';
+  import { CASE_LABELS, CASE_STYLES } from '$lib/utils/case-convert';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
@@ -237,6 +238,7 @@
   import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
   import { bennuRegexStore } from '$lib/stores/bennu/regex.svelte';
+  import { bennuCommentMarkersStore } from '$lib/stores/bennu/comment-markers.svelte';
   import { bennuHierarchyStore } from '$lib/stores/bennu/hierarchy.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuTomcatStore } from '$lib/stores/bennu/tomcat.svelte';
@@ -309,6 +311,8 @@
     void diffStore.loadConfig();
     // Regex detection level + the Regex Tester's saved and recent patterns.
     void bennuRegexStore.loadConfig();
+    // The words coloured as markers in comments (and listed by the TODO window).
+    void bennuCommentMarkersStore.loadConfig();
     // Hydrate the config-backed editor toggles (autosave / auto-import) from the persisted config.
     void bennuSettingsStore.loadConfig();
     // The profile list + which one is active, for the titlebar's switcher. Idempotent, so a Bennu
@@ -388,7 +392,15 @@
     const stopPolling = () => {
       if (externalTimer !== undefined) { clearInterval(externalTimer); externalTimer = undefined; }
     };
-    const onWindowFocus = () => { pollExternal(); startPolling(); };
+    // Coming back to the window is also when a `mvn install` run elsewhere has just rewritten a library
+    // another project of the workspace depends on. One toast per episode offers the reload; the check is
+    // a few `stat`s per jar on the backend, so it is not a reason to delay the focus.
+    const checkDependenciesStale = () => {
+      if (projectStore.project && !projectStore.isDemo) {
+        void dependenciesStore.checkStale(projectStore.workspaceRoots, true);
+      }
+    };
+    const onWindowFocus = () => { pollExternal(); startPolling(); checkDependenciesStale(); };
     window.addEventListener('focus', onWindowFocus);
     window.addEventListener('blur', stopPolling);
     if (document.hasFocus()) onWindowFocus();
@@ -421,8 +433,11 @@
     void listen('arbor://bennu-be-up', () => {
       void workspacesStore.restore();
       void bennuRegexStore.loadConfig();
+      void bennuCommentMarkersStore.loadConfig();
       void bennuSettingsStore.loadConfig();
       void bennuFormatStyleStore.load(projectStore.project?.root);
+      // The dictionary status asked at mount can have lost the same race; asking again is cheap.
+      if (!bennuSpellStore.statusKnown) void bennuSpellStore.loadStatus();
     }).then((un) => { unlistenBeUp = un; });
     // The Project tree's sync with the disk. Two halves and they are separate on purpose: this one
     // is the subscription (watcher events + the focus safety net), and the `$effect` below is what
@@ -1396,8 +1411,9 @@
     { id: 'terminal', tooltip: 'Terminal', shortcut: 'Alt+F12', icon: TerminalSquare, active: bennuUiStore.bottomPanel === 'terminal', onclick: () => bennuUiStore.toggleBottom('terminal') },
     ...pluginRail('left', 'bottom'),
   ]);
-  /** The build tools' own windows — one button per ecosystem the workspace carries. Alt+8 means "the
-   *  build tool" and goes to the primary kind's (see {@link buildToolKey}). */
+  /** The build tools' own windows — one button per ecosystem the workspace carries, always first on the
+   *  right rail in the order Maven, Gradle, Cargo, Node, then Tests. Alt+8 means "the build tool" and
+   *  goes to the primary kind's (see {@link buildToolKey}). */
   const buildToolRails = $derived<ActivityRailButton[]>([
     ...(hasMaven
       ? [{ id: 'maven', tooltip: 'Maven', shortcut: buildToolKey === 'maven' ? 'Alt+8' : undefined, icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') }]
@@ -1412,10 +1428,6 @@
     // beside it should not take the slot from it).
     ...(hasNode
       ? [{ id: 'node', tooltip: 'Node — the packages, and the scripts you can run on them', shortcut: 'Alt+Shift+9', icon: NodeIcon, active: bennuUiStore.rightPanel === 'node', onclick: () => bennuUiStore.toggleRight('node') }]
-      : []),
-    // The running Bevy game: its entities, resources and states as one tree; the detail opens at the bottom.
-    ...(bevyTools
-      ? [{ id: 'bevy', tooltip: 'Bevy Remote — the running game: entities, resources, states', shortcut: 'Ctrl+Shift+A', icon: Radar, active: bennuUiStore.rightPanel === 'bevy', onclick: () => bennuUiStore.toggleRight('bevy') }]
       : []),
   ]);
   const rightTopRaw = $derived<ActivityRailButton[]>([
@@ -1436,6 +1448,10 @@
         ]
       // A frontend-only project: no Tests catalogue, no Alt+8 slot, but its own Node window.
       : buildToolRails),
+    // The running Bevy game: its entities, resources and states as one tree; the detail opens at the bottom.
+    ...(bevyTools
+      ? [{ id: 'bevy', tooltip: 'Bevy Remote — the running game: entities, resources, states', shortcut: 'Ctrl+Shift+A', icon: Radar, active: bennuUiStore.rightPanel === 'bevy', onclick: () => bennuUiStore.toggleRight('bevy') }]
+      : []),
     ...(javaTools
       ? [
           // The parse, and the model Bennu derives from it. Both views are about Bennu's OWN
@@ -1670,13 +1686,11 @@
     }
   }
 
-  /** Whether the project has switched the naming check on — what gates the two bulk-fix entries.
-   *  Offering "Fix naming" to a project with no convention is offering to do nothing. */
-  const namingOn = $derived(bennuNamingStore.enabled);
-
-  // Read both naming documents when a project opens, so `namingOn` is right before anyone has been
-  // near Settings or Project Configuration — the profile counts, because a project that states
-  // nothing is judged by it. Untracked because `load` writes the state it reads.
+  // Read both naming documents when a project opens, so the continuous check and the review's
+  // "configured" choice are right before anyone has been near Settings or Project Configuration — the
+  // profile counts, because a project that states nothing is judged by it. The bulk fix itself does
+  // NOT wait on this: with no convention configured it uses what the project's code does, or the
+  // language's standard. Untracked because `load` writes the state it reads.
   $effect(() => {
     const root = projectStore.project?.root;
     if (!root) return;
@@ -1891,7 +1905,9 @@
         action: () => run(() => editor?.openAddParameter()), when: isJava },
       { id: 'safedelete', title: 'Safe delete…', icon: 'Trash2', shortcut: 'Alt+Delete',
         action: () => run(() => void openSafeDelete()), when: isJava },
-      // The bulk half of the naming check. Two entries and not one: "this file" is the answer to a
+      // The bulk half of the naming check — always on offer, whether or not the project switched the
+      // continuous check on: the review says which convention it is using and lets you change it.
+      // Two entries and not one: "this file" is the answer to a
       // screen full of squiggles, "the project" is a deliberate sweep, and they cost very
       // different amounts. Both open the same review before anything is written.
       // No keybinding on purpose: a bulk fix is something you run once after adopting a
@@ -1899,9 +1915,9 @@
       // is worth more to an action that is.
       { id: 'namingfixfile', title: 'Fix naming in file', icon: 'Wand2',
         action: () => run(() => void planNamingFix('file')),
-        when: !!projectStore.activeFilePath && namingOn },
+        when: !!projectStore.activeFilePath && !!projectStore.project },
       { id: 'namingfixproject', title: 'Fix naming in project', icon: 'Wand2',
-        action: () => run(() => void planNamingFix('project')), when: namingOn },
+        action: () => run(() => void planNamingFix('project')), when: !!projectStore.project },
       // No keybinding on purpose: it is a switch you flip when you want to compare, and a free
       // Ctrl+Shift+<letter> is worth more to an action you reach for while typing.
       { id: 'flc-toggle',
@@ -2416,6 +2432,24 @@
       { id: 'reindex', title: 'Rebuild index', icon: 'RotateCw',
         action: () => run(() => { const r = projectStore.project?.root; if (r) void bennuIndexStore.rebuild(r); }),
         when: !!projectStore.project && javaTools && !bennuIndexStore.indexing },
+      // Maven and Gradle only: the verb of the Dependencies panel's reload button, for a project whose
+      // libraries changed under the editor (`mvn install` of a sibling module) when the toast is gone.
+      // One verb per style, on the selection or the name at the caret. Ctrl+Shift+W is the cycle.
+      ...CASE_STYLES.map((style) => ({
+        id: `convert-case:${style}`, title: `Convert Case: ${CASE_LABELS[style]}`, icon: 'CaseSensitive',
+        action: () => run(() => editor?.convertCase(style)), when: !!path,
+      })),
+      { id: 'convert-case:cycle', title: 'Convert Case: next style', icon: 'CaseSensitive', shortcut: 'Ctrl+Shift+W',
+        action: () => run(() => editor?.convertCase('cycle')), when: !!path },
+      { id: 'reloaddeps', title: 'Reload dependencies', icon: 'RotateCw',
+        action: () => run(() => {
+          const t = moduleFocusStore.targetFor('Maven', 'Gradle');
+          if (!t) return;
+          void dependenciesStore.reload([
+            dependenciesStore.staleFor(t.toolRoot) ?? { root: t.toolRoot, tool: t.kind === 'Gradle' ? 'gradle' : 'maven' },
+          ]);
+        }),
+        when: !!projectStore.project && !!moduleFocusStore.targetFor('Maven', 'Gradle') },
       // The watcher and the focus check keep the tree in step on their own; this is the hand
       // override for the change both missed.
       { id: 'reloadtree', title: 'Reload project tree', icon: 'FolderTree',
@@ -3610,11 +3644,11 @@
   /* A few px of bg-elevated between the titlebar and the tabbed editor pane, so
      the floating panel cards read as detached from the chrome (IntelliJ New UI
      floating look). WorkspaceShell intentionally has no top padding; we add it
-     here at the window level, tinted like the rail/titlebar so it's the "gap". */
+     here at the window level, painted with the same `--chrome-fill` veil as the rail/titlebar so it is the "gap". */
   .content-area {
     flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
     padding-top: 5px;
-    background: var(--bg-elevated);
+    background: var(--chrome-fill);
   }
   /* A project swap: the panels settle in rather than snapping. Opacity + a few px only. */
   .content-area.swap { animation: project-swap var(--anim-dur-base, 160ms) cubic-bezier(0.2, 0, 0, 1); }

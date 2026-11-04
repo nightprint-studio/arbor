@@ -133,6 +133,7 @@ export const corvusOverrides: Record<string, SceneOverride> = {
   'corvus/sidebar/RemoteBranchRenameModal': withTab({ props: { branch: remoteBranches[2], onClose: noop, onRenamed: noop } }),
   'corvus/sidebar/SubmoduleBranchModal': withTab({ props: { sub: submodule, onClose: noop, onDone: noop } }),
   'corvus/sidebar/WorktreeInfoModal': withTab({ props: { worktree, onClose: noop, onSwitch: noop, onOpenInIde: noop } }),
+  'corvus/OpenUnregisteredRepoModal': withTab({ props: { path: 'C:\\Dev\\side-project', name: 'side-project' }, setup: () => workspacesStore.load() }),
   'corvus/TicketPickerModal': withTab({ props: { onSelect: noop, onClose: noop }, settle: 800 }),
   'corvus/workspace/CreateWorkspaceModal': withTab({ props: { onClose: noop }, setup: () => workspacesStore.load() }),
   'corvus/workspace/WorkspaceManagementModal': withTab({ props: { onClose: noop, onCreate: noop }, setup: () => workspacesStore.load() }),

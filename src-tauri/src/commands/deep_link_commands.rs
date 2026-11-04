@@ -55,7 +55,7 @@ pub fn dispatch_deep_link(app: AppHandle, url: String) -> Result<()> {
         // deadlock (see `window::corvus::open_corvus_window`).
         let h_be = h.clone();
         let _ = tokio::task::spawn_blocking(move || crate::ipc::ensure_corvus_be(&h_be)).await;
-        crate::window::corvus::open_or_focus(&h);
+        crate::window::corvus::open_or_focus_routed(&h);
     });
     let _ = app.emit("arbor://deep-link-manual", url);
     Ok(())

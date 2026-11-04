@@ -251,6 +251,8 @@ mod mojibake;
 // Encoding conversion: `bennu_encoding_convert_plan` / `_apply` / `_undo` — rewrite a file, folder or
 // the whole project from one encoding to another, with a dry run, backups and a one-step undo.
 mod encoding_convert;
+// Opt-in phase timing (`ARBOR_BE_PERF=<ms>`) for completion, ghost text and go-to — stderr only.
+mod perf;
 // Alt+Enter intentions: `bennu_intentions_at` — every applicable quick-fix at the caret
 // (parameterize logging, NP-safe equals, isEmpty()/boolean/negated-comparison simplifications),
 // over the pure `bennu-intentions` catalog.
@@ -301,6 +303,7 @@ mod inspect;
 mod generate_override;
 // Code generators (Spring Security, converters, HTTP clients, …): the context they read and the files they write.
 mod code_generate;
+mod endpoint_schema;
 mod hirundo_endpoints;
 mod index_service;
 // Focus-aware rate limit for the per-file "done of total" progress events.

@@ -15,8 +15,14 @@
  * per line, separated, in the order they arrived.
  *
  * The row is indented to match the item it belongs to, measured from the line's own leading
- * whitespace in `ch` units — the editor's font is monospace, so a character IS a column. A lens
- * flush against the gutter above an indented method reads as belonging to the block, not the method.
+ * whitespace in `ch` units — the editor's font is monospace, so a character IS a column — plus the
+ * 12px that `.cm-line` pads its text with and a block widget does not get. A lens flush against the
+ * gutter above an indented method reads as belonging to the block, not the method.
+ *
+ * Two things keep that column honest. The `ch` is the EDITOR's: the row itself is drawn at the editor's
+ * font size and only the lens text is smaller (a row-wide `85%` made every `ch` of the indent 15%
+ * narrow, so the label drifted further left the deeper the item). And a tab counts as the tab
+ * size, not as one column.
  *
  * ## Why the decorations live in the field
  *
@@ -91,7 +97,7 @@ class LensRowWidget extends WidgetType {
   toDOM(): HTMLElement {
     const row = document.createElement('div');
     row.className = 'cm-lens-row';
-    row.style.paddingLeft = `${this.indent}ch`;
+    row.style.paddingLeft = `calc(${LINE_PADDING_PX}px + ${this.indent}ch)`;
     for (const [i, entry] of this.entries.entries()) {
       if (i > 0) {
         const sep = document.createElement('span');
@@ -135,15 +141,20 @@ class LensRowWidget extends WidgetType {
 /** The row's height, in px. One line, and the same number in the theme and in the estimate. */
 const LENS_ROW_HEIGHT = 17;
 
-/** How many columns of leading whitespace `text` has, with a tab counted as one column.
- *
- *  One column per tab is wrong in general and right here: the indentation is measured to line the
- *  lens up with the *text* below it, and CodeMirror renders a tab at its own configured width, so
- *  either way this is an approximation. Being narrow is the safe direction — a lens slightly left of
- *  its item still reads as belonging to it, one pushed past it reads as belonging to nothing. */
-function indentOf(text: string): number {
+/** The left padding of `.cm-line` in the shared theme (`padding: 0 12px`) — the gap a line of text has
+ *  before its first glyph, and a block widget does not. */
+const LINE_PADDING_PX = 12;
+
+/** How many columns of leading whitespace `text` has: a space is one, a tab runs to the next multiple of
+ *  `tabSize` — the way CodeMirror lays the line out, so the lens lands over the first glyph. */
+export function indentOf(text: string, tabSize = 4): number {
+  const tab = Math.max(1, tabSize);
   let n = 0;
-  while (n < text.length && (text[n] === ' ' || text[n] === '\t')) n += 1;
+  for (const ch of text) {
+    if (ch === ' ') n += 1;
+    else if (ch === '\t') n += tab - (n % tab);
+    else break;
+  }
   return n;
 }
 
@@ -151,6 +162,7 @@ function build(
   entries: readonly LensEntry[],
   doc: Text,
   onPress: (key: number) => void,
+  tabSize: number,
 ): DecorationSet {
   if (entries.length === 0) return Decoration.none;
   // Grouped by the line they sit above, keyed by the line's start — a block widget has to land on a
@@ -161,7 +173,7 @@ function build(
     const line = doc.lineAt(entry.pos);
     const row = rows.get(line.from);
     if (row) row.entries.push(entry);
-    else rows.set(line.from, { indent: indentOf(line.text), entries: [entry] });
+    else rows.set(line.from, { indent: indentOf(line.text, tabSize), entries: [entry] });
   }
   return Decoration.set(
     [...rows.entries()].map(([from, row]) =>
@@ -192,7 +204,7 @@ export function codeLensLayer(onPress: (key: number) => void): Extension {
     update(value, tr) {
       for (const effect of tr.effects) {
         if (effect.is(setCodeLenses)) {
-          return { entries: effect.value, deco: build(effect.value, tr.state.doc, onPress) };
+          return { entries: effect.value, deco: build(effect.value, tr.state.doc, onPress, tr.state.tabSize) };
         }
       }
       if (!tr.docChanged) return value;
@@ -205,7 +217,7 @@ export function codeLensLayer(onPress: (key: number) => void): Extension {
       }
       // Rebuilt rather than mapped: the widgets are keyed by LINE start, and an edit moves lines
       // around independently of the positions inside them.
-      return { entries, deco: build(entries, tr.state.doc, onPress) };
+      return { entries, deco: build(entries, tr.state.doc, onPress, tr.state.tabSize) };
     },
     provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
   });
@@ -217,7 +229,6 @@ export function codeLensLayer(onPress: (key: number) => void): Extension {
         display: 'flex',
         alignItems: 'center',
         gap: '4px',
-        fontSize: '85%',
         lineHeight: `${LENS_ROW_HEIGHT}px`,
         // Never taller than one line: a provider that writes a paragraph into a lens title must not
         // be able to reflow the file around it.
@@ -226,8 +237,10 @@ export function codeLensLayer(onPress: (key: number) => void): Extension {
         whiteSpace: 'nowrap',
         color: 'var(--text-muted, #888)',
       },
+      // The lens text is smaller than the code, the row that holds it is not (see the module doc).
       '.cm-lens': {
         font: 'inherit',
+        fontSize: '85%',
         color: 'inherit',
         background: 'none',
         border: 'none',
@@ -251,6 +264,7 @@ export function codeLensLayer(onPress: (key: number) => void): Extension {
       },
       '.cm-lens-sep': {
         opacity: '0.5',
+        fontSize: '85%',
       },
     }),
   ];

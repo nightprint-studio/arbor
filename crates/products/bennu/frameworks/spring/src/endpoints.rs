@@ -46,8 +46,11 @@ pub fn endpoints(units: &[JavaUnit]) -> Vec<Endpoint> {
                     continue;
                 };
                 let methods = http_methods(ann, implied);
-                let produces = ann.pair("produces").unwrap_or_default().trim_matches('"').to_string();
-                let consumes = ann.pair("consumes").unwrap_or_default().trim_matches('"').to_string();
+                // The media types as values (`application/json, text/event-stream`), not as the annotation's source text.
+                let produces_raw = ann.pair("produces").unwrap_or_default().to_string();
+                let consumes_raw = ann.pair("consumes").unwrap_or_default().to_string();
+                let produces = crate::media_types::resolve_known(&produces_raw);
+                let consumes = crate::media_types::resolve_known(&consumes_raw);
                 let mut paths = paths_of(ann);
                 if paths.is_empty() {
                     // A bare `@GetMapping` maps the class path itself.
@@ -67,6 +70,8 @@ pub fn endpoints(units: &[JavaUnit]) -> Vec<Endpoint> {
                         line: line_at(&u.text, m.name_offset),
                         produces: produces.clone(),
                         consumes: consumes.clone(),
+                        produces_raw: produces_raw.clone(),
+                        consumes_raw: consumes_raw.clone(),
                         return_type: m.return_type.clone(),
                         params: params.clone(),
                     });

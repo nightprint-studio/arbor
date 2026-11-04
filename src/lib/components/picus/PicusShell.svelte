@@ -1028,7 +1028,7 @@
     flex-direction: column;
     overflow: hidden;
     padding-top: 6px;
-    background: var(--bg-elevated);
+    background: var(--chrome-fill);
   }
 
   .main-col {

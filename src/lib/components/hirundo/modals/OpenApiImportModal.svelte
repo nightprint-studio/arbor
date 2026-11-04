@@ -1,15 +1,12 @@
 <script lang="ts">
   /**
-   * OpenApiImportModal — an OpenAPI 3 spec (JSON) becomes requests, and the user chooses which.
-   *
-   * Step one takes the spec as a file (Browse…), a URL or pasted text. Step two lists its operations grouped
-   * by tag — a checkbox on each tag and each operation, a filter, all / none, a count — and says where they
-   * go: a new collection, or a folder inside an existing one, named after the spec, with a sub-folder per tag.
-   * The spec's server becomes `{{baseUrl}}` (in the active environment when it has none yet, else on the
-   * collection) and its security scheme becomes the auth of the folder.
+   * OpenApiImportModal — an OpenAPI 3 spec (JSON) becomes requests, and the user chooses which. The layout is
+   * the shared `ImportShell` (the spec in the editor, the operations on the right); this is what is specific:
+   * reading the spec as it is typed, grouping its operations by tag with a checkbox on each tag and operation,
+   * and where they go. The spec's server becomes `{{baseUrl}}` (in the active environment when it has none yet,
+   * else on the collection) and its security scheme the auth of the folder.
    */
-  import { onMount } from 'svelte';
-  import { FileJson, FolderSearch } from 'lucide-svelte';
+  import { FileJson } from 'lucide-svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
@@ -21,11 +18,7 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
-  import Textarea from '$lib/components/shared/ui/Textarea.svelte';
-  import Modal from '$lib/components/shared/Modal.svelte';
-  import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
-  import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
-  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
+  import { languageForPath } from '$lib/components/bennu/languages';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { environmentSave, openapiApply, openapiRead } from '$lib/ipc/hirundo';
   import { fuzzyMatch } from '$lib/utils/fuzzy';
@@ -33,14 +26,34 @@
   import { hirundoUiStore } from '$lib/stores/hirundo/ui.svelte';
   import type { KeyValue, OpenApiPlan } from '$lib/types/hirundo';
   import { methodColor, methodShort } from '../request-model';
+  import ImportShell from './ImportShell.svelte';
+  import { jsonError, type TextError } from './import-diagnostics';
 
   let { onClose }: { onClose: () => void } = $props();
 
-  let source = $state('');
-  let sourceEl = $state<HTMLTextAreaElement | undefined>(undefined);
-  let browsing = $state(false);
+  const EXAMPLE = `{
+  "openapi": "3.0.3",
+  "info": { "title": "Pet store", "version": "1.0.0" },
+  "servers": [{ "url": "https://petstore.example.com/v1" }],
+  "paths": {
+    "/pets": {
+      "get": { "tags": ["pets"], "summary": "List pets", "operationId": "listPets", "responses": { "200": { "description": "ok" } } },
+      "post": { "tags": ["pets"], "summary": "Add a pet", "operationId": "addPet", "responses": { "201": { "description": "created" } } }
+    },
+    "/pets/{id}": {
+      "get": { "tags": ["pets"], "summary": "One pet", "operationId": "getPet", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "ok" } } }
+    }
+  }
+}
+`;
+
+  const json = languageForPath('openapi.json');
+
+  let text = $state('');
+  let fromUrl = $state<string | null>(null);
   let reading = $state(false);
   let error = $state('');
+  let errorAt = $state<TextError | null>(null);
   let plan = $state<OpenApiPlan | null>(null);
 
   let chosen = $state<Record<string, boolean>>({});
@@ -50,11 +63,7 @@
   let parent = $state(hirundoStore.tree[0]?.path ?? '');
   let saving = $state(false);
 
-  onMount(() => sourceEl?.focus());
-
   const matches = (id: string, tag: string, summary: string) => !query.trim() || fuzzyMatch(`${id} ${summary} ${tag}`, query) !== null;
-
-  /** The operations of the plan that the filter lets through, by tag. */
   const groups = $derived(
     (plan?.tags ?? [])
       .map((tag) => ({ tag, ops: (plan?.operations ?? []).filter((o) => o.tag === tag && matches(o.id, o.tag, o.summary)) }))
@@ -65,28 +74,39 @@
   const count = $derived((plan?.operations ?? []).filter((o) => chosen[o.id]).length);
   const collections = $derived(hirundoStore.tree.map((c) => ({ value: c.path, label: c.name })));
 
-  async function read() {
-    if (!source.trim() || reading) return;
+  async function load(source: string, shownAs: string | null = null) {
     reading = true;
     error = '';
+    errorAt = null;
+    fromUrl = shownAs;
     try {
-      plan = await openapiRead(source);
-      chosen = Object.fromEntries(plan.operations.map((o) => [o.id, true]));
-      name = plan.title;
+      const p = await openapiRead(source);
+      plan = p;
+      chosen = Object.fromEntries(p.operations.map((o) => [o.id, true]));
+      name = p.title;
       query = '';
+      if (shownAs) fromUrl = `${shownAs} — ${p.operations.length} operation${p.operations.length === 1 ? '' : 's'} found. Pick the ones to import on the right.`;
     } catch (e) {
       plan = null;
       error = String(e);
+      errorAt = shownAs ? null : jsonError(source);
     } finally {
       reading = false;
     }
   }
 
+  // The editor's text is read as it is typed or pasted (after a pause), so the sidebar follows without a button.
+  $effect(() => {
+    const t = text;
+    if (!t.trim()) { plan = null; error = ''; errorAt = null; return; }
+    const timer = setTimeout(() => void load(t), 350);
+    return () => clearTimeout(timer);
+  });
+
   function setMany(ids: string[], value: boolean) {
     for (const id of ids) chosen[id] = value;
   }
 
-  /** Put `baseUrl` where the requests will find it: the active environment when it has none, else the collection. */
   async function baseUrlVars(project: string): Promise<KeyValue[]> {
     if (!plan?.base_url) return [];
     const kv: KeyValue = { key: 'baseUrl', value: plan.base_url, description: `From ${plan.title}`, enabled: true };
@@ -125,52 +145,48 @@
       saving = false;
     }
   }
-
-  function onKey(e: KeyboardEvent) {
-    if (browsing || !(e.ctrlKey || e.metaKey) || e.key !== 'Enter') return;
-    e.preventDefault();
-    if (plan) void save(); else void read();
-  }
 </script>
 
-<svelte:window onkeydown={onKey} />
-
-<Modal {onClose} width="820px" height="700px" padBody={false} ariaLabel="Import OpenAPI">
-  {#snippet header()}
-    <ModalHeader {onClose}>
-      <FileJson size={14} />
-      <span class="modal-title">Import OpenAPI</span>
-      {#if plan}<span class="oa-sub">{plan.title}</span>{/if}
-    </ModalHeader>
-  {/snippet}
-
-  {#if !plan}
-    <div class="oa-source">
-      <FormSection label="Spec" hint="OpenAPI 3 in JSON: paste it, give its URL, or browse to the file. YAML is not supported yet." first>
-        <Textarea bind:value={source} bind:element={sourceEl} minRows={8} maxRows={14} framed placeholder="https://api.example.com/openapi.json   or   C:\specs\openapi.json   or the JSON itself" />
-        <div class="oa-row">
-          <Button variant="outline" size="sm" onclick={() => (browsing = true)}>{#snippet iconStart()}<FolderSearch size={13} />{/snippet}Browse…</Button>
-        </div>
-      </FormSection>
-      {#if error}<div class="oa-pad"><Alert variant="error" text={error} /></div>{/if}
-    </div>
-  {:else}
-    <div class="oa-pick">
-      <div class="oa-bar">
-        <FilterInput bind:value={query} placeholder="Filter operations — path, summary, tag…" ariaLabel="Filter operations" />
-        <Button variant="outline" size="sm" onclick={() => setMany(visible.map((o) => o.id), true)}>All</Button>
-        <Button variant="outline" size="sm" onclick={() => setMany(visible.map((o) => o.id), false)}>None</Button>
+<ImportShell
+  title="Import OpenAPI"
+  icon={FileJson}
+  subtitle={plan?.title}
+  language={json}
+  bind:text
+  placeholder="Paste an OpenAPI 3 spec (JSON) here, or choose another source above."
+  modes={['paste', 'file', 'url', 'example']}
+  example={EXAMPLE}
+  fileExtensions={['json']}
+  fileTitle="Choose the OpenAPI file"
+  urlPlaceholder="https://api.example.com/v3/api-docs"
+  onFetch={(u) => void load(u, u)}
+  {fromUrl}
+  {reading}
+  {error}
+  {errorAt}
+  sideTitle="Operations"
+  sideCount={total || undefined}
+  primaryLabel={`Import ${count} operation${count === 1 ? '' : 's'}`}
+  primaryDisabled={!plan || count === 0 || (into === 'folder' && !parent)}
+  primaryLoading={saving}
+  onPrimary={() => void save()}
+  {onClose}
+>
+  {#snippet side()}
+    {#if !plan}
+      <div class="oa-empty"><EmptyState message="Nothing to import yet" description="The operations of the spec appear here as soon as it reads." compact /></div>
+    {:else}
+      <div class="oa-bar"><FilterInput bind:value={query} placeholder="Filter — path, summary, tag…" ariaLabel="Filter operations" /></div>
+      <div class="oa-tools">
+        <Button variant="ghost" size="sm" onclick={() => setMany(visible.map((o) => o.id), true)}>All</Button>
+        <Button variant="ghost" size="sm" onclick={() => setMany(visible.map((o) => o.id), false)}>None</Button>
         <span class="oa-count">{count} of {total} selected</span>
       </div>
-
       {#if plan.warnings.length}
         <div class="oa-pad">{#each plan.warnings as w (w)}<Alert variant="warning" compact text={w} />{/each}</div>
       {/if}
-
       <div class="oa-list">
-        {#if groups.length === 0}
-          <EmptyState message="No operation matches" compact />
-        {/if}
+        {#if groups.length === 0}<EmptyState message="No operation matches" compact />{/if}
         {#each groups as g (g.tag)}
           {@const ids = g.ops.map((o) => o.id)}
           {@const on = ids.filter((id) => chosen[id]).length}
@@ -187,67 +203,38 @@
                 <li>
                   <Checkbox checked={!!chosen[o.id]} ariaLabel={o.id} onchange={(v) => (chosen[o.id] = v)} />
                   <span class="oa-method" style:color={methodColor(o.request.method)}>{methodShort(o.request.method)}</span>
-                  <code class="oa-path">{o.path}</code>
-                  {#if o.summary}<span class="oa-muted oa-summary">{o.summary}</span>{/if}
+                  <span class="oa-opname"><code class="oa-path">{o.path}</code>{#if o.summary}<span class="oa-muted">{o.summary}</span>{/if}</span>
                 </li>
               {/each}
             </ul>
           </Collapsible>
         {/each}
       </div>
-
       <div class="oa-target">
         <FormSection label="Where">
-          <div class="oa-where">
-            <FormField label="Name"><Input value={name} placeholder={plan.title} oninput={(v) => (name = v)} /></FormField>
-            <FormField label="Into">
-              <RadioGroup value={into} options={[{ value: 'new', label: 'A new collection' }, { value: 'folder', label: 'A folder in…' }]} appearance="segment" size="sm" onchange={(v) => (into = v as typeof into)} />
-            </FormField>
-            {#if into === 'folder'}<FormField label="Collection"><Select value={parent} options={collections} onchange={(v) => (parent = v)} /></FormField>{/if}
-          </div>
+          <FormField label="Name"><Input value={name} placeholder={plan.title} oninput={(v) => (name = v)} /></FormField>
+          <RadioGroup value={into} options={[{ value: 'new', label: 'A new collection' }, { value: 'folder', label: 'A folder in…' }]} appearance="segment" size="sm" onchange={(v) => (into = v as typeof into)} />
+          {#if into === 'folder'}<FormField label="Collection"><Select value={parent} options={collections} onchange={(v) => (parent = v)} /></FormField>{/if}
           {#if plan.base_url}<p class="oa-muted">{'{{baseUrl}}'} = <code>{plan.base_url}</code> · auth: {plan.auth.type === 'inherit' ? 'none in the spec' : plan.auth.type}</p>{/if}
-          {#if error}<Alert variant="error" compact text={error} />{/if}
         </FormSection>
       </div>
-    </div>
-  {/if}
-
-  {#snippet footer()}
-    {#if plan}
-      <ModalFooter hint="to import">
-        <Button variant="ghost" onclick={() => (plan = null)}>Back</Button>
-        <Button variant="primary" loading={saving} disabled={count === 0 || (into === 'folder' && !parent)} onclick={() => void save()}>{`Import ${count} operation${count === 1 ? '' : 's'}`}</Button>
-      </ModalFooter>
-    {:else}
-      <ModalFooter hint="to read">
-        <Button variant="ghost" onclick={onClose}>Cancel</Button>
-        <Button variant="primary" loading={reading} disabled={!source.trim()} onclick={() => void read()}>Read</Button>
-      </ModalFooter>
     {/if}
   {/snippet}
-</Modal>
-
-{#if browsing}
-  <FileExplorerModal mode="file" extensions={['json']} title="Choose the OpenAPI file" onConfirm={(p: string) => { browsing = false; source = p; void read(); }} onCancel={() => (browsing = false)} onClose={() => (browsing = false)} />
-{/if}
+</ImportShell>
 
 <style>
-  .oa-source { padding: 4px 16px 12px; display: flex; flex-direction: column; gap: 6px; }
-  .oa-row { display: flex; gap: 8px; margin-top: 6px; }
-  .oa-pad { padding: 6px 16px 0; display: flex; flex-direction: column; gap: 4px; }
-  .oa-sub { font-size: var(--font-size-xs); color: var(--text-muted); margin-left: 8px; }
-  .oa-pick { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-  .oa-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px 6px; }
-  .oa-bar > :global(:first-child) { flex: 1; min-width: 0; }
-  .oa-count { font-size: var(--font-size-xs); color: var(--text-secondary); white-space: nowrap; }
-  .oa-list { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px; }
+  .oa-empty { flex: 1; display: grid; place-items: center; }
+  .oa-bar { padding: 8px 12px 4px; }
+  .oa-tools { display: flex; align-items: center; gap: 4px; padding: 0 8px 4px; }
+  .oa-count { margin-left: auto; font-size: var(--font-size-xs); color: var(--text-secondary); }
+  .oa-pad { padding: 0 12px 4px; display: flex; flex-direction: column; gap: 4px; }
+  .oa-list { flex: 1; min-height: 0; overflow: auto; padding: 0 8px; }
   .oa-tag { display: inline-flex; margin-right: 6px; }
-  .oa-ops { list-style: none; margin: 0; padding: 2px 0 8px 22px; display: flex; flex-direction: column; gap: 2px; }
-  .oa-ops li { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .oa-method { font: 600 10px var(--font-mono); width: 30px; flex: none; }
-  .oa-path { font-family: var(--font-mono); font-size: var(--font-size-xs); white-space: nowrap; }
-  .oa-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .oa-muted { font-size: var(--font-size-xs); color: var(--text-muted); }
-  .oa-target { border-top: 1px solid var(--border-subtle); padding: 0 16px 8px; }
-  .oa-where { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; align-items: end; }
+  .oa-ops { list-style: none; margin: 0; padding: 2px 0 8px 22px; display: flex; flex-direction: column; gap: 3px; }
+  .oa-ops li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .oa-method { font: 600 10px var(--font-mono); width: 28px; flex: none; }
+  .oa-opname { display: flex; flex-direction: column; min-width: 0; }
+  .oa-path { font-family: var(--font-mono); font-size: var(--font-size-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .oa-muted { font-size: var(--font-size-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .oa-target { border-top: 1px solid var(--border-subtle); padding: 0 12px 8px; }
 </style>

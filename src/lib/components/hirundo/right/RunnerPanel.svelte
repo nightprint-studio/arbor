@@ -32,7 +32,14 @@
 
 <div class="rp">
   {#if !hirundoStore.project || targets.length === 0}
-    <EmptyState message="Nothing to run" description="Create a collection with a few requests first." />
+    <div class="rp-empty">
+      <EmptyState message={hirundoStore.project ? 'Nothing to run' : 'No project open'} description={hirundoStore.project ? 'Create a collection with a few requests first.' : 'The runner sends every request of a collection of the open project.'} />
+      {#if hirundoStore.project}
+        <Button variant="primary" onclick={hirundoCommands.newCollection}>New collection…</Button>
+      {:else}
+        <Button variant="primary" onclick={hirundoCommands.openProject}>Open project…</Button>
+      {/if}
+    </div>
   {:else}
     <div class="rp-top">
       <div class="rp-select"><Select value={chosen} options={targets} size="sm" onchange={(v) => (target = v)} /></div>
@@ -52,7 +59,7 @@
     {#if hirundoRunner.running}<div class="rp-bar"><ProgressBar value={hirundoRunner.total ? (hirundoRunner.rows.length / hirundoRunner.total) * 100 : 0} /></div>{/if}
 
     {#if hirundoRunner.rows.length === 0 && !hirundoRunner.running}
-      <EmptyState message="No run yet" description="Pick a collection or folder and press Run. Results stay in the History tab." compact />
+      <div class="rp-empty"><EmptyState message="No run yet" description="Pick a collection or folder and press Run. Results stay in the History tab." compact /></div>
     {:else}
       <ul class="rp-rows">
         {#each hirundoRunner.rows as r (r.path)}
@@ -72,6 +79,7 @@
 
 <style>
   .rp { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+  .rp-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; }
   .rp-top { display: flex; gap: 8px; padding: 8px 12px; align-items: center; flex-wrap: wrap; }
   .rp-select { flex: 1; min-width: 160px; }
   .rp-spacer { flex: 1; }

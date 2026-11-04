@@ -53,6 +53,8 @@ pub mod class_ref;
 // `@ConfigurationProperties` → the full key each bound field binds (nesting, maps, lists, renames).
 pub mod config_props;
 pub mod endpoints;
+// `produces` / `consumes` as media-type values: MediaType constants, arrays, concatenations.
+pub mod media_types;
 // The endpoints checked against each other, and against their own signatures.
 pub mod endpoint_check;
 // A configuration key → the environment variable that overrides it.

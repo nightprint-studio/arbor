@@ -6,7 +6,7 @@
    * The environment sits at the right end: it is a fact about the whole window (every request goes to it),
    * and the type of the environment colours its selector.
    */
-  import { BookOpen, Command, FolderOpen, Layers } from 'lucide-svelte';
+  import { BookOpen, Command, FolderOpen, FolderPlus, Layers } from 'lucide-svelte';
   import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
@@ -17,6 +17,8 @@
   import { windowMenuItems } from '$lib/utils/window-menu';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { hirundoUiStore } from '$lib/stores/hirundo/ui.svelte';
+  import SplitButton from '$lib/components/shared/ui/SplitButton.svelte';
+  import { hirundoCommands } from '../hirundo-commands';
   import EnvSelector from '../editor/EnvSelector.svelte';
   import { hirundoStore } from '$lib/stores/hirundo/workspace.svelte';
   import HirundoWorkspaceSwitcher from './HirundoWorkspaceSwitcher.svelte';
@@ -24,6 +26,8 @@
   const publishNativeMenu = createNativeMenuPublisher('Hirundo');
 
   const hamburgerMenu = $derived<DropdownItem[]>([
+    { kind: 'item', id: 'new-project', label: 'New project…', icon: FolderPlus, shortcut: 'Ctrl+Shift+P', onclick: () => hirundoUiStore.open({ kind: 'new-project' }) },
+    { kind: 'item', id: 'open-folder', label: 'Open folder…', icon: FolderOpen, onclick: () => hirundoUiStore.open({ kind: 'open-folder' }) },
     { kind: 'item', id: 'open-project', label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+Shift+O', onclick: () => hirundoUiStore.open({ kind: 'project-picker' }) },
     { kind: 'item', id: 'workspaces', label: 'Manage workspaces…', icon: Layers, onclick: () => hirundoUiStore.open({ kind: 'workspaces' }) },
     ...windowMenuItems(),
@@ -51,6 +55,20 @@
 
   {#snippet trailing()}
     <div class="htb-actions">
+      {#if hirundoStore.active}
+        <SplitButton
+          label="Save"
+          size="sm"
+          variant={hirundoStore.dirty(hirundoStore.active) ? 'primary' : 'secondary'}
+          direction="down"
+          position="fixed"
+          width="190px"
+          tooltip={{ content: 'Save the request', shortcut: 'Ctrl+S' }}
+          options={[{ id: 'save-as', label: 'Save as…', shortcut: 'Ctrl+Shift+S' }]}
+          onclick={hirundoCommands.save}
+          onselect={(id) => { if (id === 'save-as') hirundoCommands.saveAs(); }}
+        />
+      {/if}
       {#if hirundoStore.project}<span class="htb-env"><EnvSelector /></span>{/if}
       <IconButton tooltip="Documentation" shortcut="F1" size={28} onclick={() => hirundoUiStore.toggleDocs()}><BookOpen size={16} /></IconButton>
       <IconButton tooltip="Command palette" shortcut="Ctrl+K" size={28} onclick={() => hirundoUiStore.togglePalette()}><Command size={16} /></IconButton>

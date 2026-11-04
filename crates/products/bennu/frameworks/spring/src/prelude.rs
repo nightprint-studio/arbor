@@ -40,6 +40,7 @@ pub use crate::beans::{
 
 // Request mappings.
 pub use crate::endpoints::endpoints;
+pub use crate::media_types::{known_constant as media_type_constant, resolve as resolve_media_types, resolve_known as resolve_known_media_types, resolve_with_sources as resolve_media_types_with_sources, constant_initializer as media_type_constant_initializer};
 
 // Annotation-origin resolution — whether a `@Service` is Spring's or the project's own.
 pub use crate::known::{find as find_annotation, has as has_annotation, is as is_annotation, is_any as is_any_annotation};

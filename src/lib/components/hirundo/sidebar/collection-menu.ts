@@ -3,7 +3,7 @@
  * reaches the same ones. What a row can do depends on what it is — a collection and a folder hold things,
  * a request is sent.
  */
-import { Upload, Copy, FilePlus2, FolderPlus, Pencil, Play, Settings2, Terminal, Trash2, FileText } from 'lucide-svelte';
+import { Link, Upload, Copy, FilePlus2, FolderPlus, Pencil, Play, Settings2, Terminal, Trash2, FileText } from 'lucide-svelte';
 import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
 import { hirundoStore } from '$lib/stores/hirundo/workspace.svelte';
 import { hirundoUiStore } from '$lib/stores/hirundo/ui.svelte';
@@ -18,6 +18,7 @@ export function menuFor(row: TreeRow): MenuItem[] {
       { id: 'rename', label: 'Rename…', icon: Pencil, shortcut: 'F2' },
       { id: 'sep1', label: '', separator: true },
       { id: 'copy-curl', label: 'Copy as cURL', icon: Terminal },
+      { id: 'copy-path', label: 'Copy Path', icon: Link },
       { id: 'sep2', label: '', separator: true },
       { id: 'delete', label: 'Delete', icon: Trash2, danger: true, shortcut: 'Del' },
     ];
@@ -30,6 +31,7 @@ export function menuFor(row: TreeRow): MenuItem[] {
     { id: 'settings', label: row.kind === 'collection' ? 'Collection settings — auth, headers, variables…' : 'Folder settings — auth, headers, variables…', icon: Settings2 },
     { id: 'rename', label: 'Rename…', icon: Pencil, shortcut: 'F2' },
     { id: 'export-http', label: 'Export as a .http file…', icon: Upload },
+    { id: 'copy-path', label: 'Copy Path', icon: Link },
     { id: 'sep2', label: '', separator: true },
     { id: 'delete', label: 'Delete', icon: Trash2, danger: true, shortcut: 'Del' },
   ];
@@ -48,6 +50,7 @@ export function perform(id: string, row: TreeRow): boolean {
     }
     case 'rename': hirundoUiStore.open({ kind: 'rename', path: row.id, name: row.name }); return true;
     case 'copy-curl': void hirundoCommands.copyCurlOfPath(row.id); return true;
+    case 'copy-path': hirundoCommands.copyNodePath(row.id); return true;
     case 'delete': hirundoUiStore.open({ kind: 'delete', path: row.id, name: row.name }); return true;
     case 'new-request': hirundoStore.newRequest(row.id); return true;
     case 'new-folder': hirundoUiStore.open({ kind: 'new-folder', parent: row.id }); return true;

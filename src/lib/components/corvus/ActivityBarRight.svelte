@@ -21,6 +21,9 @@
   import type { PluginSidebarSection } from '$lib/types/plugin';
   import { enabledSidebarSections, sidebarKey } from '$lib/contributions/sidebar';
   import PluginIcon from '../plugins/PluginIcon.svelte';
+  import { Sparkles } from 'lucide-svelte';
+  import { imberStore } from '$lib/stores/corvus/imber.svelte';
+  import { shortcutFor } from '$lib/utils/shortcut';
   import ActivityBar from '$lib/components/shared/ui/ActivityBar.svelte';
   // Right-side activity bar: tooltips fly out to the left away from the bar.
   import { tooltipLeft as tooltip } from '$lib/actions/tooltip';
@@ -57,13 +60,24 @@
       .filter((s): s is PluginSidebarSection => !!s);
   }
 
-  const topSections    = $derived(resolveOrdered('top'));
+  /** The top rail in the layout's order: Imber (built in) among the plugins' buttons. Imber is added to a
+   *  layout saved before it existed by the merger, so it is there for everyone unless they hide it. */
+  type TopEntry = { imber: true } | { imber: false; s: PluginSidebarSection };
+  const topEntries = $derived.by<TopEntry[]>(() => {
+    const bySide = rightSections.filter(s => s.position === 'top');
+    const byKey = new Map(bySide.map(s => [sidebarKey(s), s] as const));
+    return activityBarConfigStore.mergeRightTop(bySide.map(sidebarKey)).filter(i => i.visible).flatMap((i): TopEntry[] => {
+      if (i.id === 'imber') return [{ imber: true }];
+      const s = byKey.get(i.id);
+      return s ? [{ imber: false, s }] : [];
+    });
+  });
   const bottomSections = $derived(resolveOrdered('bottom'));
 
   /** The 38px rail itself should disappear when the user has hidden every
    *  plugin entry — mirrors the "no icons = no rail" rule applied for the
    *  zero-plugins case. */
-  const hasVisibleEntries = $derived(topSections.length + bottomSections.length > 0);
+  const hasVisibleEntries = $derived(topEntries.length + bottomSections.length > 0);
 
   function onClickTop(s: PluginSidebarSection) {
     uiStore.toggleRightSidebar(sidebarKey(s));
@@ -76,17 +90,31 @@
 {#if hasVisibleEntries}
   <ActivityBar side="right" ariaLabel="Right Activity Bar">
     {#snippet top()}
-      {#each topSections as s (s.plugin_name + ':' + s.id)}
-        {@const key = `plugin:${s.plugin_name}:${s.id}`}
-        <button
-          class="ab-btn"
-          class:ab-active={uiStore.activeRightSidebar === key}
-          use:tooltip={s.tooltip ?? s.label}
-          aria-pressed={uiStore.activeRightSidebar === key}
-          onclick={() => onClickTop(s)}
-        >
-          <PluginIcon name={s.icon} size={18} />
-        </button>
+      {#each topEntries as entry (entry.imber ? 'imber' : entry.s.plugin_name + ':' + entry.s.id)}
+        {#if entry.imber}
+          <button
+            class="ab-btn"
+            class:ab-active={imberStore.open}
+            use:tooltip={{ content: 'Imber (assistant)', shortcut: shortcutFor('imber_toggle') ?? undefined }}
+            aria-pressed={imberStore.open}
+            aria-label="Imber (assistant)"
+            onclick={() => imberStore.toggle()}
+          >
+            <Sparkles size={18} />
+          </button>
+        {:else}
+          {@const s = entry.s}
+          {@const key = `plugin:${s.plugin_name}:${s.id}`}
+          <button
+            class="ab-btn"
+            class:ab-active={uiStore.activeRightSidebar === key}
+            use:tooltip={s.tooltip ?? s.label}
+            aria-pressed={uiStore.activeRightSidebar === key}
+            onclick={() => onClickTop(s)}
+          >
+            <PluginIcon name={s.icon} size={18} />
+          </button>
+        {/if}
       {/each}
     {/snippet}
 

@@ -33,6 +33,9 @@
   );
 </script>
 
+<!-- The strip fills its parent (`height: 100%`), so the parent has to have a height: the shared
+     token, the same box Corvus and Bennu wrap their tabs in. -->
+<div class="gnt">
 <Tabs
   {items}
   value={activePath}
@@ -56,8 +59,19 @@
     {/if}
   {/snippet}
 </Tabs>
+</div>
 
 <style>
+  .gnt {
+    display: flex;
+    align-items: stretch;
+    flex: none;
+    height: var(--tab-strip-height);
+    background: var(--bg-base);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .gnt :global(.tabs) { flex: 1; min-width: 0; }
+
   .gnt-dot {
     width: 6px;
     height: 6px;

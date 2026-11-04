@@ -29,6 +29,8 @@ const MAX_RECENTS: usize = 40;
 
 /// Parked "open this project" requests, keyed by product id. Consumed once.
 static OPEN_INTENT: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+/// What goes with a parked request — the file, commit or branch to land on — keyed like [`OPEN_INTENT`].
+static OPEN_CONTEXT: Mutex<Option<HashMap<String, serde_json::Value>>> = Mutex::new(None);
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -147,12 +149,21 @@ pub const OPEN_INTENT_EVENT: &str = "arbor://open-intent";
 struct OpenIntent<'a> {
     product: &'a str,
     path: &'a str,
+    /// Optional extra: where in the project to land (`{ file, commit, branch }`).
+    context: Option<&'a serde_json::Value>,
 }
 
 /// Park "open this project" for `product`, to be pulled by its shell on mount.
 /// Overwrites any pending request for the same product — the latest click wins.
 #[tauri::command]
-pub fn set_open_intent(app: tauri::AppHandle, product: String, path: String) {
+pub fn set_open_intent(app: tauri::AppHandle, product: String, path: String, context: Option<serde_json::Value>) {
+    if let Ok(mut g) = OPEN_CONTEXT.lock() {
+        let map = g.get_or_insert_with(HashMap::new);
+        match &context {
+            Some(c) => { map.insert(product.clone(), c.clone()); }
+            None => { map.remove(&product); }
+        }
+    }
     if let Ok(mut g) = OPEN_INTENT.lock() {
         g.get_or_insert_with(HashMap::new)
             .insert(product.clone(), path.clone());
@@ -162,7 +173,7 @@ pub fn set_open_intent(app: tauri::AppHandle, product: String, path: String) {
     use tauri::Emitter;
     let _ = app.emit(
         OPEN_INTENT_EVENT,
-        OpenIntent { product: &product, path: &path },
+        OpenIntent { product: &product, path: &path, context: context.as_ref() },
     );
 }
 
@@ -172,6 +183,15 @@ pub fn set_open_intent(app: tauri::AppHandle, product: String, path: String) {
 #[tauri::command]
 pub fn take_open_intent(product: String) -> Option<String> {
     OPEN_INTENT
+        .lock()
+        .ok()
+        .and_then(|mut g| g.as_mut().and_then(|m| m.remove(&product)))
+}
+
+/// Pull the context parked with the project path for `product` (consumed once, like the path).
+#[tauri::command]
+pub fn take_open_context(product: String) -> Option<serde_json::Value> {
+    OPEN_CONTEXT
         .lock()
         .ok()
         .and_then(|mut g| g.as_mut().and_then(|m| m.remove(&product)))

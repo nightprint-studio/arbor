@@ -91,7 +91,7 @@
       </div>
       <div class="mm-body">
         {#if tab === 'auth'}
-          <AuthEditor auth={meta.auth} allowInherit={!isCollection} inheritedLabel="the collection's auth" onchange={(a) => (meta!.auth = a)} />
+          <AuthEditor auth={meta.auth} soap allowInherit={!isCollection} inheritedLabel="the collection's auth" onchange={(a) => (meta!.auth = a)} />
         {:else if tab === 'headers'}
           <div class="mm-note"><Alert variant="info" compact text="Sent with every request under here. A request's own header of the same name wins." /></div>
           <KeyValueEditor rows={meta.headers} keyPlaceholder="Header" onchange={(rows) => (meta!.headers = rows)} />

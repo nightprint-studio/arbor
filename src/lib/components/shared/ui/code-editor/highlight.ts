@@ -313,23 +313,37 @@ export function makeU16ToByte(src: string): (u16: number) => number {
   }
   if (ascii) return (u) => (u < 0 ? 0 : u > src.length ? src.length : u);
 
-  const u16Pos: number[] = [0];
-  const bytePos: number[] = [0];
-  let byte = 0;
-  for (let i = 0; i < src.length; ) {
-    const cp = src.codePointAt(i)!;
-    const u16len = cp > 0xffff ? 2 : 1;
-    const blen = cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
-    byte += blen;
-    i += u16len;
-    u16Pos.push(i);
-    bytePos.push(byte);
-  }
-  const total = byte;
+  // Non-ASCII source (a legacy Cp1252 tree is full of it). The lookup tables cost two arrays the size of
+  // the file, and a completion or a ghost-text request asks for ONE offset per keystroke — so the first few
+  // answers are a scan of the prefix, and the tables are built only for a caller that keeps asking (a
+  // diagnostics pass converting hundreds of spans).
+  let tables: { u16Pos: number[]; bytePos: number[]; total: number } | null = null;
+  let scans = 0;
+  const buildTables = () => {
+    const u16Pos: number[] = [0];
+    const bytePos: number[] = [0];
+    let byte = 0;
+    for (let i = 0; i < src.length; ) {
+      const cp = src.codePointAt(i)!;
+      const u16len = cp > 0xffff ? 2 : 1;
+      const blen = cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
+      byte += blen;
+      i += u16len;
+      u16Pos.push(i);
+      bytePos.push(byte);
+    }
+    return { u16Pos, bytePos, total: byte };
+  };
   return (u) => {
     if (u <= 0) return 0;
-    if (u >= src.length) return total;
+    if (!tables && scans < 3) {
+      scans++;
+      return utf8BytesBefore(src, u);
+    }
+    tables ??= buildTables();
+    if (u >= src.length) return tables.total;
     // Largest index whose UTF-16 position is ≤ u.
+    const { u16Pos, bytePos } = tables;
     let lo = 0, hi = u16Pos.length - 1;
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1;
@@ -337,4 +351,28 @@ export function makeU16ToByte(src: string): (u16: number) => number {
     }
     return bytePos[lo];
   };
+}
+
+/** UTF-8 byte length of `src` up to UTF-16 offset `u` — the same answer as the lookup tables of
+ *  {@link makeU16ToByte}, for one offset, without building them. An offset inside a surrogate pair
+ *  rounds down to the pair's start, as the tables do. */
+function utf8BytesBefore(src: string, u: number): number {
+  const end = u >= src.length ? src.length : u;
+  let byte = 0;
+  for (let i = 0; i < end; i++) {
+    const c = src.charCodeAt(i);
+    if (c < 0x80) byte += 1;
+    else if (c < 0x800) byte += 2;
+    else if (c >= 0xd800 && c <= 0xdbff) {
+      const next = i + 1 < src.length ? src.charCodeAt(i + 1) : 0;
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        if (i + 1 >= end) break; // the offset falls between the halves
+        byte += 4;
+        i++;
+      } else {
+        byte += 3; // a lone surrogate: counted as one code point of three bytes, as codePointAt does
+      }
+    } else byte += 3;
+  }
+  return byte;
 }

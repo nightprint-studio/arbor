@@ -14,6 +14,7 @@
   import { cookieDelete, cookiesClear, cookiesList } from '$lib/ipc/hirundo';
   import { hirundoStore } from '$lib/stores/hirundo/workspace.svelte';
   import type { Cookie } from '$lib/types/hirundo';
+  import { hirundoCommands } from '../hirundo-commands';
 
   let cookies = $state<Cookie[]>([]);
   /** The cookie being edited; `'new'` for a blank one. */
@@ -47,7 +48,7 @@
 
 <div class="cp">
   {#if !hirundoStore.project}
-    <EmptyState message="No project open" />
+    <div class="cp-empty"><EmptyState message="No project open" description="The cookie jar belongs to an environment of a project." compact /><Button variant="primary" onclick={hirundoCommands.openProject}>Open project…</Button></div>
   {:else}
     <div class="cp-top">
       <span class="cp-env">Jar of <b>{hirundoStore.activeEnv?.name ?? 'no environment'}</b></span>
@@ -56,7 +57,10 @@
       <Button size="sm" variant="outline" disabled={cookies.length === 0} onclick={() => void clear()}>Clear all</Button>
     </div>
     {#if cookies.length === 0}
-      <EmptyState message="The jar is empty" description="Cookies an answer sets are kept here and sent back to the same site." compact />
+      <div class="cp-empty">
+        <EmptyState message="The jar is empty" description="Cookies an answer sets are kept here and sent back to the same site." compact />
+        <Button variant="outline" onclick={() => (editing = 'new')}>Add a cookie…</Button>
+      </div>
     {:else}
       <div class="cp-list">
         <RowList items={cookies} key={key}>
@@ -82,6 +86,7 @@
 
 <style>
   .cp { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .cp-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; }
   .cp-top { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
   .cp-spacer { flex: 1; }
   .cp-env { font-size: var(--font-size-xs); color: var(--text-secondary); }

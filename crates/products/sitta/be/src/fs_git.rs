@@ -13,8 +13,8 @@
 //! the repo's recovery journal, so Corvus's Recovery tab sees it regardless.
 //!
 //! The workdir lookup for "Open in Arbor" lives in corvus-be (`git_repo_root_by_path`), so the
-//! shell's `fs_open_in_arbor` stays pure window-glue (focus the main window + emit
-//! `arbor://explorer-open-repo`) with no git. No hooks fire here.
+//! frontend's `fsOpenInArbor` hands the root to the mode-aware "go to Corvus" door
+//! (`openProjectIn`) with no git of its own. No hooks fire here.
 
 use corvus_git::explorer;
 use corvus_git::prelude::{FsBranch, FsGitStatus, GitChanges, GitCli, SnapshotPolicy};

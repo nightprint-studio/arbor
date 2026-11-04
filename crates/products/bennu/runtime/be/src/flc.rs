@@ -1112,13 +1112,20 @@ fn suggest_from_layers(args: FlcArgs) -> Result<Option<FlcReply>, String> {
         prepare_logs(&root);
     }
     if !chain_start {
+        // every layer from here to the closing brace — the argument, habit and lambda layers (each types the call under
+        // the caret) — reported as one so the gap to the model's own time shows what they cost together
+        let _layers = crate::perf::phase("ghost", "argument/habit/log layers");
         // the type this project always creates under the name being declared (`val bao = new B|`)
         if let Some(c) = crate::flc_created::suggest(line_prefix) {
             if !(settings.check && crate::flc_check::invents(&args.file, &source, args.offset, &c.text)) {
                 return Ok(Some(FlcReply { text: c.text, confidence: c.confidence, origin: "habit".into() }));
             }
         }
+        // Re-counts the WHOLE edited buffer into the line index and the log profile on every request (the hash
+        // changes with each keystroke), under the global log-state lock — timed to see what that costs.
+        let counted = crate::perf::phase("ghost", "count_file (re-index edited buffer)");
         count_file(&args.file, &source);
+        drop(counted);
         let st = log_state().lock().unwrap_or_else(|p| p.into_inner());
         if settings.logs {
             let ctx = context_at(&source, args.offset);
@@ -1188,6 +1195,7 @@ fn suggest_from_layers(args: FlcArgs) -> Result<Option<FlcReply>, String> {
     if copied.as_ref().is_some_and(|g| g.confidence >= crate::flc_ngram::STRONG_SHARE) {
         return Ok(copied.map(reply));
     }
+    let _model = crate::perf::phase("ghost", "ngram+model");
     Ok(model_suggestion(&settings, &args, &source, line_prefix, line_end).or_else(|| copied.map(reply)))
 }
 

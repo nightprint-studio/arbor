@@ -17,8 +17,11 @@
 <div class="rp">
   {#if !hirundoStore.project}
     <div class="rp-start">
-      <EmptyState message="Open a project" description="Hirundo keeps its collections in a .hirundo folder inside the project, next to the code." />
-      <Button variant="primary" onclick={c.openProject}>Open project…</Button>
+      <EmptyState message="No project yet" description="A project is a folder with a .hirundo folder inside it, next to the code: your collections, environments and tests, as readable files you can commit." />
+      <div class="rp-cta">
+        <Button variant="primary" tooltip={{ content: 'Choose a folder', shortcut: 'Ctrl+Shift+O' }} onclick={c.openProject}>Open folder…</Button>
+        <Button variant="outline" tooltip={{ content: 'Choose where it lives and name it', shortcut: 'Ctrl+Shift+P' }} onclick={c.newProject}>New project…</Button>
+      </div>
       {#if hirundoStore.recents.length}
         <div class="rp-recents">
           {#each hirundoStore.recents.slice(0, 6) as path (path)}

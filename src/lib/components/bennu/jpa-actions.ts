@@ -94,6 +94,7 @@ const TABLE: JpaActionSpec[] = [
   spec({ id: 'jpa.query.page', title: 'Create paged query', form: 'query', kind: 'query-method', target: 'repository', returns: 'page' }),
   spec({ id: 'jpa.query.count', title: 'Create count method', form: 'query', kind: 'query-method', target: 'repository', subject: 'count' }),
   spec({ id: 'jpa.query.exists', title: 'Create exists method', form: 'query', kind: 'query-method', target: 'repository', subject: 'exists' }),
+  spec({ id: 'jpa.query.delete', title: 'Create derived delete method', form: 'query', kind: 'query-method', target: 'repository', subject: 'delete' }),
 
   // On a repository — write.
   spec({ id: 'jpa.modify.update', title: 'Create update method', form: 'modify', kind: 'modify-method', target: 'repository' }),

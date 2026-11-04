@@ -25,6 +25,7 @@ import {
 } from 'lucide-svelte';
 
 import type { IconComponent } from '$lib/types/icon';
+import { MARKDOWN_ACTIONS } from '$lib/utils/markdown-format';
 import type { SidebarSection } from '$lib/stores/garrulus/ui.svelte';
 
 
@@ -36,6 +37,13 @@ import type { SidebarSection } from '$lib/stores/garrulus/ui.svelte';
  * and fields" in the palette is two names for one thing, and whichever the user
  * learned is the one that will not be there next time.
  */
+/** Palette icon for each formatting action (names from `plugin-icons`). */
+const FORMAT_ICON: Record<string, string> = {
+  bold: 'Bold', italic: 'Italic', strike: 'Strikethrough', highlight: 'Highlighter', code: 'Code',
+  h1: 'Heading1', h2: 'Heading2', h3: 'Heading3', quote: 'Quote', bullet: 'List',
+  numbered: 'ListOrdered', task: 'ListChecks', link: 'Link', codeblock: 'Braces', table: 'Table2',
+};
+
 export interface GarrulusSection {
   id: SidebarSection;
   label: string;
@@ -125,6 +133,8 @@ export interface GarrulusPaletteActions {
   intentions?: () => void;
   /** The unnamed, unfiled capture buffer. */
   inboxScratch?: () => void;
+  /** Run a formatting action (`MARKDOWN_ACTIONS` id) on the open note. */
+  formatNote?: (actionId: string) => void;
   exportNote?: (format: 'html' | 'pdf') => void;
 
   // Finding things
@@ -286,6 +296,16 @@ export function buildGarrulusPalette(
       action: () => a.run(() => a.deleteNote?.()),
     },
     { id: 'export-html', title: 'Export this note as HTML…', subtitle: 'One self-contained file — styling and images travel with it', icon: 'FileText', shortcut: 'Alt+Shift+E', when: !!note && !!a.exportNote, action: () => a.run(() => a.exportNote?.('html')) },
+    // Formatting: the same table the toolbar and the Alt chords draw from, so a verb and its
+    // button are one action. Toggles, so the title does not say add or remove.
+    ...MARKDOWN_ACTIONS.map((f): Raw => ({
+      id: `format:${f.id}`,
+      title: `Format: ${f.label.split(' — ')[0]}`,
+      icon: FORMAT_ICON[f.id] ?? 'FileText',
+      shortcut: f.shortcut,
+      when: !!note && !!a.formatNote,
+      action: () => a.run(() => a.formatNote?.(f.id)),
+    })),
     { id: 'export-pdf', title: 'Export this note as PDF…', icon: 'FileText', when: !!note && !!a.exportNote, action: () => a.run(() => a.exportNote?.('pdf')) },
   ];
 

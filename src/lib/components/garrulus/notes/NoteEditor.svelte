@@ -18,7 +18,7 @@
    */
   import type { EditorView } from '@codemirror/view';
   import MarkdownEditor from '$lib/components/shared/ui/MarkdownEditor.svelte';
-  import { markdownFormatKeymap } from '$lib/utils/markdown-format';
+  import { markdownFormatKeymap, type FormatState } from '$lib/utils/markdown-format';
   import { vaultMarkdown } from '$lib/utils/markdown-vault';
   import { garrulusNotesStore } from '$lib/stores/garrulus/notes.svelte';
   import { createVaultLinkProvider, refreshVaultTags } from './vault-link-provider';
@@ -42,9 +42,11 @@
     onChange: (notePath: string, text: string) => void;
     /** The caret left the editor. The store decides whether that is a save. */
     onBlur?: (notePath: string) => void;
+    /** What the caret is in, for the formatting toolbar's pressed buttons. */
+    onFormatState?: (state: FormatState) => void;
   }
 
-  let { notePath, revision, text, docPath, readOnly = false, onChange, onBlur }: Props = $props();
+  let { notePath, revision, text, docPath, readOnly = false, onChange, onBlur, onFormatState }: Props = $props();
 
   let editor = $state<{ focus: () => void; exec: (c: (v: EditorView) => boolean) => boolean } | null>(
     null,
@@ -89,6 +91,7 @@
   {docPath}
   {readOnly}
   {extensions}
+  {onFormatState}
   completionSources={vault.completionSources}
   onChange={(t, key) => onChange(noteOf(key), t)}
   onBlur={(key) => onBlur?.(noteOf(key))}

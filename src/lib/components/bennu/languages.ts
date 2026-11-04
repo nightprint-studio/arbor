@@ -100,7 +100,9 @@ import { MARKDOWN_FENCE_LANGUAGES } from './markdown-fences';
 import { isDockerfile } from '$lib/utils/file-names';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 import { bennuRegexStore } from '$lib/stores/bennu/regex.svelte';
+import { bennuCommentMarkersStore } from '$lib/stores/bennu/comment-markers.svelte';
 import { withInnerLanguages } from './inner-lang/plugin';
+import { withCommentMarkers } from './comment-markers/plugin';
 import { httpParser } from './http/http-lang';
 import { httpCompletion } from './http/http-completion';
 
@@ -453,7 +455,12 @@ const httpLang: LanguageDescriptor = { ...streamLang('http', httpParser), intel:
 export function languageForPath(path: string | null): LanguageDescriptor {
   // Java, JS/TS and Rust files also colour the languages their string literals hold (a regex, a
   // `// language=lua` snippet…). Reads the detection setting, so it is a `$derived` dependency too.
-  return withInnerLanguages(baseLanguageForPath(path), path, bennuRegexStore.detection);
+  const inner = withInnerLanguages(baseLanguageForPath(path), path, bennuRegexStore.detection);
+  // And the TODO / FIXME… written in its comments. Reads the marker settings, so it is a dependency too.
+  const m = bennuCommentMarkersStore;
+  return withCommentMarkers(inner, path, m.enabled, {
+    keywords: m.keywords, caseSensitive: m.caseSensitive, gutter: m.gutter,
+  });
 }
 
 function baseLanguageForPath(path: string | null): LanguageDescriptor {

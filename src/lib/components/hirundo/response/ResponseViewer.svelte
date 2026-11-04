@@ -11,10 +11,14 @@
   import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import { languageForPath } from '$lib/components/bennu/languages';
   import { tooltip } from '$lib/actions/tooltip';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import { fsWriteBytes } from '$lib/ipc/fs';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { soapInspect } from '$lib/ipc/hirundo';
   import { hirundoUiStore } from '$lib/stores/hirundo/ui.svelte';
   import type { RequestTab } from '$lib/stores/hirundo/workspace.svelte';
@@ -24,10 +28,12 @@
   let { tab }: { tab: RequestTab } = $props();
 
   let view = $state('pretty');
+  let saving = $state(false);
 
   const response = $derived(tab.response);
   const contentType = $derived(response?.headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? '');
   const isImage = $derived(!!response?.body_base64 && contentType.startsWith('image/'));
+  const isHtml = $derived(!!response && !response.body_base64 && contentType.toLowerCase().includes('html'));
   const isXml = $derived(!!response && !response.body_base64 && (contentType.includes('xml') || response.body.trimStart().startsWith('<')));
 
   // XML answers (SOAP above all) are read by the backend: the fault, and an indented copy.
@@ -52,9 +58,29 @@
   );
   const rawLanguage = languageForPath('r.txt');
 
+  /** A file name for "Save as…": the last path segment of the final URL, else a generic one with the type's extension. */
+  const suggestedName = $derived.by(() => {
+    const last = (response?.final_url ?? '').split('?')[0].split('/').filter(Boolean).pop() ?? '';
+    if (last.includes('.')) return last;
+    const ext = contentType.split(';')[0].split('/').pop()?.split('+')[0] ?? 'bin';
+    return `response.${ext}`;
+  });
+
+  async function saveBody(file: string) {
+    saving = false;
+    if (!response?.body_base64) return;
+    try {
+      const bin = atob(response.body_base64);
+      const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+      await fsWriteBytes(file, bytes);
+      toastStore.show(`Saved to ${file}.`, 'success');
+    } catch (e) { toastStore.show(String(e), 'error'); }
+  }
+
   const tabs = $derived<TabItem[]>([
     { id: 'pretty', label: 'Pretty' },
     { id: 'raw', label: 'Raw' },
+    ...(isHtml ? [{ id: 'preview', label: 'Preview' }] : []),
     { id: 'headers', label: 'Headers', badge: response?.headers.length },
     ...(tab.report ? [{ id: 'tests', label: 'Tests', badge: `${tab.report.checks.filter((c) => c.passed).length}/${tab.report.checks.length}`, tone: 'default' as const }] : []),
   ]);
@@ -74,7 +100,14 @@
   {:else if tab.error}
     <div class="rv-pad"><Alert variant="error" title="The request failed" text={tab.error} /></div>
   {:else if !response}
-    <EmptyState message="No response yet" description="Send the request with Ctrl+Enter." />
+    <div class="rv-center">
+      <EmptyState message="No response yet" description="Send the request to see the answer here — its status, time and size, the body formatted, the headers and the result of your tests." />
+      <div class="rv-keys">
+        <span><Kbd label="Ctrl+Enter" variant="inline" /> send</span>
+        <span><Kbd label="Ctrl+Shift+V" variant="inline" /> resolved variables</span>
+        <span><Kbd label="Ctrl+Shift+U" variant="inline" /> cURL</span>
+      </div>
+    </div>
   {:else}
     <div class="rv-bar">
       <div class="rv-tabs"><Tabs items={tabs} value={view} variant="underline" size="sm" ariaLabel="Response views" onSelect={(id) => (view = id)} /></div>
@@ -113,7 +146,13 @@
       {:else if isImage}
         <div class="rv-image"><img alt="Response" src={`data:${contentType};base64,${response.body_base64}`} /></div>
       {:else if response.body_base64}
-        <EmptyState message="Binary body" description={`${formatBytes(response.size_bytes)} · ${contentType || 'unknown type'}. It is not shown as text.`} />
+        <div class="rv-binary">
+          <EmptyState message="Binary body" description={`${formatBytes(response.size_bytes)} · ${contentType || 'unknown type'}. A ${contentType.split('/')[0] || 'binary'} file is not shown as text — save it to open it.`} />
+          <Button variant="primary" onclick={() => (saving = true)}>Save as…</Button>
+        </div>
+      {:else if view === 'preview' && isHtml}
+        <!-- No scripts, no forms, no same-origin: the page is only looked at. -->
+        <iframe class="rv-preview" title="Rendered response" sandbox="" srcdoc={response.body}></iframe>
       {:else}
         <CodeEditor value={view === 'raw' ? response.body : pretty} language={view === 'raw' ? rawLanguage : language} readOnly wrap lineNumbers={false} />
       {/if}
@@ -121,9 +160,15 @@
   {/if}
 </div>
 
+{#if saving}
+  <FileExplorerModal mode="save" title="Save the response body" initialFilename={suggestedName} onConfirm={(f: string) => void saveBody(f)} onCancel={() => (saving = false)} onClose={() => (saving = false)} />
+{/if}
+
 <style>
   .rv { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-  .rv-center { flex: 1; display: grid; place-items: center; }
+  .rv-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+  .rv-keys { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; font-size: var(--font-size-xs); color: var(--text-muted); }
+  .rv-keys span { display: inline-flex; align-items: center; gap: 6px; }
   .rv-pad { padding: 8px 12px 0; }
   .rv-bar { display: flex; align-items: center; gap: 12px; padding: 0 8px; border-bottom: 1px solid var(--border-subtle); }
   .rv-tabs { flex: 1; min-width: 0; }
@@ -140,6 +185,8 @@
   .rv-checks li { display: flex; align-items: center; gap: 8px; }
   .rv-checks code { font-family: var(--font-mono); }
   .rv-muted { color: var(--text-muted); }
+  .rv-binary { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; }
+  .rv-preview { flex: 1; width: 100%; border: 0; background: #fff; }
   .rv-image { padding: 12px; }
   .rv-image img { max-width: 100%; }
 </style>

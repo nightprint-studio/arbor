@@ -93,10 +93,16 @@ export const workspaceDelete = (id: string) => hirundo<HirundoConfig>('hirundo_w
 export const workspaceSwitch = (id: string) => hirundo<HirundoConfig>('hirundo_workspace_switch', { id });
 export const workspaceAddProject = (id: string, project: string) => hirundo<HirundoConfig>('hirundo_workspace_add_project', { id, project });
 export const workspaceRemoveProject = (id: string, project: string) => hirundo<HirundoConfig>('hirundo_workspace_remove_project', { id, project });
+export const workspaceMove = (id: string, gap: number) => hirundo<HirundoConfig>('hirundo_workspace_move', { id, gap });
+export const workspaceMoveProject = (fromId: string, project: string, toId: string, gap: number) =>
+  hirundo<HirundoConfig>('hirundo_workspace_move_project', { from_id: fromId, project, to_id: toId, gap });
+/** A project: a folder with its `.hirundo/` inside. `name` empty turns `location` itself into one. Returns its path. */
+export const projectCreate = (location: string, name: string) => hirundo<string>('hirundo_project_create', { location, name });
 export const detectedRootsSet = (roots: string[]) => hirundo<HirundoConfig>('hirundo_detected_roots_set', { roots });
 
 // ── Detected from code (served by Bennu) ──────────────────────────────────────────────────────────
 
+export const endpointSchema = (root: string, id: string) => bennu<EndpointSchema>('endpoint_schema', { root, id });
 export const endpointsDetected = (root: string) => bennu<DetectedEndpoint[]>('endpoints_detected', { root });
 
 // ── Schedules and the runner's history ────────────────────────────────────────────────────────────

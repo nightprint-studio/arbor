@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * AssistantWho — the line above a message that says who wrote it: an avatar, a name, an optional badge
+   * ImberWho — the line above a message that says who wrote it: an avatar, a name, an optional badge
    * (`main`, `sub-agent`) and the time. One place for it, so the assistant's own messages and the two sides of an
    * agent's thread name their author the same way.
    */

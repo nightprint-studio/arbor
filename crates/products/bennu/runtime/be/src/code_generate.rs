@@ -24,6 +24,7 @@ use bennu_templates::prelude::{class_at, insert_members, ClassModel, FieldModel}
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::endpoint_schema::SourceReader;
 use crate::index_service::IndexService;
 use crate::templates_facts::facts_for;
 use crate::templates_imports::{import_edits, TemplateEdit};
@@ -105,6 +106,7 @@ pub(crate) fn endpoint_infos(root: &str) -> Vec<(EndpointInfo, String)> {
         .endpoints
         .iter()
         .map(|e| {
+            let reader = SourceReader::new(root, &e.file);
             let info = EndpointInfo {
                 id: e.label(),
                 methods: e.methods.clone(),
@@ -112,7 +114,9 @@ pub(crate) fn endpoint_infos(root: &str) -> Vec<(EndpointInfo, String)> {
                 controller: e.class_fqcn.rsplit('.').next().unwrap_or(&e.class_fqcn).to_string(),
                 handler: e.handler.clone(),
                 return_type: e.return_type.clone(),
-                produces: e.produces.clone(),
+                // The media types as values: Spring's constants are known, the project's are read from source.
+                produces: resolve_media_types_from_source(&e.produces_raw, &reader),
+                consumes: resolve_media_types_from_source(&e.consumes_raw, &reader),
                 params: e
                     .params
                     .iter()
@@ -140,6 +144,17 @@ fn type_text(t: &TypeRef) -> String {
         out.push_str("[]");
     }
     out
+}
+
+/// `produces` / `consumes` as media types, the project's own constants read from the sources around the controller.
+fn resolve_media_types_from_source(raw: &str, reader: &SourceReader) -> String {
+    bennu_spring::prelude::resolve_media_types_with_sources(raw, &|class| reader.read(class))
+}
+
+/// The fields of the type `name` as `file` means it: whether it is an enum, its constants, and (name, type) of each field.
+pub(crate) fn member_fields(file: &str, name: &str) -> Option<(bool, Vec<String>, Vec<(String, String)>)> {
+    let shape = shape_of(file, name)?;
+    Some((shape.is_enum(), shape.constants.clone(), shape.fields.iter().map(|f| (f.name.clone(), f.type_name.clone())).collect()))
 }
 
 /// The shape of the type `name` means in `file`, through the index.

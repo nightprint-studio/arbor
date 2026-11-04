@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findFences, hasFence, inlineSpans, isInsideFence, removeFence, splitFences } from './assistant-fences';
+import { findFences, hasFence, inlineSpans, isInsideFence, removeFence, splitFences } from './imber-fences';
 
 const MSG = 'Why?\n\n```java\nint a = 1;\nint b = 2;\n```\n\nand then\n\n```\nplain\n```\n';
 

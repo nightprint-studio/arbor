@@ -31,6 +31,12 @@ export const BUILTIN_BOTTOM: BuiltinItem[] = [
   { id: 'terminal',  label: 'Terminal',       mandatory: false, section: 'bottom' },
 ];
 
+/** Built-in items of the right bar's top rail. Imber lives here by default; a saved layout that predates it
+ *  gets it appended (visible) by `mergeSection`, so nobody has to reset their layout to find it. */
+export const BUILTIN_RIGHT_TOP: BuiltinItem[] = [
+  { id: 'imber', label: 'Imber (assistant)', mandatory: false, section: 'top' },
+];
+
 /** IDs that can never be hidden. */
 export const MANDATORY_IDS = new Set(['branches', 'stage', 'detail']);
 
@@ -93,10 +99,10 @@ function createActivityBarConfigStore() {
     return mergeSection(bottomItems, BUILTIN_BOTTOM, pluginIds, 'bottom');
   }
 
-  /** Right bar: no built-ins, only plugin ids. Order and visibility persisted
+  /** Right bar: Imber, then plugin ids. Order and visibility persisted
    *  to `right_top_items` / `right_bottom_items` in the app config. */
   function mergeRightTop(pluginIds: string[]): ActivityBarDisplayItem[] {
-    return mergeSection(rightTopItems, [], pluginIds, 'top');
+    return mergeSection(rightTopItems, BUILTIN_RIGHT_TOP, pluginIds, 'top');
   }
   function mergeRightBottom(pluginIds: string[]): ActivityBarDisplayItem[] {
     return mergeSection(rightBottomItems, [], pluginIds, 'bottom');

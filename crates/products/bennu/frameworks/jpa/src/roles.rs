@@ -119,6 +119,7 @@ const QUERY_SHAPES: &[(&str, &str, &str)] = &[
     ("page", "Page", "Page<E> — a Pageable page, with the total count"),
     ("count", "Count", "long — how many match"),
     ("exists", "Exists", "boolean — whether any match"),
+    ("delete", "Delete", "deleteBy… — a derived delete of every match"),
 ];
 
 const MODIFY_SHAPES: &[(&str, &str, &str)] =
@@ -201,7 +202,7 @@ mod tests {
         assert_eq!(ids(&a), ["jpa.query", "jpa.modify", "jpa.projection"]);
         assert_eq!(
             ids(&a[0].children),
-            ["jpa.query.single", "jpa.query.list", "jpa.query.page", "jpa.query.count", "jpa.query.exists"],
+            ["jpa.query.single", "jpa.query.list", "jpa.query.page", "jpa.query.count", "jpa.query.exists", "jpa.query.delete"],
         );
         assert_eq!(ids(&a[1].children), ["jpa.modify.update", "jpa.modify.delete"]);
     }

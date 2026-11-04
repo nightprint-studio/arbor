@@ -412,6 +412,7 @@ fn endpoint_infos(api: &CxfApi) -> Vec<EndpointInfo> {
                 handler: e.name.clone(),
                 return_type: java_return(&e.returns),
                 produces: String::new(),
+                consumes: String::new(),
                 params: e
                     .params
                     .iter()

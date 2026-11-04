@@ -24,7 +24,7 @@
   {:else}
     <div class="ep-top"><Button variant="outline" size="sm" onclick={hirundoCommands.environments}>Manage…</Button></div>
     {#if groups.length === 0}
-      <EmptyState message="No environments yet" description="Create one for each place the API runs: your machine, staging, production." compact />
+      <EmptyState message="No environments yet" description="Create one for each place the API runs: your machine, staging, production. Give each a baseUrl variable (for example https://staging.example.com), and a request reaches it as {{baseUrl}}/path." compact />
     {/if}
     {#each groups as g (g.type.id)}
       <div class="ep-group">

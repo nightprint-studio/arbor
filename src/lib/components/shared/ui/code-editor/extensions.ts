@@ -28,6 +28,7 @@ import { bracketMatching, indentOnInput, foldKeymap, foldGutter, codeFolding } f
 import { lintGutter, lintKeymap } from '@codemirror/lint';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { createFindPanel } from './find-panel';
+import { caretExtension, type CaretPreferences } from './caret';
 import {
   autocompletion, completionKeymap, startCompletion, acceptCompletion,
   closeBrackets, closeBracketsKeymap, type Completion, type CompletionSource,
@@ -117,9 +118,26 @@ export function editorRuler(column: number) {
  */
 export const historyCompartment = new Compartment();
 
+/** The user event of the import an accepted completion adds elsewhere in the file. */
+export const COMPLETION_IMPORT_EVENT = 'input.complete.import';
+
+/**
+ * The undo history, taught that a completion's import belongs to the completion.
+ *
+ * The import lands a moment after the name (it is asked of the backend), above the caret, so it is
+ * neither adjacent to the insertion nor the same transaction — and two undo steps for one gesture
+ * means the first Ctrl+Z leaves an import nobody asked for. Tagged with {@link COMPLETION_IMPORT_EVENT}
+ * it joins the group of the insertion before it, when it follows within the usual grouping delay.
+ */
+export function completionAwareHistory() {
+  return history({
+    joinToEvent: (tr, isAdjacent) => isAdjacent || tr.isUserEvent(COMPLETION_IMPORT_EVENT),
+  });
+}
+
 /** The effect that empties the undo history — dispatch it with a whole-document replacement. */
 export function historyReset() {
-  return historyCompartment.reconfigure(history());
+  return historyCompartment.reconfigure(completionAwareHistory());
 }
 
 /**
@@ -164,6 +182,9 @@ export interface CodeEditorPreferences {
   /** How the completion popup behaves. Ignored by an editor whose language brings no
    *  completion source, and by a read-only one. */
   completion?: CompletionPreferences;
+  /** The caret's shape, thickness, blink and colour — see `caret.ts`. Defaults to a 2px line in the
+   *  theme's `--editor-caret`; applies to every cursor of the editor, multi-cursor ones included. */
+  caret?: CaretPreferences;
 }
 
 /** The completion-popup half of {@link CodeEditorPreferences}. */
@@ -393,6 +414,7 @@ export function createCodeEditorExtensions(
     prefs.stableGutter ? stableGutters : [],
     prefs.highlightActiveLine === false ? [] : activeLineHighlight,
     prefs.showWhitespace ? whitespaceGlyphs : [],
+    caretExtension(prefs.caret),
     prefs.wrap ? EditorView.lineWrapping : [],
     prefs.folding === false ? [] : foldingExts,
     // Folding the comments needs the folding: `foldEffect` on a state with no fold field is
@@ -419,7 +441,7 @@ export function createCodeEditorExtensions(
     // document without remounting the view, and the edits of the file that was there a moment
     // ago are still undoable — expressed as positions in a text that is gone. See
     // `historyCompartment`.
-    historyCompartment.of(history()),
+    historyCompartment.of(completionAwareHistory()),
     drawSelection(),
     // More than one cursor — Alt+click, Alt+Shift+drag, Alt+J. See `multi-cursor.ts` for what
     // stands down while there are several.

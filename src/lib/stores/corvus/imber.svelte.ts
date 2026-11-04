@@ -170,7 +170,13 @@ function createImberStore() {
       }
     },
 
-    show() { open = true; void this.loadState(); void loadActions(); },
+    show() {
+      // The panel lives beside a repository; say so rather than do nothing.
+      if (!tabsStore.activeTab) { uiStore.showToast('Open a repository to use Imber', 'warning'); return; }
+      open = true;
+      void this.loadState();
+      void loadActions();
+    },
     hide() { open = false; },
     toggle() { if (open) this.hide(); else this.show(); },
 

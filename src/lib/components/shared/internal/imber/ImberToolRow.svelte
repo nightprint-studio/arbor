@@ -5,7 +5,7 @@
    * tinted glyph and what came back at the right edge.
    */
   import { FileText, Search, ShieldCheck, Pencil, Check, Wand2, X } from 'lucide-svelte';
-  import type { ToolCall, ToolKind } from './assistant-types';
+  import type { ToolCall, ToolKind } from './imber-types';
 
   let { call }: { call: ToolCall } = $props();
 

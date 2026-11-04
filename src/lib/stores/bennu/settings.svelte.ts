@@ -25,6 +25,16 @@ import {
 } from './smart-completion';
 import { FLC_DEFAULTS, flcFromConfig, flcToConfig, type FlcSettings } from './flc-settings';
 
+import {
+  CARET_STYLES, CARET_WIDTHS, CARET_BLINKS,
+  type CaretPreferences, type CaretStyle, type CaretWidth, type CaretBlink,
+} from '$lib/components/shared/ui/code-editor/caret';
+
+/** `value` when it is one of `allowed`, else `fallback` — a hand-edited config must not break the editor. */
+function oneOf<T extends string>(allowed: readonly T[], value: string | undefined, fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
 /** How the editor turns a Tab press into whitespace. */
 export type IndentStyle = 'spaces' | 'tabs';
 
@@ -54,6 +64,11 @@ export interface BennuSettingsSnapshot {
   wordWrap: boolean;
   showWhitespace: boolean;
   highlightCurrentLine: boolean;
+  caretStyle: CaretStyle;
+  caretWidth: CaretWidth;
+  caretBlink: CaretBlink;
+  /** `auto`, `accent` or `#rrggbb`. */
+  caretColor: string;
   showLineNumbers: boolean;
   showProblemMarkers: boolean;
   /** Show the right-gutter overview strip (diagnostic marks + hover preview) in place of the
@@ -167,6 +182,10 @@ const DEFAULTS: BennuSettingsSnapshot = {
   wordWrap: false,
   showWhitespace: false,
   highlightCurrentLine: true,
+  caretStyle: 'line',
+  caretWidth: 'normal',
+  caretBlink: 'standard',
+  caretColor: 'auto',
   showLineNumbers: true,
   showProblemMarkers: false,
   minimap: true,
@@ -229,6 +248,10 @@ function createSettingsStore() {
   let wordWrap = $state(DEFAULTS.wordWrap);
   let showWhitespace = $state(DEFAULTS.showWhitespace);
   let highlightCurrentLine = $state(DEFAULTS.highlightCurrentLine);
+  let caretStyle = $state<CaretStyle>(DEFAULTS.caretStyle);
+  let caretWidth = $state<CaretWidth>(DEFAULTS.caretWidth);
+  let caretBlink = $state<CaretBlink>(DEFAULTS.caretBlink);
+  let caretColor = $state(DEFAULTS.caretColor);
   let showLineNumbers = $state(DEFAULTS.showLineNumbers);
   let showProblemMarkers = $state(DEFAULTS.showProblemMarkers);
   let minimap = $state(DEFAULTS.minimap);
@@ -308,7 +331,7 @@ function createSettingsStore() {
   function snapshot(): BennuSettingsSnapshot {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
-      highlightCurrentLine, showLineNumbers, showProblemMarkers, minimap, indentGuides, stickyScroll, inlayHints,
+      highlightCurrentLine, caretStyle, caretWidth, caretBlink, caretColor, showLineNumbers, showProblemMarkers, minimap, indentGuides, stickyScroll, inlayHints,
       usageCounts, rightMargin,
       sqlDialect, htmlScriptsAllowed, mavenAutoDownload, markdownLivePreview, historyDiffSplit, blameShowMessage, profilerHints, showChangeMarkers, dtoLabIdleMinutes, autosave,
       collapseLibraryFrames, searchDependencies,
@@ -348,6 +371,10 @@ function createSettingsStore() {
         show_line_numbers: showLineNumbers,
         show_problem_markers: showProblemMarkers,
         highlight_current_line: highlightCurrentLine,
+        caret_style: caretStyle,
+        caret_width: caretWidth,
+        caret_blink: caretBlink,
+        caret_color: caretColor,
         folding_enabled: foldingEnabled,
         fold_block_comments: foldBlockComments,
         completion_auto_popup: autoPopup,
@@ -437,6 +464,18 @@ function createSettingsStore() {
     setShowWhitespace(v: boolean) { showWhitespace = v; void persistConfigBacked(); },
     get highlightCurrentLine() { return highlightCurrentLine; },
     setHighlightCurrentLine(v: boolean) { highlightCurrentLine = v; void persistConfigBacked(); },
+    get caretStyle() { return caretStyle; },
+    setCaretStyle(v: CaretStyle) { caretStyle = v; void persistConfigBacked(); },
+    get caretWidth() { return caretWidth; },
+    setCaretWidth(v: CaretWidth) { caretWidth = v; void persistConfigBacked(); },
+    get caretBlink() { return caretBlink; },
+    setCaretBlink(v: CaretBlink) { caretBlink = v; void persistConfigBacked(); },
+    get caretColor() { return caretColor; },
+    setCaretColor(v: string) { caretColor = v; void persistConfigBacked(); },
+    /** The four caret preferences as the editor takes them. */
+    get caret(): CaretPreferences {
+      return { style: caretStyle, width: caretWidth, blink: caretBlink, color: caretColor };
+    },
     get showLineNumbers() { return showLineNumbers; },
     setShowLineNumbers(v: boolean) { showLineNumbers = v; void persistConfigBacked(); },
     get showProblemMarkers() { return showProblemMarkers; },
@@ -648,6 +687,10 @@ function createSettingsStore() {
         showLineNumbers = cfg.show_line_numbers ?? DEFAULTS.showLineNumbers;
         showProblemMarkers = cfg.show_problem_markers ?? DEFAULTS.showProblemMarkers;
         highlightCurrentLine = cfg.highlight_current_line ?? DEFAULTS.highlightCurrentLine;
+        caretStyle = oneOf(CARET_STYLES, cfg.caret_style, DEFAULTS.caretStyle);
+        caretWidth = oneOf(CARET_WIDTHS, cfg.caret_width, DEFAULTS.caretWidth);
+        caretBlink = oneOf(CARET_BLINKS, cfg.caret_blink, DEFAULTS.caretBlink);
+        caretColor = cfg.caret_color || DEFAULTS.caretColor;
         foldingEnabled = cfg.folding_enabled ?? DEFAULTS.foldingEnabled;
         foldBlockComments = cfg.fold_block_comments ?? DEFAULTS.foldBlockComments;
         autoPopup = cfg.completion_auto_popup ?? DEFAULTS.autoPopup;
@@ -727,6 +770,10 @@ function createSettingsStore() {
       wordWrap = DEFAULTS.wordWrap;
       showWhitespace = DEFAULTS.showWhitespace;
       highlightCurrentLine = DEFAULTS.highlightCurrentLine;
+      caretStyle = DEFAULTS.caretStyle;
+      caretWidth = DEFAULTS.caretWidth;
+      caretBlink = DEFAULTS.caretBlink;
+      caretColor = DEFAULTS.caretColor;
       showLineNumbers = DEFAULTS.showLineNumbers;
       showProblemMarkers = DEFAULTS.showProblemMarkers;
       minimap = DEFAULTS.minimap;

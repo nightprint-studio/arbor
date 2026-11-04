@@ -28,6 +28,8 @@ impl ToolHost {
             // A tree-wide change needs the right to write across the folder it works in.
             "replace_in_files" => out.push((str_of("path").unwrap_or_else(|| self.project().to_path_buf()), Op::Write)),
             "structural_replace" => out.push((self.project().to_path_buf(), Op::Write)),
+            // Reads source across the whole project and changes nothing.
+            "structural_search" => out.push((self.project().to_path_buf(), Op::List)),
             n if live::is_live_tool(n) => out.extend(self.live_touched(n, input)),
             n if debug::is_debug_tool(n) => out.extend(self.debug_touched(n, input)),
             // A game and a page on this machine: no file is read or written, the loopback rule is in the tool.
@@ -172,7 +174,7 @@ impl ToolHost {
             || matches!(
                 call.name.as_str(),
                 "search_text" | "find_files" | "edit_file" | "edit_files" | "replace_in_files" | "create_file" | "delete_file" | "ask_user" | "rename_symbol"
-                    | "add_parameter" | "bennu_help" | "update_plan" | "local_history" | "structural_replace" | "open_ui" | "load_skill" | "show_diagram" | "show_image"
+                    | "add_parameter" | "bennu_help" | "update_plan" | "local_history" | "structural_replace" | "structural_search" | "open_ui" | "load_skill" | "show_diagram" | "show_image"
             )
             || reads::is_read_tool(&call.name)
             || spawn::is_agent_tool(&call.name)

@@ -260,8 +260,17 @@ export function importEdit(source: string, fqn: string): Promise<ImportEdit | nu
  *  pure-AST pass only (syntax / structure — instant while typing), `true` (default) = the full
  *  resolver-backed pass; the FE runs both on staggered debounces so a big file stays responsive.
  *  Wire: `bennu_diagnostics` — `DiagnosticsArgs { file, source?, resolved? }`. */
-export function diagnostics(file: string, source?: string, resolved = true): Promise<Diagnostic[]> {
-  return bennu('bennu_diagnostics', { args: { file, source, resolved } });
+export function diagnostics(file: string, source?: string, resolved = true, live = false): Promise<Diagnostic[]> {
+  return bennu('bennu_diagnostics', { args: { file, source, resolved, live } });
+}
+
+/** The error a `live` diagnostics request fails with when a newer request for the same file replaced it
+ *  while it waited its turn (the backend skipped the work). Not a failure: the editor has moved on. */
+export const ERR_SUPERSEDED = 'bennu:superseded';
+
+/** True when `err` is the answer to a request the backend skipped because a newer one replaced it. */
+export function isSupersededError(err: unknown): boolean {
+  return String(err).includes(ERR_SUPERSEDED);
 }
 
 /** Compile the project: `mvn -q -o compile` (offline, project JDK) with a `javac`
@@ -465,8 +474,8 @@ export interface TodoScan {
 
 /** Scan the project for TODO/FIXME/XXX/HACK markers, keeping the `truncated` flag. Wire:
  *  `bennu_todos` — `TodoScanArgs { root }`. */
-export function todoScan(root: string): Promise<TodoScan> {
-  return bennu('bennu_todos', { args: { root } });
+export function todoScan(root: string, keywords?: readonly string[], caseSensitive?: boolean): Promise<TodoScan> {
+  return bennu('bennu_todos', { args: { root, keywords, case_sensitive: caseSensitive } });
 }
 
 /** Scan the project for TODO/FIXME/XXX/HACK markers (the TODO tool window). The markers only —

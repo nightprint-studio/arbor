@@ -81,6 +81,7 @@
     <tr><td><Kbd action="assistant_review_apply" size="sm" /></td><td>Bennu's Imber (focus in the panel): review the isolated copy's combined diff, then apply it to the project</td></tr>
     <tr><td><Kbd action="assistant_next_mode" size="sm" /></td><td>Bennu's Imber (focus in the panel): next permission mode — Manual, Accept edits, Autonomous</td></tr>
     <tr><td><Kbd action="voice_push_to_talk" size="sm" /></td><td>Bennu voice: hold to talk to Imber and release to send, or tap once to start and again to stop — opens the voice overlay with the selected code attached</td></tr>
+    <tr><td><Kbd action="convert_case" size="sm" /></td><td>Bennu: convert the selection, or the name at the caret (each cursor), to the next naming style — camelCase, PascalCase, snake_case, SCREAMING_SNAKE_CASE, kebab-case</td></tr>
     <tr><td><Kbd action="assistant_expand" size="sm" /></td><td>Bennu's Imber (panel open): expand it over the editor area, or restore it — Esc from inside the panel restores too</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></td><td>Bennu's Imber (message box): paste exactly what is on the clipboard, without wrapping code in a fenced block</td></tr>
     <tr><td><Kbd action="close_tab" size="sm" /></td><td>Close active tab</td></tr>

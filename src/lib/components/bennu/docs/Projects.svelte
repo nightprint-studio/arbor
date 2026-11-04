@@ -101,7 +101,9 @@
     <strong>workspace</strong> to switch to it, or a <strong>project</strong> to jump straight into it — switching
     workspace first if needed. <em>Add project…</em> adds one to the workspace you are in, whether or not it already
     holds any. From the command palette, <strong>Switch project</strong> and <strong>Switch workspace</strong> do the
-    same from the keyboard.
+    same from the keyboard; <kbd>Ctrl+Tab</kbd> (hold Ctrl, press Tab until the project you want, release) toggles between the
+    projects you were in last. A project you come back to has its open files, tabs in both editors, active file, caret and scroll exactly
+    as you left them — and so does the whole session after a restart.
   </dd>
   <dt>The workspace manager</dt>
   <dd>

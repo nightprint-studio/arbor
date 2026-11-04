@@ -3,12 +3,15 @@ import { Folder, GitBranch, Play, Bug, Package, ListChecks, Database, Search } f
 import type { SceneOverride, ExtraScene } from './scenes';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { bennuRegexStore } from '$lib/stores/bennu/regex.svelte';
+import { bennuSsrStore } from '$lib/stores/bennu/ssr.svelte';
 import { mount } from 'svelte';
 import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
 import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
 import { bennuRunConfigStore } from '$lib/stores/bennu/run-config.svelte';
 import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
 import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
+import type { NamingFixPlan, NamingTarget, RenamedName } from '$lib/ipc/bennu/naming';
 
 const noop = () => {};
 
@@ -126,6 +129,86 @@ for (const n of [
 ]) {
   bennuOverrides[`bennu/Bennu${n}Modal`] = { ...bennuOverrides[`bennu/Bennu${n}Modal`], setup: seedProject, settle: 900 };
 }
+
+/** The naming review with a plan in it: a detected convention, renames with uses, a typed file move and refusals of several kinds. */
+const namingEdit = (file: string, start: number, to: string, reason: string) => ({
+  file, start, end: start + 8, new_text: to, old: '', reason, inferred: false,
+});
+const namingName = (
+  rel: string, line: number, from: string, to: string, target: NamingTarget, uses: [string, number][] = [],
+): RenamedName => {
+  const file = `${DEMO}/core/src/main/java/it/comune/gestionale/core/${rel}`;
+  return {
+    file, line, from, to, target, file_rename: null,
+    edits: [namingEdit(file, 100 + line, to, 'declaration'), ...uses.map(([r, at]) => namingEdit(`${DEMO}/core/src/main/java/it/comune/gestionale/core/${r}`, at, to, 'use'))],
+  };
+};
+const NAMING_PLAN: NamingFixPlan = {
+  renamed: [
+    namingName('service/BandoServiceImpl.java', 41, 'get_bando', 'getBando', 'method', [['dao/BandoDaoImpl.java', 220], ['model/Bando.java', 80]]),
+    namingName('service/BandoServiceImpl.java', 57, 'lista_atti', 'listaAtti', 'method', [['dao/BandoDaoImpl.java', 310]]),
+    namingName('service/BandoServiceImpl.java', 63, 'tmp_count', 'tmpCount', 'local'),
+    namingName('service/BandoServiceImpl.java', 64, 'src_dir', 'srcDir', 'local'),
+    namingName('dao/BandoDaoImpl.java', 22, 'MaxRows', 'MAX_ROWS', 'constant', [['service/BandoServiceImpl.java', 190]]),
+    namingName('dao/BandoDaoImpl.java', 34, 'bando_id', 'bandoId', 'parameter'),
+    namingName('model/Bando.java', 12, 'data_scadenza', 'dataScadenza', 'field', [['service/BandoServiceImpl.java', 77], ['dao/BandoDaoImpl.java', 91]]),
+    { ...namingName('model/old_atto.java', 3, 'old_atto', 'OldAtto', 'type', [['service/BandoServiceImpl.java', 10]]),
+      file_rename: { from: `${DEMO}/core/src/main/java/it/comune/gestionale/core/model/old_atto.java`, to: `${DEMO}/core/src/main/java/it/comune/gestionale/core/model/OldAtto.java` } },
+  ],
+  refused: [
+    { file: `${DEMO}/core/src/main/java/it/comune/gestionale/core/model/Bando.java`, line: 14, name: 'user_name', reason: 'serialisation: @JsonProperty takes the Java name as the key it writes, so renaming it changes the JSON / XML / column other systems read. Give it an explicit name first, then rename' },
+    { file: `${DEMO}/core/src/main/java/it/comune/gestionale/core/service/BandoServiceImpl.java`, line: 120, name: 'to_string', reason: 'more than one name in this file would become \`toString\`' },
+    { file: `${DEMO}/core/src/main/java/it/comune/gestionale/core/service/BandoServiceImpl.java`, line: 140, name: 'get_all', reason: '\`getAll\` already appears in this file' },
+    { file: `${DEMO}/core/src/main/java/it/comune/gestionale/core/dao/BandoDaoImpl.java`, line: 5, name: 'it_comune_core', reason: 'a package segment is not renamed by editing text — its name IS the directory holding the file. Move the files (Project tree → Move) and the package declarations follow' },
+  ],
+  files: [],
+  capped: false,
+  cancelled: false,
+  convention: {
+    source: 'detected',
+    configured_available: false,
+    rules: [
+      { pack: 'java', target: 'type', convention: 'PascalCase', origin: 'standard', share: null, votes: 0 },
+      { pack: 'java', target: 'method', convention: 'camelCase', origin: 'detected', share: 0.82, votes: 140 },
+      { pack: 'java', target: 'field', convention: 'camelCase', origin: 'detected', share: 0.91, votes: 96 },
+      { pack: 'java', target: 'constant', convention: 'UPPER_SNAKE_CASE', origin: 'standard', share: null, votes: 0 },
+      { pack: 'java', target: 'parameter', convention: 'camelCase', origin: 'detected', share: 0.77, votes: 210 },
+      { pack: 'java', target: 'local', convention: 'camelCase', origin: 'detected', share: 0.85, votes: 380 },
+      { pack: 'java', target: 'package', convention: 'lowercase', origin: 'standard', share: null, votes: 0 },
+    ],
+  },
+};
+NAMING_PLAN.files = [...new Set(NAMING_PLAN.renamed.flatMap((r) => r.edits.map((e) => e.file)))];
+bennuOverrides['bennu/BennuNamingFixModal'] = {
+  ...bennuOverrides['bennu/BennuNamingFixModal'],
+  setup: () => {
+    seedProject();
+    bennuNamingStore.seedFix(NAMING_PLAN, 'project');
+  },
+};
+
+/** Structural search with a query, its results and a replacement — what the modal looks like in use. */
+const ssrHit = (rel: string, line: number, start: number, preview: string, enclosing: string) => ({
+  file: `${DEMO}/${rel}`, rel, line, range: { start, end: start + preview.length }, preview, enclosing, unresolved: false,
+});
+bennuOverrides['bennu/BennuSsrModal'] = {
+  ...bennuOverrides['bennu/BennuSsrModal'],
+  setup: () => {
+    seedProject();
+    bennuSsrStore.seed({
+      query: '$pre...$ final $post...$ $t$ $n$ = $v$;\nas local',
+      replacement: '$pre$ $post$ $t$ $n$ = $v$;',
+      explained: { error: null, errorLine: 0, alternatives: 1, captures: ['pre', 'post', 't', 'n', 'v'], expansion: [], literals: ['final'] },
+      hits: [
+        ssrHit('core/src/main/java/it/comune/core/service/BandoServiceImpl.java', 57, 1204, 'final Bando bando = dao.find(id);', 'chiudi'),
+        ssrHit('core/src/main/java/it/comune/core/service/BandoServiceImpl.java', 88, 2310, '@SuppressWarnings("unchecked") final List<Atto> atti = lista();', 'aggiorna'),
+        ssrHit('core/src/main/java/it/comune/core/dao/BandoDaoImpl.java', 34, 640, 'final String sql = "select * from bando";', 'cerca'),
+      ],
+      scanned: 214, parsed: 31, elapsedMs: 934, hasPages: true,
+    });
+  },
+  settle: 900,
+};
 // Same, but with a Java file open — the caret-bound modals (structure, parameters, history) read it.
 for (const n of ['FileStructure', 'AddParameter', 'LocalHistory', 'GitHistory']) {
   bennuOverrides[`bennu/Bennu${n}Modal`] = {

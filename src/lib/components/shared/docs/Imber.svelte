@@ -5,11 +5,14 @@
 <h1>Imber (assistant)</h1>
 <p><strong>Imber</strong> is the assistant of the whole suite — the same one that works in Bennu. In Corvus it works on the repository of the active tab: it commits, pushes, fetches, pulls, creates branches, merges, opens merge requests, and explains the history. It uses the same git code as the buttons, so a commit made by Imber runs the same hooks, recovery snapshots and credential flow as one made by hand.</p>
 
+<h2>The same panel as Bennu's</h2>
+<p>Corvus and Bennu draw the assistant with the same widgets: the home screen with its starter cards, the conversation with its bubble, the folded tool receipts and the activity line, and the composer with its mode menu, send and stop buttons. What differs is what goes in them — Corvus offers the git starters, the Operate / Chat switch, Undo and Schedules, and keeps one conversation per repository; Bennu adds attachments, skills, the model picker and the conversation list.</p>
+
 <h2>One setup for both products</h2>
 <p>The API key, the model, the effort, the spending limits and the price list are chosen once and shared with Bennu. The key sits in the system credential vault (never in a file); store it from the panel the first time, or from Bennu's settings. Corvus has one setting of its own: the mode.</p>
 
 <h2>Open it</h2>
-<p><Kbd action="imber_toggle" size="sm" /> or <strong>Imber: Open Assistant</strong> in the Command Palette opens the panel on the right. Each repository has its own conversation; switching tab switches conversation.</p>
+<p><Kbd action="imber_toggle" size="sm" /> or <strong>Imber: Open Assistant</strong> in the Command Palette opens the panel on the right; the sparkle at the top of the right activity bar does the same (hide or move it from <em>Customize Activity Bar</em>). Without a repository open it asks you to open one; without an API key the panel asks for it. Each repository has its own conversation; switching tab switches conversation.</p>
 
 <h2>Operate and Chat</h2>
 <ul>

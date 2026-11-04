@@ -83,7 +83,7 @@ projects) is in the profile: `hirundo/config.toml`, served by `get_hirundo_confi
 * **Schedules** (`hirundo-be/schedules.rs`): data in the profile, recurrence / next run / missed-run policy from `arbor-scheduler::calendar`;
   the window ticks every 30 s (`schedules_due`), runs with the runner it has and reports (`schedule_ran`). Nothing fires with the window closed.
 * **Runner history** (`runs.rs`): the last 50 runs per project, in the profile.
-* Toolbar: Ask Imber (copies a prompt, opens Bennu), Go to the controller (opens the matched source file), Copy the request file path.
+* Toolbar: Go to the controller (only for a request that matches a detected endpoint). Save / Save as live in the title bar, bulk edit in each table, Copy Path in the tab and tree menus. Ask Imber was removed (it only opened Bennu with a prompt on the clipboard).
 
 ## Done (phase 4 — protocols and import)
 

@@ -26,6 +26,9 @@
   import SoapImportModal from './modals/SoapImportModal.svelte';
   import OpenApiImportModal from './modals/OpenApiImportModal.svelte';
   import HttpImportModal from './modals/HttpImportModal.svelte';
+  import NewProjectModal from './modals/NewProjectModal.svelte';
+  import CreateVariableModal from './modals/CreateVariableModal.svelte';
+  import NewCollectionModal from './modals/NewCollectionModal.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { httpExport } from '$lib/ipc/hirundo';
   import { findContainer, requestsUnder } from './request-model';
@@ -47,7 +50,7 @@
   import VariablesModal from './modals/VariablesModal.svelte';
   import { buildHirundoPalette, type HirundoPaletteActions } from './hirundo-palette';
   import { hirundoCommands as c } from './hirundo-commands';
-  import { cloneRequest, collectionOf, flattenRequests, methodShort } from './request-model';
+  import { cloneRequest, flattenRequests, isStreamRequest, methodShort } from './request-model';
 
   let paletteQuery = $state('');
   let searchQuery = $state('');
@@ -64,10 +67,14 @@
     newCollection: () => hirundoUiStore.open({ kind: 'new-collection' }),
     curl: c.curl, copyCurl: () => void c.copyCurl(true), formatBody: c.formatBody, bulkEdit: c.toggleBulk,
     variables: c.variables, requestSettings: c.requestSettings, diff: c.diff, closeTab: c.closeTab,
+    closeOtherTabs: c.closeOtherTabs, closeTabsToRight: c.closeTabsToRight, closeAllTabs: c.closeAllTabs, closeSavedTabs: c.closeSavedTabs,
+    moveTabLeft: c.moveTabLeft, moveTabRight: c.moveTabRight, renameTab: () => c.renameTab(), revealTab: () => void c.revealTab(),
     findRequest: c.findRequest,
     openRequest: (path) => void hirundoStore.openRequest(path, false),
     environments: c.environments,
     switchEnvironment: (id) => void hirundoStore.selectEnvironment(id),
+    openFolder: c.openFolder,
+    newProject: c.newProject,
     openProject: c.openProject,
     openRecent: (p) => void hirundoStore.openProject(p),
     showSection: (id) => hirundoUiStore.selectSection(id),
@@ -81,7 +88,6 @@
     startStream: c.startStream,
     exportHttp: c.exportHttp,
     toggleBottom: () => hirundoUiStore.toggleBottom(),
-    askImber: () => void c.askImber(),
     goToController: () => void c.goToController(),
     copyLink: c.copyLink,
     saveAs: c.saveAs,
@@ -195,10 +201,26 @@
 {#if dialog?.kind === 'generate-code'}<GenerateCodeModal onClose={close} />{/if}
 {#if dialog?.kind === 'diff'}<DiffModal onClose={close} />{/if}
 {#if dialog?.kind === 'project-picker'}<ProjectPickerModal onClose={close} workspaceId={dialog.workspaceId} />{/if}
+{#if dialog?.kind === 'create-variable'}<CreateVariableModal name={dialog.name} requestPath={dialog.path} onClose={close} />{/if}
+{#if dialog?.kind === 'confirm-send'}
+  <ConfirmModal
+    title="Send with empty required fields?"
+    message={`These are marked required and have no value: ${dialog.missing.join(', ')}.`}
+    detail="The server will probably answer with an error."
+    variant="warning"
+    confirmLabel="Send anyway"
+    onConfirm={() => { close(); if (hirundoStore.active && isStreamRequest(hirundoStore.active.request)) c.startStream(); else void hirundoStore.send(); }}
+    onCancel={close}
+  />
+{/if}
+{#if dialog?.kind === 'new-project'}<NewProjectModal onClose={close} />{/if}
+{#if dialog?.kind === 'open-folder'}
+  <FileExplorerModal mode="folder" title="Open a folder as a project" onConfirm={(p: string) => { close(); void hirundoStore.openProject(p); }} onCancel={close} onClose={close} />
+{/if}
 {#if dialog?.kind === 'http-import'}<HttpImportModal onClose={close} />{/if}
 {#if dialog?.kind === 'http-export'}
   {@const path = dialog.path}
-  <FileExplorerModal mode="save" title="Export as a .http file" extensions={['http']} initialFilename={`${path.split('/').pop()}.http`} onConfirm={(file: string) => { close(); void exportHttp(path, file); }} onCancel={close} onClose={close} />
+  <FileExplorerModal mode="save" title="Export as a .http file" extensions={['http']} initialFilename={`${path.split('/').pop()}.http`} onConfirm={(file: string) => { void exportHttp(path, file); close(); }} onCancel={close} onClose={close} />
 {/if}
 {#if dialog?.kind === 'openapi-import'}<OpenApiImportModal onClose={close} />{/if}
 {#if dialog?.kind === 'soap-import'}<SoapImportModal onClose={close} />{/if}
@@ -207,15 +229,32 @@
 {#if dialog?.kind === 'meta'}<MetaModal path={dialog.path} onClose={close} />{/if}
 
 {#if dialog?.kind === 'new-collection'}
-  <PromptModal title="New collection" label="Name of the collection" placeholder="Bandi" confirmLabel="Create" onConfirm={createCollection} onCancel={close} />
+  <NewCollectionModal onCreate={(n) => void createCollection(n)} onClose={close} />
 {/if}
 {#if dialog?.kind === 'new-folder'}
   {@const parent = dialog.parent}
-  <PromptModal title="New folder" label={`Name of the folder in ${collectionOf(parent)}`} confirmLabel="Create" onConfirm={(n) => void createFolder(parent, n)} onCancel={close} />
+  <NewCollectionModal {parent} onCreate={(n) => void createFolder(parent, n)} onClose={close} />
 {/if}
+<!-- A `{@const}` is a derived of `dialog`: read it BEFORE close() empties the dialog, or it throws and the action silently does nothing. -->
 {#if dialog?.kind === 'rename'}
   {@const path = dialog.path}
-  <PromptModal title="Rename" label="New name" initialValue={dialog.name} confirmLabel="Rename" onConfirm={(n) => { close(); void hirundoStore.renameNode(path, n); }} onCancel={close} />
+  <PromptModal title="Rename" label="New name" initialValue={dialog.name} confirmLabel="Rename" onConfirm={(n) => { void hirundoStore.renameNode(path, n); close(); }} onCancel={close} />
+{/if}
+{#if dialog?.kind === 'rename-tab'}
+  {@const id = dialog.id}
+  <PromptModal title="Rename request" label="Name of the request" initialValue={dialog.name} confirmLabel="Rename" onConfirm={(n) => { void hirundoStore.renameTab(id, n); close(); }} onCancel={close} />
+{/if}
+{#if hirundoStore.closeConfirm}
+  {@const cc = hirundoStore.closeConfirm}
+  <ConfirmModal
+    title="Close tabs with unsaved changes?"
+    message={cc.edited === 1 ? 'One of the tabs has changes that are not saved.' : `${cc.edited} of the tabs have changes that are not saved.`}
+    detail="The changes are lost if you close them."
+    variant="warning"
+    confirmLabel="Close anyway"
+    onConfirm={() => hirundoStore.confirmClose()}
+    onCancel={() => hirundoStore.dismissClose()}
+  />
 {/if}
 {#if dialog?.kind === 'run'}
   {@const path = dialog.path}
@@ -224,7 +263,7 @@
     message={`${hirundoStore.activeEnvType?.name ?? 'This'} environment is protected. The run sends every request, including POST, PUT, PATCH and DELETE.`}
     variant="warning"
     confirmLabel="Run"
-    onConfirm={() => { close(); void hirundoRunner.run(path, { confirmed: true }); }}
+    onConfirm={() => { void hirundoRunner.run(path, { confirmed: true }); close(); }}
     onCancel={close}
   />
 {/if}

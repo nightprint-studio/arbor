@@ -885,6 +885,12 @@ pub(crate) fn suggest(file: &str, source: &str, offset: usize) -> Option<Habit> 
 
 /// Puts the usual arguments at the top of `items` when the caret is in a call argument.
 pub(crate) fn popup_rows(file: &str, source: &str, offset: usize, case: MatchCase, items: &mut Vec<CompletionItem>) {
+    // Nothing learned (the census has not run, or the project has no habits yet): there are no rows to
+    // offer, and working out the generic slot below types the call under the caret — real inference — only
+    // to be thrown away by `rows_plan`'s own first line. Asked before it, with the lock released.
+    if lock().is_empty() {
+        return;
+    }
     let slot = crate::flc_generic_slot::at(file, source, offset);
     let plan = lock().rows_plan(file, source, offset, case, &|t| slot.as_ref().map_or(true, |s| s.admits(t)));
     if let Some(plan) = plan {

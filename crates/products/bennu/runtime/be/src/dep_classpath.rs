@@ -363,6 +363,40 @@ pub(crate) fn cached_dep_jars(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The jars the **Dependencies report** is drawn from: the cached list while it is true, and — for a
+/// Maven project whose list has gone stale — the local repository read again, right now.
+///
+/// A stale list used to come back empty, which a panel draws as "nothing resolved"; keeping it
+/// served the OLD versions next to a freshly resolved tree (the tree said `1.0.7`, the transitive
+/// group still `1.0.6`). The direct read costs milliseconds and no JVM, so the report is always
+/// derived from what is on disk now. The index keeps its own list until the user reloads — see
+/// [`is_stale`], which is how the UI knows to offer it.
+pub(crate) fn report_dep_jars(root: &Path) -> Vec<PathBuf> {
+    let Some(pom_mtime) = poms_mtime(root) else { return Vec::new() };
+    let path = list_cache_path(root);
+    if let Some(entry) = load_entry_from(&path, pom_mtime) {
+        return entry.jars.into_iter().map(PathBuf::from).collect();
+    }
+    // No entry at all means "never resolved", which the report says in its own words.
+    let Some(recorded) = read_entry(&path) else { return Vec::new() };
+    if root.join("pom.xml").is_file() {
+        let repo = bennu_maven::prelude::LocalRepo::discover();
+        let fresh = bennu_maven::prelude::resolve_offline(root, &repo).jar_strings();
+        if !fresh.is_empty() {
+            return fresh.into_iter().map(PathBuf::from).collect();
+        }
+    }
+    jars_of(&recorded).into_iter().map(PathBuf::from).collect()
+}
+
+/// Whether the persisted classpath of `root` no longer matches the disk — a pom edited, or an artifact
+/// it was resolved from rewritten (`mvn install` of a module it depends on, a SNAPSHOT refreshed) — so
+/// the editor's classpath is older than what a reload would give. `false` when there is no list yet:
+/// nothing was resolved, so nothing is out of date.
+pub(crate) fn is_stale(root: &Path) -> bool {
+    poms_mtime(root).is_some_and(|mtime| is_stale_at(&list_cache_path(root), mtime))
+}
+
 /// Run Maven's `dependency:build-classpath` (offline, pointed at the project's JDK) and return the
 /// resolved jar paths as strings. `Err` carries a short user-facing reason — a "0 jars" state has to be
 /// diagnosable from the UI, not only from the process's stderr.
@@ -524,7 +558,10 @@ pub(crate) fn clear_list_cache(root: &Path) {
 /// 2: the project's `<dependencyManagement>` now decides the version of transitive dependencies
 /// (`bennu_maven::resolve::project_management`). Every list resolved before it can name artifacts
 /// at versions the build does not use.
-const RESOLVER_EPOCH: u64 = 2;
+///
+/// 3: an entry also records a stamp of the local-repository files it was resolved from
+/// ([`repo_stamp`]); one without it cannot say whether the repository moved under it.
+const RESOLVER_EPOCH: u64 = 3;
 
 /// The freshness stamp for the whole project's poms: the **newest** `pom.xml` mtime under `root`.
 ///
@@ -608,10 +645,93 @@ pub(crate) struct CachedList {
     pub partial: Option<String>,
 }
 
+/// The files whose change makes a recorded jar list wrong without touching any pom of the project: each
+/// jar, its `.pom` (a module reinstalled with new dependencies rewrites it), and the artifact's
+/// `maven-metadata-local.xml` (what `install` updates for a SNAPSHOT).
+fn repo_inputs(jars: &[String]) -> Vec<PathBuf> {
+    let mut out = Vec::with_capacity(jars.len() * 3);
+    for jar in jars {
+        let jar = Path::new(jar);
+        out.push(jar.to_path_buf());
+        out.push(jar.with_extension("pom"));
+        if let Some(artifact_dir) = jar.parent().and_then(Path::parent) {
+            out.push(artifact_dir.join("maven-metadata-local.xml"));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// A fingerprint of [`repo_inputs`]: path, modification time (to the nanosecond) and length of each,
+/// with an absent file hashing as such — so one that APPEARS moves it as well. A `stat` per file, a
+/// few hundred in all, and no reads.
+pub(crate) fn repo_stamp(jars: &[String]) -> u64 {
+    let mut hash = 0xcbf29ce484222325;
+    for path in repo_inputs(jars) {
+        hash = fnv_mix(hash, path.to_string_lossy().as_bytes());
+        let (nanos, len) = std::fs::metadata(&path)
+            .ok()
+            .map(|m| {
+                let nanos = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_nanos() as u64);
+                (nanos, m.len())
+            })
+            .unwrap_or((0, 0));
+        hash = fnv_mix(hash, &nanos.to_le_bytes());
+        hash = fnv_mix(hash, &len.to_le_bytes());
+    }
+    hash
+}
+
+/// The cache file, parsed, when it was written by this resolver. Says nothing about freshness.
+fn read_entry(path: &Path) -> Option<serde_json::Value> {
+    let bytes = std::fs::read(path).ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    (v.get("resolver").and_then(|m| m.as_u64()) == Some(RESOLVER_EPOCH)).then_some(v)
+}
+
+fn jars_of(entry: &serde_json::Value) -> Vec<String> {
+    entry
+        .get("jars")
+        .and_then(|j| j.as_array())
+        .map(|jars| jars.iter().filter_map(|j| j.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// Whether a parsed entry is still true: the poms are as they were, the repository files it was
+/// resolved from are as they were, and nothing it was missing has arrived.
+fn entry_is_current(entry: &serde_json::Value, pom_mtime: u64) -> bool {
+    if entry.get("pom_mtime").and_then(|m| m.as_u64()) != Some(pom_mtime) {
+        return false;
+    }
+    if entry.get("repo_stamp").and_then(|m| m.as_u64()) != Some(repo_stamp(&jars_of(entry))) {
+        return false;
+    }
+    // Anything recorded as missing that has since arrived invalidates the whole list: the resolve
+    // that produced it would now find more.
+    let arrived = entry
+        .get("missing_paths")
+        .and_then(|m| m.as_array())
+        .is_some_and(|missing| missing.iter().filter_map(|p| p.as_str()).any(|p| Path::new(p).is_file()));
+    !arrived
+}
+
+/// [`is_stale`] for a cache FILE (path-injectable for tests).
+fn is_stale_at(path: &Path, pom_mtime: u64) -> bool {
+    read_entry(path).is_some_and(|entry| !entry_is_current(&entry, pom_mtime))
+}
+
 /// The cached jar list for `root`, when it is still true.
 ///
-/// Two conditions, and the second is the one that was missing. The pom mtime says the
-/// *declarations* have not changed. The recorded missing paths say the *repository* has not: a pom
+/// Three conditions, and the second is the one that was missing. The pom mtime says the
+/// *declarations* of THIS project have not changed. The repository stamp (see [`repo_stamp`]) says
+/// the *artifacts it was resolved from* have not: installing a module this one depends on rewrites
+/// its jar and pom in `~/.m2` and moves nothing here, so the list kept naming the old version of it
+/// (and of whatever it pulled in) next to a tree Maven had just resolved to the new one. The recorded missing paths say the *repository* has not: a pom
 /// does not move when the artifact it names finally lands in `~/.m2`, so keying on the mtime alone
 /// pinned a project to its half-resolved classpath until somebody edited a pom or found the cache
 /// directory by hand. One `stat` per missing artifact answers it, and a resolve that was complete
@@ -629,24 +749,13 @@ fn save_entry(root: &Path, pom_mtime: u64, list: &ResolvedList) {
 /// The pure read of a cache FILE (path-injectable, so the gating is unit-testable without the
 /// profile-scoped `bennu_data_dir`).
 fn load_entry_from(path: &Path, pom_mtime: u64) -> Option<CachedList> {
-    let bytes = std::fs::read(path).ok()?;
-    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    if v.get("resolver").and_then(|m| m.as_u64()) != Some(RESOLVER_EPOCH) {
+    let v = read_entry(path)?;
+    if !entry_is_current(&v, pom_mtime) {
         return None;
     }
-    if v.get("pom_mtime").and_then(|m| m.as_u64()) != Some(pom_mtime) {
-        return None;
-    }
-    // Anything recorded as missing that has since arrived invalidates the whole list: the resolve
-    // that produced it would now find more.
-    if let Some(missing) = v.get("missing_paths").and_then(|m| m.as_array()) {
-        if missing.iter().filter_map(|p| p.as_str()).any(|p| Path::new(p).is_file()) {
-            return None;
-        }
-    }
-    let jars = v.get("jars")?.as_array()?;
+    v.get("jars")?.as_array()?;
     Some(CachedList {
-        jars: jars.iter().filter_map(|j| j.as_str().map(str::to_string)).collect(),
+        jars: jars_of(&v),
         partial: v.get("partial").and_then(|p| p.as_str()).map(str::to_string),
     })
 }
@@ -660,6 +769,7 @@ fn save_entry_to(path: &Path, pom_mtime: u64, list: &ResolvedList) {
         "resolver": RESOLVER_EPOCH,
         "pom_mtime": pom_mtime,
         "jars": list.jars,
+        "repo_stamp": repo_stamp(&list.jars),
         "missing_paths": list.missing_paths,
         "partial": list.partial,
         "source": list.source,
@@ -825,6 +935,61 @@ mod tests {
         )
         .unwrap();
         assert!(load_entry_from(&path, 9).is_none(), "no `resolver` stamp — pre-epoch");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The bug: a module installed on its own (`mvn install` in the dependency) rewrites its jar and pom
+    /// in the local repository and touches nothing in the project that depends on it, so the project's
+    /// list kept the old versions. The stamp is what notices.
+    #[test]
+    fn a_rewritten_repository_artifact_invalidates_the_cache() {
+        let dir = std::env::temp_dir().join(format!("bennu-deps-stamp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let version = dir.join("repo").join("acme").join("lib").join("1.0-SNAPSHOT");
+        std::fs::create_dir_all(&version).unwrap();
+        let jar = version.join("lib-1.0-SNAPSHOT.jar");
+        std::fs::write(&jar, b"v1").unwrap();
+        let path = dir.join("list.json");
+        let list = ResolvedList { jars: vec![jar.display().to_string()], source: "offline", ..ResolvedList::default() };
+        save_entry_to(&path, 5, &list);
+        assert!(load_entry_from(&path, 5).is_some());
+        assert!(!is_stale_at(&path, 5));
+
+        // The jar is reinstalled: a different length is enough, whatever the clock did.
+        std::fs::write(&jar, b"version two").unwrap();
+        assert!(load_entry_from(&path, 5).is_none());
+        assert!(is_stale_at(&path, 5));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The pom beside a jar is part of the stamp: a module reinstalled with a new dependency changes
+    /// its pom, not necessarily the shape of its jar.
+    #[test]
+    fn a_pom_appearing_or_changing_beside_a_jar_invalidates_the_cache() {
+        let dir = std::env::temp_dir().join(format!("bennu-deps-pomstamp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let version = dir.join("repo").join("acme").join("lib").join("2.0");
+        std::fs::create_dir_all(&version).unwrap();
+        let jar = version.join("lib-2.0.jar");
+        std::fs::write(&jar, b"jar").unwrap();
+        let jars = vec![jar.display().to_string()];
+        let before = repo_stamp(&jars);
+        std::fs::write(version.join("lib-2.0.pom"), b"<project/>").unwrap();
+        let with_pom = repo_stamp(&jars);
+        assert_ne!(before, with_pom, "a pom that appears moves the stamp");
+        std::fs::write(version.join("lib-2.0.pom"), b"<project><dependencies/></project>").unwrap();
+        assert_ne!(with_pom, repo_stamp(&jars), "a pom that changes moves it too");
+        assert_eq!(repo_stamp(&jars), repo_stamp(&jars), "and it is stable otherwise");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// No list yet means nothing resolved — which is not "out of date", and must not prompt a reload.
+    #[test]
+    fn a_project_never_resolved_is_not_stale() {
+        let dir = std::env::temp_dir().join(format!("bennu-deps-nolist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!is_stale_at(&dir.join("absent.json"), 1));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

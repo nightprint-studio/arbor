@@ -54,17 +54,103 @@ log
 
 <h3>Where a hole can go</h3>
 <p>
-  While the pattern is parsed a placeholder stands in for an <em>identifier</em>, so it can sit anywhere a name can — a receiver, a method, an
-  argument, a type. That is a real limit, and it decides what you can ask:
+  A hole is read from where it stands, so it can be the thing that belongs there — not only a name:
 </p>
 <table>
-  <thead><tr><th>A run of…</th><th></th></tr></thead>
+  <thead><tr><th>Where the hole stands</th><th>It is…</th></tr></thead>
   <tbody>
-    <tr><td><code>f($args...$)</code> — arguments</td><td><strong>Works.</strong> An argument is an expression, and a name is one.</td></tr>
-    <tr><td><code>&#123; $body...$ &#125;</code> — statements or members</td><td><strong>Does not.</strong> <code>class A &#123; body &#125;</code> is not Java, so the pattern does not compile and the field says so. There is currently <em>no</em> way to write "a class extending X, whatever its body".</td></tr>
-    <tr><td><code>void $m$($args...$)</code> — parameters</td><td><strong>Does not</strong>, for the same reason: a parameter needs a type.</td></tr>
+    <tr><td>a receiver, a method, a type, an argument</td><td>that node. <code>f($args...$)</code> is a run of arguments.</td></tr>
+    <tr><td>alone in a <strong>block</strong> — <code>&#123; $body...$ &#125;</code>, <code>if ($c$) &#123; $stmts...$ &#125;</code></td><td>a <strong>statement</strong>, or a run of them (<code>...</code>). Loops, <code>if</code>, <code>try</code>, lambdas.</td></tr>
+    <tr><td>alone in a <strong>class body</strong> — <code>class $c$ extends $b$ &#123; $members...$ &#125;</code></td><td>a <strong>member</strong> (method, field, nested type), or a run of them. Classes, interfaces, records; for an enum, after the constants and a <code>;</code>.</td></tr>
+    <tr><td>alone in a <strong>parameter list</strong> — <code>void $m$($params...$)</code></td><td>a <strong>parameter</strong>, whole with its type, or a run of them.</td></tr>
+    <tr><td><code>$mods...$</code> in <strong>front of a declaration</strong> — <code>$mods...$ final $t$ $n$ = $v$;</code></td><td>zero or more <strong>modifiers and annotations</strong>, none included: the declaration need not have any. Captured, so a replacement can put them back.</td></tr>
   </tbody>
 </table>
+<p>
+  A declaration pattern is exact about its modifiers: <code>final $t$ $n$ = $v$;</code> matches a local that is <code>final</code> and nothing else.
+  Write <code>$mods...$</code> first to accept any, or <code>$pre...$ final $post...$</code> to require <code>final</code> among others. The same
+  goes for a class: <code>$mods...$ class $c$ extends $b$ &#123; $members...$ &#125;</code> is any class extending <code>$b$</code>, public or not;
+  a class with an <code>implements</code> the pattern does not mention is a different shape, so add it or use <code>or</code>.
+</p>
+
+<h3>Declarations</h3>
+<p>
+  Classes, interfaces, enums and records (with <code>extends</code>, <code>implements</code>, generics, annotations), methods, constructors, fields, locals,
+  parameters, <code>catch</code> parameters and lambda parameters can all be written as patterns:
+</p>
+<pre><code>@Autowired private $t$ $n$;
+catch ($t$ $e$) &#123; &#125;
+for (int $i$ = 0; $i$ &lt; $l$.size(); $i$++) &#123; $body...$ &#125;
+$mods...$ $r$ $m$($params...$) throws $e$ &#123; $body...$ &#125;</code></pre>
+
+<h3><code>as</code> — how the text is to be read</h3>
+<p>
+  <code>final $t$ $n$ = $v$;</code> is legal Java as a field and as a local variable, and nothing in the text says which. Without help the compiler took the
+  first reading that parsed — a field — so there was no way to ask for a local. <code>as</code> says which, on a line of its own, and applies to the
+  alternative it follows:
+</p>
+<table>
+  <thead><tr><th>Line</th><th>The pattern is…</th></tr></thead>
+  <tbody>
+    <tr><td><code>as local</code></td><td>a local variable declaration</td></tr>
+    <tr><td><code>as param</code></td><td>a method or constructor parameter (one)</td></tr>
+    <tr><td><code>as field</code></td><td>a field</td></tr>
+    <tr><td><code>as member</code></td><td>a method, field or nested type of a class body</td></tr>
+    <tr><td><code>as statement</code>, <code>as expression</code></td><td>a statement, an expression</td></tr>
+    <tr><td><code>as class</code></td><td>a class, interface, enum or record</td></tr>
+    <tr><td><code>as catch</code></td><td>a <code>catch</code> clause</td></tr>
+  </tbody>
+</table>
+<p>
+  With <code>as</code> the pattern is read in that one way and no other, so a match is never found twice and a field never answers for a local.
+</p>
+
+<h3><code>inside</code> — where the match lives</h3>
+<pre><code>g()
+inside method, lambda</code></pre>
+<p>
+  The match must be in the <strong>nearest</strong> enclosing declaration of one of the kinds listed: <code>method</code>, <code>constructor</code>,
+  <code>initializer</code>, <code>lambda</code>, <code>class</code>, <code>interface</code>, <code>enum</code>, <code>record</code>,
+  <code>anonymous</code> — or <code>body</code> for the first four and <code>type</code> for the last five. A field is <code>inside class</code>; a
+  local or a parameter of a method is <code>inside method</code>; the same code in a lambda in that method is <code>inside lambda</code>. (<code>in</code>
+  is already a path, which is why this is not spelled that way.)
+</p>
+
+<h3>Removing <code>final</code> from locals and parameters, not fields</h3>
+<p>Two queries, each with its replacement — run them one after the other:</p>
+<pre><code>$pre...$ final $post...$ $t$ $n$ = $v$;
+as local
+→  $pre$ $post$ $t$ $n$ = $v$;
+
+$pre...$ final $post...$ $t$ $n$
+as param
+→  $pre$ $post$ $t$ $n$</code></pre>
+<p>
+  Other modifiers and annotations stay (<code>@Deprecated final int k</code> becomes <code>@Deprecated int k</code>); a hole that matched nothing takes
+  the space after it, so nothing is left indented. Fields are not locals, so they are untouched. Both are in the Templates column.
+</p>
+
+<h3>Questions about the model</h3>
+<p>
+  Asking about the structure of the code — which classes, relations, beans, endpoints — is a declaration pattern with a constraint, answered with the
+  project's index:
+</p>
+<table>
+  <thead><tr><th>Question</th><th>Query</th></tr></thead>
+  <tbody>
+    <tr><td>Every use of a member</td><td><code>use of $m$ on com.acme.Type</code></td></tr>
+    <tr><td>Subclasses of a type</td><td><code>$mods...$ class $c$ extends $b: com.acme.Base+$ &#123; $members...$ &#125;</code></td></tr>
+    <tr><td>Classes by superclass or interface</td><td><code>$mods...$ class $c$ implements $i$ &#123; $members...$ &#125;</code> then <code>group $i$</code></td></tr>
+    <tr><td>JPA entities</td><td><code>@Entity $mods...$ class $c$ &#123; $members...$ &#125;</code></td></tr>
+    <tr><td>Their relations</td><td><code>@ManyToOne $mods...$ $t$ $n$;</code> with <code>as field</code>, and an <code>or</code> with <code>@ManyToOne($args...$)</code></td></tr>
+    <tr><td>Injected fields</td><td><code>@Autowired $mods...$ $t$ $n$;</code> with <code>as field</code></td></tr>
+    <tr><td>Methods taking a type</td><td><code>$mods...$ $r$ $m$($pre...$, $p: Order$ $n$, $post...$) &#123; $body...$ &#125;</code></td></tr>
+  </tbody>
+</table>
+<p>
+  These are patterns, so what a class <em>says</em> is found and what it inherits is not; a constraint the index cannot decide is kept and marked
+  undecided. This is the minimal set — <code>use of</code> is the only form with a query kind of its own.
+</p>
 
 <h2>Constraining a hole</h2>
 <p>A colon after the name narrows what the hole accepts:</p>
@@ -116,10 +202,11 @@ log
   classpath starts inventing answers.
 </Callout>
 
-<h2>Three clauses</h2>
+<h2>The clauses</h2>
 <p>
-  A query is a pattern, optionally followed by lines beginning with <code>or</code>, <code>in</code> or <code>group</code>. No Java construct begins
-  with those words, so such a line is never mistaken for code — <code>orders.total()</code> is still a pattern.
+  A query is a pattern, optionally followed by lines beginning with <code>or</code>, <code>in</code>, <code>group</code>, <code>as</code> or
+  <code>inside</code> (the last two are described under the holes above). No Java construct begins with those words, so such a line is never mistaken
+  for code — <code>orders.total()</code> is still a pattern.
 </p>
 
 <h3><code>or</code> — the same question, another shape</h3>

@@ -714,6 +714,39 @@ impl NativeJavaProvider {
         self.rank_import_fqns(text, self.class_names.candidates(simple))
     }
 
+    /// The FQN accepting the type completion `simple` should import, or `None` for "no import" /
+    /// "ask the person".
+    ///
+    /// One candidate: that one (unless it is `java.lang`). Several: only when the file reaches none of
+    /// them already — adding `java.util.List` beside an existing `java.awt.List` import would not
+    /// compile — and the picker's ranking has a clear winner, so the popup and Alt+Enter agree about
+    /// which `Date` is meant. A tie stays a question.
+    fn import_for_completion(
+        &self,
+        text: &str,
+        simple: &str,
+        candidates: &[String],
+        symbols: &bennu_java::prelude::FileSymbols,
+    ) -> Option<String> {
+        if candidates.len() < 2 {
+            return single_import_candidate(candidates);
+        }
+        let reachable = candidates.iter().any(|fqn| {
+            bennu_java::prelude::simple_name_reaches(
+                &fqn.replace('.', "/"),
+                simple,
+                symbols.package.as_deref(),
+                &symbols.imports,
+            )
+        });
+        if reachable {
+            return None;
+        }
+        let choices = self.rank_import_fqns(text, candidates);
+        let winner = choices.fqns.first().filter(|_| choices.clear_winner)?;
+        single_import_candidate(std::slice::from_ref(winner))
+    }
+
     /// The "Import static" picker's candidates for the bare member `name`: the classes that declare a
     /// public static field (or method) of that name, **nearest first** by the same proximity the
     /// class picker uses, with the same "first place is a clear choice" rule.
@@ -988,15 +1021,17 @@ impl NativeJavaProvider {
                     detail: type_detail(candidates),
                     insert_text,
                     snippet_stops,
-                    // Auto-import ONLY when unambiguous — a single candidate that isn't `java.lang`
-                    // (which needs no import). Ambiguous names (several packages) are left to the
+                    // Auto-import when there is ONE candidate that isn't `java.lang` (which needs no
+                    // import), or — for a name that several packages share — when the picker's own
+                    // ranking has a clear winner (the one this file's package or imports lead to) and
+                    // nothing of that name is already reachable. Otherwise the choice is left to the
                     // Alt+Enter picker, so we never silently import the wrong `List`.
                     //
                     // For a nested type it is the OUTER that gets imported: one import serves every
                     // nested type of that class, and it is the form people write by hand.
                     auto_import: match &nested {
                         Some((_, outer)) => Some(outer.clone()),
-                        None => single_import_candidate(candidates),
+                        None => self.import_for_completion(text, &simple, candidates, &symbols),
                     },
                     // An ambiguous simple name owns nothing in particular: `List` is two classes,
                     // and documenting one of them would document the wrong one half the time.

@@ -21,7 +21,7 @@ describe('toRon', () => {
   });
 
   it('breaks a long value over lines, indented by depth', () => {
-    const out = toRon({ name: 'x'.repeat(40), tags: ['y'.repeat(30), 'z'.repeat(30)] });
+    const out = toRon({ name: 'x'.repeat(40), tags: ['y'.repeat(40), 'z'.repeat(40)] });
     expect(out.startsWith('(\n  name: "')).toBe(true);
     expect(out).toContain('\n  tags: [\n    "');
     expect(out.endsWith('\n)')).toBe(true);

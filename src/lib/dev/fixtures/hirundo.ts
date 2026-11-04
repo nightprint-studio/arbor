@@ -61,8 +61,12 @@ export const hirundoFixtures: Record<string, FixtureHandler> = {
   'hirundo.hirundo_workspace_switch': CONFIG,
   'hirundo.hirundo_workspace_add_project': CONFIG,
   'hirundo.hirundo_workspace_remove_project': CONFIG,
+  'hirundo.hirundo_project_create': '/Users/dev/new-project',
+  'hirundo.hirundo_workspace_move': CONFIG,
+  'hirundo.hirundo_workspace_move_project': CONFIG,
   'hirundo.hirundo_detected_roots_set': { ...CONFIG, detected_roots: [PROJECT] },
   'bennu.endpoints_detected': ENDPOINTS,
+  'bennu.endpoint_schema': { request: { type_text: 'OrderDto', kind: 'object', fields: [{ name: 'id', type_text: 'long', required: true }, { name: 'note', type_text: 'String', required: false }] }, response: null },
   'bennu.get_bennu_workspaces': { active_id: 'b1', workspaces: [{ id: 'b1', name: 'Gestionale', color_idx: 0, active_project: PROJECT, projects: [{ root: PROJECT, open_files: [], active_file: '' }, { root: '/Users/dev/anagrafe', open_files: [], active_file: '' }] }] },
   ensure_product_backend: null,
   'hirundo.openapi_read': {

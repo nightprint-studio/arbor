@@ -23,7 +23,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<Modal {onClose} width="540px" height="470px" ariaLabel="Request settings">
+<Modal {onClose} width="540px" height="560px" ariaLabel="Request settings">
   {#snippet header()}
     <ModalHeader {onClose}>
       <Settings2 size={14} />
@@ -51,6 +51,11 @@
       <FormSection label="Cookies">
         <FormRow label="Use the cookie jar" description="Send the cookies of the active environment, and keep the ones the answer sets.">
           <Toggle checked={tab.request.settings.cookie_jar} ariaLabel="Use the cookie jar" onchange={(v) => { tab.request.settings.cookie_jar = v; hirundoStore.touch(tab); }} />
+        </FormRow>
+      </FormSection>
+      <FormSection label="Streaming">
+        <FormRow label="Server-Sent Events" description="Send listens to the request as a stream and shows the events as they arrive, instead of waiting for one answer. Set for you when the request asks for text/event-stream.">
+          <Toggle checked={tab.request.settings.stream} ariaLabel="Treat as a stream" onchange={(v) => { tab.request.settings.stream = v; hirundoStore.touch(tab); }} />
         </FormRow>
       </FormSection>
       <FormSection label="Security">

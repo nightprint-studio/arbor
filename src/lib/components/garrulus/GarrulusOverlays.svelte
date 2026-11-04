@@ -81,6 +81,7 @@
     renameNote: noteCommands.renameActive,
     deleteNote: noteCommands.deleteActive,
     applyType: noteCommands.applyTypeToActive,
+    formatNote: noteCommands.format,
 
     // Finding things.
     search: () => garrulusUiStore.selectSection('search'),

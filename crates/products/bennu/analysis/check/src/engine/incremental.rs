@@ -58,6 +58,40 @@ pub struct IncrementalCache {
     resolver_rev: u64,
     /// One entry per top method / constructor body, in document order.
     bodies: Vec<BodyEntry>,
+    /// What the last run did — for the opt-in timing log and the tests, never for the verdict.
+    stats: IncrementalStats,
+}
+
+/// What one [`check_file_resolved_incremental`] run spent its time on and how much it reused. Read with
+/// [`IncrementalCache::stats`]; it is how "typing in one method revalidates the whole file" is told apart
+/// from "typing in one method revalidates one method" without a profiler.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IncrementalStats {
+    /// Top method / constructor bodies in the file.
+    pub bodies: usize,
+    /// Of those, replayed from the cache.
+    pub reused: usize,
+    /// Of those, checked again.
+    pub recomputed: usize,
+    /// The cache was usable (same structure, resolver revision and body count) — false on a cold or
+    /// invalidated run.
+    pub cache_usable: bool,
+    /// The buffer did not parse, so only its syntax error was reported (the cache was kept for later).
+    pub syntax_error: bool,
+    /// Microseconds: parse + node collection, the always-fresh pure-AST pass, the always-fresh
+    /// declaration-level resolver pass, the method bodies, and the structural remainder.
+    pub parse_us: u64,
+    pub pure_us: u64,
+    pub whole_file_us: u64,
+    pub bodies_us: u64,
+    pub remainder_us: u64,
+}
+
+impl IncrementalCache {
+    /// What the last run did.
+    pub fn stats(&self) -> IncrementalStats {
+        self.stats
+    }
 }
 
 struct BodyEntry {
@@ -82,21 +116,41 @@ pub fn check_file_resolved_incremental(
     resolver_rev: u64,
     cache: &mut IncrementalCache,
 ) -> Vec<Diagnostic> {
+    let clock = std::time::Instant::now();
+    let lap = |since: &mut std::time::Instant| -> u64 {
+        let us = since.elapsed().as_micros() as u64;
+        *since = std::time::Instant::now();
+        us
+    };
+    let mut stats = IncrementalStats::default();
+    let mut since = clock;
+
     let Some(tree) = bennu_java::prelude::parse_java(source) else {
         *cache = IncrementalCache::default();
         return check_file(source, ctx);
     };
     let root = tree.root_node();
     let nodes = collect_nodes(root);
+    stats.parse_us = lap(&mut since);
 
     // Pure-AST checks: always fresh (cheap, and their offsets must be current).
     let mut out = check_file_in(root, &nodes, source, ctx);
+    stats.pure_us = lap(&mut since);
 
     // A file that did not PARSE gets its syntax error and nothing else — same rule, and the same
-    // reason, as the whole-file path (`check::check_file_resolved`). Drop the cache too: entries
-    // keyed to a tree we do not believe would be served back once the file parses again.
+    // reason, as the whole-file path (`check::check_file_resolved`).
+    //
+    // The cache is KEPT, not dropped. Half-typed code — an open parenthesis, a trailing `.` — is the
+    // normal state of a buffer while it is being edited, and dropping the cache there meant that every
+    // pause mid-expression threw away the work for the whole file: the next clean parse found nothing
+    // to reuse and re-checked every method. Keeping it is sound because an entry is only ever replayed
+    // when the structure, the resolver revision and the body's own text all hash the same as when it
+    // was stored (see the module docs), and entries are only ever stored from a clean parse — so what
+    // sits in the cache is correct for exactly the inputs it is keyed by, however many broken buffers
+    // came in between.
     if root.has_error() {
-        *cache = IncrementalCache::default();
+        stats.syntax_error = true;
+        cache.stats = stats;
         return finish(out);
     }
 
@@ -113,6 +167,7 @@ pub fn check_file_resolved_incremental(
 
     // Whole-file resolver checks: declaration-oriented / file-gated → always fresh.
     out.extend(resolved::whole_file_diagnostics(&subject, &nodes, &infer));
+    stats.whole_file_us = lap(&mut since);
 
     // Partition by top method / constructor body and (re)compute the expensive per-expression checks.
     let bytes = source.as_bytes();
@@ -124,6 +179,8 @@ pub fn check_file_resolved_incremental(
     let reusable = cache.structural_hash == structural
         && cache.resolver_rev == resolver_rev
         && cache.bodies.len() == top_bodies.len();
+    stats.cache_usable = reusable;
+    stats.bodies = top_bodies.len();
 
     let mut new_bodies: Vec<BodyEntry> = Vec::with_capacity(top_bodies.len());
     for (i, &(bs, be)) in top_bodies.iter().enumerate() {
@@ -140,6 +197,7 @@ pub fn check_file_resolved_incremental(
                 });
             }
             new_bodies.push(BodyEntry { text_hash, rel_diags: cache.bodies[i].rel_diags.clone() });
+            stats.reused += 1;
         } else {
             // New / changed body → run the per-expression checks over just its nodes; cache them
             // relative to the body start so a later shift replays them at the right place.
@@ -157,15 +215,18 @@ pub fn check_file_resolved_incremental(
                 .collect();
             out.extend(diags);
             new_bodies.push(BodyEntry { text_hash, rel_diags });
+            stats.recomputed += 1;
         }
     }
+    stats.bodies_us = lap(&mut since);
 
     // The structural remainder (field initializers, initializer blocks, anything outside a top body)
     // is always recomputed fresh — small, and it keeps those expressions covered.
     let outside = nodes_outside_ranges(&nodes, &top_bodies);
     out.extend(resolved::per_body_diagnostics(&subject, &outside, &infer));
+    stats.remainder_us = lap(&mut since);
 
-    *cache = IncrementalCache { structural_hash: structural, resolver_rev, bodies: new_bodies };
+    *cache = IncrementalCache { structural_hash: structural, resolver_rev, bodies: new_bodies, stats };
 
     finish(out)
 }
@@ -442,5 +503,59 @@ mod tests {
         let want = norm(check_file(src, &ctx()));
         assert_eq!(got, want);
         assert!(cache.bodies.is_empty());
+    }
+
+    /// A buffer that does not parse in between must not cost the file its cache: the next clean run still
+    /// replays the method that was not touched. (It used to drop the cache, so every pause mid-expression
+    /// made the next clean validation re-check the whole file.)
+    #[test]
+    fn a_broken_buffer_in_between_keeps_the_cache() {
+        let r = resolver();
+        let v1 = "package com.acme;\nclass A {\n  int a(String s) { return s.nope(); }\n  int b(String s) { return s.gone(); }\n}\n";
+        let broken = "package com.acme;\nclass A {\n  int a(String s) { return s.nope(; }\n  int b(String s) { return s.gone(); }\n}\n";
+        let v3 = "package com.acme;\nclass A {\n  int a(String s) { return s.other(); }\n  int b(String s) { return s.gone(); }\n}\n";
+        let mut cache = IncrementalCache::default();
+        assert_eq!(incr(v1, &r, &mut cache, 1), full(v1, &r));
+        assert_eq!(incr(broken, &r, &mut cache, 1), full(broken, &r));
+        assert!(cache.stats().syntax_error);
+        assert_eq!(incr(v3, &r, &mut cache, 1), full(v3, &r));
+        let stats = cache.stats();
+        assert!(stats.cache_usable, "{stats:?}");
+        assert_eq!((stats.reused, stats.recomputed), (1, 1), "{stats:?}");
+    }
+
+    /// Typing a call character by character — most prefixes are broken or name nothing — gives the same
+    /// answer as a full run at EVERY step, and the method nobody touches is replayed from the cache the
+    /// whole way. This is the sequence-of-edits equivalence the incremental pass is trusted on.
+    #[test]
+    fn typing_a_call_stays_equivalent_at_every_keystroke() {
+        let r = resolver();
+        let file = |body: &str| {
+            format!("package com.acme;\nclass A {{\n  int a(String s) {{ return {body}; }}\n  int b(String s) {{ return s.gone(); }}\n}}\n")
+        };
+        let mut cache = IncrementalCache::default();
+        let typed = "s.trim().length(";
+        for end in 1..=typed.len() {
+            let src = file(&typed[..end]);
+            assert_eq!(incr(&src, &r, &mut cache, 1), full(&src, &r), "diverged after typing {:?}", &typed[..end]);
+        }
+        let done = file("s.trim().length()");
+        assert_eq!(incr(&done, &r, &mut cache, 1), full(&done, &r));
+        let stats = cache.stats();
+        assert_eq!(stats.reused, 1, "the untouched method must be replayed: {stats:?}");
+        assert_eq!(stats.recomputed, 1, "{stats:?}");
+    }
+
+    /// Deleting a method and typing a new one in its place keeps the answer right (the body count changes,
+    /// then changes back).
+    #[test]
+    fn removing_and_restoring_a_method_stays_equivalent() {
+        let r = resolver();
+        let both = "package com.acme;\nclass A {\n  int a(String s) { return s.nope(); }\n  int b(String s) { return s.gone(); }\n}\n";
+        let one = "package com.acme;\nclass A {\n  int a(String s) { return s.nope(); }\n}\n";
+        let mut cache = IncrementalCache::default();
+        for src in [both, one, both, one, both] {
+            assert_eq!(incr(src, &r, &mut cache, 1), full(src, &r));
+        }
     }
 }

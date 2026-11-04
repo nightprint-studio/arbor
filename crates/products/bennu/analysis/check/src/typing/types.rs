@@ -93,11 +93,16 @@ pub fn unresolved_types_in(
                 // The qualifier of a method reference (`x::method`) — tree-sitter parses the LHS as
                 // a `type_identifier` even when it's actually a VARIABLE / field / parameter
                 // (`list::add`, `helper::process`), which it can't disambiguate from a class
-                // (`Integer::parseInt`). Since a method-ref qualifier can legitimately be a value,
-                // never flag it as an unresolved type (only a genuine `TypoClass::method` slips
-                // through — the conservative trade for zero false positives).
+                // (`Integer::parseInt`). So it is judged as a type only when it can be nothing
+                // else: written like a class name (an upper-case initial and a lower-case letter
+                // somewhere, which leaves out a `CONSTANT::get`) and not a name this file uses as
+                // a value anywhere. `GComuni::getCodistat` with no such class is javac's
+                // "cannot find symbol", the same as `new GComuni()`; `list::add` stays unjudged.
                 if n.parent().map(|p| p.kind()) == Some("method_reference") {
-                    continue;
+                    let Ok(text) = n.utf8_text(bytes) else { continue };
+                    if !looks_like_class_name(text) || is_used_as_value(nodes, text, bytes) {
+                        continue;
+                    }
                 }
                 // `outer.new Inner()` names a member type of `outer`'s type, not a type in scope.
                 let creation = match n.parent() {
@@ -253,6 +258,20 @@ pub fn unresolved_types_in(
         out.push(crate::engine::check_id::CheckId::UnresolvedType.at(n, format!("Cannot resolve symbol `{name}`")));
     }
     out
+}
+
+/// Whether `name` is written the way a class is: an upper-case initial and at least one lower-case
+/// letter. `CONSTANT` and `myField` are values by every convention a method-reference qualifier can
+/// be told apart by.
+fn looks_like_class_name(name: &str) -> bool {
+    name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) && name.chars().any(|c| c.is_ascii_lowercase())
+}
+
+/// Whether the file uses `name` as a VALUE anywhere — a variable, field or parameter declared with
+/// it, or read as `name.member()`. Tree-sitter reads every such use as an `identifier` (a type is a
+/// `type_identifier`), so one is enough to say the name may not be a class at all.
+fn is_used_as_value(nodes: &[Node], name: &str, bytes: &[u8]) -> bool {
+    nodes.iter().any(|n| n.kind() == "identifier" && n.utf8_text(bytes) == Ok(name))
 }
 
 /// A qualified type name `qtext.simple`, its two halves' nodes and texts.
@@ -685,6 +704,41 @@ mod tests {
         assert!(diags("class C { void m() { Widget c = list::add; } }").is_empty());
         assert!(diags("class C { void m() { String r = helper::process; } }").is_empty());
         assert!(diags("class C { void m() { var f = data::make; } }").is_empty());
+    }
+
+    /// `GComuni::getCodistat` with no such class is the same "cannot find symbol" as `new GComuni()`,
+    /// reported on the qualifier.
+    #[test]
+    fn an_unknown_class_as_a_method_reference_qualifier_is_flagged() {
+        let d = diags("class C { void m() { var f = list.stream().map(GComuni::getCodistat); } }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("GComuni"), "{d:?}");
+        assert_eq!(d, diags("class C { void m() { Object o = new GComuni(); } }"), "same message as a `new`");
+        // A constructor reference too.
+        assert_eq!(diags("class C { void m() { Object f = GComuni::new; } }").len(), 1);
+    }
+
+    /// Everything that is not a class stays unjudged: values, `this`/`super`, arrays, constants,
+    /// resolvable and declared types, `java.lang`.
+    #[test]
+    fn method_reference_qualifiers_that_are_not_unknown_classes_stay_silent() {
+        for src in [
+            "class C { void m() { Object f = this::foo; } void foo() {} }",
+            "class C { void m() { Object f = super::toString; } }",
+            "class C { void m() { Object f = obj::bar; } }",
+            "class C { void m() { Object f = String[]::new; } }",
+            "class C { void m() { Object f = int[]::clone; } }",
+            "class C { void m() { Object f = LOGGER::info; } }",
+            "class C { void m() { Object f = Widget::size; } }",
+            "class C { void m() { Object f = Helper::go; } } class Helper { static void go() {} }",
+            "class C { void m() { Object f = String::valueOf; } }",
+            "class C { void m() { Object f = java.util.List::of; } }",
+            // A variable that happens to be capitalised: it is read as a value elsewhere.
+            "class C { Object Cache; void m() { Object f = Cache::get; } }",
+            "class C { void m(Object Cache) { Object f = Cache::get; } }",
+        ] {
+            assert!(diags(src).is_empty(), "{src}: {:?}", diags(src));
+        }
     }
 
     #[test]

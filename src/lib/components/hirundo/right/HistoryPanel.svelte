@@ -24,7 +24,7 @@
   <section class="hp-col">
     <PaneHeader title="Sent" count={hirundoStore.history.length} />
     {#if hirundoStore.history.length === 0}
-      <EmptyState message="Nothing sent yet" description="Requests sent from this window appear here until it is closed." compact />
+      <div class="hp-empty"><EmptyState message="Nothing sent yet" description="Requests sent from this window appear here until it is closed." compact /></div>
     {:else}
       {#each hirundoStore.history as h (h.at)}
         <SidebarItem onclick={() => hirundoStore.openFromHistory(h)}>
@@ -46,7 +46,7 @@
       {/snippet}
     </PaneHeader>
     {#if hirundoRunner.history.length === 0}
-      <EmptyState message="No runs yet" description="Runs of a collection — by hand or by a schedule — are kept here." compact />
+      <div class="hp-empty"><EmptyState message="No runs yet" description="Runs of a collection — by hand or by a schedule — are kept here." compact /></div>
     {:else}
       {#each hirundoRunner.history as run (run.at_ms)}
         {@const bad = run.rows.filter((r) => !r.passed).length}
@@ -76,8 +76,11 @@
 </div>
 
 <style>
-  .hp { display: flex; flex-direction: column; gap: 1px; height: 100%; min-height: 0; overflow: auto; background: var(--border-subtle); }
-  .hp-col { background: var(--bg-base); padding: 8px 8px 12px; min-width: 0; flex: none; }
+  /* Two columns that share the full height — no band of bare background under the shorter list. */
+  .hp { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .hp-col { flex: 1 1 0; min-height: 0; overflow: auto; padding: 8px 8px 12px; min-width: 0; display: flex; flex-direction: column; }
+  .hp-col + .hp-col { border-top: 1px solid var(--border-subtle); }
+  .hp-empty { flex: 1; display: grid; place-items: center; }
   .hp-m { font: 600 10px var(--font-mono); margin-right: 6px; }
   .hp-t { font-size: var(--font-size-xs); color: var(--text-muted); }
   .hp-run { display: flex; align-items: center; gap: 8px; min-width: 0; }

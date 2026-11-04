@@ -11,16 +11,27 @@
  */
 
 import { nodeAdvisories, projectAdvisories } from '$lib/ipc/bennu/maven';
+import { gradleReload } from '$lib/ipc/bennu/gradle';
+import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import {
   dependencies as fetchDependencies,
+  dependenciesStale,
   dependencyTree as fetchTree,
+  mavenReload,
   nodeDependencies as fetchNodeDependencies,
   nodeDependencyTree as fetchNodeTree,
   nodeOutdated as fetchOutdated,
   type DependencyReport,
   type DependencyTree,
   type OutdatedPackage,
+  type StaleDependencyRoot,
 } from '$lib/ipc/bennu/deps';
+
+/** How long the "dependencies changed" toast stays up. Long enough to read and act on; it is not an error. */
+const STALE_TOAST_MS = 15000;
+
+const sameDir = (a: string, b: string) =>
+  a.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase() === b.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
 
 /** What the store keeps per folder. A folder can be a Maven project and a Node one at once (a
  *  frontend built by the Maven build), and each has its own report, tree and advisories — so the
@@ -86,6 +97,12 @@ function createDependenciesStore() {
   const outdatedInFlight = new Map<string, Promise<void>>();
   /** The folder and ecosystem the report on screen describes — what the Vulnerabilities window asks about. */
   let current = $state<{ root: string; node: boolean } | null>(null);
+  /** Projects whose dependency classpath is older than the disk (a module of the workspace was just
+   *  installed, a pom changed). The editor keeps working on the classpath it has until a reload. */
+  let stale = $state<StaleDependencyRoot[]>([]);
+  /** Stale roots already announced by a toast, so an episode is announced once and not on every focus. */
+  const announced = new Set<string>();
+  let reloading = $state(false);
   /** The read in flight, so a burst of `load` calls costs one backend round-trip and not one
    *  each. A store that answers a stampede by starting a request per caller turns a noisy
    *  dependency into a backend that stops answering — every request gets its own thread over the
@@ -264,6 +281,62 @@ function createDependenciesStore() {
       })();
       outdatedInFlight.set(key, run);
       return run;
+    },
+
+    /** Projects whose dependency classpath is out of date. */
+    get stale(): StaleDependencyRoot[] {
+      return stale;
+    },
+    get reloading() {
+      return reloading;
+    },
+    /** The stale entry for `root`, if any. */
+    staleFor(root: string | null | undefined): StaleDependencyRoot | undefined {
+      return root ? stale.find((s) => sameDir(s.root, root)) : undefined;
+    },
+
+    /** Ask which of `roots` are out of date, and announce the newly stale ones once with a toast that
+     *  offers the reload. Cheap (a few `stat`s per jar); never throws — a missed check is not an error. */
+    async checkStale(roots: string[], announce = false) {
+      let next: StaleDependencyRoot[];
+      try {
+        next = roots.length > 0 ? await dependenciesStale(roots) : [];
+      } catch {
+        return;
+      }
+      stale = next;
+      const now = new Set(next.map((s) => s.root));
+      for (const root of [...announced]) if (!now.has(root)) announced.delete(root);
+      if (!announce) return;
+      const fresh = next.filter((s) => !announced.has(s.root));
+      if (fresh.length === 0) return;
+      fresh.forEach((s) => announced.add(s.root));
+      const names = fresh.map((s) => s.root.split(/[\\/]/).filter(Boolean).pop() ?? s.root);
+      toastStore.show(
+        roots.length > 1
+          ? `Dependencies changed in ${names.join(', ')} — reload?`
+          : 'Dependencies changed — reload?',
+        'info',
+        STALE_TOAST_MS,
+        { label: 'Reload', onClick: () => void this.reload(fresh) },
+      );
+    },
+
+    /** Re-resolve the dependencies of `targets` from scratch and rebuild their index. Drops the cached
+     *  classpath, the library jar pool and the library facts, and shows in the Jobs panel until done. */
+    async reload(targets: StaleDependencyRoot[]) {
+      if (targets.length === 0 || reloading) return;
+      reloading = true;
+      try {
+        for (const t of targets) await (t.tool === 'gradle' ? gradleReload(t.root) : mavenReload(t.root));
+        const done = new Set(targets.map((t) => t.root));
+        stale = stale.filter((s) => !done.has(s.root));
+        toastStore.show('Re-resolving dependencies — see the Jobs panel', 'info');
+      } catch (e) {
+        toastStore.show(`Dependencies could not be reloaded: ${e}`, 'error');
+      } finally {
+        reloading = false;
+      }
     },
 
     /** The folder and ecosystem of the report on screen, or null before any. */

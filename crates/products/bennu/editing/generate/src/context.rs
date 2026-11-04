@@ -234,6 +234,9 @@ pub struct EndpointInfo {
     pub return_type: String,
     #[serde(default)]
     pub produces: String,
+    /// The media types the handler accepts, as values (`application/json`).
+    #[serde(default)]
+    pub consumes: String,
     #[serde(default)]
     pub params: Vec<EndpointParam>,
 }

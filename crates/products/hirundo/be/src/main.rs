@@ -18,6 +18,7 @@ use hirundo_core::prelude::HirundoState;
 
 // Domain handler modules — each holds the `#[arbor_rpc::handler]`s of one domain. They self-register via
 // `inventory`, so `Hello` advertises them by name.
+mod charset;
 mod context;
 mod cookie_store;
 mod convert;

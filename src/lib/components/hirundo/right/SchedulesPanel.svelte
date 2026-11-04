@@ -26,14 +26,17 @@
 
 <div class="sp">
   {#if !hirundoStore.project}
-    <EmptyState message="No project open" />
+    <div class="sp-empty"><EmptyState message="No project open" description="Schedules belong to a project." compact /><Button variant="primary" onclick={hirundoCommands.openProject}>Open project…</Button></div>
   {:else}
     <div class="sp-top">
       <Button variant="primary" size="sm" disabled={hirundoStore.tree.length === 0} onclick={() => hirundoCommands.schedule(null)}>{#snippet iconStart()}<Plus size={12} />{/snippet}New schedule</Button>
       <span class="sp-note">Schedules run while this window is open.</span>
     </div>
     {#if hirundoSchedules.items.length === 0}
-      <EmptyState message="No schedules" description={hirundoStore.tree.length ? 'Run a collection on a timetable: every night, on weekdays, every hour.' : 'Create a collection first.'} compact />
+      <div class="sp-empty">
+        <EmptyState message="No schedules" description={hirundoStore.tree.length ? 'Run a collection on a timetable: every night, on weekdays, every hour.' : 'Create a collection first.'} compact />
+        {#if hirundoStore.tree.length}<Button variant="outline" onclick={() => hirundoCommands.schedule(null)}>New schedule…</Button>{:else}<Button variant="outline" onclick={hirundoCommands.newCollection}>New collection…</Button>{/if}
+      </div>
     {:else}
       <div class="sp-list">
         <RowList items={hirundoSchedules.items} key={(s) => s.id} dimmed={(s) => !s.enabled}>
@@ -59,6 +62,7 @@
 
 <style>
   .sp { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .sp-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; }
   .sp-top { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
   .sp-note { font-size: var(--font-size-xs); color: var(--text-muted); }
   .sp-list { padding: 0 12px 8px; overflow: auto; flex: 1; min-height: 0; }

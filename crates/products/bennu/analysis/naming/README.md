@@ -1,5 +1,7 @@
 # bennu-naming
 
+`detect` reads how a project already names things (per kind, only on strong evidence) so the bulk fix can work without a configured convention; `declarations` exposes a file's declarations for it.
+
 A declaration whose name breaks the project's convention — and the name that would not.
 
 ## The one idea

@@ -960,6 +960,26 @@ struct ConfigRebuild {
     beans: Mutex<Option<(u64, Arc<Vec<AnnotationBean>>)>>,
 }
 
+/// One file's incremental-validation state. The cache is locked for the length of a run, so validations of the
+/// same file queue up in order and each reuses what the one before it learned; `latest` numbers the requests so a
+/// live one can tell, once it gets its turn, that a newer one is already waiting.
+#[derive(Default)]
+struct IncrementalSlot {
+    cache: Mutex<bennu_check::prelude::IncrementalCache>,
+    latest: std::sync::atomic::AtomicU64,
+}
+
+/// Whose validation this is — it decides which cache slot is used and whether the run may be skipped.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ValidateMode {
+    /// A caller that wants an answer for exactly the text it sent.
+    Editor,
+    /// The editor's live request: skipped when a newer one for the file is already waiting.
+    EditorLive,
+    /// A buffer that exists only to be judged (a suggestion written into it): its own cache slot.
+    Scratch,
+}
+
 /// The process-wide index service (one per `bennu-be`).
 pub struct IndexService {
     slots: Mutex<HashMap<PathBuf, Arc<ProjectSlot>>>,
@@ -993,7 +1013,7 @@ pub struct IndexService {
     /// body that changed. Threaded through [`IndexService::validate_java`] (the resolved tier); the
     /// whole-project run doesn't use it. Taken out for the duration of a validation and put back after,
     /// so concurrent validations of the SAME file simply fall back to a full run (never a wrong result).
-    incremental: Mutex<HashMap<PathBuf, bennu_check::prelude::IncrementalCache>>,
+    incremental: Mutex<HashMap<PathBuf, Arc<IncrementalSlot>>>,
     /// Buffer-edit counters that make an incremental cache safe across files: `total` bumps on every
     /// Java `patch_file`, and `per_file[f]` counts f's own patches. A file A's "resolver revision" is
     /// `build_gen[root]` combined with `total − per_file[A]` = the number of edits to OTHER files since
@@ -1010,7 +1030,10 @@ pub struct IndexService {
     /// decompiled-tab "go to source" — consulted for REAL library source before falling back to a
     /// stub. Built lazily on first library go-to (only the sources jars already on disk), and cleared
     /// after a "Download sources" fetch so the freshly-downloaded jar is picked up without a reindex.
-    dep_sources: Mutex<HashMap<String, Arc<Vec<bennu_classpath::prelude::JavaSourceZip>>>>,
+    /// Per root: how many sources jars were on disk when the pool was built, and the pool. The count is
+    /// what notices sources downloaded by anything but this window (the IDE, `mvn dependency:sources`,
+    /// Gradle) — a pool kept until something *this process* did cleared it never saw them.
+    dep_sources: Mutex<HashMap<String, (usize, Arc<Vec<bennu_classpath::prelude::JavaSourceZip>>)>>,
     /// The last event sink a handler brought in, so background work with no request behind it —
     /// the classpath watcher — can still emit. One window per backend, so the latest is the
     /// right one. `None` until the first open.
@@ -1654,6 +1677,10 @@ impl IndexService {
             bennu_intel::prelude::clear_ref_cache(&bennu_intel::prelude::ref_cache_path(&base));
             bennu_intel::prelude::clear_diag_cache(&bennu_intel::prelude::diag_cache_path(&base));
             crate::dep_classpath::clear_list_cache(Path::new(root));
+            // The jar pool opened for "Go to source" and the facts read out of library classes were
+            // both derived from the jar list just dropped — kept, they would answer for the old one.
+            self.refresh_dep_sources(root);
+            self.forget_library_facts(root);
         }
         self.open(root, &jdk, &encoding_label, sink);
         true
@@ -1765,9 +1792,12 @@ impl IndexService {
             let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
             Arc::clone(&g)
         };
+        let prep = crate::perf::phase("completion", "level+naming");
         let level = level_of_file(&slot, file);
         let naming = crate::naming::declared_convention(file, bennu_naming::prelude::Target::Local);
+        drop(prep);
         let at = Position { file: file.to_string(), offset };
+        let provider_phase = crate::perf::phase_with("completion", "provider", || file.to_string());
         let mut items = provider
             .complete_at(
                 &at,
@@ -1775,8 +1805,10 @@ impl IndexService {
                 CompletionOptions { census: import_census_enabled(), case, level, naming },
             )
             .unwrap_or_default();
+        drop(provider_phase);
         // the arguments this project always passes at this place (`.filter(Boolean.FALSE::equals)`) lead the list
         if let Some(src) = source {
+            let _t = crate::perf::phase("completion", "habits+created+choices+rank");
             crate::flc_habits::popup_rows(file, src, offset, case, &mut items);
             // the type this project creates under the name being declared heads the list after `new`
             crate::flc_created::lift(src, offset, &mut items, &|widened, at_offset| {
@@ -2058,6 +2090,39 @@ impl IndexService {
     /// The FE fires the fast tier on a short debounce and the full tier on a longer idle debounce, so
     /// a large file paints syntax squiggles immediately while the ~0.7s semantic pass catches up.
     pub fn validate_java(&self, file: &str, source: &str, resolved: bool) -> Vec<bennu_proto::prelude::Diagnostic> {
+        self.validate_java_mode(file, source, resolved, ValidateMode::Editor, &mut false)
+    }
+
+    /// [`validate_java`](Self::validate_java) for the editor's own live requests: `None` when a NEWER request
+    /// for the same file arrived while this one waited its turn, so the work is skipped instead of computed for a
+    /// buffer the editor has already moved past. The caller reports that as an error the frontend ignores (it
+    /// discards the answer to a superseded request anyway) — never as an empty list, which would read as "no
+    /// problems".
+    pub fn validate_java_live(
+        &self,
+        file: &str,
+        source: &str,
+        resolved: bool,
+    ) -> Option<Vec<bennu_proto::prelude::Diagnostic>> {
+        let mut superseded = false;
+        let out = self.validate_java_mode(file, source, resolved, ValidateMode::EditorLive, &mut superseded);
+        (!superseded).then_some(out)
+    }
+
+    /// Validate a HYPOTHETICAL buffer of `file` — the text with a suggestion written into it, say. Has its own
+    /// per-file cache, so judging a guess neither borrows nor spoils the cache the editor's real validation reuses.
+    pub fn validate_java_scratch(&self, file: &str, source: &str) -> Vec<bennu_proto::prelude::Diagnostic> {
+        self.validate_java_mode(file, source, true, ValidateMode::Scratch, &mut false)
+    }
+
+    fn validate_java_mode(
+        &self,
+        file: &str,
+        source: &str,
+        resolved: bool,
+        mode: ValidateMode,
+        superseded: &mut bool,
+    ) -> Vec<bennu_proto::prelude::Diagnostic> {
         // A decompiled-from-bytecode stub — a JDK / dependency class opened via Ctrl+B — is a
         // signature-only, body-less, read-only view. Running the validator on it only produces useless
         // noise (missing returns for body-less methods, unresolved references to types we didn't
@@ -2130,10 +2195,29 @@ impl IndexService {
         let _module = bennu_query::prelude::enter_module(bennu_index::prelude::module_of(path));
         let file_key = PathBuf::from(file);
         let resolver_rev = self.resolver_rev_for(&slot.root, &file_key);
-        let mut cache = {
-            let mut g = self.incremental.lock().unwrap_or_else(|p| p.into_inner());
-            g.remove(&file_key).unwrap_or_default()
+        // One cache slot per file, locked for the whole run: a second validation of the same file WAITS for the
+        // first and then reuses what it learned. (It used to take the cache out of the map for the run, so an
+        // overlapping request found none and re-checked every method from cold — exactly when the user is typing
+        // fastest — and the two then raced to put theirs back.) A hypothetical buffer has a slot of its own.
+        let cache_key = match mode {
+            ValidateMode::Scratch => PathBuf::from(format!("{file}\u{0}scratch")),
+            _ => file_key.clone(),
         };
+        let slot_cache = {
+            let mut g = self.incremental.lock().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(g.entry(cache_key).or_default())
+        };
+        let ticket = slot_cache.latest.fetch_add(1, Ordering::SeqCst) + 1;
+        let waited = crate::perf::phase_with("validate", "wait for the previous run of this file", || file.to_string());
+        let mut cache = slot_cache.cache.lock().unwrap_or_else(|p| p.into_inner());
+        drop(waited);
+        // A newer request for this file queued up behind us while we waited: the editor has already moved on, and
+        // the newer one will run on the same cache. Skip the work.
+        if mode == ValidateMode::EditorLive && slot_cache.latest.load(Ordering::SeqCst) != ticket {
+            *superseded = true;
+            return Vec::new();
+        }
+        let run = crate::perf::phase_with("validate", "incremental (parse+checks)", || file.to_string());
         // Contain a panic in any single resolver-backed check (e.g. an out-of-bounds byte slice on
         // some buffer content). Without this, the panic surfaces as an RPC error → the FE's full-pass
         // promise rejects → EVERY squiggle is wiped (syntax included) and live validation looks dead.
@@ -2143,15 +2227,23 @@ impl IndexService {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             provider.validate_incremental(source, &ctx, status.any_installed, resolver_rev, &mut cache)
         }));
+        drop(run);
         match result {
             Ok(out) => {
-                let mut g = self.incremental.lock().unwrap_or_else(|p| p.into_inner());
-                g.insert(file_key, cache);
+                crate::perf::note("validate", "reuse", || {
+                    let s = cache.stats();
+                    format!(
+                        "{file}: bodies {} (reused {}, recomputed {}), cache usable {}, syntax error {}; parse {}µs, pure-AST {}µs, declaration pass {}µs, bodies {}µs, remainder {}µs",
+                        s.bodies, s.reused, s.recomputed, s.cache_usable, s.syntax_error,
+                        s.parse_us, s.pure_us, s.whole_file_us, s.bodies_us, s.remainder_us
+                    )
+                });
                 out
             }
             Err(_) => {
                 eprintln!("bennu-be: validation panicked for {file}; falling back to syntax-only checks");
-                // Nothing reinserted → the next validation of this file starts from a fresh cache.
+                // Start the next validation of this file from a fresh cache: the panic may have left this one half-updated.
+                *cache = bennu_check::prelude::IncrementalCache::default();
                 bennu_check::prelude::check_file(source, &ctx)
             }
         }
@@ -2817,6 +2909,7 @@ impl IndexService {
             default_value: bennu_intel::prelude::default_value_for(&type_text),
             type_text,
             before: None,
+            overload: None,
         };
         let plan = self
             .plan_add_parameter(
@@ -2853,6 +2946,23 @@ impl IndexService {
     /// members. Empty while the index is still building, or when no project owns the file.
     pub fn usage_marks(&self, file: &str, source: &str) -> Vec<bennu_intel::prelude::UsageMark> {
         let Some(slot) = self.slot_for_file(file) else { return Vec::new() };
+        let Some(engine) = slot.semantics() else { return Vec::new() };
+        engine.usage_marks(source)
+    }
+
+    /// [`usage_marks`](Self::usage_marks) for a **library source view**: a file under no project, so
+    /// `origin_file` (the project file it was opened from) picks the index — and, as in
+    /// [`find_usages_from`](Self::find_usages_from), the only open project does when the origin cannot.
+    pub fn usage_marks_from(
+        &self,
+        origin_file: &str,
+        view_file: &str,
+        source: &str,
+    ) -> Vec<bennu_intel::prelude::UsageMark> {
+        let Some(slot) = self.slot_for_file(origin_file).or_else(|| self.sole_slot()) else {
+            return Vec::new();
+        };
+        let _ = view_file;
         let Some(engine) = slot.semantics() else { return Vec::new() };
         engine.usage_marks(source)
     }
@@ -3085,7 +3195,9 @@ impl IndexService {
         // A `None` here is what sends the editor down its fallback chain, at the end of which sits
         // the decompiled view. Saying so — with the classification that produced it — is the
         // difference between diagnosing "go-to opened a stub" in one step and guessing at it.
+        let timing = crate::perf::phase_with("go-to", "engine.declaration", || file.to_string());
         let found = engine.declaration(file, source, offset);
+        drop(timing);
         if found.is_none() {
             nav_log(format_args!(
                 "declaration: nothing resolved at {file}:{offset} — the editor will fall back"
@@ -3828,25 +3940,34 @@ impl IndexService {
         &self,
         root: &str,
     ) -> Arc<Vec<bennu_classpath::prelude::JavaSourceZip>> {
-        {
-            let cache = self.dep_sources.lock().unwrap_or_else(|p| p.into_inner());
-            if let Some(pool) = cache.get(root) {
-                return Arc::clone(pool);
-            }
-        }
-        // Build outside the lock (opening zips does I/O). A racing second builder is harmless — the
-        // last insert wins and both hand back an equivalent pool.
         let dep_jars = {
             let slot = self.slots.lock().unwrap_or_else(|p| p.into_inner());
             slot.get(&PathBuf::from(root))
                 .map(|s| s.dep_jars.read().unwrap_or_else(|p| p.into_inner()).clone())
                 .unwrap_or_default()
         };
+        // One `stat` per dependency jar (a couple of hundred at most) is what it costs to know the pool
+        // is still the whole truth: a go-to is a click, not a keystroke.
+        let on_disk = crate::sources_download::available_sources(&dep_jars).len();
+        {
+            let cache = self.dep_sources.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some((seen, pool)) = cache.get(root) {
+                if *seen == on_disk {
+                    return Arc::clone(pool);
+                }
+            }
+        }
+        // Build outside the lock (opening zips does I/O). A racing second builder is harmless — the
+        // last insert wins and both hand back an equivalent pool.
         let pool = Arc::new(crate::sources_download::open_dep_source_zips(&dep_jars));
-        self.dep_sources
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(root.to_string(), Arc::clone(&pool));
+        // An empty jar list means the dependency tier has not landed yet — the pool built from it says
+        // nothing, and keeping it would turn "asked too early" into "no sources, ever".
+        if !dep_jars.is_empty() {
+            self.dep_sources
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(root.to_string(), (on_disk, Arc::clone(&pool)));
+        }
         pool
     }
 

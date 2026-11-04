@@ -38,6 +38,10 @@
   let value = $state('');
   /** `'end'`, or the index of the parameter the new one goes before. */
   let position = $state<string | number>('end');
+  /** Which overload a call means: `''` until one is chosen, then its index in the plan's list. */
+  let overload = $state<string | number>('');
+  /** The caret's own parameter seeds the position once — after that the position is the user's. */
+  let positionSeeded = false;
   let plan = $state<AddParameterPreview | null>(null);
   let planning = $state(false);
   let applying = $state(false);
@@ -50,6 +54,10 @@
   const preview = $derived(plan?.preview ?? null);
   const canApply = $derived(
     valid && !!preview && preview.total_edits > 0 && !preview.blocked && !applying,
+  );
+
+  const overloadChoices = $derived(
+    (plan?.overloads ?? []).map((label, i) => ({ value: i, label })),
   );
 
   const positions = $derived([
@@ -69,6 +77,7 @@
       name: name.trim(),
       default_value: value.trim() || undefined,
       before: typeof position === 'number' ? position : undefined,
+      overload: typeof overload === 'number' ? overload : undefined,
     };
     if (planTimer) clearTimeout(planTimer);
     if (!c) { plan = null; planning = false; return; }
@@ -76,7 +85,16 @@
     const seq = ++planSeq;
     planTimer = setTimeout(() => {
       void addParameterPlan({ file: c.file, source: c.source, offset: c.offset, ...request })
-        .then((p) => { if (seq === planSeq) { plan = p; planning = false; } })
+        .then((p) => {
+          if (seq !== planSeq) return;
+          plan = p;
+          planning = false;
+          // A caret inside the parameter list means "here": offer to insert before that parameter.
+          if (p && !positionSeeded) {
+            positionSeeded = true;
+            if (typeof p.caret_parameter === 'number') position = p.caret_parameter;
+          }
+        })
         .catch(() => { if (seq === planSeq) { plan = null; planning = false; } });
     }, 250);
   });
@@ -118,7 +136,7 @@
     <ModalHeader {onClose}>
       <ListPlus size={14} />
       <span class="modal-title">Add parameter</span>
-      {#if ctx}<span class="hdr-method">{ctx.method}()</span>{/if}
+      {#if ctx}<span class="hdr-method">{plan?.method || ctx.method}()</span>{/if}
     </ModalHeader>
   {/snippet}
 
@@ -140,6 +158,13 @@
         <FormField label="Position">
           <Select bind:value={position} options={positions} />
         </FormField>
+        {#if overloadChoices.length > 1}
+          <!-- The caret is on a call and several signatures take that many arguments: a call alone
+               cannot say which one, so the dialog asks. -->
+          <FormField label="Which overload">
+            <Select bind:value={overload} options={[{ value: '', label: 'Choose…' }, ...overloadChoices]} />
+          </FormField>
+        {/if}
       </div>
 
       <BennuRefactorPreview

@@ -35,7 +35,7 @@
    */
   import { tooltip } from '$lib/actions/tooltip';
   import {
-    Plus, Trash2, Search, Type, ListChecks, Box, FileText, ChevronUp, ChevronDown,
+    Plus, Trash2, Search, Type, ListChecks, Box, FileText,
     ArrowRight, ArrowLeft, ArrowLeftRight, Link2, Pencil, ListPlus, Archive, Layers, Zap, Bookmark,
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -54,7 +54,8 @@
   import ChipBar from '$lib/components/shared/ui/ChipBar.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Kbd from '$lib/components/shared/internal/Kbd.svelte';
-  import CodePreview from '$lib/components/shared/ui/CodePreview.svelte';
+  import { CodeEditor } from '$lib/components/shared/ui/code-editor';
+  import ToggleButton from '$lib/components/shared/ui/ToggleButton.svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import { languageForPath } from './languages';
   import {
@@ -100,6 +101,13 @@
   let withQuery = $state(false);
   /** Filter over the property picker — a real entity has forty fields. */
   let propertyFilter = $state('');
+  /** The collapsed sections of the query form: opened by what is in them, not by default. */
+  let orderOpen = $state(false);
+  let moreOpen = $state(false);
+  /** The conditions list, to move the focus into it and to find its rows. */
+  let condsEl = $state<HTMLElement | null>(null);
+  /** A fresh form starts with one condition row, focused: a finder with no condition is the rare case. */
+  let needsRow = $state(true);
 
   // Query shape. Seeded from the action that opened the dialog and changeable from here: the
   // button says where to start, it does not decide for you.
@@ -277,6 +285,7 @@
     assignments = [];
     propertyFilter = '';
     nameOverride = '';
+    needsRow = true;
     withQuery = false;
     queryName = '';
     queryText = '';
@@ -303,6 +312,20 @@
     const k = model?.keywords.find((x) => x.keyword === c.keyword);
     if (k?.args === 2) return 'from, to';
     return k?.collection ? 'a, b, c' : 'value';
+  }
+  // The first row of a new form, once the entity's properties are known — and the focus in it, so a finder
+  // is `Tab, Tab, Ctrl+Enter` from the moment the dialog opens.
+  $effect(() => {
+    if (!needsRow || !hasConditions || entityRepos.length === 0 || properties.length === 0) return;
+    needsRow = false;
+    if (conditions.length === 0) addCondition();
+    queueMicrotask(() => condsEl?.querySelector<HTMLElement>('button, input')?.focus());
+  });
+
+  function rowKey(e: KeyboardEvent, i: number) {
+    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault();
+    moveCondition(i, e.key === 'ArrowUp' ? -1 : 1);
   }
   function removeCondition(i: number) {
     conditions = conditions.filter((_, at) => at !== i);
@@ -574,7 +597,9 @@
   /** Only the to-many sides take a `mappedBy`; on a `@ManyToOne` it is not a thing that exists. */
   const canMapBy = $derived(['OneToMany', 'ManyToMany', 'OneToOne'].includes(attrRelation));
   const isToMany = $derived(['OneToMany', 'ManyToMany'].includes(attrRelation));
-  const title = $derived(spec?.title ?? 'Generate');
+  const title = $derived(body === 'query' ? `Create ${subject} method` : (spec?.title ?? 'Generate'));
+  /** A `Pageable` already carries its own Sort. */
+  const pageable = $derived(returns === 'page' || returns === 'slice');
   /** The header tile's glyph names the job. A database cylinder said "database management", which
    *  is not what any of these do. */
   const crestIcon = $derived(
@@ -645,7 +670,7 @@
   const isFinder = $derived(subject === 'find');
 </script>
 
-<Modal {onClose} width="min(1240px, 94vw)" height="min(780px, 92vh)" padBody={false} ariaLabel={title}>
+<Modal {onClose} width="min(1080px, 94vw)" height="min(640px, 92vh)" padBody={false} ariaLabel={title}>
   {#snippet header()}
     <ModalHeader {onClose}>
       {@const Crest = crestIcon}
@@ -943,14 +968,19 @@
             text="This entity has no repository yet — generate one first, and the method has somewhere to live."
           />
         {:else}
-          <FormSection label="What it does" first={!asksForEntity}>
-            {#if asksForRepository}
-              <FormRow label="Repository" wideControl>
-                <Select value={repositoryFqcn} options={repoOptions} searchable searchPlaceholder="Find a repository…" onchange={(v) => (repositoryFqcn = v)} />
-              </FormRow>
-            {/if}
-            {#if body === 'query'}
-              <div class="jg-inline">
+          {#if body === 'query'}
+            <!-- The method, the one decision that can still change, and the switches — one block, no
+                 paragraphs: what each does is in its tooltip. -->
+            <div class="jg-head">
+              <div class="jg-head-top">
+                <Input
+                  block
+                  size="sm"
+                  value={nameOverride}
+                  placeholder={methodName || 'Method name — built from the conditions'}
+                  ariaLabel="Method name (empty: built from the conditions)"
+                  oninput={(v) => (nameOverride = v)}
+                />
                 <RadioGroup
                   value={subject}
                   appearance="segment"
@@ -958,42 +988,66 @@
                   options={SUBJECTS}
                   onchange={(v) => (subject = v)}
                 />
-                <FormRow label="Limit" wideControl>
-                  <Input value={limit} placeholder="(none)" oninput={(v) => (limit = v)} />
-                </FormRow>
               </div>
-              <FormRow label="Distinct" description="Drops the duplicates a join produces.">
-                <Toggle bind:checked={distinct} size="sm" ariaLabel="Distinct" />
-              </FormRow>
-            {/if}
-            <FormRow
-              label="Method name"
-              wideControl
-              description={nameOverride.trim() && body === 'query'
-                ? 'A name Spring Data cannot parse is no longer a derived query, so the method arrives with its @Query written out.'
-                : 'Left empty it is built from the conditions below, which is why it cannot be misspelled.'}
-            >
-              <Input
-                value={nameOverride}
-                placeholder={methodName || 'Derived from the conditions below'}
-                oninput={(v) => (nameOverride = v)}
-              />
-            </FormRow>
-            {#if body === 'query'}
-              <FormRow
-                label="Write the @Query too"
-                description="A derived name is re-checked against the entity every time the project opens; an explicit query is a string nobody verifies until it runs. Ask for it when the generated JPQL is a starting point you mean to edit — a join, a fetch, a projection the name cannot express."
-              >
-                <Toggle
-                  checked={withQuery || !!nameOverride.trim()}
-                  disabled={!!nameOverride.trim()}
-                  size="sm"
-                  ariaLabel="Write the @Query too"
-                  onchange={(v) => (withQuery = v)}
+              {#if asksForRepository}
+                <Select value={repositoryFqcn} options={repoOptions} searchable searchPlaceholder="Find a repository…" fill size="sm" ariaLabel="Repository" onchange={(v) => (repositoryFqcn = v)} />
+              {/if}
+              <div class="jg-opts" role="group" aria-label="Options">
+                <ToggleButton
+                  pressed={distinct}
+                  label="Distinct"
+                  title="Distinct — drops the duplicates a join produces"
+                  onclick={() => (distinct = !distinct)}
+                />
+                <ToggleButton
+                  pressed={withQuery || !!nameOverride.trim()}
+                  label="@Query"
+                  title={nameOverride.trim()
+                    ? '@Query — a name Spring Data cannot parse arrives with its query written out'
+                    : '@Query — write the JPQL out too, as a starting point to edit (a join, a fetch)'}
+                  onclick={() => { if (!nameOverride.trim()) withQuery = !withQuery; }}
+                />
+                {#if isFinder}
+                  <ToggleButton
+                    pressed={sorted && !pageable}
+                    label="Sort"
+                    title={pageable
+                      ? 'Sort parameter — not offered: the Pageable already carries its own Sort'
+                      : 'Sort parameter — the caller decides the ordering instead of it being fixed in the name'}
+                    onclick={() => { if (!pageable) sorted = !sorted; }}
+                  />
+                  <span class="jg-opt-select" use:tooltip={returnOptions.find((o) => o.value === returns)?.description ?? 'Result type'}>
+                    <Select
+                      value={returns}
+                      options={returnOptions}
+                      size="sm"
+                      fill
+                      ariaLabel="Result type"
+                      onchange={(v) => (returns = v as JpaReturnShape)}
+                    />
+                  </span>
+                  <span class="jg-opt-limit">
+                    <Input size="sm" block value={limit} placeholder="Limit" ariaLabel="Limit (First / Top)" oninput={(v) => (limit = v)} />
+                  </span>
+                {/if}
+              </div>
+            </div>
+          {:else}
+            <FormSection label="Method" first={!asksForEntity}>
+              {#if asksForRepository}
+                <FormRow label="Repository" wideControl>
+                  <Select value={repositoryFqcn} options={repoOptions} searchable searchPlaceholder="Find a repository…" onchange={(v) => (repositoryFqcn = v)} />
+                </FormRow>
+              {/if}
+              <FormRow label="Method name" wideControl>
+                <Input
+                  value={nameOverride}
+                  placeholder={methodName || 'Built from the conditions'}
+                  oninput={(v) => (nameOverride = v)}
                 />
               </FormRow>
-            {/if}
-          </FormSection>
+            </FormSection>
+          {/if}
         {/if}
 
         <!-- The property picker, shared by the projection and the bulk update: both are "choose
@@ -1045,23 +1099,25 @@
                 <Badge variant="count" label={String(conditions.length)} />
               {/if}
             {/snippet}
-            {#each conditions as c, i (i)}
-              {#if i > 0}
-                <div class="jg-join">
-                  <RadioGroup
-                    value={c.or ? 'or' : 'and'}
-                    appearance="segment"
-                    size="sm"
-                    options={[{ value: 'and', label: 'AND' }, { value: 'or', label: 'OR' }]}
-                    onchange={(v) => patch(i, { or: v === 'or' })}
-                  />
-                  <span class="jg-join-rule" aria-hidden="true"></span>
-                </div>
-              {/if}
-              <!-- Two lines per condition: WHAT is compared on the first, against WHAT on the
-                   second. One line of seven controls was unreadable at any width. -->
-              <div class="jg-cond">
-                <div class="jg-cond-main">
+            <!-- One line per condition: [and/or] property · operator · value · case · remove. An empty
+                 value is a method parameter (its name is the placeholder); typing one fixes it in the
+                 query. Order is not cosmetic — Spring Data evaluates left to right — so Alt+↑/↓ moves
+                 the row. -->
+            <div class="jg-conds" role="group" aria-label="Conditions" bind:this={condsEl}>
+              {#each conditions as c, i (i)}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div class="jg-crow" onkeydown={(e) => rowKey(e, i)}>
+                  {#if i > 0}
+                    <ToggleButton
+                      pressed={c.or}
+                      label={c.or ? 'OR' : 'AND'}
+                      title="Joined to the previous condition with AND — click for OR"
+                      compact
+                      onclick={() => patch(i, { or: !c.or })}
+                    />
+                  {:else}
+                    <span class="jg-where">where</span>
+                  {/if}
                   <Select
                     value={c.path}
                     options={propertyOptions}
@@ -1082,62 +1138,32 @@
                     ariaLabel="Operator"
                     onchange={(v) => patch(i, { keyword: v })}
                   />
-                  <!-- Order is not cosmetic: Spring Data evaluates the conditions left to right,
-                       so `a or b and c` and `a and b or c` are different queries. -->
-                  <IconButton tooltip="Move earlier" size={22} disabled={i === 0} onclick={() => moveCondition(i, -1)}>
-                    <ChevronUp size={12} />
-                  </IconButton>
-                  <IconButton
-                    tooltip="Move later"
-                    size={22}
-                    disabled={i === conditions.length - 1}
-                    onclick={() => moveCondition(i, 1)}
-                  >
-                    <ChevronDown size={12} />
-                  </IconButton>
+                  {#if argsOf(c) > 0}
+                    <Input
+                      size="sm"
+                      block
+                      value={c.value ?? ''}
+                      placeholder={`→ ${parameterOf(c)}`}
+                      ariaLabel={`Fixed value (${valuePlaceholder(c)}); empty takes the parameter ${parameterOf(c)}`}
+                      oninput={(v) => patch(i, { value: v === '' ? null : v })}
+                    />
+                  {:else}
+                    <span class="jg-param jg-none">no value</span>
+                  {/if}
+                  <ToggleButton
+                    pressed={c.ignore_case}
+                    label="Aa"
+                    title="Ignore case"
+                    compact
+                    onclick={() => patch(i, { ignore_case: !c.ignore_case })}
+                  />
                   <IconButton tooltip="Remove this condition" size={22} variant="danger" onclick={() => removeCondition(i)}>
                     <Trash2 size={12} />
                   </IconButton>
                 </div>
-                <div class="jg-cond-arg">
-                  {#if argsOf(c) > 0}
-                    <RadioGroup
-                      value={isConstant(c) ? 'value' : 'param'}
-                      appearance="segment"
-                      size="sm"
-                      options={[
-                        { value: 'param', label: 'Parameter', description: 'the caller passes the value' },
-                        { value: 'value', label: 'Fixed value', description: 'written into the query itself' },
-                      ]}
-                      onchange={(v) => patch(i, { value: v === 'value' ? (c.value ?? '') : null })}
-                    />
-                    {#if isConstant(c)}
-                      <div class="jg-cond-value">
-                        <Input
-                          value={c.value ?? ''}
-                          placeholder={valuePlaceholder(c)}
-                          oninput={(v) => patch(i, { value: v })}
-                        />
-                      </div>
-                    {:else}
-                      <span class="jg-param" use:tooltip={'The method parameter this condition binds'}>{parameterOf(c)}</span>
-                    {/if}
-                  {:else}
-                    <span class="jg-param jg-none">takes no value</span>
-                  {/if}
-                  <label class="jg-ic">
-                    <Toggle
-                      checked={c.ignore_case}
-                      size="sm"
-                      ariaLabel="Ignore case"
-                      onchange={(v) => patch(i, { ignore_case: v })}
-                    />
-                    Ignore case
-                  </label>
-                </div>
-              </div>
-            {/each}
-            <button type="button" class="jg-add" onclick={addCondition}>
+              {/each}
+            </div>
+            <button type="button" class="jg-add" onclick={addCondition} use:tooltip={'Leave a value empty to take it as a method parameter'}>
               <Plus size={12} /> Add condition <Kbd keys={['Alt', 'Ins']} />
             </button>
           </FormSection>
@@ -1154,14 +1180,15 @@
                   text={`With no conditions this ${spec.delete ? 'deletes' : 'updates'} every row of the table.`}
                 />
               {/if}
-              <Alert variant="info" compact>
-                A bulk write goes straight to the database: it does not load the rows, so
-                <code>@PreUpdate</code> / <code>@PreRemove</code> do not fire and the persistence
-                context does not see it. Callers need a transaction of their own.
-              </Alert>
+              <p class="jg-note">A bulk write skips the entity callbacks and the persistence context, and needs a transaction of its own.</p>
             </FormSection>
           {:else}
-            <FormSection label="Ordering">
+            <FormSection
+              label="Order by"
+              collapsible
+              bind:open={orderOpen}
+              summary={orders.length > 0 ? `${orders.length}` : undefined}
+            >
               {#each orders as o, i (i)}
                 <div class="jg-order">
                   <Select
@@ -1174,12 +1201,11 @@
                     ariaLabel="Order by"
                     onchange={(v) => patchOrder(i, { path: v })}
                   />
-                  <RadioGroup
-                    value={o.desc ? 'desc' : 'asc'}
-                    appearance="segment"
-                    size="sm"
-                    options={[{ value: 'asc', label: 'Ascending' }, { value: 'desc', label: 'Descending' }]}
-                    onchange={(v) => patchOrder(i, { desc: v === 'desc' })}
+                  <ToggleButton
+                    pressed={o.desc}
+                    label={o.desc ? 'Desc' : 'Asc'}
+                    title="Ascending — click for descending"
+                    onclick={() => patchOrder(i, { desc: !o.desc })}
                   />
                   <IconButton
                     tooltip="Remove this ordering"
@@ -1196,54 +1222,19 @@
               </button>
             </FormSection>
 
-            <FormSection label="Result">
-              {#if isFinder}
-                <!-- One line of names, and the selected one explained underneath: six cards each
-                     wrapping its own description into a column of four words was the noisiest
-                     thing in the dialog. -->
-                <RadioGroup
-                  value={returns}
-                  appearance="segment"
+            {#if isFinder}
+              <FormSection label="Projection" collapsible bind:open={moreOpen} summary={projectionType.trim() || undefined}>
+                <Input
                   size="sm"
                   block
-                  options={returnOptions.map(({ value, label }) => ({ value, label }))}
-                  onchange={(v) => (returns = v as JpaReturnShape)}
+                  value={projectionType}
+                  placeholder={`(the ${entity?.simple ?? 'entity'})`}
+                  ariaLabel="Projection interface"
+                  oninput={(v) => (projectionType = v)}
                 />
-                <p class="jg-note jg-returns">
-                  {returnOptions.find((o) => o.value === returns)?.description ?? ''}
-                </p>
-                <FormRow
-                  label="Take a Sort parameter"
-                  description={returns === 'page' || returns === 'slice'
-                    ? 'Not offered: the Pageable already carries its own Sort.'
-                    : 'The caller decides the ordering, instead of it being fixed in the name.'}
-                >
-                  <Toggle
-                    checked={sorted && returns !== 'page' && returns !== 'slice'}
-                    disabled={returns === 'page' || returns === 'slice'}
-                    size="sm"
-                    ariaLabel="Take a Sort parameter"
-                    onchange={(v) => (sorted = v)}
-                  />
-                </FormRow>
-                <FormRow
-                  label="Projection"
-                  wideControl
-                  description="An interface with getters for the columns you want. Left empty, the method returns the entity."
-                >
-                  <Input
-                    value={projectionType}
-                    placeholder={`(the ${entity?.simple ?? 'entity'})`}
-                    oninput={(v) => (projectionType = v)}
-                  />
-                </FormRow>
-              {:else}
-                <p class="jg-note">
-                  A <code>{subject}</code> has one shape:
-                  <code>{subject === 'exists' ? 'boolean' : 'long'}</code>.
-                </p>
-              {/if}
-            </FormSection>
+                <p class="jg-note">An interface with getters for the columns you want; empty returns the entity.</p>
+              </FormSection>
+            {/if}
           {/if}
         {/if}
       </div>
@@ -1279,9 +1270,11 @@
           <EmptyState message="Fill the form and the generated code appears here." />
         {:else}
           <div class="jg-preview-code">
-            <CodePreview
-              text={shownPane?.code ?? result?.preview ?? ''}
+            <CodeEditor
+              value={shownPane?.code ?? result?.preview ?? ''}
               language={shownPane?.language ?? javaLang}
+              readOnly
+              wrap
             />
           </div>
         {/if}
@@ -1294,6 +1287,7 @@
     <ModalFooter>
       <span class="jg-hints">
         <Kbd keys={['Ctrl', 'Enter']} /> confirm
+        {#if hasConditions}<Kbd keys={['Alt', 'Ins']} /> condition{/if}
         <Kbd keys={['Esc']} /> close
       </span>
       <Button variant="ghost" onclick={onClose}>Cancel</Button>
@@ -1341,7 +1335,7 @@
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+    grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
     gap: 16px;
     padding: 12px 16px 14px;
     overflow: hidden;
@@ -1369,7 +1363,8 @@
   /* The code pane takes what the head leaves, so the preview grows with the modal instead of
      scrolling the whole column. */
   .jg-preview-code { flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
-  .jg-preview-code > :global(.cp) { flex: 1; min-width: 0; min-height: 0; }
+  .jg-preview-code > :global(.code-editor) { flex: 1; min-width: 0; min-height: 0; }
+  .jg-preview-code :global(.cm-editor) { height: 100%; }
   .jg-preview-code :global(.cm-editor) { min-width: 0; max-width: 100%; }
   .jg-preview-code :global(.cm-scroller) { overflow-x: auto; }
   .jg-name { overflow-x: auto; }
@@ -1413,29 +1408,21 @@
 
   /* A condition, and the join that precedes it. The joiner sits between the rows rather than
      inside one, because that is where the word belongs — it is about the pair. */
-  .jg-cond {
-    display: flex; flex-direction: column; gap: 6px;
-    padding: 8px;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    background: var(--bg-base);
-  }
-  .jg-cond-main {
+  /* The compact form of a finder: the method and its switches, then one line per condition. */
+  .jg-head { display: flex; flex-direction: column; gap: 8px; padding-bottom: 6px; }
+  .jg-head-top { display: flex; align-items: center; gap: 8px; }
+  .jg-head-top > :global(.input-wrap) { flex: 1; min-width: 0; }
+  .jg-opts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .jg-opt-select { flex: 1 1 110px; min-width: 100px; }
+  .jg-opt-limit { flex: 0 1 74px; min-width: 60px; }
+  .jg-conds { display: flex; flex-direction: column; gap: 5px; }
+  .jg-crow {
     display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto auto auto;
+    grid-template-columns: 44px minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
   }
-  .jg-cond-arg { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .jg-cond-value { flex: 1; min-width: 0; }
-  .jg-cond-arg > .jg-param { flex: 1; min-width: 0; }
-  .jg-ic {
-    display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto;
-    font-size: var(--font-size-2xs); color: var(--text-muted); cursor: pointer;
-  }
-  .jg-returns { padding: 2px 2px 6px; }
-  .jg-join { display: flex; align-items: center; gap: 8px; padding: 1px 0; }
-  .jg-join-rule { flex: 1; height: 1px; background: var(--border-subtle); }
+  .jg-where { font-size: var(--font-size-2xs); color: var(--text-muted); text-align: center; }
   .jg-param {
     font-family: var(--font-code);
     font-size: var(--font-size-2xs);

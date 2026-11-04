@@ -58,3 +58,26 @@ export function scheduledText(note: string, prompt: string): string {
 export function plainText(message: ImberMessage): string {
   return message.blocks.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n\n');
 }
+
+/** The text of a user message (what the bubble shows). */
+export function userText(message: ImberMessage): string {
+  return message.blocks.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n\n');
+}
+
+export interface ActivityInput {
+  running: boolean;
+  retry: { attempt: number; max: number; waitSecs: number; detail: string } | null;
+  /** The run is parked on an approval. */
+  waiting: boolean;
+  /** `thinking`, or the tool being run (`git_commit`). */
+  tool: string;
+}
+
+/** The words for the activity line while a run is open, or `null` when nothing runs. */
+export function activityText(a: ActivityInput): { label: string; retry: string | null; detail: string } | null {
+  if (!a.running) return null;
+  if (a.retry) return { label: '', retry: `Retrying (${a.retry.attempt}/${a.retry.max}) in ${a.retry.waitSecs}s`, detail: a.retry.detail };
+  if (a.waiting) return { label: 'Waiting for you', retry: null, detail: '' };
+  const label = a.tool && a.tool !== 'thinking' ? `Running ${a.tool.replace(/^git_/, '').replace(/_/g, ' ')}` : 'Thinking';
+  return { label, retry: null, detail: '' };
+}

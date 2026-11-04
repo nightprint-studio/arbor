@@ -1,27 +1,16 @@
 <script lang="ts">
   /**
-   * One message of the conversation.
-   *
-   * Yours is a soft bubble on the right, the way it is in every chat — it is short and it is yours, so
-   * it can be small. The assistant's has no bubble: it is the content, and a frame around paragraphs
-   * and tool receipts would only add edges. A quiet line above names who wrote it and when, and the
-   * blocks follow in order: text, code, the tools it used — gathered into one line that opens on
-   * demand, because the receipts matter less than the answer — and the edits it proposes. Hovering the
-   * message reveals what you can do with it.
+   * One message of Bennu's conversation: the shared Imber message frame (the bubble, the author line, the
+   * hover verbs) filled with Bennu's blocks — text, code, the tools it used gathered into one line, the
+   * edits it proposes, questions, plans, access requests, pictures, sub-agents.
    */
-  import { fly } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
-  import { Copy, ChevronRight, FilePen } from 'lucide-svelte';
-  import AssistantToolRow from './AssistantToolRow.svelte';
+  import { FilePen } from 'lucide-svelte';
   import AssistantProposal from './AssistantProposal.svelte';
-  import AssistantCode from './AssistantCode.svelte';
   import MermaidDiagram from '$lib/components/shared/ui/MermaidDiagram.svelte';
   import AssistantQuestions from './AssistantQuestions.svelte';
   import AssistantAccessRequest from './AssistantAccessRequest.svelte';
   import AssistantAccessGrant from './AssistantAccessGrant.svelte';
-  import Collapsible from '$lib/components/shared/ui/Collapsible.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
-  import { copyToClipboard } from '$lib/utils/clipboard';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import AssistantConfirm from './AssistantConfirm.svelte';
   import AssistantErrorNotice from './AssistantErrorNotice.svelte';
@@ -30,13 +19,12 @@
   import AssistantImage from './AssistantImage.svelte';
   import AssistantAttachments from './AssistantAttachments.svelte';
   import AssistantAgentCard from './AssistantAgentCard.svelte';
-  import AssistantText from './AssistantText.svelte';
-  import AssistantWho from './AssistantWho.svelte';
-  import AssistantUserText from './AssistantUserText.svelte';
-  import { hasFence, inlineSpans as inline } from './assistant-fences';
+  import ImberCode from '$lib/components/shared/internal/imber/ImberCode.svelte';
+  import ImberMessageFrame from '$lib/components/shared/internal/imber/ImberMessageFrame.svelte';
+  import ImberTextBlock from '$lib/components/shared/internal/imber/ImberTextBlock.svelte';
+  import ImberToolsFold from '$lib/components/shared/internal/imber/ImberToolsFold.svelte';
   import type { Picture } from './assistant-images';
   import AssistantDocModal from './AssistantDocModal.svelte';
-  import { animStore } from '$lib/stores/animations.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
   import type { AssistantMessage, AssistantMode, MessageBlock, ToolCall } from './assistant-types';
 
@@ -57,7 +45,6 @@
 
   const store = bennuAssistantStore;
   let docOpen = $state(false);
-
 
   type Shown = Exclude<MessageBlock, { type: 'tool' }> | { type: 'tools'; calls: ToolCall[] };
 
@@ -104,158 +91,63 @@
   const plainText = $derived(message.blocks.flatMap((b) => (b.type === 'text' ? [b.text] : b.type === 'code' ? [b.code] : b.type === 'diagram' ? ['```mermaid\n' + b.diagram.source + '\n```'] : [])).join('\n\n'));
 </script>
 
-<div class="msg" in:fly={{ y: 8, duration: animStore.dFast, easing: cubicOut }}>
-  {#if message.role === 'user'}
+<ImberMessageFrame
+  role={message.role}
+  name={author?.name ?? (modelName || 'Imber')}
+  kind={author?.kind ?? 'imber'}
+  badge={author?.badge ?? null}
+  when={time}
+  live={author ? !!author.live : last && store.running}
+  {plainText}
+  userText={message.role === 'user' ? message.blocks.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n\n') : ''}
+>
+  {#snippet userTop()}
     {#each message.blocks as b}
-      {#if b.type === 'attachments'}
-        <div class="attached"><AssistantAttachments items={b.items} /></div>
-      {/if}
+      {#if b.type === 'attachments'}<AssistantAttachments items={b.items} />{/if}
     {/each}
-    <div class="user">
-      <div class="user-actions">
-        <IconButton tooltip="Copy" size={22} onclick={() => copyToClipboard(plainText, { successToast: 'Copied' })}><Copy size={12} /></IconButton>
-      </div>
-      {#each message.blocks as b}
-        {#if b.type === 'text' && hasFence(b.text)}
-          <div class="bubble rich"><AssistantUserText text={b.text} /></div>
-        {:else if b.type === 'text'}
-          <p class="bubble">{#each inline(b.text) as s}{#if s.code}<code>{s.text}</code>{:else if s.bold}<strong>{s.text}</strong>{:else}{s.text}{/if}{/each}</p>
-        {/if}
-      {/each}
-    </div>
-  {:else}
-    <div class="assistant">
-      <AssistantWho
-        name={author?.name ?? (modelName || 'Imber')}
-        kind={author?.kind ?? 'imber'}
-        badge={author?.badge ?? null}
-        live={author ? !!author.live : last && store.running}
-        when={time}
-      />
+  {/snippet}
 
-      <div class="blocks">
-        {#each shown as b, i}
-          {#if b.type === 'text'}
-            <div class="text"><AssistantText text={b.text} live={last && store.running} />{#if last && store.running && i === shown.length - 1}<span class="asst-caret" aria-hidden="true"></span>{/if}</div>
-          {:else if b.type === 'questions'}
-            <AssistantQuestions set={b.set} {conversationId} />
-          {:else if b.type === 'plan'}
-            <AssistantPlan plan={b.plan} />
-          {:else if b.type === 'confirm'}
-            <AssistantConfirm confirm={b.confirm} {conversationId} />
-          {:else if b.type === 'notice' && b.level === 'error' && (b.detail || b.canRetry)}
-            <AssistantErrorNotice text={b.text} detail={b.detail} canRetry={b.canRetry} {last} />
-          {:else if b.type === 'notice'}
-            <Alert variant={b.level} text={b.text} compact />
-          {:else if b.type === 'access'}
-            <AssistantAccessRequest request={b.request} {conversationId} />
-          {:else if b.type === 'grant'}
-            <AssistantAccessGrant grant={b.grant} />
-          {:else if b.type === 'code'}
-            <AssistantCode language={b.language} code={b.code} />
-          {:else if b.type === 'diagram'}
-            <MermaidDiagram source={b.diagram.source} title={b.diagram.title} />
-          {:else if b.type === 'tools'}
-            <div class="tools asst-enter">
-              <Collapsible>
-                {#snippet header({ open })}
-                  <div class="tools-head" class:open>
-                    <ChevronRight size={11} class="chev" />
-                    <span>{summary(b.calls)}</span>
-                  </div>
-                {/snippet}
-                <div class="tools-list">
-                  {#each b.calls as call (call.id)}<AssistantToolRow {call} />{/each}
-                </div>
-              </Collapsible>
-            </div>
-          {:else if b.type === 'proposal'}
-            <AssistantProposal proposal={b.proposal} {conversationId} {mode} />
-          {:else if b.type === 'live_summary'}
-            <AssistantLiveSummary summary={b.summary} />
-          {:else if b.type === 'screenshot'}
-            <AssistantImage path={b.shot.path} caption={b.shot.caption} {gallery} />
-          {:else if b.type === 'image'}
-            <AssistantImage path={b.image.path} caption={b.image.caption} {gallery} />
-          {:else if b.type === 'agent'}
-            <AssistantAgentCard agent={b.agent} />
-          {/if}
-        {/each}
-      </div>
+  {#each shown as b, i}
+    {#if b.type === 'text'}
+      <ImberTextBlock text={b.text} live={last && store.running} caret={last && store.running && i === shown.length - 1} />
+    {:else if b.type === 'questions'}
+      <AssistantQuestions set={b.set} {conversationId} />
+    {:else if b.type === 'plan'}
+      <AssistantPlan plan={b.plan} />
+    {:else if b.type === 'confirm'}
+      <AssistantConfirm confirm={b.confirm} {conversationId} />
+    {:else if b.type === 'notice' && b.level === 'error' && (b.detail || b.canRetry)}
+      <AssistantErrorNotice text={b.text} detail={b.detail} canRetry={b.canRetry} {last} />
+    {:else if b.type === 'notice'}
+      <Alert variant={b.level} text={b.text} compact />
+    {:else if b.type === 'access'}
+      <AssistantAccessRequest request={b.request} {conversationId} />
+    {:else if b.type === 'grant'}
+      <AssistantAccessGrant grant={b.grant} />
+    {:else if b.type === 'code'}
+      <ImberCode language={b.language} code={b.code} />
+    {:else if b.type === 'diagram'}
+      <MermaidDiagram source={b.diagram.source} title={b.diagram.title} />
+    {:else if b.type === 'tools'}
+      <ImberToolsFold summary={summary(b.calls)} calls={b.calls} />
+    {:else if b.type === 'proposal'}
+      <AssistantProposal proposal={b.proposal} {conversationId} {mode} />
+    {:else if b.type === 'live_summary'}
+      <AssistantLiveSummary summary={b.summary} />
+    {:else if b.type === 'screenshot'}
+      <AssistantImage path={b.shot.path} caption={b.shot.caption} {gallery} />
+    {:else if b.type === 'image'}
+      <AssistantImage path={b.image.path} caption={b.image.caption} {gallery} />
+    {:else if b.type === 'agent'}
+      <AssistantAgentCard agent={b.agent} />
+    {/if}
+  {/each}
 
-      <div class="hover">
-        <IconButton tooltip="Copy" size={22} onclick={() => copyToClipboard(plainText, { successToast: 'Copied' })}><Copy size={12} /></IconButton>
-        <IconButton tooltip="Open as a Markdown document — edit, copy or save" size={22} onclick={() => (docOpen = true)}><FilePen size={12} /></IconButton>
-      </div>
-    </div>
-  {/if}
-</div>
+  {#snippet actions()}
+    <IconButton tooltip="Open as a Markdown document — edit, copy or save" size={22} onclick={() => (docOpen = true)}><FilePen size={12} /></IconButton>
+  {/snippet}
+</ImberMessageFrame>
 
 {#if docOpen}
   <AssistantDocModal text={plainText} onClose={() => (docOpen = false)} />
 {/if}
-
-<style>
-  .user { display: flex; justify-content: flex-end; align-items: flex-start; gap: 4px; }
-  /* The files sit on a line of their own above the bubble, right-aligned like it. */
-  .attached { display: flex; justify-content: flex-end; margin-bottom: 4px; }
-  .user-actions { order: -1; opacity: 0; transition: opacity var(--transition-fast); align-self: center; }
-  .user:hover .user-actions, .user:focus-within .user-actions { opacity: 1; }
-  /* A message with code in it takes the width of the column: code is read wide. */
-  .bubble.rich { flex: 1; min-width: 0; max-width: 100%; }
-  .bubble {
-    margin: 0; max-width: 90%;
-    padding: 8px 12px;
-    border-radius: 14px 14px 4px 14px;
-    background: color-mix(in srgb, var(--accent) 13%, var(--bg-elevated));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent);
-    color: var(--text-primary);
-    font-size: var(--font-size-sm); line-height: 1.5;
-    overflow-wrap: anywhere;
-    user-select: text;
-  }
-
-  .assistant { display: flex; flex-direction: column; gap: 7px; }
-
-  .blocks { display: flex; flex-direction: column; gap: 8px; padding-left: 25px; }
-  /* The answer is the point of the thread, so it is a surface of its own at full contrast — not a grey
-     paragraph between receipts. Line breaks are kept: a model's answer is written in paragraphs and lists. */
-  .text {
-    margin: 0;
-    padding: 10px 13px;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    background: var(--bg-elevated);
-    font-size: var(--font-size-md); line-height: 1.6;
-    color: var(--text-primary);
-    overflow-wrap: anywhere;
-    /* Set by the thread when the panel is expanded: prose keeps a readable line, code stays wide. */
-    max-width: var(--asst-text-max, none);
-  }
-  .bubble { white-space: pre-wrap; }
-  .bubble strong { font-weight: 650; }
-  code {
-    font-family: var(--font-code); font-size: 0.92em;
-    padding: 1px 5px; border-radius: 4px;
-    background: var(--bg-overlay); color: var(--text-primary);
-  }
-
-  .tools-head {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 2px 6px 2px 2px; border-radius: var(--radius-sm);
-    font-size: var(--font-size-xs); color: var(--text-muted);
-    transition: color var(--transition-fast), background var(--transition-fast);
-  }
-  .tools-head:hover { color: var(--text-secondary); background: var(--bg-hover); }
-  .tools-head :global(.chev) { transition: transform var(--transition-fast); }
-  .tools-head.open :global(.chev) { transform: rotate(90deg); }
-  .tools-list { display: flex; flex-direction: column; gap: 3px; padding: 5px 0 2px; }
-
-  /* What you can do with the answer, out of the way until the message is hovered or focused. */
-  .hover {
-    display: flex; align-items: center; gap: 1px; padding-left: 22px;
-    opacity: 0; transform: translateY(-2px);
-    transition: opacity var(--transition-fast), transform var(--transition-fast);
-  }
-  .assistant:hover .hover, .assistant:focus-within .hover { opacity: 1; transform: none; }
-</style>

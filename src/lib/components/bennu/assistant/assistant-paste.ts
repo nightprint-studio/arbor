@@ -9,7 +9,7 @@
  * keystroke to undo; a paragraph of prose turned into one is an irritation every time, so prose, a
  * list, and anything a single line long are left exactly as they came.
  */
-import { isInsideFence } from './assistant-fences';
+import { isInsideFence } from '$lib/components/shared/internal/imber/imber-fences';
 
 /** Beyond this a paste is cut: the box and the request are not the place for a whole log file. */
 export const MAX_PASTE_CHARS = 200_000;

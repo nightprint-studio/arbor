@@ -14,6 +14,8 @@
          *  `var(--token)`). Matches the same option on ContextMenu — useful
          *  for split-button menus that mirror a right-click menu's palette. */
         iconColor?: string;
+        /** Optional CSS colour for the label text itself (an HTTP method keeps its own colour in the list). */
+        labelColor?: string;
         /** If provided, shown as a 22px avatar circle (icon is ignored). */
         avatarUrl?: string;
         /** Second line below the label in smaller text. */
@@ -763,7 +765,7 @@
       {/if}
     {/if}
     <span class="dd-item-body">
-      <span class="dd-item-label">{item.label}</span>
+      <span class="dd-item-label" style:color={item.labelColor}>{item.label}</span>
       {#if item.subtitle}<span class="dd-item-sub">{item.subtitle}</span>{/if}
     </span>
     {#if item.meta}<span class="dd-item-meta" style:color={item.metaColor}>{item.meta}</span>{/if}

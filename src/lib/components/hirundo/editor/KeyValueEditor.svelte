@@ -8,9 +8,12 @@
    * what a diff will show. A last, empty row is always there to type into.
    */
   import { untrack } from 'svelte';
-  import { Trash2, Lock } from 'lucide-svelte';
+  import { Trash2, Lock, ListChecks } from 'lucide-svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
+  import ToggleButton from '$lib/components/shared/ui/ToggleButton.svelte';
   import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
+  import SuggestInput, { type SuggestResult } from '$lib/components/shared/ui/SuggestInput.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Textarea from '$lib/components/shared/ui/Textarea.svelte';
   import { kvFormat, kvParse } from '$lib/ipc/hirundo';
@@ -21,17 +24,30 @@
   interface Props {
     rows: KeyValue[];
     onchange: (rows: KeyValue[]) => void;
-    /** Show the bulk-edit text instead of the table. */
+    /** Start in the bulk-edit text instead of the table (the window's Ctrl+Shift+B drives this). */
     bulk?: boolean;
+    /** Called when the header toggle is used, for a caller that keeps the mode itself; without it the table keeps its own. */
+    onToggleBulk?: () => void;
     keyPlaceholder?: string;
     valuePlaceholder?: string;
     /** Rows may be marked `@secret` (variables only). */
     allowSecret?: boolean;
     /** The description column (params and variables have one; form fields need not). */
     describe?: boolean;
+    /** Completions for the key field and for the value field (given its row's key). Without them the fields are plain. */
+    suggestKey?: (text: string, caret: number) => SuggestResult | null;
+    suggestValue?: (key: string, text: string, caret: number) => SuggestResult | null;
   }
 
-  let { rows, onchange, bulk = false, keyPlaceholder = 'Key', valuePlaceholder = 'Value', allowSecret = false, describe = true }: Props = $props();
+  let { rows, onchange, bulk: bulkProp = false, onToggleBulk, keyPlaceholder = 'Key', valuePlaceholder = 'Value', allowSecret = false, describe = true, suggestKey, suggestValue }: Props = $props();
+
+  // The mode is the table's own, followed from the caller when the caller drives it.
+  let bulkLocal = $state(false);
+  $effect(() => { bulkLocal = bulkProp; });
+  const bulk = $derived(bulkLocal);
+  function toggleBulk() {
+    if (onToggleBulk) onToggleBulk(); else bulkLocal = !bulkLocal;
+  }
 
   // Always one empty row at the end to type into; it is not part of the saved rows until it has a key.
   const shown = $derived([...rows, blankRow()]);
@@ -73,12 +89,19 @@
   });
 </script>
 
+<div class="kv-head">
+  <span class="kv-title">{bulk ? 'Bulk edit' : 'Table'}</span>
+  <ToggleButton pressed={bulk} icon={ListChecks} title={bulk ? 'Back to the table' : 'Bulk edit — one entry per line, or paste a block'} shortcut="Ctrl+Shift+B" onclick={toggleBulk} />
+</div>
 {#if bulk}
   <div class="kv-bulk">
     <p class="kv-hint">One entry per line: <code>key: value</code>, <code>k=v&amp;k2=v2</code>, or paste a block of headers. Start a line with <code>//</code> to switch it off.</p>
     <Textarea bind:value={text} minRows={10} maxRows={26} framed ariaLabel="Bulk edit" />
   </div>
 {:else}
+  {#if rows.length === 0}
+    <p class="kv-empty">Nothing here yet. Type in the empty row, or <Button variant="link" size="xs" onclick={toggleBulk}>paste as bulk</Button> — one entry per line.</p>
+  {/if}
   <div class="kv" role="table">
     {#each shown as row, i (i)}
       {@const last = i === shown.length - 1}
@@ -86,10 +109,18 @@
         <span class="kv-check">
           {#if !last}<Checkbox checked={row.enabled} ariaLabel="Enabled" onchange={(v) => patch(i, { enabled: v })} />{/if}
         </span>
-        <div class="kv-cell"><Input value={row.key} placeholder={keyPlaceholder} size="sm" quiet oninput={(v) => patch(i, { key: v })} /></div>
+        <div class="kv-cell">
+          {#if suggestKey}
+            <SuggestInput value={row.key} placeholder={keyPlaceholder} quiet suggest={suggestKey} oninput={(v) => patch(i, { key: v })} />
+          {:else}
+            <Input value={row.key} placeholder={keyPlaceholder} size="sm" quiet oninput={(v) => patch(i, { key: v })} />
+          {/if}
+        </div>
         <div class="kv-cell">
           {#if allowSecret && row.value === SECRET_MARK}
             <span class="kv-secret"><Lock size={12} /> Secret — kept in the keyring</span>
+          {:else if suggestValue}
+            <SuggestInput value={row.value} placeholder={valuePlaceholder} quiet suggest={(t, c) => suggestValue(row.key, t, c)} oninput={(v) => patch(i, { value: v })} />
           {:else}
             <Input value={row.value} placeholder={valuePlaceholder} size="sm" quiet oninput={(v) => patch(i, { value: v })} />
           {/if}
@@ -109,6 +140,9 @@
 {/if}
 
 <style>
+  .kv-empty { margin: 4px 12px 0; font-size: var(--font-size-xs); color: var(--text-muted); }
+  .kv-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px 2px; }
+  .kv-title { font-size: var(--font-size-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
   .kv { display: flex; flex-direction: column; padding: 4px 8px 12px; }
   .kv-row {
     display: grid; align-items: center; gap: 6px; padding: 1px 0;

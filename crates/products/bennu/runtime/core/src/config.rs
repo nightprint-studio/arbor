@@ -59,6 +59,14 @@ pub struct BennuConfig {
     pub show_problem_markers: bool,
     /// Tint the line the caret sits on, and its gutter number. `true` by default.
     pub highlight_current_line: bool,
+    /// The caret's shape: `"line"` (default), `"block"` or `"underline"`. Anything else is read as `"line"`.
+    pub caret_style: String,
+    /// The line caret's thickness: `"thin"` (1px), `"normal"` (2px, default) or `"thick"` (3px).
+    pub caret_width: String,
+    /// `"standard"` (default), `"smooth"` (fades) or `"solid"` (never blinks).
+    pub caret_blink: String,
+    /// `"auto"` (default, the theme's caret colour), `"accent"`, or `"#rrggbb"`.
+    pub caret_color: String,
     /// Install code folding at all — the gutter arrows and the fold commands. `true` by default.
     pub folding_enabled: bool,
     /// What a new assistant conversation starts with, and how far it may reach.
@@ -290,6 +298,20 @@ pub struct BennuConfig {
     pub regex_saved: Vec<RegexPattern>,
     /// The patterns tried most recently in the Regex Tester, newest first. Capped by the frontend.
     pub regex_recent: Vec<RegexPattern>,
+    /// Structural-search queries the user saved as templates.
+    pub ssr_saved: Vec<SsrQuery>,
+    /// The structural-search queries run most recently, newest first. Capped by the frontend.
+    pub ssr_recent: Vec<SsrQuery>,
+    /// Colour `TODO` / `FIXME` … in comments, by the keyword's kind. The TODO tool window scans for
+    /// the same words (`comment_marker_keywords`), so the two always agree.
+    pub comment_markers: bool,
+    /// The words that mark a comment: the editor colours them and the TODO window lists them.
+    /// Letters, digits and `_` only; an empty list falls back to the built-in eight.
+    pub comment_marker_keywords: Vec<String>,
+    /// Whether a marker must be written exactly as listed (`TODO`, not `todo`).
+    pub comment_marker_case_sensitive: bool,
+    /// A dot in the gutter on each line that holds a marker. Off by default: the scrollbar already points to them.
+    pub comment_marker_gutter: bool,
     /// The build the split-button runs by default (and on Ctrl+F9): `"mvn"` (Maven compile) or
     /// `"validate"` (whole-project validation without compiling). Empty is treated as `"mvn"`.
     pub preferred_build_type: String,
@@ -870,6 +892,18 @@ pub struct LibraryBeansConfig {
 /// opt-out setting existed would silently arrive with the feature disabled.
 /// A regular expression kept by the Regex Tester, with the test text and replacement it was tried
 /// against. `flavour` is `"java"`, `"js"` or `"rust"`; `flags` are that flavour's flag letters.
+/// A structural-search query kept in the config: a saved template (named) or a recent run (no name).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SsrQuery {
+    /// The template's name; empty for a recent run.
+    pub title: String,
+    pub query: String,
+    pub replacement: String,
+    /// `"java"`, `"jsp"` or `"jsp-java"`.
+    pub dialect: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RegexPattern {
@@ -927,6 +961,10 @@ impl Default for BennuConfig {
             show_line_numbers: true,
             show_problem_markers: false,
             highlight_current_line: true,
+            caret_style: "line".to_string(),
+            caret_width: "normal".to_string(),
+            caret_blink: "standard".to_string(),
+            caret_color: "auto".to_string(),
             folding_enabled: true,
             assistant: AssistantConfig::default(),
             fold_block_comments: false,
@@ -983,6 +1021,15 @@ impl Default for BennuConfig {
             regex_detection: "context".to_string(),
             regex_saved: Vec::new(),
             regex_recent: Vec::new(),
+            ssr_saved: Vec::new(),
+            ssr_recent: Vec::new(),
+            comment_markers: true,
+            comment_marker_keywords: ["TODO", "FIXME", "HACK", "XXX", "NOTE", "BUG", "OPTIMIZE", "DEPRECATED"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            comment_marker_case_sensitive: true,
+            comment_marker_gutter: false,
             preferred_build_type: "mvn".to_string(),
             validate_on_open: true,
             // Empty = whichever adapter is installed, preferring the one that renders Rust's own
@@ -1164,11 +1211,31 @@ pub fn workspace_path() -> PathBuf {
 /// (top-level `name` / `active_project` / `projects`). When the new [`BennuWorkspaces`] parse
 /// yields no workspaces, we retry as the legacy shape and wrap the single workspace, so the last
 /// session is preserved across the upgrade instead of silently dropped.
+///
+/// A file that is missing, unreadable, unparseable **or empty** falls back to `workspace.toml.bak`,
+/// the last good copy [`save_workspaces`] keeps: a session torn in half by a crash mid-write must
+/// restore the one before it, not an empty window that the first save then makes permanent.
 pub fn load_workspaces() -> BennuWorkspaces {
-    match std::fs::read_to_string(workspace_path()) {
-        Ok(text) => parse_workspaces(&text),
-        Err(_) => BennuWorkspaces::default(),
-    }
+    load_workspaces_from(&workspace_path())
+}
+
+/// The sibling file holding the last good store (`workspace.toml` → `workspace.toml.bak`).
+fn workspace_backup_path(path: &std::path::Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".bak");
+    PathBuf::from(name)
+}
+
+/// A store read from `path`, or `None` when the file is absent, unparseable or holds no workspace.
+fn read_workspaces(path: &std::path::Path) -> Option<BennuWorkspaces> {
+    let text = std::fs::read_to_string(path).ok()?;
+    Some(parse_workspaces(&text)).filter(|s| !s.workspaces.is_empty())
+}
+
+fn load_workspaces_from(path: &std::path::Path) -> BennuWorkspaces {
+    read_workspaces(path)
+        .or_else(|| read_workspaces(&workspace_backup_path(path)))
+        .unwrap_or_default()
 }
 
 /// Pure parse of a `workspace.toml` body into a [`BennuWorkspaces`], applying the legacy
@@ -1194,13 +1261,33 @@ fn parse_workspaces(text: &str) -> BennuWorkspaces {
 }
 
 /// Persist the workspace store (pretty TOML), creating the dir if needed.
+///
+/// **Atomic and serialised.** Requests reach the backend on a worker thread each, so two saves in
+/// quick succession used to be able to interleave, and a plain `fs::write` truncates before it
+/// writes — a kill or crash in between left an empty or half file, which read back as "no
+/// session". Now: one writer at a time, the new text goes to a temp file and is renamed over the
+/// old one, and the previous good file is kept as `workspace.toml.bak` first.
 pub fn save_workspaces(store: &BennuWorkspaces) -> Result<(), String> {
-    let path = workspace_path();
+    static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = WRITING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    save_workspaces_to(&workspace_path(), store)
+}
+
+fn save_workspaces_to(path: &std::path::Path, store: &BennuWorkspaces) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let text = toml::to_string_pretty(store).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| e.to_string())
+    // Keep the file we are about to replace, but only if it is itself a good one: copying a torn
+    // file over the backup would throw away the one copy that still reads.
+    if read_workspaces(path).is_some() {
+        let _ = std::fs::copy(path, workspace_backup_path(path));
+    }
+    let mut tmp_name = path.as_os_str().to_owned();
+    tmp_name.push(".tmp");
+    let tmp = PathBuf::from(tmp_name);
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -1237,6 +1324,46 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    /// A temp directory that cleans up after itself.
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("bennu-ws-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Scratch(dir)
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_torn_workspace_file_restores_the_previous_save() {
+        let dir = Scratch::new("torn");
+        let path = dir.0.join("workspace.toml");
+        let first = BennuWorkspaces { active_id: "a".into(), workspaces: vec![ws("a", "One", &["/p/one"])] };
+        let second = BennuWorkspaces { active_id: "a".into(), workspaces: vec![ws("a", "One", &["/p/one", "/p/two"])] };
+        save_workspaces_to(&path, &first).unwrap();
+        save_workspaces_to(&path, &second).unwrap();
+        // A crash mid-write: the live file is left empty.
+        std::fs::write(&path, "").unwrap();
+        let read = load_workspaces_from(&path);
+        assert_eq!(read.workspaces.len(), 1, "the backup is read instead of an empty store");
+        assert_eq!(read.workspaces[0].projects.len(), 1, "it is the save before the last one");
+        // And the next save does not overwrite the good backup with the torn file.
+        save_workspaces_to(&path, &second).unwrap();
+        assert_eq!(load_workspaces_from(&path).workspaces[0].projects.len(), 2);
+    }
+
+    #[test]
+    fn a_missing_workspace_file_is_an_empty_store() {
+        let dir = Scratch::new("missing");
+        assert!(load_workspaces_from(&dir.0.join("workspace.toml")).workspaces.is_empty());
     }
 
     /// A workspace with **no projects** round-trips.

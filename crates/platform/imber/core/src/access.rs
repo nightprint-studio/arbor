@@ -26,6 +26,8 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 /// The most files one delete call may remove without a question, even where deleting is otherwise free.
 /// A directory delete counts the files inside it.
 pub const MAX_UNASKED_DELETE_FILES: usize = 50;
@@ -271,6 +273,42 @@ impl Policy {
         }
     }
 
+    /// What this policy lets a **scan** reach, as plain data a backend can apply file by file.
+    ///
+    /// A tool that walks a whole tree (a structural search) cannot ask [`Self::check`] about every file it
+    /// meets — a question per file is not a question — and cannot be left to look at everything and be
+    /// stopped at the end either: a count or a `group` table built from files the policy forbids has already
+    /// told the model about them. So the walk is given this and **skips** what it does not admit.
+    ///
+    /// Only what is allowed without asking is in it: a folder the user was never asked about is not
+    /// readable here, and neither is a secret file (reading one asks). With `write`, only what could also be
+    /// changed — nothing at all when editing is off, and read-only grants left out.
+    pub fn scan_filter(&self, write: bool) -> AccessFilter {
+        if write && !self.allow_edits {
+            return AccessFilter::default();
+        }
+        let mut roots: Vec<PathBuf> = Vec::new();
+        let mut files: Vec<PathBuf> = Vec::new();
+        match self.scope {
+            Scope::File => files.extend(self.file.clone()),
+            Scope::Project => roots.extend(self.project_root.clone()),
+            Scope::Workspace | Scope::Disk => {
+                roots.extend(self.project_root.clone());
+                roots.extend(self.workspace_roots.iter().cloned());
+            }
+        }
+        roots.extend(self.extra_folders.iter().cloned());
+        if self.allow_temp {
+            roots.extend(self.temp_dirs.iter().cloned());
+        }
+        roots.extend(self.grants.iter().filter(|g| !write || g.write).map(|g| g.root.clone()));
+        files.extend(self.run_files.iter().cloned());
+        AccessFilter {
+            roots: roots.iter().map(|r| normalize(r)).collect(),
+            files: files.iter().map(|f| normalize(f)).collect(),
+        }
+    }
+
     pub fn scope_words(&self) -> &'static str {
         match self.scope {
             Scope::File => "this file only",
@@ -278,6 +316,29 @@ impl Policy {
             Scope::Workspace => "the projects in this workspace",
             Scope::Disk => "anywhere on disk",
         }
+    }
+}
+
+/// The files a scan may read (or rewrite): whole folders, and single files. Empty admits nothing.
+///
+/// Built by [`Policy::scan_filter`]; applied by whatever walks the tree. A path that is a secret file or
+/// sits under `.git` is never admitted, whatever folder it is in.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccessFilter {
+    pub roots: Vec<PathBuf>,
+    pub files: Vec<PathBuf>,
+}
+
+impl AccessFilter {
+    pub fn admits(&self, path: &Path) -> bool {
+        if !path.is_absolute() {
+            return false;
+        }
+        let path = normalize(path);
+        if has_component(&path, ".git") || is_secret_file(&path) {
+            return false;
+        }
+        self.roots.iter().any(|r| within(&path, r)) || self.files.iter().any(|f| same(&path, f))
     }
 }
 
@@ -387,6 +448,55 @@ mod tests {
 
     fn check(scope: Scope, path: &str, op: Op) -> Decision {
         policy(scope).check(&p(path), op)
+    }
+
+    // ── what a scan may reach ──────────────────────────────────────────────────
+
+    #[test]
+    fn a_scan_stays_inside_the_scope_and_skips_secrets() {
+        let f = policy(Scope::Project).scan_filter(false);
+        assert!(f.admits(&p("work/app/src/B.java")));
+        assert!(!f.admits(&p("work/lib/Other.java")), "another project of the workspace is outside `this project`");
+        assert!(!f.admits(&p("work/app/.env")), "a secret is never scanned");
+        assert!(!f.admits(&p("work/app/.git/config")));
+        assert!(f.admits(&p("scratch/notes/n.txt")), "the user's extra folders are always inside");
+    }
+
+    #[test]
+    fn a_workspace_scope_reaches_every_project() {
+        let f = policy(Scope::Workspace).scan_filter(false);
+        assert!(f.admits(&p("work/lib/Other.java")));
+        assert!(!f.admits(&p("elsewhere/X.java")));
+    }
+
+    #[test]
+    fn the_file_scope_scans_one_file() {
+        let f = policy(Scope::File).scan_filter(false);
+        assert!(f.admits(&p("work/app/src/A.java")));
+        assert!(!f.admits(&p("work/app/src/B.java")));
+    }
+
+    #[test]
+    fn a_read_only_grant_is_scanned_but_not_rewritten() {
+        let mut policy = policy(Scope::Project);
+        policy.grant(p("work/lib"), false);
+        assert!(policy.scan_filter(false).admits(&p("work/lib/Other.java")));
+        assert!(!policy.scan_filter(true).admits(&p("work/lib/Other.java")));
+        policy.grant(p("work/lib"), true);
+        assert!(policy.scan_filter(true).admits(&p("work/lib/Other.java")));
+    }
+
+    #[test]
+    fn nothing_is_rewritten_while_editing_is_off() {
+        let mut policy = policy(Scope::Project);
+        policy.allow_edits = false;
+        assert!(!policy.scan_filter(true).admits(&p("work/app/src/B.java")));
+        assert!(policy.scan_filter(false).admits(&p("work/app/src/B.java")), "reading is not affected");
+    }
+
+    #[test]
+    fn a_relative_path_is_never_admitted() {
+        assert!(!policy(Scope::Project).scan_filter(false).admits(Path::new("src/B.java")));
     }
 
     #[test]

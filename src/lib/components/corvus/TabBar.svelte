@@ -176,7 +176,7 @@
      since the snippet receives `active` via the parent class on .tabs-tab. */
 
   .tabbar-wrap {
-    height: 32px;
+    height: var(--tab-strip-height);
     background: var(--bg-base);
     flex-shrink: 0;
     position: relative;

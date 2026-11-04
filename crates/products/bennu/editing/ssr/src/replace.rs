@@ -139,6 +139,7 @@ pub fn render(template: &str, hit: &Hit) -> String {
         };
         let inner: String = chars[i + 1..close].iter().collect();
         let name = inner.trim().trim_end_matches("...").trim();
+        let before = out.len();
         match hit.capture(name) {
             Some(capture) => out.push_str(&capture.text),
             // Not a hole left open: a `$` pair that names nothing is text the user typed, and
@@ -147,6 +148,13 @@ pub fn render(template: &str, hit: &Hit) -> String {
             None => {}
         }
         i = close + 1;
+        // A hole that matched nothing — `$mods...$` on a declaration without modifiers — takes the space
+        // that separated it from the next word with it, or `$mods$ int x;` would come out as ` int x;`.
+        if out.len() == before && (out.is_empty() || out.ends_with(char::is_whitespace)) {
+            while matches!(chars.get(i), Some(' ' | '\t')) {
+                i += 1;
+            }
+        }
     }
     out
 }
@@ -222,6 +230,18 @@ mod tests {
     fn a_run_that_matched_nothing_renders_as_nothing() {
         let h = hit((0, 0), &[]);
         assert_eq!(render("f($args...$)", &h), "f()");
+    }
+
+    /// A hole that matched nothing takes the space after it, or removing the modifiers from a
+    /// declaration would leave it indented by one.
+    #[test]
+    fn an_empty_hole_takes_its_trailing_space_with_it() {
+        let none = hit((0, 0), &[("mods", ""), ("t", "int")]);
+        assert_eq!(render("$mods...$ $t$ x;", &none), "int x;");
+        let some = hit((0, 0), &[("mods", "@A"), ("t", "int")]);
+        assert_eq!(render("$mods...$ $t$ x;", &some), "@A int x;");
+        // Between two words exactly one space is left.
+        assert_eq!(render("a $mods...$ b", &none), "a b");
     }
 
     /// The check that stops a silent wrong rewrite: `$b$` would have rendered as empty, giving

@@ -108,6 +108,10 @@ fn bennu_inlay_hints(_ctx: &BennuState, args: InlayArgs) -> Result<Vec<InlayWire
 pub struct UsageCountArgs {
     pub file: String,
     pub source: String,
+    /// For a **library source view** — a file under no project: the project file it was opened from,
+    /// whose index holds the uses. Absent for an ordinary file.
+    #[serde(default)]
+    pub origin_file: Option<String>,
 }
 
 /// One declaration's use count, on the wire.
@@ -144,15 +148,25 @@ fn bennu_usage_counts(
     if !crate::intel::is_java_file(&args.file) {
         return Ok(Vec::new());
     }
-    Ok(IndexService::global()
-        .usage_marks(&args.file, &args.source)
+    let service = IndexService::global();
+    // A library view belongs to no project, so its own path cannot pick the index — the origin does.
+    // What the index knows about a library is the uses of its TYPES (the project's own references to
+    // them); a count of zero, or anything about its members, is not a fact about the program, so
+    // only types with at least one use are drawn there and nothing is ever greyed out.
+    let library = args.origin_file.is_some() && service.root_for_file(&args.file).is_none();
+    let marks = match (&args.origin_file, library) {
+        (Some(origin), true) => service.usage_marks_from(origin, &args.file, &args.source),
+        _ => service.usage_marks(&args.file, &args.source),
+    };
+    Ok(marks
         .into_iter()
+        .filter(|m| !library || (m.kind.to_string() == "type" && m.count > 0))
         // A declaration a framework calls, that nothing else does, is dropped rather than sent
         // with an explanation attached. "no usages · the test runner runs it" above every method
         // of a test file is true, useless, and the reason the editor was in the way.
         .filter(|m| !m.is_silent())
         .map(|m| {
-            let unused = m.is_unused();
+            let unused = !library && m.is_unused();
             UsageCountWire {
                 decl: m.decl,
                 start: m.start,

@@ -187,6 +187,8 @@ export interface AddParameterRequest {
   default_value?: string;
   /** The index of the parameter it goes before. Omitted: last. */
   before?: number;
+  /** Which overload a call means, an index into the previous answer's `overloads`. Omitted: ask. */
+  overload?: number;
 }
 
 /** The preview of adding a parameter — a rename-shaped edit list, plus the positions on offer. */
@@ -195,6 +197,12 @@ export interface AddParameterPreview {
   preview: RenamePreview;
   /** The parameters the method takes today, each written `Type name`. */
   parameters: string[];
+  /** The method's name. */
+  method?: string;
+  /** Caret on a call that several signatures could take: each, written `name(Type a)`. Choose one. */
+  overloads?: string[];
+  /** The parameter the caret is inside, when it is in a declaration's parameter list. */
+  caret_parameter?: number | null;
 }
 
 /**

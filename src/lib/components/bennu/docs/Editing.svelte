@@ -129,6 +129,17 @@
   recognised, in any case. Anything written after the marker becomes the callout's title.
 </p>
 
+<h3>Formatting</h3>
+<p>
+  In the live preview a thin strip above the text formats what the caret is in: bold, italic, strikethrough, highlight,
+  inline code, a heading level, quote, bulleted / numbered / task list, link and code block. The buttons are
+  <strong>toggles that follow the caret</strong> — bold is drawn pressed when the caret is inside bold text, and pressing it
+  again takes the bold off. The same actions have chords: <kbd>Alt</kbd>+<kbd>B</kbd> bold, <kbd>Alt</kbd>+<kbd>I</kbd> italic,
+  <kbd>Alt</kbd>+<kbd>S</kbd> strikethrough, <kbd>Alt</kbd>+<kbd>H</kbd> highlight, <kbd>Alt</kbd>+<kbd>C</kbd> code,
+  <kbd>Alt</kbd>+<kbd>L</kbd> link, <kbd>Alt</kbd>+<kbd>Q</kbd> quote (again: callout, again: plain) and
+  <kbd>Alt</kbd>+<kbd>T</kbd> task.
+</p>
+
 <h3>Tables</h3>
 <p>
   <strong>A table stays a table.</strong> Click a cell and you edit that cell — only the cell you are in shows its markdown,
@@ -217,6 +228,16 @@
     <div class="fc-eyebrow">Settings → Editor → Appearance</div>
     <div class="fc-title">Appearance</div>
     <div class="fc-desc">The font size, the line-number gutter, the tint on the caret's line, word wrap, and spaces and tabs drawn as glyphs — each applied to the file already in front of you.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow">Palette → Convert Case · <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd></div>
+    <div class="fc-title">Convert case</div>
+    <div class="fc-desc">Rewrite the selection, or the name at the caret (each cursor of a multi-cursor selection), as camelCase, PascalCase, snake_case, SCREAMING_SNAKE_CASE, kebab-case, lowercase, UPPERCASE or Title Case — from the palette, the editor's context menu, or the shortcut, which moves it one step round the first five. Words break at separators, humps and the end of an acronym (<code>HTTPServer</code> → <code>http_server</code>); digits stay with their word. The result stays selected, so pressing again goes on. It is a text change, not a rename: use <em>Rename</em> to change a declared name everywhere.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow">Settings → Editor → Caret</div>
+    <div class="fc-title">The caret</div>
+    <div class="fc-desc">A two-pixel line in the theme's caret colour, with a hairline halo so it stands out from the tinted current line and the selection. You can make it a block or an underline, thin or thick, blink smoothly or not at all, and take the accent or a <code>#rrggbb</code> colour. Every cursor of a multi-cursor selection looks the same. The shared code editors elsewhere in the app use the default look.</div>
   </div>
   <div class="feature-card">
     <div class="fc-eyebrow">Always on</div>
@@ -478,6 +499,17 @@ import static org.junit.Assert.assertEquals;`, 'java')}</code></pre>
   A line with a problem is underlined, and hovering the underline says what is wrong. A marker in the gutter beside the line is optional
   (Settings › Editor › <strong>Show problem markers in the gutter</strong>, off by default): without it the gutter keeps the same width while errors come and
   go, and the line numbers reserve room for four digits so the text does not shift when a file crosses 100 or 1,000 lines.
+</p>
+<h2>TODO and FIXME in comments</h2>
+<p>
+  The words <code>TODO</code>, <code>FIXME</code>, <code>HACK</code>, <code>XXX</code>, <code>NOTE</code>, <code>BUG</code>, <code>OPTIMIZE</code> and
+  <code>DEPRECATED</code> are bold and tinted in their own colour where they are written in a comment — in Java, JavaScript / TypeScript, Rust, XML / HTML /
+  JSP, YAML, SQL, shell, properties and the other languages whose comments Bennu can read, and never inside a string. <code>TODO(name):</code> counts too.
+  Each spot is also marked on the scrollbar overview, and optionally by a dot in the gutter.
+</p>
+<p>
+  <strong>Settings › Editor › Comment markers</strong> switches this off, edits the list of words, decides whether case matters and turns the gutter dot on.
+  The TODO tool window scans for the same words, so what is coloured is what it lists.
 </p>
 <h3>Change markers</h3>
 <p>

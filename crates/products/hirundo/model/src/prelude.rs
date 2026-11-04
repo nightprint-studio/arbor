@@ -13,7 +13,7 @@ pub use crate::format::{
 pub use crate::httpfile::{diagnose as diagnose_http, file_variables, Diag as HttpDiag, dynamic_names, dynamic_value, dynamic_vars, parse_http_env, parse_http_file, to_http_file, HttpEntry};
 pub use crate::kv::{enabled_pairs, parse_text as parse_kv_text, percent_decode, percent_encode, to_text as kv_to_text, KeyValue, SECRET_MARK};
 pub use crate::method::Method;
-pub use crate::prepare::{prepare, Inherited, Prepared};
+pub use crate::prepare::{prepare, Inherited, Prepared, PATH_PARAM_PREFIX};
 pub use crate::request::{split_query, Body, BodyKind, HttpRequest, Settings, DEFAULT_TIMEOUT_MS};
 pub use crate::soap::{add_username_token, fault_of, from_headers as soap_from_headers, pretty_xml, protocol_headers as soap_protocol_headers, sample_envelope, Fault, SoapSettings, SoapVersion};
 pub use crate::openapi::{example as openapi_example, parse as parse_openapi, Operation as OpenApiOperation, Plan as OpenApiPlan, UNTAGGED};

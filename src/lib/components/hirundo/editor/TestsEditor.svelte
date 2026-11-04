@@ -8,10 +8,14 @@
   import Collapsible from '$lib/components/shared/ui/Collapsible.svelte';
   import { languageForPath } from '$lib/components/bennu/languages';
   import { hirundoStore, type RequestTab } from '$lib/stores/hirundo/workspace.svelte';
+  import type { Schema } from '$lib/types/hirundo';
+  import { assertionCompletion } from './schema';
 
-  let { tab }: { tab: RequestTab } = $props();
+  let { tab, responseSchema = null }: { tab: RequestTab; responseSchema?: Schema | null } = $props();
 
-  const language = languageForPath('tests.txt');
+  // `body.` completes with the fields of the endpoint's return type, when Bennu knows it.
+  const base = languageForPath('tests.txt');
+  const language = { ...base, intel: { ...(base.intel ?? {}), completion: assertionCompletion(() => responseSchema) } };
   let help = $state(false);
 </script>
 

@@ -64,9 +64,13 @@ export { mermaidLanguageExtension, mermaidMode } from './mermaid-mode';
 export { wgslLanguageExtension, wgslMode } from './wgsl-mode';
 export { javascriptStream } from './js-mode';
 export {
-  createCodeEditorExtensions, refTextAt, preferencesCompartment,
+  createCodeEditorExtensions, refTextAt, preferencesCompartment, COMPLETION_IMPORT_EVENT,
   type CodeEditorExtensionsOptions, type CodeEditorPreferences, type CompletionPreferences,
 } from './extensions';
+export {
+  CARET_STYLES, CARET_WIDTHS, CARET_BLINKS,
+  type CaretPreferences, type CaretStyle, type CaretWidth, type CaretBlink,
+} from './caret';
 export { intellijEditingKeymap } from './intellij-keymap';
 export { createHighlightPlugin, streamTokenSpans, makeByteToU16, makeU16ToByte, parserReady } from './highlight';
 // Tab stops of an inserted completion — see `snippet-stops.ts` for why this is not CodeMirror's own

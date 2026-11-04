@@ -11,7 +11,7 @@ import {
   PRODUCT_WINDOW_OPENERS, closeProductWindow, listRunningProducts, openLauncherWindow,
 } from '$lib/ipc/app';
 import { openWorkspaceWindow } from '$lib/ipc/window';
-import { setOpenIntent } from '$lib/ipc/recents';
+import { setOpenIntent, type OpenContext } from '$lib/ipc/recents';
 import { windowModeStore } from '$lib/stores/window-mode.svelte';
 import { SURFACES, surfaceStore, type SurfaceId } from '$lib/stores/surfaces.svelte';
 
@@ -87,9 +87,14 @@ export async function restartProduct(id: string): Promise<void> {
  * window openers take no arguments, and the shell boots long after the click.
  * If that product is already open the shell reacts to the same intent through
  * its focus path, so a second click on a recent still lands on the project.
+ *
+ * This is also the one door for every "go to Corvus" from another product (Bennu's status bar, the File
+ * Explorer, history / blame): it follows the window mode, so with Corvus already a tab of the container it is
+ * that tab that comes forward, and a window is built only when Corvus is not open anywhere. `context` says
+ * where to land (a commit, a branch).
  */
-export async function openProjectIn(product: string, path: string): Promise<void> {
-  await setOpenIntent(product, path);
+export async function openProjectIn(product: string, path: string, context?: OpenContext): Promise<void> {
+  await setOpenIntent(product, path, context);
   await openProduct(product);
 }
 

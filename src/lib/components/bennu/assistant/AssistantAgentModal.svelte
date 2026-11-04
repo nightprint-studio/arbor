@@ -21,8 +21,8 @@
   import { bennuAgentsStore } from '$lib/stores/bennu/assistant-agents.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
   import AssistantMessage from './AssistantMessage.svelte';
-  import AssistantUserText from './AssistantUserText.svelte';
-  import AssistantWho from './AssistantWho.svelte';
+  import ImberUserText from '$lib/components/shared/internal/imber/ImberUserText.svelte';
+  import ImberWho from '$lib/components/shared/internal/imber/ImberWho.svelte';
   import { elapsedLabel, statusInfo, toolsLabel } from './assistant-agents';
   import { formatCost } from './assistant-format';
   import type { AssistantMessage as Message } from './assistant-types';
@@ -109,10 +109,10 @@
       {:else}
         <!-- What main asked, as the message it was. -->
         <section class="turn" in:fly={{ y: 8, duration: animStore.dFast, easing: cubicOut }}>
-          <AssistantWho name={mainWho.name} kind={mainWho.kind} badge={mainWho.badge} when={startedAt} />
+          <ImberWho name={mainWho.name} kind={mainWho.kind} badge={mainWho.badge} when={startedAt} />
           <div class="ask">
             <div class="ask-to"><ArrowRight size={11} /> to <strong>{agent?.title}</strong></div>
-            <div class="ask-text"><AssistantUserText text={agent?.task ?? ''} /></div>
+            <div class="ask-text"><ImberUserText text={agent?.task ?? ''} /></div>
           </div>
         </section>
 

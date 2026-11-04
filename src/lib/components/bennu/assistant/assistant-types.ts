@@ -27,20 +27,9 @@ export interface AssistantModel {
   outputPrice: number;
 }
 
-/** What a tool call did, which is what picks its icon. `refactor` is one of Bennu's own — rename, add
- *  parameter, change case — planned through the refactoring engine rather than typed out as text. */
-export type ToolKind = 'read' | 'search' | 'edit' | 'validate' | 'refactor';
-
-export interface ToolCall {
-  id: string;
-  kind: ToolKind;
-  /** `Read BandoService.java`. */
-  label: string;
-  /** What came back, in a few words: `412 lines`, `3 matches`. */
-  detail: string;
-  /** False when it was refused or failed; absent in conversations saved before this was recorded. */
-  ok?: boolean;
-}
+import type { ToolCall, ToolKind } from '$lib/components/shared/internal/imber/imber-types';
+/** A tool call and its icon kind are the shared widgets' own types; `refactor` is one of Bennu's. */
+export type { ToolCall, ToolKind };
 
 export interface ProposedFile {
   path: string;

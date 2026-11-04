@@ -11,12 +11,12 @@
    * stays short and nothing is more than two clicks away.
    */
   import {
-    ArrowUp, Square, Eye, FlaskConical, ChevronDown, FileText, TextCursorInput, ShieldCheck, Zap, Lock, HardDrive,
+    ArrowUp, Eye, FlaskConical, ChevronDown, FileText, TextCursorInput, ShieldCheck, Zap, Lock, HardDrive,
     Gauge, MessageSquare, SlidersHorizontal, Ruler, BookText, ListTodo, WandSparkles, GitBranch, Copy, Ban, Bot, Hammer, Scale, Network, Paperclip,
   } from 'lucide-svelte';
   import { decisionInfo, effectiveDecisionLevel } from './assistant-decision';
   import { subagentsLabel } from './assistant-agents';
-  import Textarea from '$lib/components/shared/ui/Textarea.svelte';
+  import ImberComposerFrame from '$lib/components/shared/internal/imber/ImberComposerFrame.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
@@ -341,128 +341,121 @@
   }
 </script>
 
-<div class="composer">
-  <div
-    class="frame"
-    class:dropping
-    role="presentation"
-    onfocusin={() => store.refreshSelection()}
-    ondragover={onDragOver}
-    ondragleave={() => (dropping = false)}
-    ondrop={onDrop}
-  >
-    <div class="chips">
-      {#if fileName && !store.chatOnly}
-        <Badge variant="chip" size="sm" label={fileName}>
-          {#snippet icon()}<FileText size={10} />{/snippet}
-        </Badge>
-      {/if}
-      {#if selected > 0}
-        <Badge variant="chip" size="sm" label={selected === 1 ? '1 line selected' : `${selected} lines selected`}>
-          {#snippet icon()}<TextCursorInput size={10} />{/snippet}
-        </Badge>
-      {/if}
-      {#each store.instructions as file (file.name)}
-        <Badge variant="chip" size="sm" label={file.name}>
-          {#snippet icon()}<BookText size={10} />{/snippet}
-        </Badge>
-      {/each}
-    </div>
+<ImberComposerFrame
+  bind:value={store.draft}
+  bind:element={textEl}
+  placeholder={store.chatOnly ? 'Ask anything…' : 'Ask about this project, or tell it what to change…'}
+  running={store.running}
+  {canSend}
+  sendTooltip={store.dryRun ? 'Preview the request — dry run is on' : 'Send'}
+  {dropping}
+  onSend={send}
+  onStop={() => store.cancel()}
+  onfocusin={() => store.refreshSelection()}
+  ondragover={onDragOver}
+  ondragleave={() => (dropping = false)}
+  ondrop={onDrop}
+  onfieldkeydown={(e) => { paste.onkeydown(e); onFieldKeydown(e); }}
+  onfieldpaste={(e) => { if (!attachPasted(e)) paste.onpaste(e); }}
+>
+  {#snippet chips()}
+    {#if fileName && !store.chatOnly}
+      <Badge variant="chip" size="sm" label={fileName}>
+        {#snippet icon()}<FileText size={10} />{/snippet}
+      </Badge>
+    {/if}
+    {#if selected > 0}
+      <Badge variant="chip" size="sm" label={selected === 1 ? '1 line selected' : `${selected} lines selected`}>
+        {#snippet icon()}<TextCursorInput size={10} />{/snippet}
+      </Badge>
+    {/if}
+    {#each store.instructions as file (file.name)}
+      <Badge variant="chip" size="sm" label={file.name}>
+        {#snippet icon()}<BookText size={10} />{/snippet}
+      </Badge>
+    {/each}
+  {/snippet}
 
+  {#snippet attachments()}
     {#if files.count > 0}
       <AssistantAttachments items={files.items} onRemove={(i) => files.remove(i)} />
     {/if}
+  {/snippet}
 
-    <!-- Keys are handled on the way up from the textarea, which keeps the focus. -->
+  {#snippet beforeField()}
     <AssistantComposerBlocks bind:draft={store.draft} />
+  {/snippet}
 
-    <div class="field" role="presentation" onkeydown={(e) => { paste.onkeydown(e); onFieldKeydown(e); }} onpaste={(e) => { if (!attachPasted(e)) paste.onpaste(e); }}>
-      {#if slashOpen}
-        <div class="slash">
-          <SuggestionList items={slashItems} active={slashActive} id="asst-slash" ariaLabel="Skills" onpick={pickSlash} />
-        </div>
-      {/if}
-      <Textarea
-        bind:value={store.draft}
-        bind:element={textEl}
-        placeholder={store.chatOnly ? 'Ask anything…' : 'Ask about this project, or tell it what to change…'}
-        minRows={2}
-        maxRows={9}
-        onsubmit={send}
-      />
-    </div>
+  {#snippet popup()}
+    {#if slashOpen}
+      <SuggestionList items={slashItems} active={slashActive} id="asst-slash" ariaLabel="Skills" onpick={pickSlash} />
+    {/if}
+  {/snippet}
 
-    <div class="controls">
-      <Dropdown items={modelItems} position="fixed" direction="up" width="300px">
+  {#snippet controls()}
+    <Dropdown items={modelItems} position="fixed" direction="up" width="300px">
+      {#snippet trigger({ open, toggle })}
+        <Button variant="ghost" size="xs" ariaExpanded={open} ariaHaspopup="menu" tooltip="Model" onclick={toggle}>
+          <span class="lbl"><i class="model-dot"></i>{store.model.name}<ChevronDown size={11} /></span>
+        </Button>
+      {/snippet}
+    </Dropdown>
+
+    <Dropdown items={settingsItems} position="fixed" direction="up" width="270px">
+      {#snippet trigger({ open, toggle })}
+        <IconButton tooltip={`Settings — ${settingsTip}`} size={24} active={open} ariaHasPopup ariaExpanded={open} onclick={toggle}>
+          <SlidersHorizontal size={14} />
+        </IconButton>
+      {/snippet}
+    </Dropdown>
+
+    <IconButton
+      tooltip={files.full ? `At most ${MAX_ATTACHMENTS} files` : 'Attach files — pictures or text (or paste a picture)'}
+      size={24} disabled={files.full} onclick={() => (pickerOpen = true)}
+    >
+      <Paperclip size={14} />
+    </IconButton>
+
+    <VoiceMicButton onText={insertDictation} onSetup={() => bennuUiStore.openSettings('voice')} />
+  {/snippet}
+
+  {#snippet trailing()}
+    {#if !store.chatOnly}
+      <Dropdown items={modeItems} position="fixed" direction="up" width="340px">
         {#snippet trigger({ open, toggle })}
-          <Button variant="ghost" size="xs" ariaExpanded={open} ariaHaspopup="menu" tooltip="Model" onclick={toggle}>
-            <span class="lbl"><i class="model-dot"></i>{store.model.name}<ChevronDown size={11} /></span>
+          <Button
+            variant="ghost" size="xs" ariaExpanded={open} ariaHaspopup="menu"
+            color={current.tone === 'warning' ? 'var(--warning)' : undefined}
+            tooltip={{ content: `Mode — ${current.label}`, description: current.description }} onclick={toggle}
+          >
+            <span class="lbl"><ModeIcon size={12} />{current.label}<ChevronDown size={11} /></span>
           </Button>
         {/snippet}
       </Dropdown>
+    {/if}
+  {/snippet}
 
-      <Dropdown items={settingsItems} position="fixed" direction="up" width="270px">
-        {#snippet trigger({ open, toggle })}
-          <IconButton tooltip={`Settings — ${settingsTip}`} size={24} active={open} ariaHasPopup ariaExpanded={open} onclick={toggle}>
-            <SlidersHorizontal size={14} />
-          </IconButton>
-        {/snippet}
-      </Dropdown>
+  {#snippet sendIcon()}
+    {#if store.dryRun}<Eye size={15} />{:else}<ArrowUp size={15} />{/if}
+  {/snippet}
 
-      <IconButton
-        tooltip={files.full ? `At most ${MAX_ATTACHMENTS} files` : 'Attach files — pictures or text (or paste a picture)'}
-        size={24} disabled={files.full} onclick={() => (pickerOpen = true)}
-      >
-        <Paperclip size={14} />
-      </IconButton>
+  {#snippet hint()}
+    {#if store.dryRun}<FlaskConical size={10} />Dry run — send shows the request instead of making it.
+    {:else if store.chatOnly}<MessageSquare size={10} />It only talks: it cannot read or change anything.
+    {:else if store.mode === 'autonomous'}<Bot size={10} />Edits are applied; files its own build reports an error in are opened for you.
+    {:else if store.mode === 'accept_edits'}<Zap size={10} />Edits are applied as they are made, inside what you allowed.
+    {:else}<ShieldCheck size={10} />You approve every edit before it is written.{/if}
+  {/snippet}
 
-      <VoiceMicButton onText={insertDictation} onSetup={() => bennuUiStore.openSettings('voice')} />
-
-      <span class="grow"></span>
-
-      {#if !store.chatOnly}
-        <Dropdown items={modeItems} position="fixed" direction="up" width="340px">
-          {#snippet trigger({ open, toggle })}
-            <Button
-              variant="ghost" size="xs" ariaExpanded={open} ariaHaspopup="menu"
-              color={current.tone === 'warning' ? 'var(--warning)' : undefined}
-              tooltip={{ content: `Mode — ${current.label}`, description: current.description }} onclick={toggle}
-            >
-              <span class="lbl"><ModeIcon size={12} />{current.label}<ChevronDown size={11} /></span>
-            </Button>
-          {/snippet}
-        </Dropdown>
-      {/if}
-
-      {#if store.running}
-        <span class="asst-ring"><IconButton tooltip="Stop" variant="accent" size={28} onclick={() => store.cancel()}><Square size={12} /></IconButton></span>
-      {:else}
-        <IconButton
-          tooltip={store.dryRun ? 'Preview the request — dry run is on' : 'Send'}
-          shortcut="Ctrl+Enter" variant="accent" size={28} disabled={!canSend} onclick={send}
-        >
-          {#if store.dryRun}<Eye size={15} />{:else}<ArrowUp size={15} />{/if}
-        </IconButton>
-      {/if}
-    </div>
-  </div>
-
-  <div class="foot">
-    <span class="hint">
-      {#if store.dryRun}<FlaskConical size={10} />Dry run — send shows the request instead of making it.
-      {:else if store.chatOnly}<MessageSquare size={10} />It only talks: it cannot read or change anything.
-      {:else if store.mode === 'autonomous'}<Bot size={10} />Edits are applied; files its own build reports an error in are opened for you.
-      {:else if store.mode === 'accept_edits'}<Zap size={10} />Edits are applied as they are made, inside what you allowed.
-      {:else}<ShieldCheck size={10} />You approve every edit before it is written.{/if}
-    </span>
+  {#snippet figures()}
     {#if store.pressing}
       <span class="limit" class:reached={store.pressing.level === 'reached'} title={store.spend?.warning ?? ''}>
         {store.pressing.level === 'reached' ? 'Limit reached' : `${store.pressing.percent}% of ${store.pressing.period} limit`}
       </span>
     {/if}
     {#if store.active}<span class="cost" title="What this conversation has cost">{formatEur(store.eur(store.active.cost))}</span>{/if}
-  </div>
-</div>
+  {/snippet}
+</ImberComposerFrame>
 
 {#if pickerOpen}
   <FileExplorerModal
@@ -477,42 +470,11 @@
 {/if}
 
 <style>
-  .composer { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 8px; }
-
-  .frame.dropping { border-color: var(--accent-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 30%, transparent); }
-  .frame {
-    display: flex; flex-direction: column; gap: 8px;
-    padding: 9px 10px 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--bg-elevated);
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-  }
-  .frame:focus-within {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-subtle);
-  }
-
-  .chips { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
-  .chips:empty { display: none; }
-  .field { position: relative; min-width: 0; }
-  /* Opens upward, over the thread: the composer sits at the bottom of the panel. */
-  .slash { position: absolute; left: -4px; right: -4px; bottom: calc(100% + 8px); z-index: 20; }
-
-  .controls { display: flex; align-items: center; gap: 4px; min-width: 0; }
-  .grow { flex: 1; min-width: 4px; }
   /* An icon and its text sit apart; the buttons they are in do not space their own children. */
   .lbl { display: inline-flex; align-items: center; gap: 6px; }
   .model-dot {
     width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
     background: linear-gradient(140deg, var(--accent), var(--info));
-  }
-
-  .foot { display: flex; align-items: center; gap: 8px; padding: 0 4px; min-height: 16px; }
-  .hint {
-    display: inline-flex; align-items: center; gap: 6px; min-width: 0;
-    font-size: var(--font-size-2xs); color: var(--text-muted);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .limit { margin-left: auto; flex-shrink: 0; font-size: var(--font-size-2xs); color: var(--warning); }
   .limit.reached { color: var(--danger); font-weight: 600; }

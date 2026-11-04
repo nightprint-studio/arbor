@@ -3450,6 +3450,7 @@ fn bennu_check_file(ctx: &BennuState, args: CheckFileArgs) -> Result<CheckResult
             // keystrokes; a caller that asked a question once wants the complete answer.
             resolved: Some(true),
             actions: Vec::new(),
+            live: false,
         },
     )?;
 

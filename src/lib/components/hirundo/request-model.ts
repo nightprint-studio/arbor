@@ -7,7 +7,7 @@ export function blankRequest(name = 'New request'): HttpRequest {
     name, order: 0, method: 'GET', url: '', params: [], headers: [], auth: { type: 'inherit' },
     body: { kind: 'none', text: '', form: [] },
     soap: { version: '1.1', action: '' },
-    settings: { timeout_ms: 30000, follow_redirects: true, verify_tls: true, cookie_jar: true },
+    settings: { timeout_ms: 30000, follow_redirects: true, verify_tls: true, cookie_jar: true, stream: false },
     docs: '', tests: '',
   };
 }
@@ -41,6 +41,11 @@ export function sameRequest(a: HttpRequest, b: HttpRequest): boolean {
 }
 
 /** CSS colour of a method, from the theme's status tokens. */
+/** Whether Send should listen to the request as a stream: set explicitly, or asked for by its `Accept` header. */
+export function isStreamRequest(r: HttpRequest): boolean {
+  return r.settings.stream || r.headers.some((h) => h.enabled && h.key.toLowerCase() === 'accept' && h.value.toLowerCase().includes('text/event-stream') && !h.value.includes(','));
+}
+
 export function methodColor(m: Method): string {
   switch (m) {
     case 'GET': return 'var(--success)';
@@ -145,7 +150,7 @@ export function splitVariables(text: string): { text: string; variable: boolean 
 
 /** The URL as the bar shows it: the base plus the enabled params as a query. */
 export function urlWithQuery(r: HttpRequest): string {
-  const q = r.params.filter((p) => p.enabled && p.key).map((p) => (p.value ? `${p.key}=${p.value}` : p.key)).join('&');
+  const q = r.params.filter((p) => p.enabled && p.key && !p.key.startsWith('path:')).map((p) => (p.value ? `${p.key}=${p.value}` : p.key)).join('&');
   return q ? `${r.url}?${q}` : r.url;
 }
 
@@ -156,14 +161,16 @@ export function urlWithQuery(r: HttpRequest): string {
 export function applyUrl(r: HttpRequest, text: string): void {
   const at = text.indexOf('?');
   r.url = at === -1 ? text : text.slice(0, at);
-  const disabled = r.params.filter((p) => !p.enabled);
+  // Path variables (`path:id`) are not part of the query: they stay as they are.
+  const pathRows = r.params.filter((p) => p.key.startsWith('path:'));
+  const disabled = r.params.filter((p) => !p.enabled && !p.key.startsWith('path:'));
   const described = new Map(r.params.map((p) => [p.key, p.description]));
   const typed: KeyValue[] = at === -1 ? [] : text.slice(at + 1).split('&').filter(Boolean).map((pair) => {
     const eq = pair.indexOf('=');
     const key = eq === -1 ? pair : pair.slice(0, eq);
     return { key, value: eq === -1 ? '' : pair.slice(eq + 1), description: described.get(key) ?? '', enabled: true };
   });
-  r.params = [...typed, ...disabled];
+  r.params = [...pathRows, ...typed, ...disabled];
 }
 
 /** One row of the collections tree, uniform across collections, folders and requests (what the shared Tree walks). */
@@ -193,4 +200,26 @@ export function wsColor(idx: number): string {
   return `var(--ws-color-${Math.max(0, Math.min(7, Math.floor(idx || 0)))})`;
 }
 
+/** A plausible value for a parameter of this Java type, so the field is not empty and shows what is expected. */
+export function sampleFor(type: string): string {
+  const t = type.replace(/\s+/g, '').replace(/^java\.(lang|util)\./, '');
+  if (/^(Long|long|Integer|int|Short|short|BigInteger)$/.test(t)) return '1';
+  if (/^(Double|double|Float|float|BigDecimal)$/.test(t)) return '1.0';
+  if (/^(Boolean|boolean)$/.test(t)) return 'true';
+  if (/^UUID$/.test(t)) return '{{$uuid}}';
+  if (/^(LocalDate)$/.test(t)) return '2025-01-31';
+  if (/^(LocalDateTime|Instant|OffsetDateTime|ZonedDateTime|Date)$/.test(t)) return '{{$isoTimestamp}}';
+  return '';
+}
+
 export const WS_COLOR_COUNT = 8;
+
+/**
+ * The current value of a theme colour token as the `#rrggbb` the env-type file stores (a file cannot hold a CSS
+ * variable), so a new type takes its colour from the theme instead of a literal in the code.
+ */
+export function themeHex(token: string, fallback = '#808080'): string {
+  if (typeof document === 'undefined') return fallback;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+  return /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
+}

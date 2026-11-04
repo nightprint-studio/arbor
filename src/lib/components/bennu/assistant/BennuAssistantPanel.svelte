@@ -9,11 +9,11 @@
    * Top to bottom: the conversation (a switcher, saved), how full the window is, the thread — or the home
    * screen when there is no conversation open — and the composer with the choices that shape the next answer.
    */
-  import { onDestroy, onMount, tick } from 'svelte';
-  import { BookUser, Sparkles, SquarePen, Trash2, Ellipsis, KeyRound, Eye, FlaskConical, Bot, MessageSquare, WandSparkles, Maximize2, Minimize2 } from 'lucide-svelte';
+  import { onDestroy, onMount } from 'svelte';
+  import { BookUser, SquarePen, Trash2, Ellipsis, KeyRound, Eye, FlaskConical, Bot, MessageSquare, WandSparkles, Maximize2, Minimize2 } from 'lucide-svelte';
   import { assistantLayoutStore } from '$lib/stores/bennu/assistant-layout.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
-  import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
+  import ImberChatPanel from '$lib/components/shared/internal/imber/ImberChatPanel.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
@@ -35,12 +35,10 @@
   import AssistantActivity from './AssistantActivity.svelte';
   import AssistantStopCard from './AssistantStopCard.svelte';
   import AssistantHome from './AssistantHome.svelte';
-  import './assistant-motion.css';
 
   const store = bennuAssistantStore;
   onMount(() => { void store.start(); });
-  let thread = $state<HTMLElement | null>(null);
-  let root = $state<HTMLElement | null>(null);
+  let root = $state<HTMLElement | undefined>(undefined);
 
   // The panel's two keyboard verbs, only while focus is inside it (Ctrl+Shift+M belongs to structural search).
   const layout = assistantLayoutStore;
@@ -76,12 +74,6 @@
     }
   }
 
-  // The thread follows its end: a new message, or another conversation, lands at the bottom.
-  $effect(() => {
-    void store.activeId;
-    void store.active?.messages.length;
-    void tick().then(() => thread?.scrollTo({ top: thread.scrollHeight }));
-  });
 
   const menu = $derived<DropdownItem[]>([
     {
@@ -120,11 +112,16 @@
 </script>
 
 <svelte:window onkeydown={onKeydown} />
-<div class="asst-root" bind:this={root}>
-<PanelShell title="Imber" scrollable={false} onheaderdblclick={() => layout.toggle()}>
-  {#snippet icon()}<Sparkles size={13} />{/snippet}
-
-  {#snippet actions()}
+<ImberChatPanel
+  running={store.running}
+  home={!(store.active && store.active.messages.length > 0)}
+  wide={layout.expanded}
+  followKey={`${store.active?.messages.length ?? 0}:${store.active?.messages.at(-1)?.blocks.length ?? 0}`}
+  resetKey={store.activeId ?? ''}
+  bind:root
+  onheaderdblclick={() => layout.toggle()}
+>
+  {#snippet headerActions()}
     <RadioGroup
       value={store.chatOnly ? 'chat' : 'agent'}
       options={MODES}
@@ -149,34 +146,27 @@
     </Dropdown>
   {/snippet}
 
-  {#snippet toolbar()}
+  {#snippet bars()}
     <div class="top">
       <AssistantHeader />
     </div>
     <AssistantContextBar />
     <AssistantWorktreeBanner />
     <AssistantAgents />
-    <!-- A thin sweep under the header for as long as a run is open. -->
-    {#if store.running}<div class="asst-sweep" aria-hidden="true"></div>{/if}
   {/snippet}
 
-  <div class="thread" class:home={!(store.active && store.active.messages.length > 0)} class:wide={layout.expanded} bind:this={thread}>
-    {#if store.active && store.active.messages.length > 0}
-      {#each store.active.messages as m (m.id)}
-        <AssistantMessage message={m} conversationId={store.active.id} mode={store.mode} last={m.id === store.active.messages.at(-1)?.id} />
-      {/each}
-      <AssistantActivity />
-    {:else}
-      <AssistantHome />
-    {/if}
-    <AssistantStopCard />
-  </div>
+  {#snippet homeContent()}<AssistantHome />{/snippet}
 
-  {#snippet footer()}
-    <div class="composer-col" class:wide={layout.expanded}><AssistantComposer /></div>
-  {/snippet}
-</PanelShell>
-</div>
+  {#if store.active}
+    {#each store.active.messages as m (m.id)}
+      <AssistantMessage message={m} conversationId={store.active.id} mode={store.mode} last={m.id === store.active.messages.at(-1)?.id} />
+    {/each}
+  {/if}
+  <AssistantActivity />
+  <AssistantStopCard />
+
+  {#snippet dock()}<AssistantComposer />{/snippet}
+</ImberChatPanel>
 
 {#if store.deleteAsked}
   <ConfirmModal
@@ -198,26 +188,4 @@
 
 <style>
   .top { padding: 8px 12px 4px; }
-
-  /* Only there to scope the panel's keys; it adds no box of its own. */
-  .asst-root { display: contents; }
-
-  .thread {
-    flex: 1; min-height: 0;
-    overflow-y: auto;
-    display: flex; flex-direction: column; gap: 18px;
-    padding: 14px 12px 18px;
-    scroll-behavior: smooth;
-  }
-
-  /* Expanded: the thread is a centred column. Prose keeps a readable line length (`--asst-text-max`,
-     read by the message), code, diagrams, diffs and the live cards use the column's full width. */
-  .thread.wide:not(.home) {
-    --asst-text-max: 78ch;
-    padding-inline: max(12px, calc((100% - 1040px) / 2));
-  }
-  .composer-col.wide { max-width: 1040px; margin-inline: auto; width: 100%; }
-
-  /* The home screen takes the whole panel, and paints its own padding. */
-  .thread.home { padding: 0; gap: 0; overflow: hidden; }
 </style>

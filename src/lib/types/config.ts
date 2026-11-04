@@ -136,7 +136,8 @@ export interface BranchGroupingConfig {
   collapsed_groups: string[];
 }
 
-export type WindowControlsStyle = 'mac' | 'windows';
+/** `crescenti` is `mac` with the glyphs always showing instead of only on hover. */
+export type WindowControlsStyle = 'mac' | 'windows' | 'crescenti';
 export type AnimSpeed = 'fast' | 'normal' | 'slow';
 export type ActivityBarPosition = 'left' | 'right' | 'hidden';
 

@@ -57,7 +57,8 @@
     closure and the exclusions — in milliseconds and with no build tool involved.</li>
   <li>Only when that comes up short is Maven run — and the two answers are combined, because a <code>mvn</code> run that
     fails halfway still wrote the entries it did resolve.</li>
-  <li>The result is cached against your poms' timestamps <em>and</em> against what was missing.</li>
+  <li>The result is cached against your poms' timestamps, against what was missing, <em>and</em> against the library
+    files it was resolved from — a jar or pom in your local repository that is rewritten retires it.</li>
 </ol>
 <Callout variant="info" title="A broken Maven still gets a classpath">
   A project whose Maven is missing, misconfigured or simply broken still resolves, from the poms and the repository alone.
@@ -77,6 +78,17 @@
   later, with nothing pressed. It waits for the file to settle first, so a save in the middle of an edit does not start a
   rebuild against half a <code>&lt;dependency&gt;</code>.
 </Callout>
+
+<h2>When a sibling module is installed</h2>
+<p>
+  In a workspace of several projects, <code>mvn install</code> on a module rewrites its jar and pom in your local
+  repository — and every project that depends on it is now resolved against a library that no longer exists. Bennu
+  notices when the window regains focus (and when the panel opens): the <strong>Dependencies</strong> panel shows a notice
+  with a <strong>Reload dependencies</strong> button, and a toast offers the same once per change. The panel itself is
+  always drawn from the repository as it is now, so <strong>Resolve tree</strong> and <em>Pulled in transitively</em> agree;
+  what stays old until you reload is the editor's classpath — completion, go-to and the library index.
+  <strong>Reload dependencies</strong> is also in the toolbar of the panel and in the command palette.
+</p>
 
 <h2>Changing what is on disk</h2>
 <p>

@@ -53,12 +53,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arbor_ipc::prelude::EventSink;
-use arbor_syntax::prelude::ByteRange;
+use arbor_syntax::prelude::{ByteRange, HoleForms};
+use bennu_assistant::prelude::AccessFilter;
 use bennu_core::prelude::BennuState;
 use bennu_ssr::prelude::{
-    apply_edits, build_report, check_replacement, compile, edits_for, line_of, parse_query,
-    preview_of, search_file, Ask, Denotation, GroupBy, Hit, HitCapture, NoTypes, Query, Report,
-    Subject, TypeOracle,
+    apply_edits, build_report, check_replacement, compile_with, edits_for, line_of,
+    parse_query, preview_of, search_file, Ask, Denotation, GroupBy, Hit, HitCapture, NoTypes,
+    Query, Report, Subject, TypeOracle, JAVA_FORMS,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -103,6 +104,8 @@ const JAVA_CONTEXTS: &[(&str, &str)] = &[
     ("class __BennuQuery__ {\n", "\n}"),
     ("class __BennuQuery__ { void __m__() {\n", "\n} }"),
     ("class __BennuQuery__ { void __m__() {\n", "\n;} }"),
+    // A `catch` clause is only legal after a `try`.
+    ("class __BennuQuery__ { void __m__() { try {} ", "\n} }"),
 ];
 
 /// A JSP fragment needs **no** wrapper, and that is a property of the grammar rather than a
@@ -166,6 +169,15 @@ impl Dialect {
         match self {
             Dialect::Java | Dialect::JspJava => JAVA_CONTEXTS,
             Dialect::Jsp => JSP_CONTEXTS,
+        }
+    }
+
+    /// How a hole may be written where a bare name would not parse. Java gets statements, members,
+    /// parameters and modifiers; a page grammar has none of those positions and keeps the bare form.
+    fn forms(self) -> &'static [HoleForms] {
+        match self {
+            Dialect::Java | Dialect::JspJava => JAVA_FORMS,
+            Dialect::Jsp => &[HoleForms::PLAIN],
         }
     }
 
@@ -351,6 +363,8 @@ pub struct PreviewedFile {
 pub struct Preview {
     pub files: Vec<PreviewedFile>,
     pub hits: usize,
+    /// Files the walk left out because the caller's access filter did not admit them. A count only.
+    pub skipped: usize,
 }
 
 /// What `apply` did.
@@ -409,6 +423,10 @@ pub struct SsrReplaceArgs {
     pub replacement: String,
     #[serde(default)]
     pub dialect: Dialect,
+    /// What the caller may reach. Absent for the window (the user sees everything); the assistant passes
+    /// its policy's filter, and a file it does not admit is skipped rather than scanned.
+    #[serde(default)]
+    pub access: Option<AccessFilter>,
 }
 
 #[derive(Deserialize)]
@@ -475,7 +493,7 @@ fn bennu_ssr_explain(_ctx: &BennuState, args: SsrExplainArgs) -> Result<Explaine
             // otherwise a shortcut could be reported as fine and then find nothing.
             let runnable = desugar(&query);
             if let Err(e) =
-                compile(&args.dialect.language(), &runnable, args.dialect.contexts())
+                compile_with(&args.dialect.language(), &runnable, args.dialect.contexts(), args.dialect.forms())
             {
                 return Ok(Explained {
                     error: Some(e.to_string()),
@@ -513,6 +531,93 @@ fn bennu_ssr_explain(_ctx: &BennuState, args: SsrExplainArgs) -> Result<Explaine
     }
 }
 
+// ── what the project holds, and stopping a search ─────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct SsrLanguagesArgs {
+    pub root: String,
+}
+
+/// Which languages a query can be written for in this project.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Languages {
+    pub java: bool,
+    /// At least one page file (`.jsp`, `.jspf`, `.jspx`, `.tag`, `.tagx`).
+    pub jsp: bool,
+}
+
+/// How long the answer about a root's pages is trusted. Short enough that adding the first page shows up
+/// within a minute, long enough that opening the modal repeatedly walks nothing.
+const LANGUAGES_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn languages_cache() -> &'static std::sync::Mutex<HashMap<String, (std::time::Instant, bool)>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, (std::time::Instant, bool)>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Whether any page file lives under `dir`, stopping at the first one found.
+fn has_page(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !SKIP_DIRS.contains(&name) && has_page(&path) {
+                return true;
+            }
+        } else if Dialect::Jsp.reads(&path) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether the project has pages to search, so the panel offers the page languages only where they mean something.
+///
+/// Walks the tree until the first page and remembers the answer for a minute per root.
+#[arbor_rpc::handler]
+fn bennu_ssr_languages(_ctx: &BennuState, args: SsrLanguagesArgs) -> Result<Languages, String> {
+    let now = std::time::Instant::now();
+    if let Ok(cache) = languages_cache().lock() {
+        if let Some((at, jsp)) = cache.get(&args.root) {
+            if now.duration_since(*at) < LANGUAGES_TTL {
+                return Ok(Languages { java: true, jsp: *jsp });
+            }
+        }
+    };
+    let jsp = has_page(Path::new(&args.root));
+    if let Ok(mut cache) = languages_cache().lock() {
+        cache.insert(args.root, (now, jsp));
+    };
+    Ok(Languages { java: true, jsp })
+}
+
+#[derive(Deserialize)]
+pub struct SsrCancelArgs {
+    pub search_id: String,
+}
+
+fn cancelled_searches() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(Default::default)
+}
+
+fn is_cancelled(search_id: &str) -> bool {
+    cancelled_searches().lock().map(|s| s.contains(search_id)).unwrap_or(false)
+}
+
+/// Ask a running search to stop: its walk ends before the next file, and what it had found stays found.
+#[arbor_rpc::handler]
+fn bennu_ssr_cancel(_ctx: &BennuState, args: SsrCancelArgs) -> Result<(), String> {
+    if let Ok(mut set) = cancelled_searches().lock() {
+        set.insert(args.search_id);
+    };
+    Ok(())
+}
+
 /// Run a query. Fire-and-forget: validates, spawns the walk, returns immediately.
 #[arbor_rpc::handler]
 fn bennu_ssr_search(ctx: &BennuState, args: SsrSearchArgs) -> Result<(), String> {
@@ -535,10 +640,15 @@ fn bennu_ssr_search(ctx: &BennuState, args: SsrSearchArgs) -> Result<(), String>
                 let sink = sink.clone();
                 let id = search_id.clone();
                 let root = root.clone();
-                run(&query, &root, dialect, &mut |batch: &[Hit]| {
+                let stop_id = search_id.clone();
+                run(&query, &root, dialect, &|| is_cancelled(&stop_id), &|_| true, &mut |batch: &[Hit]| {
                     streamed += batch.len();
                     emit_hits(&sink, &id, batch, &root);
                 })
+            };
+            // The id is spent: a cancelled search leaves nothing behind in the set.
+            if let Ok(mut set) = cancelled_searches().lock() {
+                set.remove(&search_id);
             };
             // The report needs every hit together — it is an aggregate — so it is built at the
             // end from what the walk kept. Only the *listing* streams.
@@ -562,6 +672,76 @@ fn bennu_ssr_search(ctx: &BennuState, args: SsrSearchArgs) -> Result<(), String>
     Ok(())
 }
 
+#[derive(Deserialize)]
+pub struct SsrRunArgs {
+    pub root: String,
+    pub query: String,
+    #[serde(default)]
+    pub dialect: Dialect,
+    /// How many matches to list. The counts and the `group` table always cover all of them.
+    #[serde(default)]
+    pub sample: Option<usize>,
+    /// What the caller may reach — see [`SsrReplaceArgs::access`].
+    #[serde(default)]
+    pub access: Option<AccessFilter>,
+}
+
+/// Whether `access` admits the file at absolute `path`; everything, when there is no filter.
+fn admitted(access: &Option<AccessFilter>, path: &str) -> bool {
+    access.as_ref().map_or(true, |a| a.admits(Path::new(path)))
+}
+
+/// A search run to the end, answered in one piece: the counts, a sample of the places and the `group` table.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SsrRunResult {
+    pub total: usize,
+    pub files: usize,
+    pub scanned: usize,
+    pub parsed: usize,
+    pub capped: bool,
+    /// Files left out for want of access — a count, never a name.
+    pub skipped: usize,
+    pub sample: Vec<SsrHit>,
+    pub report: Report,
+    pub error: Option<String>,
+}
+
+/// Run a structural search and answer it whole — for a caller that cannot wait for a stream of events (the
+/// assistant). Reads files, writes nothing. The walk is the one `bennu_ssr_search` makes.
+#[arbor_rpc::handler]
+fn bennu_ssr_run(_ctx: &BennuState, args: SsrRunArgs) -> Result<SsrRunResult, String> {
+    let query = parse_query(&args.query).map_err(|e| e.message)?;
+    let outcome = run(&query, &args.root, args.dialect, &|| false, &|p| admitted(&args.access, p), &mut |_| {});
+    let report = build_report(&outcome.hits, query.group.as_ref());
+    let files = outcome.hits.iter().map(|h| h.file.as_str()).collect::<std::collections::HashSet<_>>().len();
+    let sample = outcome
+        .hits
+        .iter()
+        .take(args.sample.unwrap_or(20).min(200))
+        .map(|h| SsrHit {
+            file: absolute(&args.root, &h.file),
+            rel: h.file.clone(),
+            line: h.line,
+            range: h.range,
+            preview: h.preview.clone(),
+            enclosing: h.enclosing.clone(),
+            unresolved: h.unresolved,
+        })
+        .collect();
+    Ok(SsrRunResult {
+        total: outcome.hits.len(),
+        files,
+        scanned: outcome.scanned,
+        parsed: outcome.parsed,
+        capped: outcome.capped,
+        skipped: outcome.skipped,
+        sample,
+        report,
+        error: outcome.error,
+    })
+}
+
 /// What a replacement would do, file by file. Nothing is written.
 #[arbor_rpc::handler]
 fn bennu_ssr_preview(_ctx: &BennuState, args: SsrReplaceArgs) -> Result<Preview, String> {
@@ -571,7 +751,8 @@ fn bennu_ssr_preview(_ctx: &BennuState, args: SsrReplaceArgs) -> Result<Preview,
     check_replacement(&query, &args.replacement).map_err(|e| e.message)?;
 
     // Nothing to stream to: a preview is a whole plan or it is not a plan.
-    let outcome = run(&query, &args.root, args.dialect, &mut |_| {});
+    let outcome = run(&query, &args.root, args.dialect, &|| false, &|p| admitted(&args.access, p), &mut |_| {});
+    let skipped = outcome.skipped;
     let mut by_file: HashMap<String, Vec<Hit>> = HashMap::new();
     for hit in outcome.hits {
         by_file.entry(hit.file.clone()).or_default().push(hit);
@@ -599,7 +780,7 @@ fn bennu_ssr_preview(_ctx: &BennuState, args: SsrReplaceArgs) -> Result<Preview,
             after,
         });
     }
-    Ok(Preview { files, hits: total })
+    Ok(Preview { files, hits: total, skipped })
 }
 
 /// Write what the preview showed.
@@ -650,6 +831,8 @@ struct Outcome {
     /// Whether the pre-filter applied at all.
     prefiltered: bool,
     capped: bool,
+    /// Files the access filter did not admit: never read, never counted in `scanned`.
+    skipped: usize,
     /// Why the walk produced nothing, when the reason is the query rather than the project.
     ///
     /// A pattern that does not compile finds nothing, and "found nothing" is exactly what a
@@ -669,6 +852,7 @@ impl Outcome {
             parsed: 0,
             prefiltered: false,
             capped: false,
+            skipped: 0,
             error: Some(error),
         }
     }
@@ -681,12 +865,19 @@ impl Outcome {
 /// compute a single edit — passes a callback that does nothing. Collecting first and chunking
 /// afterwards would have made the search *look* streamed while still taking all its time before
 /// the first row appeared.
-fn run(query: &Query, root: &str, dialect: Dialect, emit: &mut dyn FnMut(&[Hit])) -> Outcome {
+fn run(
+    query: &Query,
+    root: &str,
+    dialect: Dialect,
+    should_stop: &dyn Fn() -> bool,
+    admit: &dyn Fn(&str) -> bool,
+    emit: &mut dyn FnMut(&[Hit]),
+) -> Outcome {
     // `use of` is a shortcut for a set of patterns, not a second engine — see `desugar`.
     let query = &desugar(query);
 
     let language = dialect.language();
-    let compiled = match compile(&language, query, dialect.contexts()) {
+    let compiled = match compile_with(&language, query, dialect.contexts(), dialect.forms()) {
         Ok(compiled) => compiled,
         Err(e) => return Outcome::refused(e.to_string()),
     };
@@ -698,11 +889,22 @@ fn run(query: &Query, root: &str, dialect: Dialect, emit: &mut dyn FnMut(&[Hit])
 
     let mut hits = Vec::new();
     let (mut scanned, mut parsed) = (0usize, 0usize);
+    let mut skipped = 0usize;
     let mut capped = false;
 
     for path in source_files(root, dialect) {
+        // Checked per file: the cheapest boundary that still ends a long walk within a blink of "Stop".
+        if should_stop() {
+            break;
+        }
         let rel = relative(root, &path);
         if !admits(query, &rel) {
+            continue;
+        }
+        // Before the file is read, not after its hits are found: a count or a table built from a file the
+        // caller may not reach has already told it about the file.
+        if !admit(&path) {
+            skipped += 1;
             continue;
         }
         scanned += 1;
@@ -741,7 +943,7 @@ fn run(query: &Query, root: &str, dialect: Dialect, emit: &mut dyn FnMut(&[Hit])
         }
     }
 
-    Outcome { hits, scanned, parsed, prefiltered: !literals.is_empty(), capped, error: None }
+    Outcome { hits, scanned, parsed, prefiltered: !literals.is_empty(), capped, skipped, error: None }
 }
 
 /// Rewrite `use of $m$ on <Type>` into the patterns it stands for.
@@ -999,10 +1201,27 @@ fn _report_is_wire_shaped(report: &Report) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    use bennu_ssr::prelude::compile;
+
     use super::*;
 
     fn query(text: &str) -> Query {
         parse_query(text).expect("parses")
+    }
+
+    /// The walk's gate: no filter admits everything (the window), a filter admits only its folders and
+    /// never a secret file or anything under `.git`.
+    #[test]
+    fn the_access_filter_decides_which_files_are_walked() {
+        let base = if cfg!(windows) { "C:/p/app" } else { "/p/app" };
+        let other = if cfg!(windows) { "C:/p/other" } else { "/p/other" };
+        let filter = Some(AccessFilter { roots: vec![std::path::PathBuf::from(base)], files: Vec::new() });
+        assert!(admitted(&filter, &format!("{base}/src/A.java")));
+        assert!(!admitted(&filter, &format!("{other}/src/A.java")), "outside the folders");
+        assert!(!admitted(&filter, &format!("{base}/.env")), "a secret is not scanned");
+        assert!(!admitted(&filter, &format!("{base}/.git/hooks/x.java")));
+        assert!(admitted(&None, &format!("{other}/src/A.java")), "no filter, no limit");
+        assert!(!admitted(&Some(AccessFilter::default()), &format!("{base}/src/A.java")), "an empty filter admits nothing");
     }
 
     // ── dialects ────────────────────────────────────────────────────────────────
@@ -1034,7 +1253,7 @@ mod tests {
     #[test]
     fn only_java_wraps_its_fragments() {
         assert!(Dialect::Jsp.contexts().is_empty());
-        assert_eq!(Dialect::Java.contexts().len(), 3);
+        assert_eq!(Dialect::Java.contexts().len(), 4);
     }
 
     /// The three shapes a JSP query is actually written in, compiled against the real grammar.
@@ -1103,7 +1322,7 @@ mod tests {
     fn the_java_in_jsp_dialect_writes_java_and_walks_pages() {
         assert!(Dialect::JspJava.reads(Path::new("list.jsp")));
         assert!(!Dialect::JspJava.reads(Path::new("List.java")));
-        assert_eq!(Dialect::JspJava.contexts().len(), 3, "Java fragments, Java wrappers");
+        assert_eq!(Dialect::JspJava.contexts().len(), 4, "Java fragments, Java wrappers");
         assert!(Dialect::JspJava.has_use_of(), "it is Java, so `use of` is a sentence");
         assert!(!Dialect::JspJava.resolves_types(), "a lifted scriptlet is in no file");
     }

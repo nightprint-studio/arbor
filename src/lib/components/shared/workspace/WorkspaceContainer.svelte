@@ -97,6 +97,6 @@
     position: relative;
     height: 100vh;
     overflow: hidden;
-    background: var(--bg-elevated);
+    background: var(--chrome-fill);
   }
 </style>

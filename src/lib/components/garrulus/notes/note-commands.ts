@@ -9,6 +9,7 @@
  * writes on its own authority. The writes are the dialogs' confirm buttons.
  */
 
+import { MARKDOWN_ACTIONS, type EditorCommand } from '$lib/utils/markdown-format';
 import { garrulusNotesStore } from '$lib/stores/garrulus/notes.svelte';
 import { garrulusUiStore } from '$lib/stores/garrulus/ui.svelte';
 import { garrulusVaultStore } from '$lib/stores/garrulus/vault.svelte';
@@ -18,7 +19,27 @@ import { garrulusVaultStore } from '$lib/stores/garrulus/vault.svelte';
  *  vault created by Garrulus carries.) */
 const DAILY_TYPE = 'daily';
 
+/**
+ * The formatting runner of the note editor on screen, if there is one. The editor lives in the
+ * workspace and the palette lives in the overlays; this is the one thread between them.
+ */
+let activeExec: ((command: EditorCommand) => boolean) | null = null;
+
+/** The workspace registers its editor here; the returned function unregisters it. */
+export function registerNoteEditor(exec: (command: EditorCommand) => boolean): () => void {
+  activeExec = exec;
+  return () => {
+    if (activeExec === exec) activeExec = null;
+  };
+}
+
 export const noteCommands = {
+  /** Run a formatting action (`MARKDOWN_ACTIONS` id) on the open note. */
+  format: (actionId: string) => {
+    const action = MARKDOWN_ACTIONS.find((a) => a.id === actionId);
+    if (action) activeExec?.(action.command);
+  },
+
   quickSwitch: () => garrulusUiStore.openSwitcher(),
 
   newNote: () => garrulusUiStore.openNoteDialog({ kind: 'new', typeId: null }),

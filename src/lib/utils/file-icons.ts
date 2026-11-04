@@ -331,6 +331,32 @@ const merulaIcon: IconifyIcon = {
     + '</g>',
 };
 
+/**
+ * `.http` / `.rest` — un file di richieste, e il marchio di **Hirundo** (`static/products/hirundo.svg`)
+ * che le esegue: una H la cui traversa è una richiesta che va e una risposta che torna, due frecce
+ * opposte. Stesso criterio di `merulaIcon`: il file e il programma devono sembrare due facce dello
+ * stesso oggetto.
+ *
+ * Il marchio ha la H larga e le frecce a 40 su 512; a 16 px quella proporzione è un grumo, quindi i
+ * tratti sono più sottili e le due punte più aperte. I colori sono i veri: il rosa del marchio per
+ * la H, quello chiaro per le frecce, su un pannello quasi nero con il bordo del programma.
+ */
+const hirundoIcon: IconifyIcon = {
+  width: 32,
+  height: 32,
+  body:
+    '<rect x="1" y="1" width="30" height="30" rx="7" fill="#1d0814"/>'
+    + '<rect x="1" y="1" width="30" height="30" rx="7" fill="none" stroke="#a61e4d" stroke-width="1.5"/>'
+    + '<g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4">'
+    // I due montanti della H.
+    + '<path d="M9.5 8.5v15" stroke="#f06595"/><path d="M22.5 8.5v15" stroke="#f06595"/>'
+    // La richiesta che va…
+    + '<path d="M9.5 13.5h9.5" stroke="#ffc2d9"/><path d="M16.5 10.5l3 3-3 3" stroke="#ffc2d9"/>'
+    // …e la risposta che torna.
+    + '<path d="M22.5 19h-9.5" stroke="#ff8fb8"/><path d="M15.5 16l-3 3 3 3" stroke="#ff8fb8"/>'
+    + '</g>',
+};
+
 /** lowercase extension → icon */
 const EXT_ICONS: Record<string, IconifyIcon> = {
   // Le tre di casa: vedi sopra.
@@ -389,6 +415,7 @@ const EXT_ICONS: Record<string, IconifyIcon> = {
   xz: zipIcon, rar: zipIcon, '7z': zipIcon, tgz: zipIcon,
   sql: sqlIcon, sqlite: sqlIcon, sqlite3: sqlIcon,
   ron: ronIcon,
+  http: hirundoIcon, rest: hirundoIcon,
   wgsl: wgslIcon,
   glsl: glslIcon, vert: glslIcon, frag: glslIcon, comp: glslIcon,
   hlsl: hlslIcon,

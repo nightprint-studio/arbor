@@ -86,9 +86,9 @@ export const PRODUCTS: ProductIdentity[] = [
     blurb: 'A vault of plain markdown notes — links, tags, tasks and templates per note kind — that keeps itself in step across your machines. The files stay yours: any other markdown editor opens the same folder.',
   },
   {
-    // The swallow: always in motion between two places, which is what a request is. Teal, the
-    // colour the Hirundo mock is drawn in, and unused by the rest of the roster.
-    id: 'hirundo', name: 'Hirundo', bird: 'swallow', role: 'HTTP client', accent: '#22b8cf',
+    // The swallow: always in motion between two places, which is what a request is. Rose, a
+    // hue none of the rest of the roster uses (and far from Arbor's own blue-green).
+    id: 'hirundo', name: 'Hirundo', bird: 'swallow', role: 'HTTP client', accent: '#f06595',
     blurb: 'Collections of HTTP requests kept as readable files in your project, environments that know whether they are local or production, auth that inherits, and tests you can run on a schedule.',
   },
 ];

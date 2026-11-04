@@ -167,6 +167,33 @@ export interface NamingFixPlan {
   capped: boolean;
   /** Whether the user stopped it. What is here is still valid — it is simply not everything. */
   cancelled: boolean;
+  /** The convention the plan was judged by, and where it came from. */
+  convention: ConventionReport;
+}
+
+/** Where a fix's rules come from: the project's own, what its code does, or the language's standard. */
+export type ConventionSource = 'configured' | 'detected' | 'standard';
+
+/** One rule a fix applied. */
+export interface ConventionUse {
+  /** The language pack's id (`java`, …). */
+  pack: string;
+  target: NamingTarget;
+  /** The convention's spelling (`camelCase`, `UPPER_SNAKE_CASE`, …). */
+  convention: string;
+  /** Where THIS rule came from — a detected report still uses the standard for a kind the code did not settle. */
+  origin: ConventionSource;
+  /** For a detected rule: the share of the decisive names that follow it, `0..1`. */
+  share: number | null;
+  votes: number;
+}
+
+/** The rules a fix ran under. */
+export interface ConventionReport {
+  source: ConventionSource;
+  /** Whether the project has switched its own convention on, so `configured` is a choice. */
+  configured_available: boolean;
+  rules: ConventionUse[];
 }
 
 /**
@@ -177,17 +204,19 @@ export function namingFixPlan(
   root: string,
   file?: string,
   source?: string,
+  convention?: ConventionSource,
 ): Promise<NamingFixPlan> {
   return bennu('bennu_naming_fix_plan', {
-    args: { root, file: file ?? null, source: source ?? null },
+    args: { root, file: file ?? null, source: source ?? null, convention: convention ?? null },
   });
 }
 
 /**
  * A progress tick while a fix is being planned (`arbor://bennu/naming-fix-progress`).
  *
- * `phase` is `"reading"` (project sources being scanned) or `"planning types"` — the two halves
- * cost differently and a bar that jumps from one to the other with no label reads as stuck.
+ * `phase` is `"detecting"` (reading how the project names things), `"reading"` (project sources
+ * being scanned) or `"planning types"` — the three cost differently and a bar that jumps from one to
+ * the next with no label reads as stuck.
  */
 export interface FixProgress {
   root: string;
@@ -198,7 +227,7 @@ export interface FixProgress {
 
 /** Ask the backend to stop planning a fix. Wire: `bennu_cancel_naming_fix`. */
 export function cancelNamingFix(root: string): Promise<void> {
-  return bennu('bennu_cancel_naming_fix', { args: { root, file: null, source: null } });
+  return bennu('bennu_cancel_naming_fix', { args: { root, file: null, source: null, convention: null } });
 }
 
 /** The default section — what a project that never configured naming has. */

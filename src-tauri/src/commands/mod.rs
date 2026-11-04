@@ -6,7 +6,6 @@ pub mod profile_commands;
 pub mod terminal_commands;
 pub mod job_commands;
 pub mod fs_commands;
-pub mod fs_git_commands;
 pub mod workspace_commands;
 pub mod branding_commands;
 pub mod deep_link_commands;

@@ -177,7 +177,7 @@
     height: 100vh;
     display: flex;
     flex-direction: column;
-    background: var(--bg-elevated);
+    background: var(--chrome-fill);
     overflow: hidden;
   }
 </style>

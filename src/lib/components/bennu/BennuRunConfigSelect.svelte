@@ -108,7 +108,8 @@
     height: 24px;
     max-width: 190px;
     padding: 0 6px;
-    background: var(--bg-overlay);
+    /* Translucent so the title bar's tint shows through instead of an opaque patch. */
+    background: color-mix(in srgb, var(--text-primary) 6%, transparent);
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--text-secondary);

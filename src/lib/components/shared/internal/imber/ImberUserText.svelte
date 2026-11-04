@@ -3,8 +3,8 @@
    * What you wrote, as the thread shows it: your words as they were typed, and each fenced block as a
    * highlighted code block (the same one the assistant's answers use) instead of a run of backticks.
    */
-  import AssistantCode from './AssistantCode.svelte';
-  import { inlineSpans, splitFences } from './assistant-fences';
+  import ImberCode from './ImberCode.svelte';
+  import { inlineSpans, splitFences } from './imber-fences';
 
   let { text }: { text: string } = $props();
   const segments = $derived(splitFences(text));
@@ -13,7 +13,7 @@
 <div class="user-text">
   {#each segments as s}
     {#if s.kind === 'code'}
-      <AssistantCode language={s.language || 'text'} code={s.code} />
+      <ImberCode language={s.language || 'text'} code={s.code} />
     {:else}
       <p class="prose">{#each inlineSpans(s.text) as p}{#if p.code}<code>{p.text}</code>{:else if p.bold}<strong>{p.text}</strong>{:else}{p.text}{/if}{/each}</p>
     {/if}

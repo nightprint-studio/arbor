@@ -159,7 +159,16 @@ pub struct DiagnosticsArgs {
     /// empty for a plain Java file (→ the AST validator).
     #[serde(default)]
     pub actions: Vec<ActionRef>,
+    /// The editor's own live request, asked once per pause in typing. When a NEWER request for the same
+    /// file is already waiting behind this one, the work is skipped and the call fails with
+    /// [`ERR_SUPERSEDED`] — which the editor ignores, having already discarded the answer to a request
+    /// it has moved past. A caller that wants an answer for exactly the text it sent leaves this off.
+    #[serde(default)]
+    pub live: bool,
 }
+
+/// The error a [`live`](DiagnosticsArgs::live) request fails with when a newer one replaced it.
+pub const ERR_SUPERSEDED: &str = "bennu:superseded";
 
 /// Diagnostics for a file. For a JSP with `actions`, reports the conservative
 /// "action inesistente" diagnostic (a genuinely-missing reference → a `warning`; a
@@ -179,7 +188,7 @@ pub(crate) fn bennu_diagnostics(
     // syntax squiggles within ~120ms of a keystroke, and a style finding can wait for the idle
     // debounce. When the project has not opted in — the default — this costs one map lookup.
     let naming = match (args.resolved.unwrap_or(true), args.source.as_deref()) {
-        (true, Some(source)) => crate::naming::diagnostics_for(&args.file, source),
+        (true, Some(source)) => { let _t = crate::perf::phase("diagnostics", "naming"); crate::naming::diagnostics_for(&args.file, source) },
         _ => Vec::new(),
     };
     // Encoding rides alongside too, and for a stronger version of the same reason: a corrupted
@@ -188,7 +197,7 @@ pub(crate) fn bennu_diagnostics(
     // route at all. Skipped on the FAST tier like the others; it is a scan of the buffer, not a
     // syntax pass.
     let encoding = match (args.resolved.unwrap_or(true), args.source.as_deref()) {
-        (true, Some(source)) => crate::mojibake::diagnostics_for(source),
+        (true, Some(source)) => { let _t = crate::perf::phase("diagnostics", "encoding scan"); crate::mojibake::diagnostics_for(source) },
         _ => Vec::new(),
     };
     let file = args.file.clone();
@@ -206,7 +215,7 @@ pub(crate) fn bennu_diagnostics(
     // file it has not opened) gets severities re-levelled and nothing suppressed — which is the
     // right half to keep, since `@SuppressWarnings` is about a place in a buffer.
     let policy = crate::inspections::policy_for_file(&file);
-    Ok(policy.apply(source.as_deref().unwrap_or(""), diags))
+    let _t = crate::perf::phase("diagnostics", "inspection policy"); Ok(policy.apply(source.as_deref().unwrap_or(""), diags))
 }
 
 /// The file's own diagnostics: whichever single route claims it (language server, manifest, shader,
@@ -270,11 +279,14 @@ fn route_diagnostics(args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
                 // Route through the owning project's provider so the resolver-backed checks
                 // (unknown members via type inference) run when the index is built; falls back to
                 // the pure AST checks otherwise. `resolved` picks the tier (fast pure-AST vs full).
-                java = IndexService::global().validate_java(
-                    &args.file,
-                    source,
-                    args.resolved.unwrap_or(true),
-                );
+                let resolved = args.resolved.unwrap_or(true);
+                java = if args.live && resolved {
+                    IndexService::global()
+                        .validate_java_live(&args.file, source, resolved)
+                        .ok_or_else(|| ERR_SUPERSEDED.to_string())?
+                } else {
+                    IndexService::global().validate_java(&args.file, source, resolved)
+                };
             }
         }
         // Framework-contributed problems (Spring placeholders / SpEL / bean XML) ride the same
@@ -283,7 +295,7 @@ fn route_diagnostics(args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
         // syntax squiggles within ~120ms of a keystroke, and a framework check is a project-wide
         // question. Not restricted to `.java` — a bean XML has diagnostics and no Java validation.
         if args.resolved.unwrap_or(true) {
-            java.extend(crate::frameworks::diagnostics_for(&args.file, args.source.as_deref()));
+            { let _t = crate::perf::phase("diagnostics", "framework checks"); java.extend(crate::frameworks::diagnostics_for(&args.file, args.source.as_deref())); }
             // A mapper XML is judged against the class index and the other mappers, which no
             // framework extension can reach — so it is answered here, from the live buffer.
             if args.file.to_ascii_lowercase().ends_with(".xml") {

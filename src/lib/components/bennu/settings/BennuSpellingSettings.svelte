@@ -25,6 +25,9 @@
   /** Whether the backend has answered. Offering a download before it has is how dictionaries that
    *  are already on disk got offered again on every open. */
   const known = $derived(bennuSpellStore.statusKnown);
+  /** The backend did not answer (or answered with an error): say so, and offer to ask again. */
+  const statusError = $derived(bennuSpellStore.statusError);
+  const asking = $derived(bennuSpellStore.statusLoading);
   const languages = $derived(bennuSpellStore.status?.languages ?? []);
 </script>
 
@@ -49,15 +52,26 @@
         <span class="set-hint">Hunspell, from the LibreOffice dictionaries. Shared by every project.</span>
       {:else if known}
         <span class="set-empty">No dictionaries installed — nothing is being checked anywhere.</span>
+      {:else if statusError}
+        <span class="set-empty">
+          Could not find out which dictionaries are installed — {statusError}. You can still download them.
+        </span>
       {:else}
         <span class="set-empty">Asking the backend which dictionaries are installed…</span>
       {/if}
     </div>
+    {#if statusError && !known}
+      <Button variant="secondary" size="sm" onclick={() => void bennuSpellStore.loadStatus()} disabled={asking}>
+        {asking ? 'Asking…' : 'Retry'}
+      </Button>
+    {/if}
+    <!-- Not gated on the status being known: a download answers with the fresh status itself, so a
+         backend that could not report one is no reason to refuse the one thing that fixes it. -->
     <Button
-      variant={known && !installed ? 'primary' : 'secondary'}
+      variant={!installed ? 'primary' : 'secondary'}
       size="sm"
       onclick={() => void bennuSpellStore.download()}
-      disabled={bennuSpellStore.downloading || !known}
+      disabled={bennuSpellStore.downloading}
     >
       {#snippet iconStart()}<Download size={13} />{/snippet}
       {bennuSpellStore.downloading

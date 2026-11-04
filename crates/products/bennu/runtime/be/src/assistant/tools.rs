@@ -635,6 +635,7 @@ impl ToolHost {
             "replace_in_files" => self.run_replace_in_files(&call.input),
             "local_history" => self.run_history(&call.input),
             "structural_replace" => self.run_structural(&call.input),
+            "structural_search" => self.run_structural_search(&call.input),
             "open_ui" => self.run_open_ui(&call.input),
             "show_diagram" => self.run_show_diagram(&call.input),
             "show_image" => self.run_show_image(&call.input),

@@ -2111,7 +2111,14 @@ impl Ctx<'_> {
             for idx in indexes {
                 let Some(arg) = args.get(idx) else { continue };
                 let Some(mut arg_ty) = self.infer_expr(arg, enclosing) else { failed = true; break };
-                if arg_ty.binary_name.is_empty() || self.is_type_variable(&arg_ty.binary_name) {
+                // An argument that is a type variable binds nothing — unless it is one the CALLER
+                // declares. A generic method forwarding its own `T...` to another generic method
+                // (`<T> T f(T... v) { return g(v); }`) passes a variable that is perfectly well
+                // known: it is `g`'s variable bound to `f`'s. Abstaining there left `g`'s own,
+                // unrelated variable in the result, which only agreed with the caller's by sharing a letter.
+                let caller_variable = self.is_type_variable(&arg_ty.binary_name)
+                    && self.declares_type_variable(arg, &arg_ty.binary_name);
+                if arg_ty.binary_name.is_empty() || (self.is_type_variable(&arg_ty.binary_name) && !caller_variable) {
                     failed = true; // an untypeable argument binds nothing
                     break;
                 }
@@ -2398,6 +2405,32 @@ impl Ctx<'_> {
     /// identifier, which is a variable only when it names no type the resolver knows — that last
     /// test is what keeps a class in the default package (`Foo`) from reading as a variable, and it
     /// is why this is a method on the walk rather than the free-standing shape test [`is_type_var`].
+    /// Whether `name` is a type parameter declared by a method, constructor or type enclosing `at` —
+    /// a variable in scope at that point, as opposed to a name that merely does not resolve.
+    fn declares_type_variable(&self, at: &Node, name: &str) -> bool {
+        let mut cur = Some(*at);
+        while let Some(n) = cur {
+            let mut c = n.walk();
+            let declared = n.children(&mut c).filter(|ch| ch.kind() == "type_parameters").any(|tps| {
+                let mut tc = tps.walk();
+                let found = tps
+                    .named_children(&mut tc)
+                    .filter(|tp| tp.kind() == "type_parameter")
+                    .any(|tp| {
+                        let mut ic = tp.walk();
+                        let first = tp.named_children(&mut ic).find(|x| x.kind() == "type_identifier");
+                        first.and_then(|x| node_text(&x, self.bytes)).as_deref() == Some(name)
+                    });
+                found
+            });
+            if declared {
+                return true;
+            }
+            cur = n.parent();
+        }
+        false
+    }
+
     fn is_type_variable(&self, name: &str) -> bool {
         !name.is_empty()
             && !name.contains('/')
@@ -2776,6 +2809,21 @@ impl Ctx<'_> {
         let mut bindings: Vec<(String, TypeRef)> = Vec::new();
         for (i, param) in method.params.iter().enumerate() {
             let text = param.type_text.trim();
+            // `T... values`, recorded as `T[]`: the variable is what EVERY remaining argument is, or
+            // the element type of the one array handed over whole. Read as an ordinary parameter it
+            // matched neither shape below, so a generic method of this file taking a varargs of its
+            // own variable never fixed it — `<T> T pick(Object s, T... v)` called with two `String`s
+            // had no type at all.
+            if i + 1 == method.params.len() && text.ends_with("[]") {
+                if let Some(v) = vars.iter().copied().find(|v| *v == text.trim_end_matches("[]").trim()) {
+                    if let Some(joined) = self.join_variadic_arguments(args, i) {
+                        if !bindings.iter().any(|(b, _)| b == v) {
+                            bindings.push((v.to_string(), joined));
+                        }
+                    }
+                    continue;
+                }
+            }
             let Some(arg) = args.get(i) else { continue };
             let bound = if let Some(v) = vars.iter().copied().find(|v| *v == text) {
                 self.infer_expr(arg, None).map(|t| (v.to_string(), boxed(t)))
@@ -2801,6 +2849,31 @@ impl Ctx<'_> {
         };
         let out = apply_bindings(&ret, &bindings);
         (!self.mentions_type_variable(&out)).then_some(out)
+    }
+
+    /// The one type a variadic `T...` is bound to by the arguments from `from` on: the closest type they
+    /// all are, boxed. A single argument that is itself an array is the array handed over whole, and
+    /// stands for its element. `None` when there are none, one cannot be typed, or no single type fits.
+    fn join_variadic_arguments(&self, args: &[Node], from: usize) -> Option<TypeRef> {
+        let rest = args.get(from..).filter(|r| !r.is_empty())?;
+        let whole = rest.len() == 1;
+        let mut joined: Option<TypeRef> = None;
+        for arg in rest {
+            let mut t = self.infer_expr(arg, None)?;
+            if t.binary_name.is_empty() || self.is_type_variable(&t.binary_name) {
+                return None;
+            }
+            if whole && t.dims >= 1 {
+                t.dims -= 1;
+            }
+            let t = boxed(t);
+            joined = match joined.take() {
+                None => Some(t),
+                Some(prev) if prev == t => Some(prev),
+                Some(prev) => Some(crate::hierarchy::common_supertype(self.resolver, &prev, &t)?),
+            };
+        }
+        joined
     }
 
     // ---- local scope resolution ----
@@ -4517,6 +4590,69 @@ mod shadowing_tests {
         assert_eq!(ty.type_args.len(), 1, "{ty:?}");
         assert_eq!(ty.type_args[0].binary_name, "java/lang/String", "{ty:?}");
         assert_eq!(ty.type_args[0].dims, 0, "{ty:?}");
+    }
+
+    /// A generic method that hands its own `T...` on to another generic method: the callee's variable is
+    /// bound to the caller's, so the result is the caller's `T` whatever the callee called its own.
+    #[test]
+    fn a_generic_method_forwarding_its_varargs_binds_the_callees_variable_to_its_own() {
+        let mut r = resolver();
+        r.members.insert(
+            "acme/Codec".into(),
+            cm(vec![Member::method(
+                "unmarshal",
+                TypeRef::simple("U"),
+                vec![TypeRef::simple("java/lang/Object"), TypeRef::simple("U").arrayed(1)],
+            )
+            .stat()]),
+        );
+        r.simple.insert("Codec".into(), "acme/Codec".into());
+        let src = "class C { <T> T m(Object source, T... values) { Object o = Codec.unmarshal(source, values); return null; } }";
+        let call = "Codec.unmarshal(source, values)";
+        let start = src.find(call).unwrap();
+        let ty = infer_expression_type(src, start, start + call.len(), &r).unwrap();
+        assert_eq!(ty.binary_name, "T", "the caller's T, not the callee's U: {ty:?}");
+        assert_eq!(ty.dims, 0, "{ty:?}");
+    }
+
+    /// The same call through an array handed over whole, and with a plain element: the binding is the
+    /// element type either way, and an argument that merely fails to resolve still binds nothing.
+    #[test]
+    fn an_unresolved_name_is_not_mistaken_for_a_type_variable_of_the_caller() {
+        let mut r = resolver();
+        r.members.insert(
+            "acme/Codec".into(),
+            cm(vec![Member::method(
+                "unmarshal",
+                TypeRef::simple("U"),
+                vec![TypeRef::simple("java/lang/Object"), TypeRef::simple("U").arrayed(1)],
+            )
+            .stat()]),
+        );
+        r.simple.insert("Codec".into(), "acme/Codec".into());
+        // `Mystery` is declared nowhere: not a parameter of the method or the class.
+        let src = "class C { void m(Object source, Mystery... values) { Object o = Codec.unmarshal(source, values); } }";
+        let call = "Codec.unmarshal(source, values)";
+        let start = src.find(call).unwrap();
+        let ty = infer_expression_type(src, start, start + call.len(), &r).unwrap();
+        assert_ne!(ty.binary_name, "Mystery", "{ty:?}");
+    }
+
+    /// `<T> T pick(Object s, T... v)` declared in the file and called with several `String`s, or with a
+    /// `String[]` handed over whole: `T` is `String` either way.
+    #[test]
+    fn a_generic_varargs_method_of_the_file_is_typed_from_its_arguments() {
+        let mut r = resolver();
+        r.members.insert("java/lang/String".into(), cm(vec![]));
+        r.simple.insert("String".into(), "java/lang/String".into());
+        let src = "class C {\n    <T> T pick(Object s, T... v) { return null; }\n    void m(String a, String b, String[] all) {\n        Object x = pick(null, a, b);\n        Object y = pick(null, all);\n        Object z = pick(null, a);\n    }\n}";
+        for call in ["pick(null, a, b)", "pick(null, all)", "pick(null, a)"] {
+            let start = src.find(call).unwrap();
+            let ty = infer_expression_type(src, start, start + call.len(), &r)
+                .unwrap_or_else(|| panic!("{call} has no type"));
+            assert_eq!(ty.binary_name, "java/lang/String", "{call}: {ty:?}");
+            assert_eq!(ty.dims, 0, "{call}: {ty:?}");
+        }
     }
 
     #[test]

@@ -28,5 +28,5 @@
 </div>
 
 <style>
-  .hirundo-window { height: 100vh; display: flex; flex-direction: column; background: var(--bg-elevated); overflow: hidden; }
+  .hirundo-window { height: 100vh; display: flex; flex-direction: column; background: var(--chrome-fill); overflow: hidden; }
 </style>

@@ -60,7 +60,8 @@ pub use crate::diag_cache::{
 pub use bennu_query::prelude::{ProjectView, RecordedDeps};
 
 pub use crate::add_parameter::{
-    add_parameter_plan, default_value_for, is_type_text, AddParameterPlan, Anchor, NewParameter,
+    add_parameter_plan, default_value_for, is_type_text, signature_caret, AddParameterPlan, Anchor, NewParameter,
+    SignatureCaret,
 };
 // RENAME planning + apply (docs §5 #10-12): best-effort, preview-first, config-aware.
 // Plus go-to-declaration (`resolve_declaration` + `DeclarationLocation`), which reuses the

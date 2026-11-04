@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tinta del prodotto — proposte</title>
+<style>
+  :root{--base:#0d1117;--elev:#161b22;--over:#1c2128;--hover:#21262d;--border:#30363d;--fg:#e6edf3;--muted:#8b949e;--tint:#f06595}
+  *{box-sizing:border-box} body{margin:0;background:#010409;color:var(--fg);font:14px/1.45 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;padding:16px}
+  h1{font-size:20px;margin:0 0 4px} p.lead{color:var(--muted);margin:0 0 12px;max-width:780px}
+  .pick{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+  .pick button{border:1px solid var(--border);background:var(--elev);color:var(--fg);border-radius:999px;padding:5px 12px;font:inherit;cursor:pointer;display:flex;gap:8px;align-items:center}
+  .pick button i{width:10px;height:10px;border-radius:50%}
+  .pick button.on{border-color:var(--tint);box-shadow:0 0 0 1px var(--tint)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  .card{background:var(--elev);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px}
+  .card h3{margin:0;font-size:14px} .card .d{color:var(--muted);font-size:12.5px}
+  .tag{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid var(--border);color:var(--muted);margin-left:6px}
+  .tag.bad{color:#f85149;border-color:#f8514955} .tag.ok{color:#3fb950;border-color:#3fb95055}
+  /* mini window */
+  .win{position:relative;height:210px;border-radius:12px;overflow:hidden;background:var(--elev);display:grid;grid-template-rows:28px 1fr 16px;border:1px solid #000}
+  .tb{display:flex;align-items:center;gap:8px;padding:0 10px;font-size:10px;color:var(--muted);position:relative}
+  .dots{display:flex;gap:5px} .dots i{width:8px;height:8px;border-radius:50%;background:#444}
+  .logo{width:16px;height:16px;border-radius:5px;background:var(--tint);display:grid;place-items:center;color:#111;font:700 9px system-ui}
+  .tab{margin-left:auto;background:var(--over);border-radius:6px;padding:2px 8px}
+  .mid{display:grid;grid-template-columns:30px 1fr;min-height:0}
+  .rail{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0}
+  .rb{width:22px;height:22px;border-radius:6px;background:transparent}
+  .rb.on{background:color-mix(in srgb,var(--tint) 22%,transparent)}
+  .rb.hov{background:var(--hover)}
+  .panels{margin:0 5px 0 0;border-radius:8px;background:var(--base);display:grid;grid-template-columns:70px 1fr;gap:0;overflow:hidden}
+  .side{border-right:1px solid #0000;background:var(--base)} .main{background:var(--base)}
+  .lines{padding:8px;display:grid;gap:5px} .lines i{height:5px;border-radius:3px;background:#2a313a} .lines i:nth-child(2n){width:70%}
+  .ft{font-size:9px;color:var(--muted);padding:0 10px;display:flex;align-items:center;position:relative}
+
+  /* 0 · current: separate gradients on titlebar and rail, opaque hover boxes */
+  .p0 .tb{background-image:linear-gradient(90deg,transparent 0,color-mix(in srgb,var(--tint) 42%,transparent) 24px,color-mix(in srgb,var(--tint) 14%,transparent) 150px,transparent 400px),radial-gradient(ellipse 380px 170px at 0 0,color-mix(in srgb,var(--tint) 13%,transparent),transparent 380px);background-size:100% 2px,100% 100%;background-repeat:no-repeat}
+  .p0 .rail{background-image:linear-gradient(180deg,color-mix(in srgb,var(--tint) 13%,transparent) 0,color-mix(in srgb,var(--tint) 4%,transparent) 70px,transparent 190px);background-repeat:no-repeat}
+  .p0 .logo{box-shadow:0 0 0 3px var(--elev)}   /* the "hole": opaque ring around the logo tile */
+  .p0 .rb.hov{background:#21262d}
+
+  /* 1 · one continuous glow on the chrome layer (behind titlebar + rail + footer) */
+  .p1{background:radial-gradient(ellipse 260px 200px at 0 0,color-mix(in srgb,var(--tint) 20%,transparent),transparent 70%),var(--elev)}
+  .p1 .rb.hov{background:rgba(255,255,255,.07)}
+
+  /* 2 · flat tint: the whole chrome is the elevated colour mixed a little with the accent */
+  .p2{background:color-mix(in srgb,var(--tint) 7%,var(--elev))}
+  .p2 .rb.hov{background:rgba(255,255,255,.07)} .p2 .tab{background:color-mix(in srgb,var(--tint) 10%,var(--over))}
+
+  /* 3 · accent only where it means something: logo, active rail button, a 2px line under the title bar */
+  .p3 .tb::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,var(--tint),transparent 55%)}
+  .p3 .rb.on{background:color-mix(in srgb,var(--tint) 20%,transparent);box-shadow:inset 2px 0 0 var(--tint)}
+
+  /* 4 · aurora: two soft blobs (accent + a neighbouring hue) at the top-left, very low opacity */
+  .p4{background:radial-gradient(160px 120px at 8% 0,color-mix(in srgb,var(--tint) 24%,transparent),transparent 70%),radial-gradient(220px 150px at 38% -10%,color-mix(in srgb,oklch(from var(--tint) l c calc(h + 32)) 22%,transparent),transparent 70%),var(--elev)}
+  .p4 .rb.hov{background:rgba(255,255,255,.07)}
+
+  /* 5 · edge light: a thin accent rim on the floating panels (where chrome meets content) + dimmer glow */
+  .p5{background:radial-gradient(ellipse 200px 90px at 0 0,color-mix(in srgb,var(--tint) 10%,transparent),transparent 70%),var(--elev)}
+  .p5 .panels{box-shadow:0 0 0 1px color-mix(in srgb,var(--tint) 35%,transparent),0 0 14px color-mix(in srgb,var(--tint) 12%,transparent)}
+  .p5 .rb.hov{background:rgba(255,255,255,.07)}
+
+  /* 6 · vertical wash: tint at the top fading to neutral at the bottom, on the chrome layer */
+  .p6{background:linear-gradient(180deg,color-mix(in srgb,var(--tint) 14%,var(--elev)),var(--elev) 75%)}
+  .p6 .rb.hov{background:rgba(255,255,255,.07)}
+  /* 7 · tinted canvas: the chrome stays neutral, the CONTENT panels carry a hint of the accent */
+  .p7 .panels,.p7 .side,.p7 .main{background:color-mix(in srgb,var(--tint) 3.5%,var(--base))}
+  .p7 .rb.hov{background:rgba(255,255,255,.07)}
+  /* 8 · layered depth: chrome 6% tint, panels 2% tint, plus a faint top highlight on the panels */
+  .p8{background:color-mix(in srgb,var(--tint) 6%,var(--elev))}
+  .p8 .panels,.p8 .side,.p8 .main{background:color-mix(in srgb,var(--tint) 2%,var(--base))}
+  .p8 .panels{box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+  .p8 .rb.hov{background:rgba(255,255,255,.07)}
+  /* 9 · dot grid: a faint dotted texture in the accent over the chrome (no blur, static) */
+  .p9{background-image:radial-gradient(color-mix(in srgb,var(--tint) 22%,transparent) 1px,transparent 1.4px),linear-gradient(var(--elev),var(--elev));background-size:9px 9px,100% 100%}
+  .p9 .tb,.p9 .ft{background:linear-gradient(90deg,var(--elev) 40%,transparent)}
+  .p9 .rb.hov{background:rgba(255,255,255,.07)}
+  /* 10 · spotlight under the active panel: the glow sits behind the focused panel edge */
+  .p10{background:radial-gradient(ellipse 240px 150px at 55% 55%,color-mix(in srgb,var(--tint) 18%,transparent),transparent 72%),var(--elev)}
+  .p10 .panels{box-shadow:0 0 22px color-mix(in srgb,var(--tint) 16%,transparent)}
+  .p10 .rb.hov{background:rgba(255,255,255,.07)}
+  /* 11 · gradient between two of the product's own shades (accent → darker accent), diagonal across the chrome */
+  .p11{background:linear-gradient(135deg,color-mix(in srgb,var(--tint) 18%,var(--elev)),color-mix(in srgb,oklch(from var(--tint) calc(l - .25) c h) 16%,var(--elev)) 60%,var(--elev))}
+  .p11 .rb.hov{background:rgba(255,255,255,.07)}
+</style>
+</head>
+<body>
+<h1>Tinta del prodotto — proposte</h1>
+<p class="lead">Oggi la tinta è fatta da due gradienti separati: uno sulla title bar, uno sulla rail, più i bottoni con sfondo opaco. Il risultato: una cucitura dove i due si incontrano e “buchi” grigi attorno a logo e hover (nel tuo screenshot, il contorno scuro attorno al tile <b>B</b>). Le proposte sotto usano tutte lo stesso principio, realizzabile una volta sola nel guscio condiviso: <b>un solo livello di colore dietro tutta la chrome</b> (title bar, rail, footer), con i widget traslucidi sopra.</p>
+<div class="pick" id="pick"></div>
+<div class="grid" id="grid"></div>
+<script>
+const PRODUCTS = { Hirundo:'#f06595', Bennu:'#ff7a18', Corvus:'#8b5cf6', Picus:'#40a02b', Garrulus:'#3b8ee0', Merula:'#ff8a1f' };
+const CARDS = [
+ {k:'p0', t:'0 · Oggi', tag:['cuciture e buchi','bad'], d:'Due gradienti separati (title bar e rail) e anello opaco attorno al logo: si vede la giunzione e il “foro” scuro.'},
+ {k:'p1', t:'1 · Bagliore unico', tag:['consigliata','ok'], d:'Un solo radial-gradient sul livello chrome, sotto title bar, rail e footer: nessuna giunzione, i pannelli opachi lo ritagliano naturalmente. I bottoni diventano traslucidi (bianco al 7%), quindi niente buchi.'},
+ {k:'p2', t:'2 · Tinta piatta', tag:['più sobria','ok'], d:'Nessun gradiente: la chrome è bg-elevated mescolato al 7% con l’accento. Zero cuciture per costruzione, costo nullo.'},
+ {k:'p3', t:'3 · Solo accenti', tag:['minimale','ok'], d:'Niente sfondo colorato: linea di 2 px sotto la title bar che sfuma, tasto attivo con barra laterale, logo a colore.'},
+ {k:'p4', t:'4 · Aurora', tag:['corretta','ok'], d:'Due macchie morbide in alto a sinistra: accento + una tinta vicina sulla ruota dei colori (accento ruotato di 32°). Nella prima versione la seconda macchia era un viola fisso, ed è per questo che tutti i prodotti tendevano al viola: era un mio errore.'},
+ {k:'p5', t:'5 · Bordo luminoso', tag:['alternativa','ok'], d:'Bagliore ridotto + filo d’accento attorno ai pannelli flottanti: il colore segue il “taglio” tra chrome e contenuto.'},
+  {k:'p6', t:'6 · Velo verticale', tag:['semplice','ok'], d:'Dall’alto, tinta al 14% che sfuma fino al neutro verso il basso. Un solo livello, nessuna giunzione.'},
+ {k:'p7', t:'7 · Tela colorata', tag:['sfondo','ok'], d:'La chrome resta neutra, sono i pannelli di contenuto ad avere un velo (3,5%) dell’accento. Il colore del programma si vede soprattutto dove si lavora.'},
+ {k:'p8', t:'8 · Profondità a strati', tag:['sfondo','ok'], d:'Chrome al 6%, pannelli al 2%, e un filo di luce in cima ai pannelli: i livelli si leggono come strati dello stesso colore.'},
+ {k:'p9', t:'9 · Punti', tag:['texture','ok'], d:'Una trama di puntini nell’accento dietro la chrome, che svanisce dove ci sono titoli e footer. Statica, nessun blur.'},
+ {k:'p10', t:'10 · Riflettore', tag:['sfondo','ok'], d:'Un alone morbido dietro i pannelli, al centro: il colore sembra illuminare il contenuto dal basso.'},
+ {k:'p11', t:'11 · Diagonale a due toni', tag:['gradiente','ok'], d:'Gradiente diagonale tra l’accento e una sua versione più scura, molto tenue, su tutta la chrome.'},
+];
+const win = k => `<div class="win ${k}"><div class="tb"><span class="dots"><i></i><i></i><i></i></span><span class="logo">${NAME[0]}</span><span>☰</span><span class="tab">file</span></div>
+<div class="mid"><div class="rail"><div class="rb on"></div><div class="rb hov"></div><div class="rb"></div></div><div class="panels"><div class="side"><div class="lines"><i></i><i></i><i></i><i></i><i></i></div></div><div class="main"><div class="lines"><i></i><i></i><i></i><i></i></div></div></div></div>
+<div class="ft">main · 3 problems</div></div>`;
+let NAME = 'Hirundo';
+function draw(){
+  document.documentElement.style.setProperty('--tint', PRODUCTS[NAME]);
+  document.getElementById('grid').innerHTML = CARDS.map(c => `<div class="card">${win(c.k)}<h3>${c.t}<span class="tag ${c.tag[1]}">${c.tag[0]}</span></h3><div class="d">${c.d}</div></div>`).join('');
+  document.getElementById('pick').innerHTML = Object.entries(PRODUCTS).map(([n,c]) => `<button class="${n===NAME?'on':''}" data-n="${n}"><i style="background:${c}"></i>${n}</button>`).join('');
+}
+document.getElementById('pick').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { NAME = b.dataset.n; draw(); } });
+draw();
+</script>
+</body>
+</html>

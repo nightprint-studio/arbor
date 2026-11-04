@@ -24,6 +24,12 @@ describe('getFileIcon', () => {
     different('index.jsp', 'index.html');
   });
 
+  it('gives request files the Hirundo mark, one for both spellings', () => {
+    same('requests.http', 'api.rest');
+    different('requests.http', 'data.json');
+    different('requests.http', 'pattern.merula');
+  });
+
   it('picks Struts config out of the forty other XMLs around it', () => {
     same('struts.xml', 'struts-security.xml');
     same('struts.xml', 'struts.properties');

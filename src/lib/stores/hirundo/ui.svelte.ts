@@ -24,6 +24,7 @@ export type Dialog =
   | { kind: 'new-collection' }
   | { kind: 'new-folder'; parent: string }
   | { kind: 'rename'; path: string; name: string }
+  | { kind: 'rename-tab'; id: string; name: string }
   | { kind: 'meta'; path: string }
   | { kind: 'delete'; path: string; name: string }
   | { kind: 'project-picker'; workspaceId?: string }
@@ -32,6 +33,10 @@ export type Dialog =
   | { kind: 'run'; path: string }
   | { kind: 'soap-import' }
   | { kind: 'openapi-import' }
+  | { kind: 'open-folder' }
+  | { kind: 'new-project' }
+  | { kind: 'confirm-send'; missing: string[] }
+  | { kind: 'create-variable'; name: string; path: string | null }
   | { kind: 'http-import' }
   | { kind: 'http-export'; path: string }
   | { kind: 'diff' }

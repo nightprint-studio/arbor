@@ -282,11 +282,25 @@ pub(crate) fn diagnostics_for(file: &str, source: &str) -> Vec<Diagnostic> {
 /// two kinds of pack it is dealing with.
 pub(crate) fn violations_for(file: &str, source: &str) -> Vec<Violation> {
     let Some((rel, config)) = owning_project(file) else { return Vec::new() };
-    match outline_for(file, &rel, source, &config) {
+    violations_under(file, &rel, source, &config)
+}
+
+/// Every violation in `source` judged by `config`, whether or not the project switched the check on.
+///
+/// For the bulk fix, which works from a convention it may have *chosen* (the language's standard, or
+/// what the project does) rather than one the project wrote down. `config` must have `enabled` set or
+/// the scan answers nothing; the continuous check never calls this, so a project that has not opted
+/// in still gets no squiggles.
+pub(crate) fn violations_with(root: &str, file: &str, source: &str, config: &NamingConfig) -> Vec<Violation> {
+    violations_under(file, &relative_to(root, file), source, config)
+}
+
+fn violations_under(file: &str, rel: &str, source: &str, config: &NamingConfig) -> Vec<Violation> {
+    match outline_for(file, rel, source, config) {
         Some(symbols) => {
-            bennu_naming::prelude::violations_from_symbols(&rel, &symbols, source, &config)
+            bennu_naming::prelude::violations_from_symbols(rel, &symbols, source, config)
         }
-        None => bennu_naming::prelude::violations(&rel, source, &config),
+        None => bennu_naming::prelude::violations(rel, source, config),
     }
 }
 
@@ -376,7 +390,7 @@ const PRESENCE_BUDGET: usize = 40_000;
 /// case for anything with a web front-end — that is a few hundred entries, not a full tree walk.
 /// On a pure-Java tree it walks until the budget runs out, which is the price of proving a
 /// negative; it happens once, when the modal opens, off the UI thread.
-fn languages_present(root: &str) -> std::collections::BTreeSet<&'static str> {
+pub(crate) fn languages_present(root: &str) -> std::collections::BTreeSet<&'static str> {
     let mut found = std::collections::BTreeSet::new();
     let total = packs().len();
     let mut budget = PRESENCE_BUDGET;
@@ -429,7 +443,7 @@ fn cache() -> &'static Mutex<HashMap<String, NamingConfig>> {
 ///
 /// The **merged** config is what the cache holds, because it is what every reader wants and
 /// merging per file on a project-wide pass would be the same work thousands of times.
-fn config_for_root(root: &str) -> NamingConfig {
+pub(crate) fn config_for_root(root: &str) -> NamingConfig {
     let key = root.replace('\\', "/");
     if let Ok(guard) = cache().lock() {
         if let Some(hit) = guard.get(&key) {

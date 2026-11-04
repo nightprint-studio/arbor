@@ -184,7 +184,8 @@ pub(crate) async fn execute(p: &Prepared) -> Result<ResponseOut, String> {
     }
     let time_ms = started.elapsed().as_millis() as u64;
 
-    let (body, body_base64) = decode_body(&bytes);
+    let content_type = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("content-type")).map(|(_, v)| v.as_str()).unwrap_or("");
+    let (body, body_base64) = decode_body(&bytes, content_type);
     Ok(ResponseOut {
         status: status.as_u16(),
         status_text: status.canonical_reason().unwrap_or("").to_string(),
@@ -225,12 +226,11 @@ fn build_multipart(parts: &[FormPart]) -> Result<(String, Vec<u8>), String> {
     Ok((content_type_header(&boundary), encode_multipart(&encoded, &boundary)))
 }
 
-/// The body as text, and — only when it is not UTF-8 — the exact bytes, so an image or a PDF survives.
-fn decode_body(bytes: &[u8]) -> (String, Option<String>) {
-    match std::str::from_utf8(bytes) {
-        Ok(text) => (text.to_string(), None),
-        Err(_) => (String::from_utf8_lossy(bytes).into_owned(), Some(base64::engine::general_purpose::STANDARD.encode(bytes))),
-    }
+/// The body as text — by the charset the server declared, or the document's own — and, only when it is really binary (an image, a PDF), the exact bytes too.
+fn decode_body(bytes: &[u8], content_type: &str) -> (String, Option<String>) {
+    let decoded = crate::charset::decode(bytes, content_type);
+    let base64 = decoded.binary.then(|| base64::engine::general_purpose::STANDARD.encode(bytes));
+    (decoded.text, base64)
 }
 
 /// A failure in words a person can act on.
@@ -254,9 +254,9 @@ mod tests {
 
     #[test]
     fn a_text_body_is_text_and_a_binary_one_keeps_its_bytes() {
-        assert_eq!(decode_body("ciao è".as_bytes()), ("ciao è".to_string(), None));
+        assert_eq!(decode_body("ciao è".as_bytes(), "text/plain"), ("ciao è".to_string(), None));
         let png = [0x89, b'P', b'N', b'G', 0xFF, 0xFE];
-        let (text, b64) = decode_body(&png);
+        let (text, b64) = decode_body(&png, "image/png");
         assert!(text.contains('\u{FFFD}'));
         assert_eq!(base64::engine::general_purpose::STANDARD.decode(b64.unwrap()).unwrap(), png);
     }

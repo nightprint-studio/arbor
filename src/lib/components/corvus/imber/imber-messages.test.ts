@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ImberApproval, ImberBlock, ImberMessage, ImberToolCall } from '$lib/types/corvus/imber';
-import { foldTools, pendingApproval, plainText, scheduledText, summarizeTools, upsertMessage } from './imber-messages';
+import { activityText, foldTools, pendingApproval, plainText, scheduledText, summarizeTools, upsertMessage, userText } from './imber-messages';
 
 const msg = (id: string, blocks: ImberBlock[] = []): ImberMessage => ({ id, role: 'assistant', at: 0, blocks });
 const call = (kind: ImberToolCall['kind'], ok = true): ImberToolCall => ({ id: Math.random().toString(), kind, label: 'x', detail: '', ok });
@@ -72,5 +72,26 @@ describe('scheduledText', () => {
 describe('plainText', () => {
   it('joins the text blocks only', () => {
     expect(plainText(msg('a', [{ type: 'text', text: 'one' }, { type: 'tool', call: call('read') }, { type: 'text', text: 'two' }]))).toBe('one\n\ntwo');
+  });
+});
+
+describe('userText', () => {
+  it('joins the text blocks of a user message', () => {
+    expect(userText(msg('u', [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]))).toBe('a\n\nb');
+  });
+});
+
+describe('activityText', () => {
+  const base = { running: true, retry: null, waiting: false, tool: 'thinking' };
+  it('says nothing when no run is open', () => {
+    expect(activityText({ ...base, running: false })).toBeNull();
+  });
+  it('names the tool in plain words, or thinks', () => {
+    expect(activityText({ ...base, tool: 'git_force_push' })?.label).toBe('Running force push');
+    expect(activityText(base)?.label).toBe('Thinking');
+  });
+  it('a retry replaces the label, and an approval waits for the user', () => {
+    expect(activityText({ ...base, retry: { attempt: 2, max: 5, waitSecs: 8, detail: 'overloaded' } })).toEqual({ label: '', retry: 'Retrying (2/5) in 8s', detail: 'overloaded' });
+    expect(activityText({ ...base, waiting: true })?.label).toBe('Waiting for you');
   });
 });

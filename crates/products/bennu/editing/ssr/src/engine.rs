@@ -23,10 +23,10 @@
 
 use std::collections::HashSet;
 
-use arbor_syntax::prelude::{ByteRange, Pattern, SyntaxError};
+use arbor_syntax::prelude::{ByteRange, HoleForms, Pattern, SyntaxError};
 use tree_sitter::{Language, Node, Parser, Tree};
 
-use crate::query::{Alternative, Ask, Constraint, Denotes, GroupBy, Query};
+use crate::query::{Alternative, Ask, Constraint, DeclKind, Denotes, Enclosure, GroupBy, Query};
 
 /// What an expression turned out to be: a type, or a value of a type.
 ///
@@ -165,28 +165,79 @@ pub fn compile(
     query: &Query,
     contexts: &[(&str, &str)],
 ) -> Result<Vec<Pattern>, SyntaxError> {
+    compile_with(language, query, contexts, &[HoleForms::PLAIN])
+}
+
+/// The ways a Java hole may be written where a bare name would not parse, **most ordinary first**.
+///
+/// A hole alone in a block is a statement (`{};`) or, in a class body, a member (`int {};`); alone in a
+/// parenthesised list it is a parameter (`int {}`); in front of a declaration it is a run of modifiers and
+/// annotations (`@{}`). The compiler tries these in order — and the bare form first, in every context,
+/// before any other — so a pattern that compiled before compiles exactly as it did.
+pub const JAVA_FORMS: &[HoleForms] = &[
+    HoleForms::PLAIN,
+    HoleForms { block: "{};", item: "{}", mods: "{}" },
+    HoleForms { block: "int {};", item: "{}", mods: "{}" },
+    HoleForms { block: "{}", item: "int {}", mods: "{}" },
+    HoleForms { block: "{}", item: "{}", mods: "@{}" },
+    HoleForms { block: "{};", item: "{}", mods: "@{}" },
+    HoleForms { block: "int {};", item: "{}", mods: "@{}" },
+    HoleForms { block: "{}", item: "int {}", mods: "@{}" },
+    HoleForms { block: "{};", item: "int {}", mods: "{}" },
+    HoleForms { block: "int {};", item: "int {}", mods: "{}" },
+    HoleForms { block: "{};", item: "int {}", mods: "@{}" },
+    HoleForms { block: "int {};", item: "int {}", mods: "@{}" },
+];
+
+/// [`compile`] with the forms a hole may take in a position a bare name cannot fill (see [`JAVA_FORMS`]).
+///
+/// An alternative with an `as` kind is compiled in that kind's wrappers **only**: it is the user saying how
+/// the text is to be read, and falling back to another reading is how one pattern came to mean two things.
+pub fn compile_with(
+    language: &Language,
+    query: &Query,
+    contexts: &[(&str, &str)],
+    forms: &[HoleForms],
+) -> Result<Vec<Pattern>, SyntaxError> {
     let Ask::Patterns(alternatives) = &query.ask else { return Ok(Vec::new()) };
-    alternatives.iter().map(|alt| compile_one(language, &alt.pattern, contexts)).collect()
+    alternatives.iter().map(|alt| compile_one(language, alt, contexts, forms)).collect()
 }
 
 fn compile_one(
     language: &Language,
-    pattern: &str,
+    alt: &Alternative,
     contexts: &[(&str, &str)],
+    forms: &[HoleForms],
 ) -> Result<Pattern, SyntaxError> {
-    let mut last = Pattern::compile(language, pattern);
-    if last.is_ok() {
-        return last;
-    }
-    for (prefix, suffix) in contexts {
-        match Pattern::compile_in(language, pattern, prefix, suffix) {
-            Ok(compiled) => return Ok(compiled),
-            // Kept so the error the caller sees is a real one about their pattern, rather than
-            // whichever context happened to be tried first.
-            Err(e) => last = Err(e),
+    let pattern = alt.pattern.as_str();
+    // Where the fragment may sit: the one reading it was declared as, or bare and then each context.
+    // The guess is about Java: a grammar compiled with no wrapper contexts (a page) is left alone.
+    let reading = alt.decl.or_else(|| if contexts.is_empty() { None } else { DeclKind::guess(pattern) });
+    let attempts: Vec<(&str, &str)> = match reading {
+        Some(kind) => kind.wrappers().to_vec(),
+        None => std::iter::once(("", "")).chain(contexts.iter().copied()).collect(),
+    };
+    let mut first_error: Option<SyntaxError> = None;
+    for (index, form) in forms.iter().enumerate() {
+        let mut last = None;
+        for (prefix, suffix) in &attempts {
+            match Pattern::compile_in_with(language, pattern, prefix, suffix, form) {
+                Ok(compiled) => return Ok(compiled),
+                // Kept so the error the caller sees is a real one about their pattern, rather than
+                // whichever context happened to be tried first.
+                Err(e) => last = Some(e),
+            }
+        }
+        // The error to report is the bare form's: a complaint about `int ARBOR_PLACEHOLDER_3` would be
+        // about text the user never wrote.
+        if index == 0 {
+            first_error = last;
         }
     }
-    last
+    Err(first_error.unwrap_or_else(|| SyntaxError::Pattern {
+        reason: "this pattern has no body".to_string(),
+        at: None,
+    }))
 }
 
 /// Run the compiled alternatives over one file.
@@ -223,7 +274,12 @@ pub fn search_file(
                 })
                 .collect();
 
-            let verdict = admits(alt, &captures, subject, types, tree.as_ref());
+            let mut verdict = admits(alt, &captures, subject, types, tree.as_ref());
+            // Where the match lives. Without a tree the question cannot be answered, and that is
+            // "unknown", not "no" — the same rule a type constraint follows.
+            if verdict != Verdict::Refused && !query.inside.is_empty() {
+                verdict = all_of([verdict, lives_inside(&query.inside, tree.as_ref(), found.range)]);
+            }
             if verdict == Verdict::Refused {
                 claimed.remove(&(found.range.start, found.range.end));
                 continue;
@@ -249,7 +305,7 @@ pub fn search_file(
 
 /// Whether a query needs its own parse of the subject.
 fn needs_tree(query: &Query) -> bool {
-    if matches!(query.group, Some(GroupBy::Enclosing)) {
+    if matches!(query.group, Some(GroupBy::Enclosing)) || !query.inside.is_empty() {
         return true;
     }
     let Ask::Patterns(alts) = &query.ask else { return false };
@@ -356,6 +412,50 @@ fn check(
         Constraint::All(parts) => {
             all_of(parts.iter().map(|p| check(p, capture, subject, types, tree)))
         }
+    }
+}
+
+/// The declaration the match is **nearest inside** — a method, a lambda, a class…
+///
+/// The match's own node is not a candidate: a method matched by `as member` is inside its class, not
+/// inside itself. A block that is a direct child of a class body is an instance initializer, and a class
+/// body under `new X() { … }` or an enum constant is an anonymous class, which is why neither is read off
+/// the node's own kind.
+fn nearest_enclosure(node: Node<'_>) -> Option<Enclosure> {
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        let grand = parent.parent().map(|g| g.kind());
+        let found = match parent.kind() {
+            "method_declaration" => Some(Enclosure::Method),
+            "constructor_declaration" | "compact_constructor_declaration" => Some(Enclosure::Constructor),
+            "static_initializer" => Some(Enclosure::Initializer),
+            "block" if grand == Some("class_body") => Some(Enclosure::Initializer),
+            "lambda_expression" => Some(Enclosure::Lambda),
+            "class_declaration" => Some(Enclosure::Class),
+            "interface_declaration" | "annotation_type_declaration" => Some(Enclosure::Interface),
+            "enum_declaration" => Some(Enclosure::Enum),
+            "record_declaration" => Some(Enclosure::Record),
+            "class_body" if matches!(grand, Some("object_creation_expression" | "enum_constant")) => {
+                Some(Enclosure::Anonymous)
+            }
+            _ => None,
+        };
+        if found.is_some() {
+            return found;
+        }
+        current = parent;
+    }
+    None
+}
+
+/// Whether the match at `range` lives in one of `wanted`. No tree, or a match that sits in none of them
+/// (top level of a file), is undecided rather than refused.
+fn lives_inside(wanted: &[Enclosure], tree: Option<&Tree>, range: ByteRange) -> Verdict {
+    let Some(node) = tree.and_then(|t| node_at(t, range)) else { return Verdict::Unresolved };
+    match nearest_enclosure(node) {
+        Some(found) if wanted.contains(&found) => Verdict::Admitted,
+        Some(_) => Verdict::Refused,
+        None => Verdict::Refused,
     }
 }
 
@@ -500,6 +600,8 @@ mod tests {
         ("class __Q {", "}"),
         ("class __Q { void __m() {", "} }"),
         ("class __Q { void __m() {", ";} }"),
+        // A `catch` clause is only legal after a `try`.
+        ("class __Q { void __m() { try {} ", "} }"),
     ];
 
     fn language() -> Language {
@@ -511,7 +613,7 @@ mod tests {
         // Named in the message: a table-driven test that fails on `.expect("pattern compiles")`
         // reports a byte range into text nobody wrote, and finding out *which row* meant doing
         // the arithmetic by hand.
-        let compiled = compile(&language(), &query, WRAP)
+        let compiled = compile_with(&language(), &query, WRAP, JAVA_FORMS)
             .unwrap_or_else(|e| panic!("`{query_text}` does not compile — {e}"));
         search_file(
             &language(),
@@ -554,26 +656,159 @@ mod tests {
         }
     }
 
-    /// **A known limit, pinned so it cannot be rediscovered by accident.**
-    ///
-    /// A placeholder is substituted with an ordinary **identifier** before the pattern is
-    /// parsed, so a hole can only sit where a name is legal. A run of *arguments* is a run of
-    /// expressions and works; a run of **class members**, of **statements** or of **parameters**
-    /// is not, because none of those may be a bare name — `class A { body }` and `void m(args)`
-    /// are not Java.
-    ///
-    /// The practical cost is that a **class-shaped pattern cannot be written at all**: there is
-    /// no way to say "a class extending X, whatever its body". Closing that needs a placeholder
-    /// that is recognised through a wrapper rather than by its own text, which is a change to
-    /// how patterns are compiled and not a context that can be added here.
+    /// A bare hole is an **identifier**, so on its own it can only sit where a name is legal: a run
+    /// of arguments works, a run of members, statements or parameters does not. That is what plain
+    /// [`compile`] still does — and it is what the *forms* ([`JAVA_FORMS`]) exist to lift, which the
+    /// next tests pin: the same patterns compile once the hole may be written as a statement, a
+    /// member, a parameter or a modifier.
     #[test]
-    fn a_run_hole_only_works_where_a_bare_name_is_legal() {
+    fn a_bare_hole_only_works_where_a_name_is_legal() {
         let compiles = |text: &str| {
             compile(&language(), &parse_query(text).expect("parses"), WRAP).is_ok()
         };
         assert!(compiles("f($args...$)"), "arguments are expressions");
-        assert!(!compiles("class $c$ extends $b$ { $body...$ }"), "members are not names");
-        assert!(!compiles("void $m$($args...$) { $body...$ }"), "parameters are not names either");
+        assert!(!compiles("class $c$ extends $b$ { $members...$ }"), "members are not names");
+        assert!(!compiles("void $m$($params...$) { $body...$ }"), "parameters are not names either");
+    }
+
+    fn compiles_with_forms(text: &str) -> bool {
+        compile_with(&language(), &parse_query(text).expect("parses"), WRAP, JAVA_FORMS).is_ok()
+    }
+
+    /// The shapes that were impossible to write, now compiling. One row each, named by what the
+    /// user was after.
+    #[test]
+    fn declaration_shaped_patterns_compile() {
+        for text in [
+            "for (int $i$ = 0; $i$ < $l$.size(); $i$++) { $body...$ }",
+            "catch ($t$ $e$) { }",
+            "@Autowired private $t$ $n$;",
+            "class $c$ extends $b$ { $members...$ }",
+            "$mods...$ class $c$ extends $b$ implements $i$ { $members...$ }",
+            "void $m$($params...$) { $body...$ }",
+            "$mods...$ $r$ $m$($params...$) throws $e$ { $body...$ }",
+            "if ($c$) { $stmts...$ }",
+            "try { $stmts...$ } catch ($t$ $e$) { $handler...$ }",
+            "$mods...$ interface $i$ { $members...$ }",
+            // An enum's members come after the constants and a `;`.
+            "$mods...$ enum $e$ { $constants...$ ; $members...$ }",
+            "$mods...$ record $r$($params...$) { $members...$ }",
+            "($a$, $b$) -> { $stmts...$ }",
+        ] {
+            assert!(compiles_with_forms(text), "`{text}` should compile");
+        }
+    }
+
+    #[test]
+    fn a_statement_hole_matches_the_body_of_a_loop() {
+        let src = "class A { void m() { for (int i = 0; i < xs.size(); i++) { a(); b(); } } }";
+        let hits = run("for (int $i$ = 0; $i$ < $l$.size(); $i$++) { $body...$ }", src, &NoTypes);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].capture("body").map(|c| c.text.as_str()), Some("a(); b();"));
+    }
+
+    #[test]
+    fn a_catch_clause_is_a_pattern() {
+        let src = "class A { void m() { try { f(); } catch (IOException e) { } catch (Exception x) { g(); } } }";
+        let hits = run("catch ($t$ $e$) { }", src, &NoTypes);
+        assert_eq!(hits.len(), 1, "only the catch with an empty body");
+        assert_eq!(hits[0].capture("t").map(|c| c.text.as_str()), Some("IOException"));
+    }
+
+    #[test]
+    fn a_class_pattern_ignores_what_is_in_the_body() {
+        let src = "public class A extends B { int x; void f() {} } class C extends B {} class D {}";
+        let hits = run("$mods...$ class $c$ extends $b$ { $members...$ }", src, &NoTypes);
+        let names: Vec<&str> = hits.iter().filter_map(|h| h.capture("c")).map(|c| c.text.as_str()).collect();
+        assert_eq!(names, ["A", "C"]);
+    }
+
+    #[test]
+    fn an_annotated_field_is_found_by_its_annotation() {
+        let src = "class A { @Autowired private Svc s; private Svc t; }";
+        let hits = run("@Autowired private $t$ $n$;", src, &NoTypes);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].capture("n").map(|c| c.text.as_str()), Some("s"));
+    }
+
+    // ── `as`: what the text is ──────────────────────────────────────────────────
+
+    const FINALS: &str =
+        "class A { final int f = 1; void m(final int p) { final int l = 2; int k = 3; } }";
+
+    #[test]
+    fn as_picks_one_reading_of_the_same_text() {
+        let locals = run("final $t$ $n$ = $v$;\nas local", FINALS, &NoTypes);
+        assert_eq!(locals.len(), 1);
+        assert_eq!(locals[0].preview, "final int l = 2;");
+
+        let fields = run("final $t$ $n$ = $v$;\nas field", FINALS, &NoTypes);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].preview, "final int f = 1;");
+
+        let params = run("final $t$ $n$\nas param", FINALS, &NoTypes);
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].preview, "final int p");
+    }
+
+    /// Two readings in one query: the `as` belongs to the alternative it follows.
+    #[test]
+    fn as_belongs_to_its_own_alternative() {
+        let hits = run("final $t$ $n$ = $v$;\nas local\nor final $t$ $n$ = $v$;\nas field", FINALS, &NoTypes);
+        assert_eq!(hits.len(), 2, "a local and a field, each found once");
+    }
+
+    #[test]
+    fn a_modifier_hole_lets_one_pattern_cover_every_declaration() {
+        let hits = run("$mods...$ int $n$ = $v$;\nas local", FINALS, &NoTypes);
+        let found: Vec<&str> = hits.iter().map(|h| h.preview.as_str()).collect();
+        assert_eq!(found, ["final int l = 2;", "int k = 3;"]);
+        assert_eq!(hits[0].capture("mods").map(|c| c.text.as_str()), Some("final"));
+        assert_eq!(hits[1].capture("mods").map(|c| c.text.as_str()), Some(""));
+    }
+
+    /// The case that started this: take `final` off locals and parameters, keep it on fields, leave
+    /// the other modifiers and annotations exactly where they were.
+    #[test]
+    fn removing_final_from_locals_and_parameters_leaves_the_fields() {
+        use crate::replace::{apply, edits_for};
+        let src = "class A { final int f = 1; void m(final int p, String q) { final int l = 2; @Deprecated final int k = 3; } }";
+        let rewrite = |query: &str, template: &str, source: &str| {
+            let hits = run(query, source, &NoTypes);
+            apply(source, &edits_for(template, &hits))
+        };
+        let locals = rewrite(
+            "$pre...$ final $post...$ $t$ $n$ = $v$;\nas local",
+            "$pre$ $post$ $t$ $n$ = $v$;",
+            src,
+        );
+        let both = rewrite("$pre...$ final $post...$ $t$ $n$\nas param", "$pre$ $post$ $t$ $n$", &locals);
+        assert_eq!(
+            both,
+            "class A { final int f = 1; void m(int p, String q) { int l = 2; @Deprecated int k = 3; } }",
+        );
+    }
+
+    // ── `inside`: where it lives ────────────────────────────────────────────────
+
+    #[test]
+    fn inside_asks_for_the_nearest_enclosing_declaration() {
+        let src = "class A { int f = g(); void m() { g(); Runnable r = () -> g(); } A() { g(); } }";
+        let count = |q: &str| run(q, src, &NoTypes).len();
+        assert_eq!(count("g()"), 4);
+        assert_eq!(count("g()\ninside method"), 1);
+        assert_eq!(count("g()\ninside lambda"), 1);
+        assert_eq!(count("g()\ninside constructor"), 1);
+        assert_eq!(count("g()\ninside class"), 1, "the field initialiser");
+        assert_eq!(count("g()\ninside body"), 3);
+        assert_eq!(count("g()\ninside method, lambda"), 2);
+    }
+
+    #[test]
+    fn inside_tells_anonymous_classes_from_named_ones() {
+        let src = "class A { void m() { new R() { void run() { g(); } int x = g(); }; } }";
+        assert_eq!(run("g()\ninside anonymous", src, &NoTypes).len(), 1, "the field of the anonymous class");
+        assert_eq!(run("g()\ninside method", src, &NoTypes).len(), 1, "the method of the anonymous class");
     }
 
     /// The appended `;` must stay outside the matched range, or the pattern would match the

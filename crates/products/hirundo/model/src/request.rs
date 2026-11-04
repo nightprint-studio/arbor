@@ -44,13 +44,15 @@ pub struct Settings {
     pub verify_tls: bool,
     /// Send the cookies the environment's jar holds, and keep the ones the answer sets.
     pub cookie_jar: bool,
+    /** The request is a stream (Server-Sent Events): Send listens to it instead of waiting for one answer. */
+    pub stream: bool,
 }
 
 pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { timeout_ms: DEFAULT_TIMEOUT_MS, follow_redirects: true, verify_tls: true, cookie_jar: true }
+        Self { timeout_ms: DEFAULT_TIMEOUT_MS, follow_redirects: true, verify_tls: true, cookie_jar: true, stream: false }
     }
 }
 
@@ -98,7 +100,7 @@ mod tests {
     fn a_blank_request_is_a_get_with_the_usual_settings() {
         let r = HttpRequest::default();
         assert_eq!(r.method, Method::Get);
-        assert_eq!(r.settings, Settings { timeout_ms: 30_000, follow_redirects: true, verify_tls: true, cookie_jar: true });
+        assert_eq!(r.settings, Settings { timeout_ms: 30_000, follow_redirects: true, verify_tls: true, cookie_jar: true, stream: false });
         assert_eq!(r.auth, Auth::Inherit);
         assert_eq!(r.body.kind, BodyKind::Empty);
     }

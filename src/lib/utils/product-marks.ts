@@ -188,16 +188,19 @@ const MARKS: Record<ProductId, Record<MarkWeight, MarkPart[]>> = {
       p('M16.5 6.6 A7 7 0 1 0 19 12 H15.2', DUO),
     ],
   },
-  // H — two stems and a crossbar that carries an arrow: a request going across.
+  // H — two stems and a crossbar, built like the other letters. The crossbar sits a little below
+  // the middle (11.5 would be centred): a swallow in flight, tail down, rather than a ladder.
+  // Anything more (arrowheads, a second bar) is mud at the 16px a tab gives it.
   hirundo: {
-    line: [p('M6 4 V20', LINE), p('M18 4 V20', LINE), p('M6 12 H18', LINE)],
-    solid: [p('M6.2 4.4 V19.6', SOLID), p('M17.8 4.4 V19.6', SOLID), p('M6.2 12 H17.8', SOLID)],
+    line: [p('M6.5 4 V20', LINE), p('M17.5 4 V20', LINE), p('M6.5 12.5 H17.5', LINE)],
+    solid: [p('M6.7 4.4 V19.6', SOLID), p('M17.3 4.4 V19.6', SOLID), p('M6.7 12.6 H17.3', SOLID)],
     duotone: [
-      faint(bar(2.2, 2.6, 2.6, 2.6, 0.8)),
-      faint(bar(19.2, 18.8, 2.6, 2.6, 0.8)),
-      p('M6.4 4.6 V19.4', DUO),
-      p('M17.6 4.6 V19.4', DUO),
-      p('M6.4 12 H17.6', DUO),
+      // Two short dashes trailing off to the left of the stem: motion, kept clear of the strokes.
+      faint(bar(1.8, 8.6, 2.4, 1.8, 0.9)),
+      faint(bar(1.8, 14.2, 2.4, 1.8, 0.9)),
+      p('M7 4.6 V19.4', DUO),
+      p('M17.4 4.6 V19.4', DUO),
+      p('M7 12.6 H17.4', DUO),
     ],
   },
 };

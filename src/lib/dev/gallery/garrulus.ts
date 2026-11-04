@@ -8,6 +8,10 @@ export const garrulusOverrides: Record<string, SceneOverride> = {
   'garrulus/notes/CloseNoteModal': {
     props: { title: 'Sprint planning', path: 'meetings/sprint-planning.md', onSave: noop, onDiscard: noop, onCancel: noop },
   },
+  'garrulus/notes/NewNoteModal': { props: { typeId: null, onClose: noop } },
+  'garrulus/notes/RenameNoteModal': { props: { path: 'bugs/crash-on-start.md', onClose: noop } },
+  'garrulus/notes/TypePickerModal': { props: { placeholder: 'New note of which type…', onPick: noop, onClose: noop } },
+  'garrulus/notes/QuickSwitcherModal': { props: { onClose: noop } },
   'garrulus/shell/GarrulusCommitModal': { props: { onClose: noop } },
   'garrulus/shell/GarrulusRemoteModal': { props: { onClose: noop, vaultName: 'work', onChanged: noop } },
 };

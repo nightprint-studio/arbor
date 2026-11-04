@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hirundo — proposte icona (stile suite)</title>
+<style>
+  :root{--card:#161b22;--border:#30363d;--fg:#e6edf3;--muted:#8b949e}
+  *{box-sizing:border-box} body{margin:0;background:#010409;color:var(--fg);font:14px/1.45 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;padding:16px}
+  h1{font-size:20px;margin:0 0 4px} p{color:var(--muted);margin:0 0 16px;max-width:760px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .big{display:grid;place-items:center;background:#0d1117;border-radius:10px;padding:14px}
+  .big svg{width:128px;height:128px}
+  .row{display:flex;gap:12px;align-items:center}
+  .row svg{width:40px;height:40px} .row svg.s{width:24px;height:24px} .row svg.xs{width:16px;height:16px}
+  b{font-size:13px} span.d{color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<h1>Hirundo — icone nello stile della suite</h1>
+<p>Stesso telaio delle altre app: card arrotondata con bordo a gradiente nel colore del programma (qui teal) e lettera iniziale costruita a tratti, con un dettaglio che racconta il programma. Sei varianti della <b>H</b>; sotto ogni icona la vedi a 40, 24 e 16 px.</p>
+<div class="grid" id="grid"></div>
+<script>
+const CARD = (id, letter, extra = '') => `
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="${id}-bg" x1="256" y1="0" x2="256" y2="512" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#123541"/><stop offset="55%" stop-color="#0b2029"/><stop offset="100%" stop-color="#06141a"/></linearGradient>
+    <linearGradient id="${id}-w1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0b7285"/><stop offset="100%" stop-color="#66d9e8"/></linearGradient>
+    <linearGradient id="${id}-w2" x1="1" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c5f6fa"/><stop offset="100%" stop-color="#22b8cf"/></linearGradient>
+    <linearGradient id="${id}-w3" x1="1" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#1864ab"/><stop offset="100%" stop-color="#74c0fc"/></linearGradient>
+    <linearGradient id="${id}-w4" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#15aabf"/><stop offset="100%" stop-color="#e3fafc"/></linearGradient>
+    <linearGradient id="${id}-fg" x1="150" y1="400" x2="370" y2="110" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#1098ad"/><stop offset="55%" stop-color="#22b8cf"/><stop offset="100%" stop-color="#99e9f2"/></linearGradient>
+    <linearGradient id="${id}-hi" x1="92" y1="0" x2="170" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#22b8cf"/><stop offset="100%" stop-color="#e3fafc"/></linearGradient>
+    <filter id="${id}-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <clipPath id="${id}-card"><rect width="512" height="512" rx="112" ry="112"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112" ry="112" fill="url(#${id}-bg)"/>
+  <g clip-path="url(#${id}-card)">
+    <polygon points="0,0 260,0 0,260" fill="url(#${id}-w1)"/><polygon points="512,0 512,260 252,0" fill="url(#${id}-w2)"/>
+    <polygon points="0,512 0,252 260,512" fill="url(#${id}-w3)"/><polygon points="512,512 252,512 512,252" fill="url(#${id}-w4)"/>
+    <rect x="68" y="68" width="376" height="376" rx="56" ry="56" fill="#071b22"/>
+    <rect x="68" y="68" width="376" height="80" rx="56" ry="56" fill="#fff" fill-opacity="0.04"/>
+  </g>
+  <g fill="none" stroke="url(#${id}-fg)" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" filter="url(#${id}-glow)">${letter}</g>
+  ${extra}
+</svg>`;
+
+const V = [
+ { t: '1 · H con crossbar-freccia', d: 'La crossbar è una richiesta in viaggio: barra e punta di freccia. È la versione di base già presente.',
+   l: '<path d="M160 140V372"/><path d="M352 140V372"/><path d="M160 256H322"/><path d="M286 220L322 256 286 292"/>' },
+ { t: '2 · H con coda a forcella', d: 'I due montanti finiscono con la forcella della coda di rondine; la crossbar è l’ala tesa. La più “rondine”.',
+   l: '<path d="M160 140V300"/><path d="M160 300L128 380M160 300L192 380"/><path d="M352 140V300"/><path d="M352 300L320 380M352 300L384 380"/><path d="M160 224H352"/>' },
+ { t: '3 · H con crossbar-ala', d: 'La crossbar sale come un’ala in volo dal montante sinistro a quello destro.',
+   l: '<path d="M160 140V372"/><path d="M352 140V372"/><path d="M160 300C210 300 230 200 352 200"/>' },
+ { t: '4 · H va e torna', d: 'Due crossbar con frecce opposte: richiesta e risposta. Si legge bene anche a 16 px.',
+   l: '<path d="M160 140V372"/><path d="M352 140V372"/><path d="M160 216H318"/><path d="M286 184L318 216 286 248"/><path d="M352 300H194"/><path d="M226 268L194 300 226 332"/>' },
+ { t: '5 · H con scia di velocità', d: 'Una H che parte: tre trattini orizzontali di scia a sinistra, come il cursore del Bennu.',
+   l: '<path d="M210 140V372"/><path d="M382 140V372"/><path d="M210 256H382"/>',
+   x: '<g stroke="url(#ID-hi)" stroke-width="26" stroke-linecap="round" filter="url(#ID-glow)"><path d="M92 186H140"/><path d="M92 256H160"/><path d="M92 326H140"/></g>' },
+ { t: '6 · H con pennuti a V', d: 'I montanti si aprono in alto a V come le punte delle ali; la crossbar chiude il cerchio del volo.',
+   l: '<path d="M160 372V250L120 140"/><path d="M352 372V250L392 140"/><path d="M160 300H352"/>' },
+];
+const grid = document.getElementById('grid');
+V.forEach((v, i) => {
+  const id = 'h' + i;
+  const svg = CARD(id, v.l, (v.x || '').replaceAll('ID', id));
+  grid.insertAdjacentHTML('beforeend', `<div class="card"><div class="big">${svg}</div>
+    <div class="row">${CARD(id + 'a', v.l, (v.x || '').replaceAll('ID', id + 'a'))}${CARD(id + 'b', v.l, (v.x || '').replaceAll('ID', id + 'b')).replace('<svg ', '<svg class="s" ')}${CARD(id + 'c', v.l, (v.x || '').replaceAll('ID', id + 'c')).replace('<svg ', '<svg class="xs" ')}</div>
+    <div><b>${v.t}</b><br><span class="d">${v.d}</span></div></div>`);
+});
+</script>
+</body>
+</html>

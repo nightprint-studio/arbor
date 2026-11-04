@@ -56,6 +56,42 @@ struct Placeholder {
     arity: Arity,
     /// The identifier it was replaced with so the pattern would parse.
     token: String,
+    /// Every text the hole was written as — the bare token, plus each wrapped form (`TOKEN;`, `@TOKEN`,
+    /// `int TOKEN`…) it took where a bare name would not parse. A pattern node whose text is one of these
+    /// **is** the hole.
+    texts: Vec<String>,
+}
+
+/// How a hole is written into the pattern text where a bare identifier would not parse.
+///
+/// A placeholder is an identifier, and an identifier is not a statement, a member, a parameter or a
+/// modifier. Each field is a template with `{}` for the identifier, applied to the holes in that
+/// **position** (see [`Position`]); `"{}"` is the bare identifier, which is what a pattern always used.
+///
+/// The caller tries several combinations and keeps the first that parses, so a pattern is never written
+/// differently from the way it was before — a form only matters where the bare one failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HoleForms {
+    /// A hole standing alone on a statement or member position (`{ $body...$ }`).
+    pub block: &'static str,
+    /// A hole standing alone between `(`/`,` and `)`/`,` (`m($params...$)`).
+    pub item: &'static str,
+    /// A run hole in front of a declaration (`$mods...$ final int x`).
+    pub mods: &'static str,
+}
+
+impl HoleForms {
+    /// Every hole is the bare identifier — the behaviour before forms existed.
+    pub const PLAIN: HoleForms = HoleForms { block: "{}", item: "{}", mods: "{}" };
+}
+
+/// Where a hole sits in the pattern text, decided from the characters around it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Position {
+    Plain,
+    Block,
+    Item,
+    Mods,
 }
 
 /// One thing a pattern matched, and where.
@@ -119,7 +155,19 @@ impl Pattern {
         prefix: &str,
         suffix: &str,
     ) -> Result<Pattern, SyntaxError> {
-        let (body, placeholders) = substitute(pattern)?;
+        Self::compile_in_with(language, pattern, prefix, suffix, &HoleForms::PLAIN)
+    }
+
+    /// [`Pattern::compile_in`], with holes in statement / member / parameter / modifier position written
+    /// as `forms` says instead of as a bare identifier.
+    pub fn compile_in_with(
+        language: &Language,
+        pattern: &str,
+        prefix: &str,
+        suffix: &str,
+        forms: &HoleForms,
+    ) -> Result<Pattern, SyntaxError> {
+        let (body, placeholders) = substitute_with(pattern, forms)?;
         let text = format!("{prefix}{body}{suffix}");
         let fragment = ByteRange::new(prefix.len(), prefix.len() + body.len());
 
@@ -149,8 +197,11 @@ impl Pattern {
         }
 
         let root = smallest_covering(tree.root_node(), fragment);
-        let by_token =
-            placeholders.iter().enumerate().map(|(i, p)| (p.token.clone(), i)).collect();
+        let by_token = placeholders
+            .iter()
+            .enumerate()
+            .flat_map(|(i, p)| p.texts.iter().map(move |t| (t.clone(), i)))
+            .collect();
         Ok(Pattern { text, tree, root, placeholders, by_token, case_insensitive: false })
     }
 
@@ -450,6 +501,48 @@ fn token_for(index: usize) -> String {
 /// `$$` is a literal `$`, which is the escape a pattern needs the moment somebody
 /// writes a PostgreSQL dollar-quoted body.
 fn substitute(pattern: &str) -> Result<(String, Vec<Placeholder>), SyntaxError> {
+    substitute_with(pattern, &HoleForms::PLAIN)
+}
+
+/// Where the hole spanning `chars[open..=close]` sits, from the text around it.
+///
+/// * **Block** — it opens a statement or member (after `{`, `;` or `}`) and nothing but a `}` or the end of
+///   the line follows: `{ $body...$ }`.
+/// * **Item** — it is a whole element of a parenthesised list: `m($params...$)`, `f($a$, $b$)`.
+/// * **Mods** — a run hole that is followed by more of a declaration: `$mods...$ final int x`.
+fn position_of(chars: &[char], open: usize, close: usize, arity: Arity) -> Position {
+    let prev = chars[..open].iter().rev().find(|c| !c.is_whitespace()).copied();
+    let after = &chars[close + 1..];
+    let next = after.iter().find(|c| !c.is_whitespace()).copied();
+    let tail: String = after.iter().take_while(|c| **c != '\n').collect();
+    let tail = tail.trim();
+    let opens_block = matches!(prev, Some('{' | ';' | '}'));
+
+    if opens_block && (tail.is_empty() || tail.starts_with('}')) {
+        return Position::Block;
+    }
+    if matches!(prev, Some('(' | ',')) && matches!(next, Some(')' | ',')) {
+        return Position::Item;
+    }
+    let line_start = chars[..open].iter().rev().take_while(|c| **c != '\n').all(|c| c.is_whitespace());
+    // After a word or an annotation's `)` too: `final $rest...$ int x` — modifiers come in runs.
+    let heads_a_declaration = prev.is_none()
+        || opens_block
+        || line_start
+        || matches!(prev, Some(c) if c.is_alphanumeric() || matches!(c, '(' | ',' | '_' | ')' | '>'));
+    if arity == Arity::Many
+        && heads_a_declaration
+        && matches!(next, Some(c) if c.is_alphabetic() || c == '@' || c == '$' || c == '_')
+    {
+        return Position::Mods;
+    }
+    Position::Plain
+}
+
+fn substitute_with(
+    pattern: &str,
+    forms: &HoleForms,
+) -> Result<(String, Vec<Placeholder>), SyntaxError> {
     let mut out = String::with_capacity(pattern.len());
     let mut placeholders: Vec<Placeholder> = vec![];
     let bytes: Vec<char> = pattern.chars().collect();
@@ -510,11 +603,28 @@ fn substitute(pattern: &str) -> Result<(String, Vec<Placeholder>), SyntaxError> 
             }
             None => {
                 let token = token_for(placeholders.len());
-                placeholders.push(Placeholder { name, arity, token: token.clone() });
+                placeholders.push(Placeholder {
+                    name: name.clone(),
+                    arity,
+                    token: token.clone(),
+                    texts: vec![token.clone()],
+                });
                 token
             }
         };
-        out.push_str(&token);
+        let template = match position_of(&bytes, i, close, arity) {
+            Position::Block => forms.block,
+            Position::Item => forms.item,
+            Position::Mods => forms.mods,
+            Position::Plain => "{}",
+        };
+        let written = template.replace("{}", &token);
+        if let Some(p) = placeholders.iter_mut().find(|p| p.name == name) {
+            if !p.texts.contains(&written) {
+                p.texts.push(written.clone());
+            }
+        }
+        out.push_str(&written);
         i = close + 1;
     }
 
@@ -683,6 +793,77 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    const STATEMENTS: HoleForms = HoleForms { block: "{};", item: "{}", mods: "{}" };
+    const MEMBERS: HoleForms = HoleForms { block: "int {};", item: "{}", mods: "{}" };
+
+    /// A hole alone in a block is a run of statements — the position a bare identifier cannot fill.
+    #[test]
+    fn a_hole_in_a_block_stands_for_a_run_of_statements() {
+        let pattern = Pattern::compile_in_with(
+            &java(),
+            "for (int $i$ = 0; $i$ < $n$; $i$++) { $body...$ }",
+            "class C { void m() { ",
+            " } }",
+            &STATEMENTS,
+        )
+        .expect("compiles");
+        let source = "class A { void go() { for (int k = 0; k < 3; k++) { a(); b(); } } }";
+        let found = pattern.find_all(&java(), source).expect("searches");
+        assert_eq!(found.len(), 1);
+        assert_eq!(captured(source, &found[0], "body"), "a(); b();");
+    }
+
+    #[test]
+    fn a_hole_in_a_class_body_stands_for_a_run_of_members() {
+        let pattern = Pattern::compile_in_with(
+            &java(),
+            "class $c$ extends $b$ { $members...$ }",
+            "",
+            "",
+            &MEMBERS,
+        )
+        .expect("compiles");
+        let source = "class A extends B { int x; void f() {} }";
+        let found = pattern.find_all(&java(), source).expect("searches");
+        assert_eq!(found.len(), 1);
+        assert_eq!(captured(source, &found[0], "members"), "int x; void f() {}");
+    }
+
+    #[test]
+    fn a_parameter_run_hole_takes_whole_parameters() {
+        const PARAMS: HoleForms = HoleForms { block: "{}", item: "int {}", mods: "{}" };
+        let pattern = Pattern::compile_in_with(&java(), "void $m$($params...$) { }", "class C { ", " }", &PARAMS)
+            .expect("compiles");
+        let source = "class A { void go(String a, int b) { } }";
+        let found = pattern.find_all(&java(), source).expect("searches");
+        assert_eq!(found.len(), 1);
+        assert_eq!(captured(source, &found[0], "params"), "String a, int b");
+    }
+
+    /// `$mods...$` is zero or more modifiers and annotations — including none at all, when the declaration
+    /// has no `modifiers` node for it to sit in.
+    #[test]
+    fn a_modifier_hole_may_match_nothing() {
+        const MODS: HoleForms = HoleForms { block: "{}", item: "{}", mods: "@{}" };
+        let pattern = Pattern::compile_in_with(&java(), "$mods...$ int $n$ = 1;", "class C { void m() { ", " } }", &MODS)
+            .expect("compiles");
+        let source = "class A { void go() { final int a = 1; int b = 1; @Deprecated final int c = 1; } }";
+        let found = pattern.find_all(&java(), source).expect("searches");
+        assert_eq!(found.len(), 3, "with modifiers, without, and with an annotation too");
+        assert_eq!(captured(source, &found[0], "mods"), "final");
+        assert!(found[1].capture("mods").expect("still captured").range.is_empty());
+        assert_eq!(captured(source, &found[2], "mods"), "@Deprecated final");
+    }
+
+    /// Forms only apply where a bare identifier would not do: the plain form keeps every older pattern
+    /// meaning what it meant.
+    #[test]
+    fn plain_forms_change_nothing() {
+        let (a, _) = substitute("f($x$, { $y$ })").expect("substitutes");
+        let (b, _) = substitute_with("f($x$, { $y$ })", &HoleForms::PLAIN).expect("substitutes");
+        assert_eq!(a, b);
     }
 
     #[test]

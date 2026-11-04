@@ -84,6 +84,13 @@
     <code>java.util</code> name do — and so does a class of <em>this project</em> that lives in another package, however findable it is elsewhere.
     A name none of the four reaches reads as "cannot resolve", and <kbd>Alt</kbd> + <kbd>Enter</kbd> offers the import.
   </dd>
+  <dt>A class at the left of <code>::</code></dt>
+  <dd>
+    <code>.map(GComuni::getCodistat)</code> with no such class in scope is "cannot resolve", on the name, like <code>new GComuni()</code>,
+    and <kbd>Alt</kbd> + <kbd>Enter</kbd> offers the import. Only a name written like a class is judged — an upper-case initial and a lower-case letter
+    somewhere — and never one the file also uses as a value, so <code>list::add</code>, <code>this::run</code>, <code>LOGGER::info</code>
+    and <code>String[]::new</code> stay silent.
+  </dd>
   <dt>A nested type through its outer</dt>
   <dd><code>Cfg.MyProva</code> where <code>Cfg</code> declares no <code>MyProva</code> is caught, judged only when the qualifier is a type <em>this project declares</em> — so <code>com.acme.Foo</code> and a library's <code>Map.Entry</code> are left as written. <kbd>Alt</kbd> + <kbd>Enter</kbd> offers the import.</dd>
   <dt>Types</dt>
@@ -188,18 +195,34 @@ class LegacyImporter { … }`, 'java')}</code></pre>
   outside its file can refer to it. Anything a caller could use — a method, a field, a type, and everything in a server-read language — opens the rename preview
   with the name filled in. A rename does not rewrite JSP, OGNL or reflection strings, which is exactly why those fixes ask first.
 </p>
-<p>For more than a couple, <em>Fix naming in file</em> and <em>Fix naming in project</em> in the command palette:</p>
+<p>
+  For more than a couple, <em>Fix naming in file</em> and <em>Fix naming in project</em> in the command palette. They are <strong>always there</strong> — the
+  continuous check does not have to be switched on, and no convention has to be configured first.
+</p>
 <ol class="step-list">
+  <li><strong>The rule.</strong> With a convention configured the fix uses it. Without one it uses what the project's code already does, kind by kind — a kind needs
+    at least eight names that only one spelling fits, and 60% of them agreeing — and the language's standard wherever the code is inconclusive. The review says which it
+    is (<em>configured</em>, <em>detected</em> or <em>standard</em>), lists the rules with where each came from, and lets you switch between them: choosing another
+    plans the fix again.</li>
   <li>The review opens at once and fills in as the plan is built, with progress — and a <strong>Stop</strong> that still hands you what it had.</li>
-  <li>Argue with it: <strong>group</strong> by file, by kind or not at all; switch a <strong>kind</strong> off wholesale, untick a <strong>group</strong> or a single
-    name; <strong>filter</strong> by name. The footer always counts what Apply will do — nothing out of sight is still applied — and the list is windowed, so thousands
-    of names scroll like a handful.</li>
-  <li>Apply. Nothing was written before, and the whole fix is a single Undo after.</li>
+  <li>Argue with it: <strong>group</strong> by file, by kind or not at all; switch a <strong>kind</strong> off or pick it <em>only</em>; untick a <strong>group</strong>
+    or a single name; <strong>filter</strong> by name or file; select all, none or invert. Each row shows the old and the new name with the changed characters marked,
+    its kind, and how many places it rewrites. The pane under the list shows the declaration line, the files the rename reaches and an editor for the name — type
+    your own and it is written everywhere (a type's file is renamed to match). <em>Go to declaration</em> steps the review aside and a toast brings it back as it was.
+    The footer always counts what Apply will do — nothing out of sight is still applied — and the list is windowed, so thousands of names scroll like a handful.</li>
+  <li>The <strong>Left alone</strong> tab lists what the fix will not touch, grouped by reason.</li>
+  <li>Apply — a long list asks you to confirm the count first. Nothing was written before, and the whole fix is a single Undo after.</li>
 </ol>
+<p>
+  Keyboard: <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>Space</kbd> ticks, <kbd>F2</kbd> edits the name, <kbd>F</kbd> filters, <kbd>A</kbd> / <kbd>N</kbd> / <kbd>I</kbd>
+  select all / none / invert, <kbd>Ctrl</kbd> + <kbd>Enter</kbd> applies, <kbd>Esc</kbd> closes.
+</p>
 <Callout variant="warning" title="What a bulk fix refuses">
   Two names in a file becoming the same name; a spelling already used there — how a bulk fix turns compiling code into two members with one signature; a method
-  overriding something from a dependency, whose name a jar fixes; and a file whose bytes are not valid in the project's declared encoding, where the editor and the
-  index read it differently. Every refusal is listed with its reason.
+  overriding something from a dependency, whose name a jar fixes; a field or getter whose <code>@JsonProperty</code>, <code>@Column</code> or similar annotation
+  has no explicit name, so renaming it would change the JSON, XML or column other systems read; a package, whose name is its directory; and a file whose bytes are
+  not valid in the project's declared encoding, where the editor and the index read it differently. Every refusal is listed with its reason. Names that JSP, OGNL
+  or reflection reach by string are <em>not</em> detected — that is the case the rename preview exists for.
 </Callout>
 <p>
   Never reported: <strong>generated code</strong> — build output, <code>@Generated</code>, a "do not edit" banner — constructors (their type is reported instead),

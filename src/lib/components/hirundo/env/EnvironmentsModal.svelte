@@ -25,7 +25,7 @@
   import { hirundoStore } from '$lib/stores/hirundo/workspace.svelte';
   import type { EnvType, Environment, Local } from '$lib/types/hirundo';
   import KeyValueEditor from '../editor/KeyValueEditor.svelte';
-  import { idFromName } from '../request-model';
+  import { idFromName, themeHex } from '../request-model';
   import EnvEditor from './EnvEditor.svelte';
   import SecretValues from './SecretValues.svelte';
   import TypeEditor from './TypeEditor.svelte';
@@ -88,7 +88,7 @@
 
   function addType() {
     const name = 'New type';
-    types.push({ id: uniqueId(name, types.map((t) => t.id)), name, color: '#a371f7', confirm_mutating: false, vars: [] });
+    types.push({ id: uniqueId(name, types.map((t) => t.id)), name, color: themeHex('--ws-color-3'), confirm_mutating: false, vars: [] });
     typeIndex = types.length - 1;
   }
 
@@ -177,7 +177,15 @@
               <EnvEditor bind:env={environments[envIndex]} {types} isNew={isNewEnv(environments[envIndex])} onrename={(n) => renameEnvironment(envIndex, n)} />
             {/key}
           {:else}
-            <EmptyState message="No environments" description="Add one for each place the API runs." />
+            <div class="em-intro">
+              <EmptyState message="No environments yet" description="An environment is a place the API runs — your machine, staging, production — and holds the values that change between them." />
+              <ol class="em-steps">
+                <li>Add an environment and pick its <b>type</b> (it sets the colour and whether to ask before changing anything).</li>
+                <li>Give it a variable <code>baseUrl</code> with the address of the server, for example <code>https://staging.example.com</code>.</li>
+                <li>Write requests as <code>{'{{'}baseUrl{'}}'}/orders</code>: the same request then goes wherever the selector in the title bar says.</li>
+              </ol>
+              <p class="em-note">A name is looked up in layers, the first that defines it winning: this machine, the environment, its type, the folders, the collection.</p>
+            </div>
           {/if}
         </div>
       </div>
@@ -228,6 +236,9 @@
   .em-add { padding: 8px; }
   .em-edit { overflow: auto; min-width: 0; }
   .em-local { padding: 8px 0; }
+  .em-intro { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px 32px; max-width: 520px; margin: 0 auto; }
+  .em-steps { margin: 0; padding-left: 20px; font-size: var(--font-size-sm); color: var(--text-secondary); display: flex; flex-direction: column; gap: 6px; }
+  .em-steps code { font-family: var(--font-mono); }
   .em-note { margin: 0 12px 8px; font-size: var(--font-size-xs); color: var(--text-muted); }
   .em-note code { font-family: var(--font-mono); }
   .em-sub { font-size: var(--font-size-xs); color: var(--text-muted); margin-left: 8px; }

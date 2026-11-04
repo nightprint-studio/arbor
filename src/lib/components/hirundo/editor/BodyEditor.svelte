@@ -12,7 +12,8 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
   import { languageForPath } from '$lib/components/bennu/languages';
-  import type { Body, BodyKind, SoapSettings, SoapVersion } from '$lib/types/hirundo';
+  import type { Body, BodyKind, Schema, SoapSettings, SoapVersion } from '$lib/types/hirundo';
+  import { jsonKeyCompletion } from './schema';
   import KeyValueEditor from './KeyValueEditor.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
 
@@ -31,9 +32,11 @@
     onchange: (body: Body) => void;
     onsoap: (soap: SoapSettings) => void;
     bulk?: boolean;
+    /** The shape of the endpoint's `@RequestBody`, when Bennu knows it: the JSON's keys complete from it. */
+    requestSchema?: Schema | null;
   }
 
-  let { body, soap, onchange, onsoap, bulk = false }: Props = $props();
+  let { body, soap, onchange, onsoap, bulk = false, requestSchema = null }: Props = $props();
 
   const KINDS = [
     { value: 'none', label: 'None' },
@@ -45,7 +48,10 @@
     { value: 'multipart', label: 'Multipart' },
   ];
 
-  const language = $derived(languageForPath(body.kind === 'json' ? 'body.json' : body.kind === 'xml' || body.kind === 'soap' ? 'body.xml' : 'body.txt'));
+  const language = $derived.by(() => {
+    const base = languageForPath(body.kind === 'json' ? 'body.json' : body.kind === 'xml' || body.kind === 'soap' ? 'body.xml' : 'body.txt');
+    return body.kind === 'json' && requestSchema ? { ...base, intel: { ...(base.intel ?? {}), completion: jsonKeyCompletion(() => requestSchema) } } : base;
+  });
 
   function choose(kind: string) {
     // Switching to SOAP on an empty body offers an envelope to start from.

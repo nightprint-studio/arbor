@@ -261,7 +261,7 @@
     display: flex;
     align-items: center;
     height: var(--titlebar-h, 42px);
-    background: var(--bg-elevated);
+    background: var(--chrome-fill);
     flex-shrink: 0;
     overflow: visible;
     position: relative;
@@ -273,54 +273,10 @@
   }
 
   /*
-   * The product tint — half of a corner glow. It is strongest at the top-left and dies out
-   * to the right; the activity rail continues the same colour downward, so the two read as
-   * one corner rather than as a stripe and a stripe.
-   *
-   * `--product-tint` is set on the document root (see `routes/+page.svelte`), which is why
-   * there is no class and no prop here: with the variable unset the mixes resolve to
-   * transparent and the whole treatment costs nothing. One variable also cannot drift from
-   * itself, which two components each told their own colour eventually would.
-   *
-   * Two BACKGROUND LAYERS rather than pseudo-elements, which matters here: `.tb` is the
-   * `data-tauri-drag-region`, and an overlay would have to be excluded from hit-testing to
-   * avoid eating the window drag. A background cannot intercept anything, needs no stacking
-   * order against the children, and costs no DOM.
-   *
-   * The hairline is deliberately well under full strength. At full strength it stops being
-   * a hint and becomes a rule ruled across the window — the eye goes to it instead of to
-   * the content, which is the opposite of what an ambient signal is for.
+   * The title bar paints `--chrome-fill` (see `app.css`): the top slice of the product veil, the one gradient
+   * behind all the chrome. It is a background and nothing else — the bar is the `data-tauri-drag-region`, and
+   * a background cannot intercept the window drag the way an overlay would.
    */
-  .tb {
-    /* Stops in PIXELS, not percentages: a corner glow is a fixed physical size, and a
-       percentage would stretch it across a wide window until it reached the tab strip in
-       the middle — where it would sit behind the tabs' own opaque backgrounds.
-
-       The glow is RADIAL, centred on the very corner: it fades along the window's top edge
-       and down its left edge at the same rate, so it follows a rounded corner instead of
-       cutting across it. The hairline below used to start at x=0 at full strength; on a
-       window the OS rounds, its first pixels sit outside the curve and read as a coloured
-       wedge. It now fades IN over the corner radius (`--tb-corner`) and only then reaches
-       its colour. */
-    --tb-corner: 14px;
-    background-image:
-      linear-gradient(
-        90deg,
-        transparent 0px,
-        color-mix(in srgb, var(--product-tint, transparent) 42%, transparent) calc(var(--tb-corner) + 10px),
-        color-mix(in srgb, var(--product-tint, transparent) 14%, transparent) 150px,
-        transparent 400px
-      ),
-      radial-gradient(
-        ellipse 380px 170px at 0 0,
-        color-mix(in srgb, var(--product-tint, transparent) 13%, transparent) 0px,
-        color-mix(in srgb, var(--product-tint, transparent) 5%, transparent) 150px,
-        transparent 380px
-      );
-    background-size: 100% 2px, 100% 100%;
-    background-position: top left, top left;
-    background-repeat: no-repeat;
-  }
 
   /* Each interactive cluster opts out of the window-drag region and lays its
      children out inline. (Plain flex, not `display: contents`, so the wrapper
@@ -418,7 +374,7 @@
    */
   .tb-hamburger:hover,
   .tb-hamburger.active {
-    background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+    background: color-mix(in srgb, var(--text-primary) 7%, transparent);
     color: var(--text-primary);
   }
 

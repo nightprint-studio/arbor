@@ -24,7 +24,7 @@ use bennu_core::prelude::BennuState;
 use bennu_deps::prelude::{module_graph, read as read_dependencies, read_cargo, read_gradle, ModuleGraph, Report};
 use serde::Deserialize;
 
-use crate::dep_classpath::cached_dep_jars;
+use crate::dep_classpath::{is_stale, report_dep_jars};
 
 /// Args for [`bennu_dependencies`].
 #[derive(Deserialize)]
@@ -41,6 +41,41 @@ pub struct DependenciesArgs {
 #[arbor_rpc::handler]
 pub(crate) fn bennu_dependencies(_ctx: &BennuState, args: DependenciesArgs) -> Result<Report, String> {
     Ok(report_of(&args.root))
+}
+
+/// Args for [`bennu_dependencies_stale`].
+#[derive(Deserialize)]
+pub struct StaleArgs {
+    /// Project roots to check — every project of the open workspace.
+    pub roots: Vec<String>,
+}
+
+/// Which of `roots` have a dependency classpath older than the disk: a pom edited, or a library it was
+/// resolved from rewritten — typically a module of the same workspace that was just `mvn install`ed.
+///
+/// A few `stat`s per dependency jar and no reads, so the window can ask whenever it regains focus.
+/// The answer is "a reload would change something", not "something is wrong": the editor keeps
+/// working on the classpath it has until the user reloads.
+#[arbor_rpc::handler]
+pub(crate) fn bennu_dependencies_stale(_ctx: &BennuState, args: StaleArgs) -> Result<Vec<StaleRoot>, String> {
+    Ok(args
+        .roots
+        .into_iter()
+        .filter(|root| is_stale(std::path::Path::new(root)))
+        .map(|root| {
+            // Maven first when both are there, as everywhere else (see `report_of`).
+            let tool = if std::path::Path::new(&root).join("pom.xml").is_file() { "maven" } else { "gradle" };
+            StaleRoot { root, tool }
+        })
+        .collect())
+}
+
+/// A project whose dependency classpath is older than the disk, and the build tool that reloads it.
+#[derive(serde::Serialize)]
+pub struct StaleRoot {
+    pub root: String,
+    /// `maven` or `gradle` — which reload applies.
+    pub tool: &'static str,
 }
 
 /// The project's **internal** dependency graph: which of its own modules depend on which, with the
@@ -62,11 +97,11 @@ pub(crate) fn bennu_module_graph(_ctx: &BennuState, args: DependenciesArgs) -> R
 pub(crate) fn report_of(root: &str) -> Report {
     let root = std::path::PathBuf::from(root);
     if !root.join("pom.xml").is_file() && bennu_gradle::prelude::is_gradle_root(&root) {
-        let jars = cached_dep_jars(&root);
+        let jars = report_dep_jars(&root);
         return read_gradle(&root, &jars);
     }
     if root.join("pom.xml").is_file() || !root.join("Cargo.toml").is_file() {
-        let jars = cached_dep_jars(&root);
+        let jars = report_dep_jars(&root);
         return read_dependencies(&root, &jars);
     }
     read_cargo(&root)

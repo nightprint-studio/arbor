@@ -504,7 +504,7 @@
     transition: background var(--transition-fast), color var(--transition-fast);
     -webkit-app-region: no-drag;
   }
-  .btb-run-btn:hover:not(:disabled), .btb-run-btn.open { background: var(--bg-hover); color: var(--text-primary); }
+  .btb-run-btn:hover:not(:disabled), .btb-run-btn.open { background: color-mix(in srgb, var(--text-primary) 12%, transparent); color: var(--text-primary); }
   .btb-run-btn:disabled { opacity: 0.4; cursor: default; }
   .btb-run-primary:not(:disabled) { color: var(--success); }
   .btb-run-primary:hover:not(:disabled) { background: var(--success-subtle); color: var(--success); }

@@ -9,7 +9,7 @@
   import { onDestroy, untrack } from 'svelte';
   import MarkdownView from '$lib/components/shared/ui/MarkdownView.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
-  import { nextLength } from './assistant-typewriter';
+  import { nextLength } from './imber-typewriter';
 
   let { text, live }: {
     text: string;

@@ -38,6 +38,33 @@ const MAX_TEXT_LEN: usize = 200;
 pub struct TodoScanArgs {
     /// Absolute path to the project root to scan.
     pub root: String,
+    /// The marker words to look for (letters, digits, `_`). Absent or empty: `TODO`, `FIXME`, `XXX`, `HACK`.
+    /// The editor passes the words it colours, so the window lists exactly what the editor marks.
+    #[serde(default)]
+    pub keywords: Option<Vec<String>>,
+    /// Whether a marker must be written exactly as listed. Absent: it must.
+    #[serde(default)]
+    pub case_sensitive: Option<bool>,
+}
+
+/// The words being looked for and how strictly.
+struct Markers {
+    words: Vec<String>,
+    case_sensitive: bool,
+}
+
+impl Markers {
+    fn from_args(args: &TodoScanArgs) -> Self {
+        let words: Vec<String> = args
+            .keywords
+            .iter()
+            .flatten()
+            .map(|w| w.trim().to_string())
+            .filter(|w| !w.is_empty() && w.bytes().all(is_word_byte))
+            .collect();
+        let words = if words.is_empty() { MARKERS.iter().map(|m| m.to_string()).collect() } else { words };
+        Markers { words, case_sensitive: args.case_sensitive.unwrap_or(true) }
+    }
 }
 
 /// What [`bennu_todos`] returns: the markers, and whether there were more than fit.
@@ -64,9 +91,10 @@ fn bennu_todos(_ctx: &BennuState, args: TodoScanArgs) -> Result<TodoScan, String
     if !root.is_dir() {
         return Err(format!("{} is not a directory", args.root));
     }
+    let markers = Markers::from_args(&args);
     let mut items = Vec::new();
     let mut truncated = false;
-    scan_dir(root, &mut items, &mut truncated);
+    scan_dir(root, &markers, &mut items, &mut truncated);
     Ok(TodoScan { items, truncated })
 }
 
@@ -76,7 +104,7 @@ fn bennu_todos(_ctx: &BennuState, args: TodoScanArgs) -> Result<TodoScan, String
 /// Sorted because `read_dir` order is whatever the filesystem likes: with a cap, an unsorted walk
 /// returns a different 2,000 markers from one call to the next. Typed by `file_type()`, which does not
 /// follow links, so a symlink loop cannot recurse.
-fn scan_dir(dir: &Path, out: &mut Vec<TodoItem>, capped: &mut bool) {
+fn scan_dir(dir: &Path, markers: &Markers, out: &mut Vec<TodoItem>, capped: &mut bool) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     let mut entries: Vec<_> = rd.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
@@ -89,10 +117,10 @@ fn scan_dir(dir: &Path, out: &mut Vec<TodoItem>, capped: &mut bool) {
         let path = entry.path();
         if kind.is_dir() {
             if !is_tree_noise_dir(dir, &entry.file_name().to_string_lossy()) {
-                scan_dir(&path, out, capped);
+                scan_dir(&path, markers, out, capped);
             }
         } else if kind.is_file() && is_scannable(&path) {
-            scan_file(&path, out, capped);
+            scan_file(&path, markers, out, capped);
         }
     }
 }
@@ -106,13 +134,13 @@ fn is_scannable(path: &Path) -> bool {
 }
 
 /// Scan one file line-by-line for markers.
-fn scan_file(path: &Path, out: &mut Vec<TodoItem>, capped: &mut bool) {
+fn scan_file(path: &Path, markers: &Markers, out: &mut Vec<TodoItem>, capped: &mut bool) {
     let Ok(source) = std::fs::read_to_string(path) else {
         return; // unreadable / non-UTF-8 — skip
     };
     let file = path.to_string_lossy().replace('\\', "/");
     for (idx, line) in source.lines().enumerate() {
-        if let Some((kind, text)) = match_marker(line) {
+        if let Some((kind, text)) = match_marker(line, markers) {
             // Checked on a hit, not per line: a full list only means "truncated" if there is one more.
             if out.len() >= MAX_TODOS {
                 *capped = true;
@@ -126,11 +154,11 @@ fn scan_file(path: &Path, out: &mut Vec<TodoItem>, capped: &mut bool) {
 /// Match the first marker word in `line` (word-bounded, case-sensitive) and return
 /// its `(kind, text)` where `text` is the trimmed remainder after the marker (and any
 /// single `:` / whitespace separator), capped at [`MAX_TEXT_LEN`] chars.
-fn match_marker(line: &str) -> Option<(String, String)> {
+fn match_marker(line: &str, markers: &Markers) -> Option<(String, String)> {
     let bytes = line.as_bytes();
     let mut best: Option<(usize, &str)> = None;
-    for marker in MARKERS {
-        if let Some(pos) = find_word(bytes, marker) {
+    for marker in &markers.words {
+        if let Some(pos) = find_word(bytes, marker, markers.case_sensitive) {
             if best.map(|(p, _)| pos < p).unwrap_or(true) {
                 best = Some((pos, marker));
             }
@@ -138,22 +166,27 @@ fn match_marker(line: &str) -> Option<(String, String)> {
     }
     let (pos, marker) = best?;
     let after = &line[pos + marker.len()..];
+    // `TODO(alice): …` — the author in brackets belongs to the marker, not to the text.
+    let after = after.strip_prefix('(').and_then(|r| r.split_once(')')).map_or(after, |(_, rest)| rest);
     // Drop a single leading `:` and surrounding whitespace, IntelliJ-style.
     let text = after.trim_start().strip_prefix(':').unwrap_or(after).trim();
     let text: String = text.chars().take(MAX_TEXT_LEN).collect();
-    Some((marker.to_string(), text))
+    // One kind per word whatever its spelling, so the window's filter chips do not split `todo` from `TODO`.
+    let kind = if markers.case_sensitive { marker.to_string() } else { marker.to_ascii_uppercase() };
+    Some((kind, text))
 }
 
-/// Find the byte offset of the first word-bounded, case-sensitive occurrence of
-/// `word` in `haystack` (boundaries: not preceded/followed by `[A-Za-z0-9_]`).
-fn find_word(haystack: &[u8], word: &str) -> Option<usize> {
+/// Find the byte offset of the first word-bounded occurrence of `word` in `haystack` (boundaries:
+/// not preceded/followed by `[A-Za-z0-9_]`), matching case only when `case_sensitive`.
+fn find_word(haystack: &[u8], word: &str, case_sensitive: bool) -> Option<usize> {
     let w = word.as_bytes();
     if w.is_empty() || haystack.len() < w.len() {
         return None;
     }
     let mut i = 0;
     while i + w.len() <= haystack.len() {
-        if &haystack[i..i + w.len()] == w {
+        let same = if case_sensitive { &haystack[i..i + w.len()] == w } else { haystack[i..i + w.len()].eq_ignore_ascii_case(w) };
+        if same {
             let before_ok = i == 0 || !is_word_byte(haystack[i - 1]);
             let after_idx = i + w.len();
             let after_ok = after_idx >= haystack.len() || !is_word_byte(haystack[after_idx]);
@@ -175,6 +208,32 @@ fn is_word_byte(b: u8) -> bool {
 mod tests {
     use super::*;
 
+    fn default_markers() -> Markers {
+        Markers { words: MARKERS.iter().map(|m| m.to_string()).collect(), case_sensitive: true }
+    }
+
+    fn markers(words: &[&str], case_sensitive: bool) -> Markers {
+        Markers { words: words.iter().map(|w| w.to_string()).collect(), case_sensitive }
+    }
+
+    fn match_marker(line: &str) -> Option<(String, String)> {
+        super::match_marker(line, &default_markers())
+    }
+
+    #[test]
+    fn configured_words_replace_the_defaults_and_can_ignore_case() {
+        let m = markers(&["NOTE", "BUG"], false);
+        assert_eq!(super::match_marker("// note: mind the order", &m), Some(("NOTE".into(), "mind the order".into())));
+        assert!(super::match_marker("// TODO: not listed", &m).is_none());
+        assert!(super::match_marker("// note", &markers(&["NOTE"], true)).is_none());
+    }
+
+    #[test]
+    fn an_author_in_brackets_is_not_part_of_the_text() {
+        let (kind, text) = match_marker("// TODO(alice): split this").unwrap();
+        assert_eq!((kind.as_str(), text.as_str()), ("TODO", "split this"));
+    }
+
     #[test]
     fn matches_todo_comment_and_extracts_text() {
         let (kind, text) = match_marker("    // TODO: refactor this").unwrap();
@@ -195,7 +254,7 @@ mod tests {
         assert!(!missing.is_dir());
         let mut items = Vec::new();
         let mut capped = false;
-        scan_dir(&missing, &mut items, &mut capped);
+        scan_dir(&missing, &default_markers(), &mut items, &mut capped);
         assert!(items.is_empty() && !capped);
     }
 

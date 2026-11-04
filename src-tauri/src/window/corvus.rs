@@ -116,3 +116,23 @@ pub async fn open_corvus_window(app: AppHandle) {
     tracing::info!("open_corvus_window: ensure returned — creating/focusing window");
     open_or_focus(&app);
 }
+
+/// Bring Corvus up **where the user keeps it**: its own window if there is one, else — when the app runs as
+/// a tabbed container (a container window is open, or the window mode says tabbed) — the Corvus *tab* of
+/// the container, which is focused if it already exists. Only otherwise is a standalone window built.
+///
+/// Every shell-side "go to Corvus" (an OS deep link, a typed one) goes through this instead of
+/// [`open_or_focus`], which only knows windows and used to open a second Corvus next to the one already
+/// living in the container. (The frontend's single entry is `openProjectIn` → `openProduct`, which makes the
+/// same choice.)
+pub fn open_or_focus_routed(app: &AppHandle) {
+    if app.get_webview_window(CORVUS_WINDOW_LABEL).is_some() {
+        return open_or_focus(app);
+    }
+    let in_container = app.get_webview_window(super::workspace::WORKSPACE_WINDOW_LABEL).is_some() || super::launcher_window_mode_is_tabbed();
+    if in_container {
+        super::workspace::open_or_focus(app, Some("corvus".into()));
+    } else {
+        open_or_focus(app);
+    }
+}

@@ -23,7 +23,7 @@
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
     History, Tag, Trash2, ExternalLink, FolderPlus, FolderInput, Package, Boxes, ClipboardPaste, Sparkles, Info, Wand2,
-    Languages,
+    Languages, Send,
   } from 'lucide-svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import FilePropertiesModal from '$lib/components/shared/internal/FilePropertiesModal.svelte';
@@ -473,6 +473,8 @@
         ? { id: 'new-class', label: 'Rust File',  icon: FileCode2 }
         : { id: 'new-class', label: 'Java Class', icon: FileCode2 },
       { id: 'new-file', label: 'File', icon: FileText },
+      // Requests run from the editor — a request file belongs to any project, Java or not.
+      { id: 'new-http', label: 'HTTP File', icon: Send },
       { separator: true, id: 'sep-new-kind', label: '' },
       isPackageDir(dir)
         ? { id: 'new-folder', label: 'Package',   icon: Package }
@@ -504,7 +506,8 @@
   function runNew(id: string, dir: string) {
     if (id === 'new-folder') { openNewFolder(dir); return; }
     if (id === 'new-module') { newModuleFrom = dir; return; }
-    newFileKind = id === 'new-file' ? 'file' : defaultKind();
+    newFileHttp = id === 'new-http';
+    newFileKind = id === 'new-file' || id === 'new-http' ? 'file' : defaultKind();
     newFileDir = dir;
   }
 
@@ -678,6 +681,7 @@
         // kind list, a plain file that only wants a name, or a directory.
         case 'new-class':
         case 'new-file':
+        case 'new-http':
         case 'new-folder':
         case 'new-module': runNew(id, newDir); break;
         case 'run-tests': runTestsFor(node); break;
@@ -775,6 +779,7 @@
         case 'props': propsPath = root; break;
         case 'new-class':
         case 'new-file':
+        case 'new-http':
         case 'new-folder': runNew(id, root); break;
         case 'expand':    expandAll(); break;
         case 'collapse':  collapseAll(); break;
@@ -1032,6 +1037,8 @@
    *  through {@link runNew}. The typed leaf follows the project (a struct on Cargo, a class
    *  on Maven); the plain one only asks for a name. */
   let newFileKind = $state<NewFileKind>('class');
+  /** The dialog is making a `.http` file ("New › HTTP File"). */
+  let newFileHttp = $state(false);
 
   /** The typed default for this project. Read at the moment the dialog is opened rather
    *  than held in state — the project can change under a long-lived panel. */
@@ -1228,6 +1235,7 @@
   <BennuNewFileModal
     dir={newFileDir}
     initialKind={newFileKind}
+    http={newFileHttp}
     onClose={() => (newFileDir = null)}
   />
 {/if}

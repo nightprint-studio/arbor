@@ -78,7 +78,8 @@
 
   /**
    * The product tint — set once here, on the document root, and read by every piece of
-   * chrome that wants it (`var(--product-tint)`): the title bar and the activity rail.
+   * chrome that wants it (`var(--product-tint)`): `--chrome-bg` in `app.css` mixes it into one vertical veil that
+   * the title bar, both rails, the strips around the panels and the status bar all paint.
    *
    * Here rather than as a prop on each of them, because the two have to be visually
    * CONTINUOUS — the colour runs across the top and turns down the left, and two components

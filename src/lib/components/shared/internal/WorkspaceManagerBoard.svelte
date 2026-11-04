@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
-   * BennuWorkspaceBoard — every workspace as a column, every project as a card in it.
+   * WorkspaceManagerBoard — every workspace as a column, every project as a card in it. Shared by the
+   * products' workspace managers: it owns no store, it is given the workspaces and calls back for every change.
    *
    * The point of a board over a list-and-detail pane is that moving a project is one gesture:
    * grab it, drop it in the other column, where you want it. Reordering is the same gesture within
@@ -13,42 +14,66 @@
    * <kbd>Enter</kbd> opens it; <kbd>Delete</kbd> removes it from the workspace.
    * On a workspace header: <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> reorder, <kbd>Enter</kbd> switches to it.
    *
-   * The pointer drag lives in `board-drag.svelte.ts`; this file is the board's markup and the
-   * mapping from a drop to a store call.
+   * The pointer drag lives in `workspace-manager-drag.svelte.ts`; this file is the board's markup and the
+   * mapping from a drop to a callback. A filter dims nothing and moves nothing: rows that do not match are
+   * hidden, and the drop positions still count them, so a drop lands where it looks like it does.
    */
   import { tick, onDestroy } from 'svelte';
   import { flip } from 'svelte/animate';
   import { Plus, GripVertical, Check, X, FolderPlus } from 'lucide-svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import { workspacesStore, wsColorVar } from '$lib/stores/bennu/workspaces.svelte';
-  import { createBoardDrag, type DragItem, type DropTarget } from './board-drag.svelte';
+  import { createBoardDrag, type DragItem, type DropTarget } from './workspace-manager-drag.svelte';
+  import type { WorkspaceManagerItem } from './workspace-manager';
 
   let {
+    workspaces,
+    activeId,
+    colorVar,
+    query = '',
     selectedId = $bindable(''),
     onAddProject,
     onNewWorkspace,
+    onOpenProject,
+    onRemoveProject,
+    onMoveProject,
+    onMoveWorkspace,
     onClose,
   }: {
+    workspaces: WorkspaceManagerItem[];
+    activeId: string;
+    /** The CSS colour of a palette index. */
+    colorVar: (idx: number) => string;
+    /** Hide the projects whose name or path does not contain this. */
+    query?: string;
     selectedId?: string;
     onAddProject: (wsId: string) => void;
     onNewWorkspace: () => void;
+    onOpenProject: (wsId: string, root: string) => void;
+    onRemoveProject: (wsId: string, root: string) => void;
+    /** `index` is a gap in the target's list as it is now, the moved project included. */
+    onMoveProject: (fromId: string, root: string, toId: string, index: number) => void | Promise<void>;
+    onMoveWorkspace: (id: string, index: number) => void;
     onClose: () => void;
   } = $props();
+
+  const nameOf = (p: { root: string; name?: string }) => p.name || basename(p.root);
+  const shown = (p: { root: string; name?: string }) => {
+    const q = query.trim().toLowerCase();
+    return !q || nameOf(p).toLowerCase().includes(q) || p.root.toLowerCase().includes(q);
+  };
 
   function basename(path: string): string {
     const parts = path.split(/[\\/]/).filter(Boolean);
     return parts[parts.length - 1] ?? path;
   }
 
-  const workspaces = $derived(workspacesStore.workspaces);
-
   // ── Drop → store ──────────────────────────────────────────────────────────────
   function drop(item: DragItem, target: DropTarget) {
     if (item.kind === 'workspace' && target.kind === 'workspace') {
-      workspacesStore.moveWorkspace(item.wsId, target.index);
+      onMoveWorkspace(item.wsId, target.index);
     } else if (item.kind === 'project' && target.kind === 'project') {
-      void workspacesStore.moveProject(item.wsId, item.root, target.wsId, target.index);
+      void onMoveProject(item.wsId, item.root, target.wsId, target.index);
     }
   }
   const drag = createBoardDrag(drop);
@@ -70,7 +95,8 @@
   }
 
   function stepFocus(from: HTMLElement, dir: 1 | -1) {
-    const rows = [...(from.closest('[data-ws-col]')?.querySelectorAll<HTMLElement>('[data-proj-row]') ?? [])];
+    // Hidden rows (the filter) cannot take the focus, so they are not stepped onto.
+    const rows = [...(from.closest('[data-ws-col]')?.querySelectorAll<HTMLElement>('[data-proj-row]') ?? [])].filter((r) => r.offsetParent !== null);
     rows[rows.indexOf(from) + dir]?.focus();
   }
 
@@ -82,13 +108,13 @@
       e.preventDefault();
       const to = e.key === 'ArrowUp' ? index - 1 : index + 2; // gaps: before the one above / after the one below
       if (to < 0 || to > count) return;
-      void workspacesStore.moveProject(wsId, root, wsId, to).then(() => refocus(wsId, root));
+      void Promise.resolve(onMoveProject(wsId, root, wsId, to)).then(() => refocus(wsId, root));
     } else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
       e.preventDefault();
       const next = workspaces[wsIndex + (e.key === 'ArrowLeft' ? -1 : 1)];
       if (!next) return;
       const at = Math.min(index, next.projects.length);
-      void workspacesStore.moveProject(wsId, root, next.id, at).then(() => refocus(next.id, root));
+      void Promise.resolve(onMoveProject(wsId, root, next.id, at)).then(() => refocus(next.id, root));
     } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       stepFocus(el, e.key === 'ArrowDown' ? 1 : -1);
@@ -97,7 +123,7 @@
       openProject(wsId, root);
     } else if (e.key === 'Delete') {
       e.preventDefault();
-      workspacesStore.removeProjectFrom(wsId, root);
+      onRemoveProject(wsId, root);
     }
   }
 
@@ -106,7 +132,7 @@
       e.preventDefault();
       const to = e.key === 'ArrowLeft' ? index - 1 : index + 2;
       if (to < 0 || to > workspaces.length) return;
-      workspacesStore.moveWorkspace(wsId, to);
+      onMoveWorkspace(wsId, to);
       void tick().then(() =>
         document.querySelector<HTMLElement>(`[data-ws-head="${CSS.escape(wsId)}"]`)?.focus());
     } else if (e.key === 'Enter') {
@@ -123,7 +149,7 @@
 
   function openProject(wsId: string, root: string) {
     onClose();
-    void workspacesStore.switchToProject(wsId, root);
+    onOpenProject(wsId, root);
   }
 
   function select(wsId: string) {
@@ -138,7 +164,7 @@
       class="col"
       class:selected={ws.id === selectedId}
       class:ghosted={drag.active && drag.item?.kind === 'workspace' && drag.item.wsId === ws.id}
-      style:--ws={wsColorVar(ws.color_idx)}
+      style:--ws={colorVar(ws.colorIdx)}
       data-ws-col={ws.id}
       aria-label={ws.name || 'Workspace'}
       animate:flip={{ duration: 200 }}
@@ -156,9 +182,9 @@
         onkeydown={(e) => onHeaderKey(e, ws.id, wi)}
       >
         <GripVertical size={13} class="grip" />
-        <Monogram name={ws.name || 'Workspace'} color={wsColorVar(ws.color_idx)} size={22} />
+        <Monogram name={ws.name || 'Workspace'} color={colorVar(ws.colorIdx)} size={22} />
         <span class="name">{ws.name || 'Workspace'}</span>
-        {#if ws.id === workspacesStore.activeId}<Check size={12} class="active-check" />{/if}
+        {#if ws.id === activeId}<Check size={12} class="active-check" />{/if}
         <span class="count">{ws.projects.length}</span>
       </div>
 
@@ -169,6 +195,7 @@
           <div
             class="proj"
             class:ghosted={drag.active && drag.item?.kind === 'project' && drag.item.wsId === ws.id && drag.item.root === p.root}
+            class:filtered-out={!shown(p)}
             class:drop-before={projectDrop(ws.id) === i}
             role="option"
             aria-selected="false"
@@ -181,14 +208,14 @@
             use:tooltip={p.root}
             animate:flip={{ duration: 180 }}
           >
-            <Monogram name={basename(p.root)} color={wsColorVar(ws.color_idx)} size={20} />
-            <span class="proj-name">{basename(p.root)}</span>
+            <Monogram name={nameOf(p)} color={colorVar(ws.colorIdx)} size={20} />
+            <span class="proj-name">{nameOf(p)}</span>
             <button
               type="button"
               class="remove"
               data-no-drag
-              aria-label={`Remove ${basename(p.root)} from ${ws.name || 'Workspace'}`}
-              onclick={() => workspacesStore.removeProjectFrom(ws.id, p.root)}
+              aria-label={`Remove ${nameOf(p)} from ${ws.name || 'Workspace'}`}
+              onclick={() => onRemoveProject(ws.id, p.root)}
             ><X size={12} /></button>
           </div>
         {/each}
@@ -259,6 +286,7 @@
   }
   .proj:hover { background: var(--bg-hover); border-color: var(--border); }
   .proj.ghosted { opacity: 0.35; }
+  .proj.filtered-out { display: none; }
   /* The insertion line above this row — where a drop would land. */
   .proj { position: relative; }
   .proj.drop-before::before {

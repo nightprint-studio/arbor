@@ -129,6 +129,23 @@ export interface SsrApplied {
  */
 export type SsrDialect = 'java' | 'jsp' | 'jsp-java';
 
+/** Which kinds of files the project holds — decides whether the page languages are offered at all. */
+export interface SsrLanguages {
+  java: boolean;
+  /** At least one `.jsp` / `.jspf` / `.jspx` / `.tag` file. */
+  jsp: boolean;
+}
+
+/** Whether the project has Java and page files to search. Cached by the backend per root. Wire: `bennu_ssr_languages`. */
+export function ssrLanguages(root: string): Promise<SsrLanguages> {
+  return bennu('bennu_ssr_languages', { args: { root } });
+}
+
+/** Stop a running search: the walk ends at the next file. Wire: `bennu_ssr_cancel`. */
+export function ssrCancel(searchId: string): Promise<void> {
+  return bennu('bennu_ssr_cancel', { args: { search_id: searchId } });
+}
+
 /** Read a query and say what it means. No files are touched. Wire: `bennu_ssr_explain`. */
 export function explainQuery(query: string, dialect: SsrDialect = 'java'): Promise<SsrExplained> {
   return bennu('bennu_ssr_explain', { args: { query, dialect } });

@@ -19,6 +19,7 @@
   // The undo/redo history as a serialisable field — see `emitViewState`.
   import { historyField } from '@codemirror/commands';
   import { docHash } from './doc-hash';
+  import { minimalChange } from './minimal-change';
   // The explicit "ask for completions here" command — see `requestCompletion`.
   import { startCompletion } from '@codemirror/autocomplete';
   import {
@@ -38,10 +39,13 @@
   import { openSearchPanel, searchPanelOpen } from '@codemirror/search';
 
   import type { LanguageDescriptor, EditorDiagnostic, EditorViewSnapshot } from './types';
+  import { convertCaseInView } from './case-command';
+  import type { CaseStyle } from '$lib/utils/case-convert';
   import {
     createCodeEditorExtensions, historyReset, refTextAt,
     preferencesCompartment, type CodeEditorPreferences, type CompletionPreferences,
   } from './extensions';
+  import type { CaretPreferences } from './caret';
   import { minimapExtension } from './minimap';
   import { lineAnnotationExtension, pushLineAnnotations, type LineAnnotation } from './line-annotations';
   import { lineHeatExtension, pushLineHeat, type LineHeat } from './line-heat';
@@ -88,6 +92,7 @@
     folding = true,
     foldBlockComments = false,
     completion,
+    caret,
     keyBindings,
     marks = [],
     singleLine = false,
@@ -212,6 +217,8 @@
     /** How the completion popup behaves — auto-popup, its delay, case sensitivity. Ignored by an
      *  editor whose language brings no completion source. Applied live. */
     completion?: CompletionPreferences;
+    /** The caret's shape, thickness, blink and colour (`caret.ts`). Applied live; omit for a 2px line in the theme's caret colour. */
+    caret?: CaretPreferences;
     /**
      * Keys this host claims back from CodeMirror, e.g. `Mod-Enter` to run a
      * statement. Installed above every built-in binding — see the option of the
@@ -380,7 +387,7 @@
   /** The user-facing preferences as one object — read in both places that need them (the mount
    *  and the live reconfigure) so the two can never drift. */
   function currentPreferences(): CodeEditorPreferences {
-    return { lineNumbers, problemMarkers, stableGutter, highlightActiveLine, showWhitespace, wrap, folding, foldBlockComments, completion };
+    return { lineNumbers, problemMarkers, stableGutter, highlightActiveLine, showWhitespace, wrap, folding, foldBlockComments, completion, caret };
   }
 
   let lastEmitted: string | null = null;
@@ -417,6 +424,9 @@
    */
   function emitViewState(withHistory = false) {
     if (!view || !onViewState) return;
+    // A view torn down before its text arrived describes an empty document: its caret and scroll are the top
+    // by construction, and filing them would replace the real position the host already holds for this tab.
+    if (view.state.doc.length === 0 && value.length > 0) return;
     const sel = view.state.selection.main;
     onViewState(
       {
@@ -1047,19 +1057,29 @@
       : null;
     suppressEmit = true;
     try {
+      // Only the part that actually differs is replaced. A whole-document replace maps every
+      // decoration (diagnostics, lenses, inlay hints, folds, usage marks) onto nothing, so a reload
+      // that changed one line — or a stub swapped for the real source with the same header — made
+      // all of them vanish for a beat and then pop back. The common head and tail keep their
+      // positions, and with them the selection and the scroll anchor.
+      const change = minimalChange(current, next);
       view.dispatch({
-        changes: { from: 0, to: current.length, insert: next },
+        changes: change,
         annotations: Transaction.addToHistory.of(false),
         effects: historyReset(),
       });
       if (was) {
-        const len = view.state.doc.length;
-        view.dispatch({
-          selection: {
-            anchor: Math.min(was.anchor, len),
-            head: Math.min(was.head, len),
-          },
-        });
+        // A narrow change already mapped the selection onto the text that stayed; only a rewrite of
+        // the whole document leaves it with nothing to map onto and needs the old offsets back.
+        if (change.from === 0 && change.to === current.length) {
+          const len = view.state.doc.length;
+          view.dispatch({
+            selection: {
+              anchor: Math.min(was.anchor, len),
+              head: Math.min(was.head, len),
+            },
+          });
+        }
         view.scrollDOM.scrollTop = was.top;
       }
     } finally { suppressEmit = false; }
@@ -1755,6 +1775,13 @@
     if (!view) return;
     const b2u = makeByteToU16(view.state.doc.toString());
     selectRange(b2u(startByte), b2u(endByte));
+  }
+
+  /** Convert the selection — or the identifier at the caret, per cursor — to a naming style, or one step
+   *  round the cycle with `'cycle'`. One undo step. `false` when there was nothing to convert. */
+  export function convertCase(style: CaseStyle | 'cycle'): boolean {
+    if (!view || readOnly) return false;
+    return convertCaseInView(view, style);
   }
 
   /** Copy the current selection to the clipboard (no-op when nothing is selected). */

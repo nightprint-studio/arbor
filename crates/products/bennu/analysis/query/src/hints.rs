@@ -171,7 +171,90 @@ pub(crate) fn admits_so_far(m: &Member, wanted: usize, may_grow: bool) -> bool {
 
 /// Every overload that admits the position of the argument at `offset`, as the slot it gives that argument. `closed` is
 /// whether the call is surely closed at the caret: see [`closes_at_caret`].
+/// How many distinct questions the slot cache remembers. One completion asks one (source, caret) pair; a second
+/// covers the ghost-text request that follows it.
+const SLOT_CACHE_SIZE: usize = 4;
+
+/// How long a remembered answer is trusted. Short on purpose: the answer depends on the index, which the cache
+/// cannot see change — a second is long enough to cover the half-dozen passes of ONE completion request and too
+/// short for anyone to notice a stale type after an edit elsewhere.
+const SLOT_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+
+struct SlotEntry {
+    fingerprint: u64,
+    len: usize,
+    offset: usize,
+    closed: bool,
+    /// The resolver the answer was worked out against, by address: a rebuilt index is a new resolver.
+    resolver: usize,
+    at: std::time::Instant,
+    slots: Vec<ArgumentSlot>,
+}
+
+thread_local! {
+    static SLOT_CACHE: std::cell::RefCell<Vec<SlotEntry>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn slot_fingerprint(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// [`compute_slot_candidates`], remembered per (buffer, caret, resolver) for [`SLOT_CACHE_TTL`].
+///
+/// Completing inside a call's parentheses asks "what does this argument take?" from half a dozen passes — the
+/// type names, the enum constants, the functional types, the callee's statics, the locals that fit, the `Class<T>`
+/// slot — and each used to parse the buffer and type the callee's receiver chain again for the identical answer.
+/// Inference is the expensive part of a keystroke here, so it is done once.
 fn slot_candidates(source: &str, offset: usize, resolver: &dyn TypeResolver, closed: bool) -> Vec<ArgumentSlot> {
+    // Tests build many resolvers at the same stack address over the same text; a remembered answer from the
+    // previous one would be a wrong answer for the next.
+    if cfg!(test) {
+        return compute_slot_candidates(source, offset, resolver, closed);
+    }
+    let fingerprint = slot_fingerprint(source);
+    let who =(resolver as *const dyn TypeResolver).cast::<()>() as usize;
+    let hit = SLOT_CACHE.with(|cell| {
+        cell.borrow()
+            .iter()
+            .find(|e| {
+                e.fingerprint == fingerprint
+                    && e.len == source.len()
+                    && e.offset == offset
+                    && e.closed == closed
+                    && e.resolver == who
+                    && e.at.elapsed() < SLOT_CACHE_TTL
+            })
+            .map(|e| e.slots.clone())
+    });
+    if let Some(slots) = hit {
+        return slots;
+    }
+    let slots = compute_slot_candidates(source, offset, resolver, closed);
+    SLOT_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        cache.insert(
+            0,
+            SlotEntry {
+                fingerprint,
+                len: source.len(),
+                offset,
+                closed,
+                resolver: who,
+                at: std::time::Instant::now(),
+                slots: slots.clone(),
+            },
+        );
+        cache.truncate(SLOT_CACHE_SIZE);
+    });
+    slots
+}
+
+fn compute_slot_candidates(source: &str, offset: usize, resolver: &dyn TypeResolver, closed: bool) -> Vec<ArgumentSlot> {
     // `f(a, |)` does not parse as an argument list, and the error recovery counts the arguments wrongly: a
     // placeholder at the caret makes it one. The buffer as written is the fallback.
     if source.is_char_boundary(offset) {

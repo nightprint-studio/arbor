@@ -61,6 +61,7 @@ pub fn endpoints() -> Vec<EndpointInfo> {
             handler: "get".into(),
             return_type: "OrderDto".into(),
             produces: String::new(),
+            consumes: String::new(),
             params: vec![p("id", "Long", "path"), EndpointParam { required: false, ..p("expand", "String", "query") }],
         },
         EndpointInfo {
@@ -71,6 +72,7 @@ pub fn endpoints() -> Vec<EndpointInfo> {
             handler: "create".into(),
             return_type: "ResponseEntity<OrderDto>".into(),
             produces: String::new(),
+            consumes: String::new(),
             params: vec![p("request", "CreateOrderRequest", "body"), p("X-Tenant", "String", "header")],
         },
         EndpointInfo {
@@ -81,6 +83,7 @@ pub fn endpoints() -> Vec<EndpointInfo> {
             handler: "list".into(),
             return_type: "List<OrderDto>".into(),
             produces: String::new(),
+            consumes: String::new(),
             params: vec![p("status", "String", "query"), p("page", "int", "query")],
         },
         EndpointInfo {
@@ -91,6 +94,7 @@ pub fn endpoints() -> Vec<EndpointInfo> {
             handler: "delete".into(),
             return_type: "void".into(),
             produces: String::new(),
+            consumes: String::new(),
             params: vec![p("id", "Long", "path")],
         },
     ]

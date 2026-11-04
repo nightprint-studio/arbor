@@ -5,8 +5,11 @@
    * Everything here is the editing surface itself, which is why it is one page on every project
    * kind: a Cargo project draws its buffers with the same rules a Maven one does.
    */
-  import { Database, Regex, TextCursorInput } from 'lucide-svelte';
+  import { Database, MessageSquareWarning, Regex, TextCursorInput } from 'lucide-svelte';
   import { bennuRegexStore } from '$lib/stores/bennu/regex.svelte';
+  import { bennuCommentMarkersStore as markers } from '$lib/stores/bennu/comment-markers.svelte';
+  import { DEFAULT_KEYWORDS, keywordsText } from '$lib/components/bennu/comment-markers/markers';
+  import Input from '$lib/components/shared/ui/Input.svelte';
   import type { RegexDetection } from '$lib/components/bennu/inner-lang/detect';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
@@ -17,8 +20,13 @@
     bennuSettingsStore, SQL_DIALECTS,
     type IndentStyle, type SqlDialectSetting,
   } from '$lib/stores/bennu/settings.svelte';
+  import type { CaretBlink, CaretStyle, CaretWidth } from '$lib/components/shared/ui/code-editor/caret';
 
   const s = bennuSettingsStore;
+
+  /** The marker words as typed; null while the field simply shows the stored list. */
+  let keywordDraft = $state<string | null>(null);
+  const keywordField = $derived(keywordDraft ?? keywordsText(markers.keywords));
 
   const indentOptions = [
     { value: 'spaces', label: 'Spaces' },
@@ -59,6 +67,44 @@
   });
 
   const editorRuler = $derived(s.rightMargin > 0);
+
+  const caretStyleOptions = [
+    { value: 'line', label: 'Line' },
+    { value: 'block', label: 'Block' },
+    { value: 'underline', label: 'Underline' },
+  ];
+  const caretWidthOptions = [
+    { value: 'thin', label: 'Thin' },
+    { value: 'normal', label: 'Normal' },
+    { value: 'thick', label: 'Thick' },
+  ];
+  const caretBlinkOptions = [
+    { value: 'standard', label: 'Standard' },
+    { value: 'smooth', label: 'Smooth' },
+    { value: 'solid', label: 'Solid (no blink)' },
+  ];
+  const caretColorOptions = [
+    { value: 'auto', label: 'Automatic' },
+    { value: 'accent', label: 'Accent' },
+    { value: 'custom', label: 'Custom…' },
+  ];
+  const HEX = /^#[0-9a-fA-F]{6}$/;
+  /** The colour mode the stored value means: anything but `auto` / `accent` is a custom colour. */
+  const caretColorMode = $derived(s.caretColor === 'auto' || s.caretColor === 'accent' ? s.caretColor : 'custom');
+  /** The hex as typed; null while the field simply shows the stored colour. */
+  let caretHexDraft = $state<string | null>(null);
+  const caretHexField = $derived(caretHexDraft ?? (caretColorMode === 'custom' ? s.caretColor : '#ff8800'));
+
+  function pickCaretColor(mode: string) {
+    if (mode === 'custom') s.setCaretColor(HEX.test(caretHexField) ? caretHexField : '#ff8800');
+    else s.setCaretColor(mode);
+    caretHexDraft = null;
+  }
+  function commitCaretHex(v: string) {
+    const hex = v.trim();
+    if (HEX.test(hex)) s.setCaretColor(hex);
+    caretHexDraft = null;
+  }
 </script>
 
 <div class="section-header">
@@ -121,6 +167,33 @@
 </div>
 
 <div class="card">
+  <div class="card-section-title"><TextCursorInput size={12} /> Caret</div>
+  <FormRow label="Style" description="A line between characters, a block over the next one, or an underline beneath it. The same shape is used for every cursor of a multi-cursor selection.">
+    <RadioGroup value={s.caretStyle} options={caretStyleOptions} size="sm"
+                onchange={(v) => s.setCaretStyle(v as CaretStyle)} />
+  </FormRow>
+  <FormRow label="Thickness" description="Pixels of the line (1, 2 or 3), and of the underline. A block is always one character wide.">
+    <RadioGroup value={s.caretWidth} options={caretWidthOptions} size="sm"
+                onchange={(v) => s.setCaretWidth(v as CaretWidth)} />
+  </FormRow>
+  <FormRow label="Blink" description="Standard switches on and off; smooth fades; solid never blinks.">
+    <Select value={s.caretBlink} options={caretBlinkOptions}
+            onchange={(v) => s.setCaretBlink(v as CaretBlink)} ariaLabel="Caret blink" />
+  </FormRow>
+  <FormRow label="Colour" description="Automatic follows the theme's caret colour, chosen to stand out from the current line and the selection (both are accent washes). Accent uses the accent colour; custom takes a #rrggbb value.">
+    <Select value={caretColorMode} options={caretColorOptions}
+            onchange={(v) => pickCaretColor(v)} ariaLabel="Caret colour" />
+  </FormRow>
+  {#if caretColorMode === 'custom'}
+    <FormRow label="Custom colour" description="Six hex digits, for example #ff8800. Anything else is ignored.">
+      <Input value={caretHexField} placeholder="#ff8800" ariaLabel="Custom caret colour"
+             oninput={(v) => (caretHexDraft = v)}
+             onchange={commitCaretHex} />
+    </FormRow>
+  {/if}
+</div>
+
+<div class="card">
   <div class="card-section-title"><TextCursorInput size={12} /> Indentation</div>
   <FormRow label="Tab size" description="Number of columns a tab occupies.">
     <NumberStepper value={s.tabSize} min={1} max={16} narrow
@@ -151,6 +224,30 @@
   >
     <Select value={bennuRegexStore.detection} options={regexDetectionOptions}
             onchange={(v) => bennuRegexStore.setDetection(v as RegexDetection)} ariaLabel="Regex auto-detection" />
+  </FormRow>
+</div>
+
+<div class="card">
+  <div class="card-section-title"><MessageSquareWarning size={12} /> Comment markers</div>
+  <FormRow
+    label="Highlight markers in comments"
+    description="Colour TODO, FIXME and the other words below where they are written in a comment (never in a string), and point at them on the scrollbar overview. Each kind has its own colour from the theme. The TODO window lists the same words."
+  >
+    <Toggle checked={markers.enabled} onchange={(v) => markers.setEnabled(v)} ariaLabel="Highlight markers in comments" />
+  </FormRow>
+  <FormRow
+    label="Markers"
+    description="Words separated by commas or spaces; letters, digits and _ only. TODO(name): is a marker too. Leave empty for the built-in list."
+  >
+    <Input value={keywordField} placeholder={keywordsText(DEFAULT_KEYWORDS)} ariaLabel="Marker words"
+           oninput={(v) => (keywordDraft = v)}
+           onchange={(v) => { markers.setKeywords(v); keywordDraft = null; }} />
+  </FormRow>
+  <FormRow label="Match case" description="Off, todo and Todo count as TODO.">
+    <Toggle checked={markers.caseSensitive} onchange={(v) => markers.setCaseSensitive(v)} ariaLabel="Match case" />
+  </FormRow>
+  <FormRow label="Dot in the gutter" description="Also mark the line with a coloured dot beside the line numbers.">
+    <Toggle checked={markers.gutter} onchange={(v) => markers.setGutter(v)} ariaLabel="Dot in the gutter" />
   </FormRow>
 </div>
 

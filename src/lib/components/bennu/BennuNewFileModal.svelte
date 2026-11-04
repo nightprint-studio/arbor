@@ -32,12 +32,15 @@
   import { getFileIcon } from '$lib/utils/file-icons';
   import { tooltip } from '$lib/actions/tooltip';
   import { bennuTemplatesStore } from '$lib/stores/bennu/templates.svelte';
+  import { createFileFromTemplate } from '$lib/ipc/bennu/templates';
+  import { NEW_HTTP_FILE } from './http/http-lang';
 
   let {
     dir,
     initialKind = 'class',
+    http = false,
     onClose,
-  }: { dir: string; initialKind?: NewFileKind; onClose: () => void } = $props();
+  }: { dir: string; initialKind?: NewFileKind; http?: boolean; onClose: () => void } = $props();
 
   /** The Java shapes, in IntelliJ's order — the frequent ones first, not alphabetical.
    *  `iconKind` is what {@link SymbolKindIcon} draws; an exception is a class and wears a
@@ -78,16 +81,36 @@
   let kind = $state<NewFileKind>(untrack(() => initialKind));
   /** One of the user's templates, chosen instead of a kind. */
   let template = $state<string | null>(null);
-  let name = $state('');
+  /** "New › HTTP File" starts from a name that is already a good one — Enter takes it. */
+  let name = $state(untrack(() => (http ? 'requests' : '')));
   let busy = $state(false);
 
   const dirLabel = $derived(dir.split(/[\\/]/).filter(Boolean).slice(-2).join('/'));
   const canCreate = $derived(name.trim().length > 0 && !busy);
 
+  /** A `.http` file with a starter request, opened in the editor. The extension is added when the
+   *  name has none, so `requests` and `requests.http` are the same answer. */
+  async function createHttpFile() {
+    const base = name.trim();
+    const file = /\.(http|rest)$/i.test(base) ? base : `${base}.http`;
+    const path = `${dir.replace(/[\\/]+$/, '')}/${file}`;
+    try {
+      await createFileFromTemplate(projectStore.project?.root ?? dir, path, NEW_HTTP_FILE);
+    } catch {
+      toastStore.show(`Could not create “${file}” — it may already exist`, 'warning');
+      return;
+    }
+    await projectStore.openFile(path);
+    projectStore.refreshTree();
+    bennuUiStore.revealActiveInTree();
+    onClose();
+  }
+
   async function create() {
     if (!canCreate) return;
     busy = true;
     try {
+      if (http) { await createHttpFile(); return; }
       const res = template
         ? await newFileFromTemplate(projectStore.project?.root ?? dir, dir, name.trim(), template)
         : await newFile(dir, name.trim(), kind);
@@ -122,10 +145,10 @@
    *  `AtlasPlayer` into a field asking for a file name would be right to expect
    *  `AtlasPlayer.rs`, which is not what a Rust project wants. */
   const title = $derived(
-    !isTyped ? 'New File' : projectStore.isCargo ? 'New Rust File' : 'New Java Class',
+    http ? 'New HTTP File' : !isTyped ? 'New File' : projectStore.isCargo ? 'New Rust File' : 'New Java Class',
   );
   const namePlaceholder = $derived(
-    !isTyped
+    http ? 'File name (.http)' : !isTyped
       ? 'File name (with extension)'
       : projectStore.isCargo
         ? 'Module name (snake_case)'
@@ -154,7 +177,10 @@
   }
 
   let nameEl = $state<HTMLInputElement | undefined>();
-  $effect(() => { nameEl?.focus(); });
+  $effect(() => {
+    nameEl?.focus();
+    if (http) nameEl?.select();
+  });
 </script>
 
 <!-- `height: auto` rather than a number: the content is a name field and a fixed list of six,

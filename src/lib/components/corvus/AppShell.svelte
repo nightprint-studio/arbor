@@ -65,6 +65,8 @@
   import { syncStore } from '$lib/stores/corvus/sync.svelte';
   import InitRepoModal from './InitRepoModal.svelte';
   import CloneRepoModal from './CloneRepoModal.svelte';
+  import OpenUnregisteredRepoModal from './OpenUnregisteredRepoModal.svelte';
+  import { openRepoPrompt } from '$lib/stores/corvus/openRepoPrompt.svelte';
   import GitSetupModal from './GitSetupModal.svelte';
   import OnboardingModal from '../shared/OnboardingModal.svelte';
   import WhatsNewModal from '../shared/whats-new/WhatsNewModal.svelte';
@@ -332,19 +334,6 @@
     return () => { unlistenDl?.(); unlistenDlManual?.(); };
   });
 
-  // The File Explorer (possibly its own dedicated window) delegates heavy git
-  // operations here: the backend focuses this window and emits the repo to open.
-  let unlistenExplorerRepo: (() => void) | null = null;
-  onMount(() => {
-    (async () => {
-      unlistenExplorerRepo = await listen<{ repoRoot: string }>('arbor://explorer-open-repo', ev => {
-        const root = ev.payload?.repoRoot;
-        if (root) void openRepoFromPath(root).catch(e => uiStore.showToast(`Open in Arbor failed: ${e}`, 'error'));
-      });
-    })();
-    return () => { unlistenExplorerRepo?.(); };
-  });
-
   /** Re-classify every tombstoned tab.  Called when the window regains
    *  focus (config-gated) and after the user clicks Retry on a tombstone
    *  panel.  A tab promoted to OK is reopened in-place via the bridge. */
@@ -567,11 +556,11 @@
 
   // Canopy asking for a specific repository: open it as a tab. Fires once on
   // mount for a request parked before this window existed, and on every later
-  // request while it stays open. Reuses the same helper the File Explorer's
-  // "Open in Arbor" delegation goes through.
+  // request while it stays open. Every "go to Corvus" (Bennu, the File Explorer,
+  // links) lands here through `openProjectIn`, with an optional commit/branch context.
   onMount(() =>
-    onOpenIntent('corvus', (path) => {
-      void openRepoFromPath(path).catch(e =>
+    onOpenIntent('corvus', (path, context) => {
+      void openRepoFromPath(path, context).catch(e =>
         uiStore.showToast(`Failed to open repo: ${e}`, 'error'));
     }),
   );
@@ -2413,6 +2402,11 @@
       onInit={handleInitRepo}
       onCancel={() => initModalOpen = false}
     />
+  {/if}
+
+  <!-- "Repository not registered — add it?" — a "go to Corvus" from another product named an unknown repo -->
+  {#if openRepoPrompt.request}
+    <OpenUnregisteredRepoModal path={openRepoPrompt.request.path} name={openRepoPrompt.request.name} />
   {/if}
 
   <!-- Clone Repository modal -->

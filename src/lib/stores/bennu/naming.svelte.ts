@@ -24,6 +24,7 @@
  */
 
 import { listen } from '@tauri-apps/api/event';
+import { noFilter, type FixFilter } from '$lib/components/bennu/naming-fix-selection';
 import {
   cancelNamingFix as ipcCancelFix,
   emptyNamingConfig,
@@ -36,6 +37,7 @@ import {
   type FixProgress,
   type NamingCatalog,
   type NamingFixPlan,
+  type ConventionSource,
   type NamingConfig,
   type NamingConvention,
   type NamingRules,
@@ -280,6 +282,13 @@ function createBennuNamingStore() {
   let fixProgress = $state<FixProgress | null>(null);
   /** What the pending plan covers, for the modal's title. */
   let fixScope = $state<'file' | 'project'>('file');
+  /** The review's ticks, filter, grouping and typed names. Held here and not in the modal so the review can be
+   *  hidden (to look at a declaration in the editor) and come back as it was. */
+  let fixFilter = $state<FixFilter>(noFilter('file'));
+  /** The review is open but out of the way. */
+  let fixHidden = $state(false);
+  /** What the pending plan was asked of, so choosing another convention in the review plans it again. */
+  let fixRequest: { root: string; file?: string; source?: string } | null = null;
 
   // Attached on the first fix and kept: a listener costs nothing while no fix is running, and
   // re-attaching per run is a race against the first event the backend emits.
@@ -355,6 +364,13 @@ function createBennuNamingStore() {
     get planningFix() { return planningFix; },
     get fixProgress() { return fixProgress; },
     get fixScope() { return fixScope; },
+    get fixFilter() { return fixFilter; },
+    get fixHidden() { return fixHidden; },
+    setFixFilter(next: FixFilter) { fixFilter = next; },
+    /** Move the review out of the way — the plan, ticks and typed names are kept. */
+    hideFix() { fixHidden = true; },
+    /** Bring a hidden review back. */
+    showFix() { fixHidden = false; },
 
     /**
      * Plan the bulk fix for one file, or — with no `file` — for the whole project.
@@ -366,16 +382,24 @@ function createBennuNamingStore() {
      *
      * Nothing is written: the plan is held for review, and whoever renders it applies the edits.
      */
-    async planFix(root: string, file?: string, source?: string): Promise<NamingFixPlan | null> {
+    async planFix(
+      root: string,
+      file?: string,
+      source?: string,
+      convention?: ConventionSource,
+    ): Promise<NamingFixPlan | null> {
       if (planningFix) return null;
       planningFix = true;
       fixOpen = true;
       pendingFix = null;
       fixProgress = null;
       fixScope = file ? 'file' : 'project';
+      fixFilter = noFilter('file');
+      fixHidden = false;
+      fixRequest = { root, file, source };
       await attachProgress();
       try {
-        const plan = await ipcFixPlan(root, file, source);
+        const plan = await ipcFixPlan(root, file, source, convention);
         pendingFix = plan;
         return plan;
       } catch {
@@ -399,10 +423,30 @@ function createBennuNamingStore() {
       void ipcCancelFix(root);
     },
 
+    /** Plan the pending fix again under another convention — the review's "judged by" choice. */
+    async replanFix(convention: ConventionSource): Promise<NamingFixPlan | null> {
+      if (!fixRequest || planningFix) return null;
+      const { root, file, source } = fixRequest;
+      return this.planFix(root, file, source, convention);
+    },
+
+    /** Put a plan on screen without planning one — what the gallery shows. */
+    seedFix(plan: NamingFixPlan, scope: 'file' | 'project' = 'project') {
+      pendingFix = plan;
+      fixOpen = true;
+      fixHidden = false;
+      fixFilter = noFilter('file');
+      fixScope = scope;
+      planningFix = false;
+      fixProgress = null;
+    },
+
     /** Close the review, dropping whatever it held. */
     dismissFix() {
       pendingFix = null;
       fixOpen = false;
+      fixHidden = false;
+      fixFilter = noFilter('file');
       fixProgress = null;
     },
   };

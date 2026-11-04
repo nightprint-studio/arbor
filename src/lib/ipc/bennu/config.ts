@@ -20,6 +20,16 @@ export interface BennuRegexPattern {
   replacement: string;
 }
 
+/** A structural-search query kept in the config — a saved template or a recent run. Mirrors the BE `SsrQuery`. */
+export interface BennuSsrQuery {
+  /** The template's name; empty for a recent run. */
+  title: string;
+  query: string;
+  replacement: string;
+  /** `'java'` | `'jsp'` | `'jsp-java'`. */
+  dialect: string;
+}
+
 /** Mirrors the BE `AssistantConfig` — what a new assistant conversation starts with. No key: that lives
  *  in the credential vault. */
 /** Mirrors the BE `LimitsConfig` — spending limits in euros; 0 switches one off. */
@@ -107,6 +117,12 @@ export interface BennuConfig {
   show_problem_markers: boolean;
   /** Tint the line the caret sits on. */
   highlight_current_line: boolean;
+  /** Caret shape (`line` | `block` | `underline`), line thickness (`thin` | `normal` | `thick`), blink
+   *  (`smooth` | `standard` | `solid`) and colour (`auto` | `accent` | `#rrggbb`). */
+  caret_style: string;
+  caret_width: string;
+  caret_blink: string;
+  caret_color: string;
   /** Install code folding — the gutter arrows and the fold commands. */
   folding_enabled: boolean;
   /** Collapse a file's block comments when it opens (needs `folding_enabled`). */
@@ -212,6 +228,18 @@ export interface BennuConfig {
   regex_saved: BennuRegexPattern[];
   /** The patterns tried most recently in the Regex Tester, newest first. */
   regex_recent: BennuRegexPattern[];
+  /** Structural-search queries the user saved as templates. */
+  ssr_saved: BennuSsrQuery[];
+  /** The structural-search queries run most recently, newest first. */
+  ssr_recent: BennuSsrQuery[];
+  /** Colour TODO / FIXME … in comments. */
+  comment_markers: boolean;
+  /** The words that mark a comment — shared by the editor and the TODO window. */
+  comment_marker_keywords: string[];
+  /** A marker must be written exactly as listed. */
+  comment_marker_case_sensitive: boolean;
+  /** A dot in the gutter on each line holding a marker. */
+  comment_marker_gutter: boolean;
   /** The build the split-button runs by default (and on Ctrl+F9): `'mvn'` (Maven compile) or
    *  `'validate'` (whole-project validation without compiling). */
   preferred_build_type: string;

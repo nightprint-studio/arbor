@@ -13,8 +13,8 @@
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
-  import AssistantCode from './AssistantCode.svelte';
-  import { findFences, removeFence } from './assistant-fences';
+  import ImberCode from '$lib/components/shared/internal/imber/ImberCode.svelte';
+  import { findFences, removeFence } from '$lib/components/shared/internal/imber/imber-fences';
 
   let { draft = $bindable('') }: { draft?: string } = $props();
 
@@ -53,7 +53,7 @@
         <span class="title">{opened.language || 'text'} · {linesLabel(opened.lines)}</span>
       </ModalHeader>
     {/snippet}
-    <div class="preview"><AssistantCode language={opened.language || 'text'} code={opened.code} /></div>
+    <div class="preview"><ImberCode language={opened.language || 'text'} code={opened.code} /></div>
   </Modal>
 {/if}
 

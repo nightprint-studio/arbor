@@ -12,7 +12,7 @@ import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import {
   collectionsTree, curlImport, metaGet, metaSave, envState, getConfig, localSave, nodeDelete, projectForget, projectOpened,
   requestDuplicate, requestGet, requestSave, requestSend, requestCancel, testsRun,
-  workspaceAddProject, workspaceCreate, workspaceDelete, workspaceRemoveProject, workspaceSwitch, workspaceUpdate, detectedRootsSet,
+  workspaceMove, workspaceMoveProject, projectCreate, workspaceAddProject, workspaceCreate, workspaceDelete, workspaceRemoveProject, workspaceSwitch, workspaceUpdate, detectedRootsSet,
 } from '$lib/ipc/hirundo';
 import { blankRequest, cloneRequest, sameRequest } from '$lib/components/hirundo/request-model';
 import type {
@@ -179,6 +179,26 @@ function createHirundoWorkspace() {
     try { config = await workspaceRemoveProject(id, root); } catch (e) { fail(e); }
   }
 
+  async function moveWorkspace(id: string, gap: number) {
+    try { config = await workspaceMove(id, gap); } catch (e) { fail(e); }
+  }
+
+  async function moveProject(fromId: string, root: string, toId: string, gap: number) {
+    try { config = await workspaceMoveProject(fromId, root, toId, gap); } catch (e) { fail(e); }
+  }
+
+  /** Make a project (a folder with `.hirundo/` inside) and open it; it joins the active workspace like any opened project. */
+  async function createProject(location: string, name: string) {
+    try {
+      const path = await projectCreate(location, name);
+      await openProject(path);
+      return path;
+    } catch (e) {
+      fail(e);
+      return null;
+    }
+  }
+
   async function setDetectedRoots(roots: string[]) {
     try { config = await detectedRootsSet(roots); } catch (e) { fail(e); }
   }
@@ -255,6 +275,69 @@ function createHirundoWorkspace() {
     if (i === -1) return;
     tabs.splice(i, 1);
     if (activeId === id) activeId = (tabs[i] ?? tabs[i - 1])?.id ?? null;
+  }
+
+  /** What a close-many is waiting on: tabs with edits that would be lost. */
+  let closeConfirm = $state<{ ids: string[]; keep: string | null; edited: number } | null>(null);
+
+  /** Edits worth asking about: a saved request that changed, or a new one that has something in it. */
+  function hasEdits(tab: RequestTab): boolean {
+    return tab.path ? !sameRequest(tab.request, tab.saved) : tab.request.url.trim() !== '' || tab.request.name.trim() !== '';
+  }
+
+  function closeMany(ids: string[], keep: string | null) {
+    const at = Math.max(0, tabs.findIndex((t) => t.id === activeId));
+    tabs = tabs.filter((t) => !ids.includes(t.id));
+    if (!tabs.some((t) => t.id === activeId)) activeId = (keep && tabs.some((t) => t.id === keep) ? keep : (tabs[Math.min(at, tabs.length - 1)]?.id ?? null));
+  }
+
+  /** Close tabs, asking first when any holds edits. `keep` is the tab that stays (and becomes active). */
+  function requestClose(ids: string[], keep: string | null = null) {
+    if (!ids.length) return;
+    const edited = tabs.filter((t) => ids.includes(t.id) && hasEdits(t)).length;
+    if (edited) closeConfirm = { ids, keep, edited };
+    else closeMany(ids, keep);
+  }
+
+  function confirmClose() {
+    if (closeConfirm) closeMany(closeConfirm.ids, closeConfirm.keep);
+    closeConfirm = null;
+  }
+
+  function dismissClose() {
+    closeConfirm = null;
+  }
+
+  /** The tab-strip verbs: `id` is the tab that was clicked, the rest is relative to it. */
+  function closeTabs(kind: 'one' | 'others' | 'right' | 'all' | 'saved', id: string | null = activeId) {
+    const i = tabs.findIndex((t) => t.id === id);
+    if (kind === 'all') return requestClose(tabs.map((t) => t.id));
+    if (kind === 'saved') return closeMany(tabs.filter((t) => !dirty(t)).map((t) => t.id), null);
+    if (i === -1) return;
+    if (kind === 'one') requestClose([tabs[i].id]);
+    else if (kind === 'others') requestClose(tabs.filter((t) => t.id !== id).map((t) => t.id), id);
+    else requestClose(tabs.slice(i + 1).map((t) => t.id), id);
+  }
+
+  /** Move a tab to a new place in the strip (the order lives as long as the window's tabs do). */
+  function reorderTab(from: number, to: number) {
+    if (from === to || from < 0 || to < 0 || from >= tabs.length || to >= tabs.length) return;
+    const [moved] = tabs.splice(from, 1);
+    tabs.splice(to, 0, moved);
+  }
+
+  /** Nudge the active tab one place left (-1) or right (1). */
+  function moveActive(delta: number) {
+    const i = tabs.findIndex((t) => t.id === activeId);
+    if (i !== -1) reorderTab(i, i + delta);
+  }
+
+  /** A saved request is renamed in its file; a new one only in the tab. */
+  async function renameTab(id: string, name: string) {
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab || !name.trim()) return;
+    if (tab.path) await renameNode(tab.path, name.trim());
+    else tab.request.name = name.trim();
   }
 
   function activate(id: string) {
@@ -424,10 +507,11 @@ function createHirundoWorkspace() {
     get history() { return history; },
     get loading() { return loading; },
     get pending() { return pending; },
+    get closeConfirm() { return closeConfirm; },
 
-    init, openProject, switchWorkspace, switchToProject, createWorkspace, updateWorkspace, deleteWorkspace, addProjectTo, removeProjectFrom, setDetectedRoots,
+    init, openProject, switchWorkspace, switchToProject, createWorkspace, updateWorkspace, deleteWorkspace, addProjectTo, removeProjectFrom, setDetectedRoots, moveWorkspace, moveProject, createProject,
     closeProject, forgetProject, refreshTree, refreshEnvs,
-    openRequest, newRequest, importCurl, dirty, closeTab, activate, step, touch,
+    openRequest, newRequest, importCurl, dirty, closeTab, closeTabs, confirmClose, dismissClose, reorderTab, moveActive, renameTab, activate, step, touch,
     save, duplicate, deleteNode, renameNode, setLocal, selectEnvironment,
     send, cancel, runTests, confirmPending, dismissPending, openFromHistory, target,
   };

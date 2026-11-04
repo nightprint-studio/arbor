@@ -28,7 +28,7 @@ pub use crate::source::imports::{
     duplicate_imports, import_inventory, unresolved_imports, unresolved_static_imports,
     unused_imports, ImportEntry,
 };
-pub use crate::engine::incremental::{check_file_resolved_incremental, IncrementalCache};
+pub use crate::engine::incremental::{check_file_resolved_incremental, IncrementalCache, IncrementalStats};
 pub use crate::hierarchy::inheritance::{inheritance_errors, missing_abstract_impls};
 pub use crate::calls::lambdas::lambda_capture_errors;
 pub use crate::decls::local_class::local_class_errors_nodes;

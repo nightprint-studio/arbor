@@ -112,7 +112,7 @@ fn mentions(text: &str, name: &str) -> bool {
 /// fine, which is why the line-only check cannot see it.
 fn errors_at_uses(file: &str, source: &str, name: &str, after: usize) -> usize {
     IndexService::global()
-        .validate_java(file, source, true)
+        .validate_java_scratch(file, source)
         .iter()
         .filter(|d| d.severity == "error" && d.start >= after)
         .filter(|d| INVENTED.contains(&d.code.as_str()))
@@ -123,7 +123,7 @@ fn errors_at_uses(file: &str, source: &str, name: &str, after: usize) -> usize {
 /// The number of invented-kind errors that start inside `[from, to]` of `source`.
 fn invented_errors(file: &str, source: &str, from: usize, to: usize) -> usize {
     IndexService::global()
-        .validate_java(file, source, true)
+        .validate_java_scratch(file, source)
         .iter()
         .filter(|d| d.severity == "error" && d.start >= from && d.start <= to)
         .filter(|d| {

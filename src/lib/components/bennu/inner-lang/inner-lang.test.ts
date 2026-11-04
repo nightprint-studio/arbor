@@ -111,10 +111,8 @@ describe('detection', () => {
   });
 
   it('colours SQL by hint but leaves JPQL to the framework extension', () => {
-    expect(values(findSites('// language=PostgreSQL
-String s = "select 1";', 'java', CONTEXT))).toEqual([['sql', 'select 1']]);
-    expect(findSites('// language=JPAQL
-String s = "select o from O o";', 'java', CONTEXT)).toEqual([]);
+    expect(values(findSites('// language=PostgreSQL\nString s = "select 1";', 'java', CONTEXT))).toEqual([['sql', 'select 1']]);
+    expect(findSites('// language=JPAQL\nString s = "select o from O o";', 'java', CONTEXT)).toEqual([]);
   });
 
   it('recognises regex arguments by context', () => {

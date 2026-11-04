@@ -27,16 +27,18 @@
    * validation thread caps, in its own settings.
    */
   import { onDestroy } from 'svelte';
-  import { Activity, ChevronDown, ChevronRight, Cpu, MemoryStick, RotateCcw, Square, TriangleAlert } from 'lucide-svelte';
+  import { Activity, ChevronDown, ChevronRight, Cpu, MemoryStick, RotateCcw, Square, Terminal, TriangleAlert } from 'lucide-svelte';
   import { voiceApi } from '$lib/ipc/voice';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import Collapsible from '$lib/components/shared/ui/Collapsible.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
+  import { consoleHostLabel, splitConsoleHosts, type ConsoleHost } from '$lib/utils/process-groups';
   import { productIdentity } from '$lib/utils/products';
   import { tooltip } from '$lib/actions/tooltip';
   import { processMonitorStore, type WatchedRow } from '$lib/stores/process-monitor.svelte';
@@ -92,26 +94,40 @@
    * servers are the usual reason a machine is slow and the only rows with an action; everything
    * else is what you started through Arbor, and it ends when you stop it.
    */
+  // Windows console hosts (`conhost`) are pulled out of the last table into one collapsed group — see
+  // `utils/process-groups`. The open/closed state is plain component state, so a refresh (which
+  // replaces the rows, keyed by pid) never folds it back.
+  const split = $derived(splitConsoleHosts(rows.filter((r) => r.kind === 'child'), rows));
+  let consolesOpen = $state(false);
+
   const groups = $derived([
     {
       id: 'arbor', title: 'Arbor',
       hint: 'The application itself — its frontend and one backend per product.',
       rows: rows.filter((r) => r.kind === 'shell' || r.kind === 'backend' || r.kind === 'helper'),
       empty: '',
+      hosts: [] as ConsoleHost<WatchedRow>[],
     },
     {
       id: 'lsp', title: 'Language servers',
       hint: 'Started by a product for the projects open in it. They rebuild their state from the files, so Restart loses nothing.',
       rows: rows.filter((r) => r.kind === 'language-server'),
       empty: 'No language server is running.',
+      hosts: [] as ConsoleHost<WatchedRow>[],
     },
     {
       id: 'other', title: 'Everything else',
       hint: 'What was started through Arbor — runs, builds, tests, a terminal’s shell. It ends when you stop it.',
-      rows: rows.filter((r) => r.kind === 'child'),
+      rows: split.rest,
       empty: 'Nothing else is running.',
+      hosts: split.hosts,
     },
   ]);
+
+  /** A group's rows plus its console hosts — what its count and totals are about. */
+  function members(group: (typeof groups)[number]): WatchedRow[] {
+    return [...group.rows, ...group.hosts.map((h) => h.host)];
+  }
 
   function sumCpu(list: WatchedRow[]): number { return list.reduce((n, r) => n + r.cpu, 0); }
   function sumMemory(list: WatchedRow[]): number { return list.reduce((n, r) => n + r.memory, 0); }
@@ -292,19 +308,56 @@
       </div>
     {/if}
 
+    {#snippet consoleHosts(hosts: ConsoleHost<WatchedRow>[])}
+      {@const list = hosts.map((h) => h.host)}
+      <Collapsible bind:open={consolesOpen} chevron>
+        {#snippet header()}
+          <span class="row ch-head" class:warn={list.some((r) => r.heavy || r.busy)}>
+            <span class="c-what">
+              <span class="icon"><Terminal size={14} /></span>
+              <span class="names">
+                <span class="name">Console hosts ({hosts.length})</span>
+                <span class="sub">Windows starts one per command-line program. Closing one closes that program’s console, so they are not stopped from here.</span>
+              </span>
+            </span>
+            <span class="c-num">{report?.cpu_sampled ? `${Math.round(sumCpu(list))}%` : '—'}</span>
+            <span class="c-num">{mb(sumMemory(list))}</span>
+            <span class="c-up"></span>
+            <span class="c-act"></span>
+          </span>
+        {/snippet}
+        {#each hosts as entry (entry.host.pid)}
+          {@const h = entry.host}
+          <div class="row ch-row" class:warn={h.heavy || h.busy} role="row">
+            <span class="c-what" role="cell">
+              <span class="icon"><Terminal size={13} /></span>
+              <span class="names">
+                <span class="name">{consoleHostLabel(entry)}</span>
+                <span class="sub">Console host · pid {h.pid}{entry.hosted ? ` · hosts pid ${entry.hosted.pid}` : ''}</span>
+              </span>
+            </span>
+            <span class="c-num" class:hot={h.busy} role="cell">{report?.cpu_sampled ? `${h.cpu.toFixed(0)}%` : '—'}</span>
+            <span class="c-num" class:hot={h.heavy} role="cell">{mb(h.memory)}</span>
+            <span class="c-up" role="cell">{uptime(h.uptime_s)}</span>
+            <span class="c-act" role="cell"></span>
+          </div>
+        {/each}
+      </Collapsible>
+    {/snippet}
+
     {#snippet table(group: (typeof groups)[number])}
       <section class="group" aria-labelledby={`pg-${group.id}`}>
         <header class="g-head">
           <h3 id={`pg-${group.id}`}>{group.title}</h3>
-          <span class="g-count">{group.rows.length}</span>
-          {#if group.rows.length}
+          <span class="g-count">{members(group).length}</span>
+          {#if members(group).length}
             <span class="g-sum">
-              {report?.cpu_sampled ? `${Math.round(sumCpu(group.rows))}%` : '—'} · {mb(sumMemory(group.rows))}
+              {report?.cpu_sampled ? `${Math.round(sumCpu(members(group)))}%` : '—'} · {mb(sumMemory(members(group)))}
             </span>
           {/if}
         </header>
         <p class="g-hint">{group.hint}</p>
-        {#if group.rows.length === 0}
+        {#if members(group).length === 0}
           <p class="g-empty">{group.empty}</p>
         {:else}
           <div class="table" role="table" aria-label={group.title}>
@@ -430,6 +483,9 @@
                 </div>
               {/if}
             {/each}
+            {#if group.hosts.length}
+              {@render consoleHosts(group.hosts)}
+            {/if}
           </div>
         {/if}
       </section>
@@ -609,6 +665,9 @@
   .c-num.hot { color: var(--warning); font-weight: 600; }
   .c-up { color: var(--text-muted); font-size: var(--font-size-xs); }
   .c-act { display: flex; justify-content: flex-end; }
+  .ch-head { border-top: 1px solid var(--border-subtle); cursor: pointer; }
+  .ch-head:hover { background: var(--bg-hover); }
+  .ch-row { padding-left: 28px; }
 
   .limits { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
   .l-label { font-size: var(--font-size-xs); color: var(--text-muted); cursor: help; }

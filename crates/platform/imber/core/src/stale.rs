@@ -61,10 +61,15 @@ fn refetch_hint(tool: &str) -> Option<&'static str> {
     const KEEP_PREFIX: [&str; 13] = [
         "run_", "debug_", "brp_", "screenshot", "edit_", "create_", "delete_", "replace_", "rename_", "add_", "structural_", "corvus_", "spawn_",
     ];
+    const REFETCH: &str = "call the tool again with the same arguments to read it";
+    // The `structural_` prefix is for the rewrite; the search beside it only reads, so asking again is fine.
+    if tool == "structural_search" {
+        return Some(REFETCH);
+    }
     if KEEP_EXACT.contains(&tool) || KEEP_PREFIX.iter().any(|p| tool.starts_with(p)) {
         return None;
     }
-    Some("call the tool again with the same arguments to read it")
+    Some(REFETCH)
 }
 
 pub fn is_stub(content: &str) -> bool {

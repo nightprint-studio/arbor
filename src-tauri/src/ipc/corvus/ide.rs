@@ -60,7 +60,7 @@ fn open_in_ide(
         let app = state
             .app_handle()
             .ok_or_else(|| AppError::Other("Arbor is still starting".into()))?;
-        crate::commands::recents_commands::set_open_intent(app.clone(), "bennu".into(), path);
+        crate::commands::recents_commands::set_open_intent(app.clone(), "bennu".into(), path, None);
         tauri::async_runtime::spawn(async move {
             crate::window::bennu::open_bennu_window(app).await;
         });

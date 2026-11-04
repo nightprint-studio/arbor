@@ -17,6 +17,23 @@ use crate::request::{BodyKind, HttpRequest};
 use crate::soap::{add_username_token, protocol_headers};
 use crate::vars::{interpolate, ResolvedVars};
 
+/// A param whose key starts with this is a **path variable** (`path:id`), not a query parameter: its value
+/// replaces `{{id}}` in the URL. It is how a request made from a Spring `/orders/{id}` keeps the `id` as a row of its
+/// own — typed, required, with a sample — instead of a variable that has to be defined somewhere.
+pub const PATH_PARAM_PREFIX: &str = "path:";
+
+/// The URL with each `{{name}}` that has a path row (`path:name`) with a value replaced by that value.
+fn with_path_params(url: &str, params: &[KeyValue]) -> String {
+    let mut out = url.to_string();
+    for row in params.iter().filter(|r| r.enabled && !r.value.is_empty()) {
+        let Some(name) = row.key.trim().strip_prefix(PATH_PARAM_PREFIX) else { continue };
+        for pattern in [format!("{{{{{name}}}}}"), format!("{{{{ {name} }}}}")] {
+            out = out.replace(&pattern, &row.value);
+        }
+    }
+    out
+}
+
 /// What the levels above a request contribute, outermost first (the collection, then its folders).
 #[derive(Debug, Clone, Default)]
 pub struct Inherited<'a> {
@@ -78,7 +95,7 @@ pub fn prepare(req: &HttpRequest, inherited: &Inherited<'_>, vars: &ResolvedVars
     }
 
     // Query: the request's own params, then whatever the auth adds (an API key in the query).
-    let mut query: Vec<(String, String)> = enabled_pairs(&req.params).into_iter().map(|(k, v)| (percent_encode(&fill(&k)), percent_encode(&fill(&v)))).collect();
+    let mut query: Vec<(String, String)> = enabled_pairs(&req.params).into_iter().filter(|(k, _)| !k.starts_with(PATH_PARAM_PREFIX)).map(|(k, v)| (percent_encode(&fill(&k)), percent_encode(&fill(&v)))).collect();
 
     let mut ws_security: Option<(String, String)> = None;
     let mut chain: Vec<&Auth> = inherited.auth.clone();
@@ -97,7 +114,7 @@ pub fn prepare(req: &HttpRequest, inherited: &Inherited<'_>, vars: &ResolvedVars
         auth::apply(&filled, &mut headers, &mut query);
     }
 
-    let base = with_scheme(fill(req.url.trim()).trim());
+    let base = with_scheme(fill(&with_path_params(req.url.trim(), &req.params)).trim());
     let url = if query.is_empty() {
         base
     } else {
@@ -183,6 +200,26 @@ mod tests {
         assert_eq!(p.method, Method::Get);
         assert!(p.unresolved.is_empty());
         assert!(p.body.is_none());
+    }
+
+    #[test]
+    fn a_path_row_fills_the_url_and_is_not_a_query_parameter() {
+        let mut r = req();
+        r.url = "{{baseUrl}}/orders/{{id}}/lines/{{ line }}".into();
+        r.params = vec![KeyValue::new("path:id", "42"), KeyValue::new("path:line", "7"), KeyValue::new("expand", "all")];
+        let p = prepare(&r, &Inherited::default(), &vars(&[("baseUrl", "http://x")]));
+        assert_eq!(p.url, "http://x/orders/42/lines/7?expand=all");
+        assert!(p.unresolved.is_empty());
+    }
+
+    #[test]
+    fn an_empty_path_row_leaves_the_variable_to_be_reported() {
+        let mut r = req();
+        r.url = "http://x/orders/{{id}}".into();
+        r.params = vec![KeyValue::new("path:id", "")];
+        let p = prepare(&r, &Inherited::default(), &vars(&[]));
+        assert_eq!(p.unresolved, ["id"]);
+        assert_eq!(p.url, "http://x/orders/{{id}}", "no query from the path row");
     }
 
     #[test]

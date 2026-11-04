@@ -383,6 +383,34 @@ mod tests {
         assert!(t.0.join(".hirundo/collections/bandi/lista-bandi.toml").is_file());
     }
 
+    /// Renaming is a name change inside the file (the file keeps its place): the tree shows the new name at once,
+    /// for a request, a folder and a collection alike.
+    #[test]
+    fn renaming_a_request_a_folder_and_a_collection_shows_in_the_tree() {
+        let t = Temp::new();
+        let store = Store::for_project(&t.0);
+        let c = store.create_collection("Bandi").unwrap();
+        let folder = store.create_folder(&c, "Auth").unwrap();
+        let login = store.create_request(&folder, &req("Login", Method::Post)).unwrap();
+
+        let mut request = store.read_request(&login).unwrap();
+        request.name = "Sign in".into();
+        store.write_request(&login, &request).unwrap();
+        let mut meta = store.read_meta(&folder).unwrap();
+        meta.name = "Authentication".into();
+        store.write_meta(&folder, &meta).unwrap();
+        let mut top = store.read_meta(&c).unwrap();
+        top.name = "Tenders".into();
+        store.write_meta(&c, &top).unwrap();
+
+        let tree = store.tree().unwrap();
+        assert_eq!(tree[0].name, "Tenders");
+        let Node::Folder { name, children, path, .. } = &tree[0].children[0] else { panic!("a folder") };
+        assert_eq!((name.as_str(), path.as_str()), ("Authentication", "bandi/auth"), "the folder keeps its place");
+        let Node::Request { name, path, .. } = &children[0] else { panic!("a request") };
+        assert_eq!((name.as_str(), path.as_str()), ("Sign in", "bandi/auth/login.toml"));
+    }
+
     #[test]
     fn two_requests_with_the_same_name_get_different_files() {
         let t = Temp::new();

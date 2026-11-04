@@ -158,6 +158,154 @@ impl fmt::Display for GroupBy {
     }
 }
 
+/// What the **text of a pattern is** — `as local`, `as param`, `as field`…
+///
+/// A fragment parses differently depending on where it is imagined to sit: `final $t$ $n$ = $v$;` is a
+/// field in a class body and a local variable in a method body, and both readings are legal Java. Without
+/// this the compiler tried the contexts in a fixed order and kept the first that parsed — the class body —
+/// so the pattern silently meant «a field» and there was no way to ask for the other. `as` picks the one
+/// reading and **forbids the fallback**, which is also what keeps a match from being found twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclKind {
+    /// A local variable declaration — `final int x = 1;` inside a body.
+    Local,
+    /// A method or constructor parameter — `final String s`.
+    Param,
+    /// A field.
+    Field,
+    /// Any member of a class body: a method, a field, a nested type.
+    Member,
+    /// A statement.
+    Statement,
+    /// An expression.
+    Expression,
+    /// A class, interface, enum or record, at the top of a file.
+    Class,
+    /// A `catch` clause.
+    Catch,
+}
+
+/// The wrappers a fragment is parsed inside, as `(prefix, suffix)`.
+type Wrappers = &'static [(&'static str, &'static str)];
+
+impl DeclKind {
+    pub const ALL: [DeclKind; 8] = [
+        DeclKind::Local, DeclKind::Param, DeclKind::Field, DeclKind::Member,
+        DeclKind::Statement, DeclKind::Expression, DeclKind::Class, DeclKind::Catch,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            DeclKind::Local => "local",
+            DeclKind::Param => "param",
+            DeclKind::Field => "field",
+            DeclKind::Member => "member",
+            DeclKind::Statement => "statement",
+            DeclKind::Expression => "expression",
+            DeclKind::Class => "class",
+            DeclKind::Catch => "catch",
+        }
+    }
+
+    pub fn from_word(word: &str) -> Option<DeclKind> {
+        DeclKind::ALL.into_iter().find(|k| k.name() == word)
+    }
+
+    /// The reading a pattern can only have, from its first words, when no `as` says otherwise.
+    ///
+    /// Two shapes parse *somewhere else* if left to the fixed order of contexts, and parse without error
+    /// when they do — which is the worst way to be wrong, a pattern that compiles and matches nothing:
+    ///
+    /// * `catch (…) { }` is a **constructor** called `catch` in a class body (the keyword is only a
+    ///   keyword where the grammar expects it);
+    /// * `@Autowired private T n;` is a **local variable** at the top of a file (the grammar accepts
+    ///   statements there), `private` and all.
+    ///
+    /// A leading `catch`, or a modifier that only a member can carry (`private`, `static`…), settles it.
+    pub fn guess(pattern: &str) -> Option<DeclKind> {
+        const MEMBER_ONLY: [&str; 9] = [
+            "public", "private", "protected", "static", "transient", "volatile", "abstract", "native", "default",
+        ];
+        for (index, word) in pattern.split_whitespace().enumerate() {
+            if index == 0 && (word == "catch" || word.starts_with("catch(")) {
+                return Some(DeclKind::Catch);
+            }
+            if word.starts_with('@') || word == "final" {
+                continue;
+            }
+            return MEMBER_ONLY.contains(&word).then_some(DeclKind::Member);
+        }
+        None
+    }
+
+    /// The Java wrappers that make a fragment of this kind parse — the **only** ones tried for it.
+    pub fn wrappers(self) -> Wrappers {
+        match self {
+            DeclKind::Local => &[("class __Q { void __m() {\n", "\n} }"), ("class __Q { void __m() {\n", "\n;} }")],
+            DeclKind::Param => &[("class __Q { void __m(", ") {} }")],
+            DeclKind::Field | DeclKind::Member => &[("class __Q {\n", "\n}")],
+            DeclKind::Statement => &[("class __Q { void __m() {\n", "\n} }")],
+            DeclKind::Expression => &[("class __Q { void __m() {\n", "\n;} }")],
+            DeclKind::Class => &[("", "")],
+            DeclKind::Catch => &[("class __Q { void __m() { try {} ", "\n} }")],
+        }
+    }
+}
+
+/// Where a match has to live — `inside method`, `inside class, interface`.
+///
+/// The **nearest** enclosing declaration of the match is the one asked about, so `inside method` is true
+/// for a local, a parameter and a statement of a method, and false for the same text inside a lambda in
+/// it (that is `inside lambda`). A field is `inside class`; a member of an anonymous class is `inside
+/// anonymous`. `in` is already a path, which is why this is not spelled that way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Enclosure {
+    Method,
+    Constructor,
+    Initializer,
+    Lambda,
+    Class,
+    Interface,
+    Enum,
+    Record,
+    Anonymous,
+}
+
+impl Enclosure {
+    pub fn name(self) -> &'static str {
+        match self {
+            Enclosure::Method => "method",
+            Enclosure::Constructor => "constructor",
+            Enclosure::Initializer => "initializer",
+            Enclosure::Lambda => "lambda",
+            Enclosure::Class => "class",
+            Enclosure::Interface => "interface",
+            Enclosure::Enum => "enum",
+            Enclosure::Record => "record",
+            Enclosure::Anonymous => "anonymous",
+        }
+    }
+
+    /// Every enclosure a word stands for: `body` is the four things code runs in.
+    pub fn from_word(word: &str) -> Option<Vec<Enclosure>> {
+        match word {
+            "body" => Some(vec![
+                Enclosure::Method, Enclosure::Constructor, Enclosure::Initializer, Enclosure::Lambda,
+            ]),
+            "type" => Some(vec![
+                Enclosure::Class, Enclosure::Interface, Enclosure::Enum, Enclosure::Record, Enclosure::Anonymous,
+            ]),
+            other => [
+                Enclosure::Method, Enclosure::Constructor, Enclosure::Initializer, Enclosure::Lambda,
+                Enclosure::Class, Enclosure::Interface, Enclosure::Enum, Enclosure::Record, Enclosure::Anonymous,
+            ]
+            .into_iter()
+            .find(|e| e.name() == other)
+            .map(|e| vec![e]),
+        }
+    }
+}
+
 /// One alternative: the pattern text (placeholders stripped of their constraints, ready for
 /// [`arbor_syntax`]) plus the constraints that were on them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +314,8 @@ pub struct Alternative {
     pub pattern: String,
     /// The constraints peeled off, by capture name.
     pub constraints: Vec<NamedConstraint>,
+    /// `as local` — what the pattern's text is. `None` lets the compiler try the usual contexts.
+    pub decl: Option<DeclKind>,
 }
 
 impl Alternative {
@@ -200,6 +350,8 @@ pub struct Query {
     /// `in a, b` — path prefixes, project-relative and forward-slashed. Empty is "everywhere".
     pub scopes: Vec<String>,
     pub group: Option<GroupBy>,
+    /// `inside method` — the match must live in one of these. Empty is "anywhere".
+    pub inside: Vec<Enclosure>,
 }
 
 /// Why a query could not be read. Carries the line so the editor can point at it.
@@ -226,8 +378,11 @@ fn err(message: impl Into<String>, line: usize) -> QueryError {
 /// belongs to the pattern being built. Blank lines and `--` comments are dropped, so a saved
 /// query can carry a note about what it is for.
 pub fn parse(text: &str) -> Result<Query, QueryError> {
-    let mut alternatives: Vec<String> = Vec::new();
+    let mut alternatives: Vec<(String, Option<DeclKind>)> = Vec::new();
     let mut current = String::new();
+    // `as <kind>` belongs to the alternative being written, so one query can read two shapes differently.
+    let mut current_decl: Option<DeclKind> = None;
+    let mut inside: Vec<Enclosure> = Vec::new();
     let mut scopes: Vec<String> = Vec::new();
     let mut group: Option<GroupBy> = None;
     let mut use_of: Option<(Ask, usize)> = None;
@@ -243,10 +398,35 @@ pub fn parse(text: &str) -> Result<Query, QueryError> {
         match clause_of(trimmed) {
             Some(("or", rest)) => {
                 if !current.trim().is_empty() {
-                    alternatives.push(std::mem::take(&mut current));
+                    alternatives.push((std::mem::take(&mut current), current_decl.take()));
                 }
                 current.push_str(rest);
                 current.push('\n');
+            }
+            Some(("as", rest)) => {
+                let word = rest.trim();
+                current_decl = Some(DeclKind::from_word(word).ok_or_else(|| {
+                    let all: Vec<&str> = DeclKind::ALL.iter().map(|k| k.name()).collect();
+                    err(
+                        format!("`as {word}` is not a kind of code — write `as` and one of: {}", all.join(", ")),
+                        line,
+                    )
+                })?);
+            }
+            Some(("inside", rest)) => {
+                for word in rest.split(',').map(str::trim).filter(|w| !w.is_empty()) {
+                    let found = Enclosure::from_word(word).ok_or_else(|| {
+                        err(
+                            format!(
+                                "`inside {word}` is not a place code lives — write `inside` and any of: \
+                                 method, constructor, initializer, lambda, class, interface, enum, record, \
+                                 anonymous (or `body` for the first four, `type` for the last five)"
+                            ),
+                            line,
+                        )
+                    })?;
+                    inside.extend(found);
+                }
             }
             Some(("in", rest)) => {
                 for scope in rest.split(',') {
@@ -274,7 +454,7 @@ pub fn parse(text: &str) -> Result<Query, QueryError> {
     }
 
     if !current.trim().is_empty() {
-        alternatives.push(current);
+        alternatives.push((current, current_decl.take()));
     }
 
     let ask = match use_of {
@@ -308,12 +488,19 @@ pub fn parse(text: &str) -> Result<Query, QueryError> {
             // Both ends: `or` on a line of its own leaves a leading separator the same way the
             // accumulation leaves a trailing one.
             Ask::Patterns(
-                alternatives.iter().map(|a| peel(a.trim())).collect::<Result<Vec<_>, _>>()?,
+                alternatives
+                    .iter()
+                    .map(|(text, decl)| {
+                        let mut alt = peel(text.trim())?;
+                        alt.decl = *decl;
+                        Ok(alt)
+                    })
+                    .collect::<Result<Vec<_>, QueryError>>()?,
             )
         }
     };
 
-    let query = Query { ask, scopes, group };
+    let query = Query { ask, scopes, group, inside };
     check_group(&query, group_line)?;
     Ok(query)
 }
@@ -324,7 +511,7 @@ pub fn parse(text: &str) -> Result<Query, QueryError> {
 /// construct beginning with a bare `or` / `in` / `group` / `use`, so this can never misread real
 /// code as a clause.
 fn clause_of(line: &str) -> Option<(&'static str, &str)> {
-    for word in ["or", "in", "group", "use"] {
+    for word in ["or", "in", "group", "use", "as", "inside"] {
         if let Some(rest) = line.strip_prefix(word) {
             if rest.starts_with(char::is_whitespace) {
                 return Some((word, rest.trim_start()));
@@ -511,7 +698,7 @@ fn peel(raw: &str) -> Result<Alternative, QueryError> {
         i = close + 1;
     }
 
-    Ok(Alternative { pattern, constraints })
+    Ok(Alternative { pattern, constraints, decl: None })
 }
 
 /// Read a constraint, splitting a conjunction first.
@@ -581,6 +768,28 @@ mod tests {
 
     fn q(text: &str) -> Query {
         parse(text).expect("parses")
+    }
+
+    #[test]
+    fn a_pattern_that_can_only_be_one_thing_says_so() {
+        assert_eq!(DeclKind::guess("catch ($t$ $e$) { }"), Some(DeclKind::Catch));
+        assert_eq!(DeclKind::guess("@Autowired private $t$ $n$;"), Some(DeclKind::Member));
+        assert_eq!(DeclKind::guess("public static void main($a...$) { }"), Some(DeclKind::Member));
+        // Either a field or a local: left to `as`.
+        assert_eq!(DeclKind::guess("final $t$ $n$ = $v$;"), None);
+        assert_eq!(DeclKind::guess("$mods...$ class $c$ { }"), None);
+        assert_eq!(DeclKind::guess("log.debug($x$)"), None);
+    }
+
+    #[test]
+    fn as_and_inside_are_read_per_alternative_and_per_query() {
+        let query = q("a $x$;\nas local\nor b $x$;\nas field\ninside method, lambda");
+        let Ask::Patterns(alts) = &query.ask else { panic!("patterns") };
+        assert_eq!(alts[0].decl, Some(DeclKind::Local));
+        assert_eq!(alts[1].decl, Some(DeclKind::Field));
+        assert_eq!(query.inside, [Enclosure::Method, Enclosure::Lambda]);
+        assert!(parse("a\nas nonsense").is_err());
+        assert!(parse("a\ninside nowhere").is_err());
     }
 
     /// The alternatives **exactly as they will be compiled**.

@@ -4573,6 +4573,7 @@ dependencies = [
  "arbor-scheduler",
  "base64 0.22.1",
  "bennu-generate",
+ "encoding_rs",
  "hirundo-core",
  "hirundo-model",
  "mlua",

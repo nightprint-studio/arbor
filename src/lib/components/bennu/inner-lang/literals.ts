@@ -48,6 +48,34 @@ export function scanLiterals(src: string, host: Host): Literal[] {
   }
 }
 
+/**
+ * Where the comments are, found by the same walk that finds the literals — the one scanner that knows a `//`
+ * inside a string, a char literal or a JS regex literal is not a comment. Sorted and non-overlapping.
+ */
+export function scanComments(src: string, host: Host): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  found = out;
+  try { scanLiterals(src, host); } finally { found = null; }
+  return out;
+}
+
+/** Collects the comments the scanners step over, while `scanComments` runs; null otherwise. */
+let found: { from: number; to: number }[] | null = null;
+
+function takeLineComment(src: string, i: number): number {
+  let e = src.indexOf('\n', i);
+  if (e < 0) e = src.length;
+  found?.push({ from: i, to: e });
+  return e;
+}
+
+function takeBlockComment(src: string, i: number): number {
+  const e = src.indexOf('*/', i + 2);
+  const end = e < 0 ? src.length : e + 2;
+  found?.push({ from: i, to: end });
+  return end;
+}
+
 const base = (open: number, start: number, end: number, close: number): Literal =>
   ({ open, start, end, close, textBlock: false, raw: false, template: false });
 
@@ -58,10 +86,9 @@ function scanJava(src: string): Literal[] {
   while (i < n) {
     const c = src[i];
     if (c === '/' && src[i + 1] === '/') {
-      while (i < n && src[i] !== '\n') i++;
+      i = takeLineComment(src, i);
     } else if (c === '/' && src[i + 1] === '*') {
-      const e = src.indexOf('*/', i + 2);
-      i = e < 0 ? n : e + 2;
+      i = takeBlockComment(src, i);
     } else if (c === "'") {
       i = skipCharLiteral(src, i);
     } else if (c === '"' && src.startsWith('"""', i)) {
@@ -123,10 +150,9 @@ function scanJs(src: string): Literal[] {
   while (i < n) {
     const c = src[i];
     if (c === '/' && src[i + 1] === '/') {
-      while (i < n && src[i] !== '\n') i++;
+      i = takeLineComment(src, i);
     } else if (c === '/' && src[i + 1] === '*') {
-      const e = src.indexOf('*/', i + 2);
-      i = e < 0 ? n : e + 2;
+      i = takeBlockComment(src, i);
     } else if (c === '/' && startsJsRegex(src, i)) {
       i = skipJsRegex(src, i);
     } else if (c === '"' || c === "'") {
@@ -186,9 +212,11 @@ function scanRust(src: string): Literal[] {
   while (i < n) {
     const c = src[i];
     if (c === '/' && src[i + 1] === '/') {
-      while (i < n && src[i] !== '\n') i++;
+      i = takeLineComment(src, i);
     } else if (c === '/' && src[i + 1] === '*') {
-      i = skipRustBlockComment(src, i);
+      const end = skipRustBlockComment(src, i);
+      found?.push({ from: i, to: end });
+      i = end;
     } else if (c === 'r' && (src[i + 1] === '"' || src[i + 1] === '#') && !isIdentChar(src[i - 1])) {
       const raw = rustRaw(src, i);
       if (raw) { out.push(raw); i = raw.close; } else i++;

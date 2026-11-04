@@ -251,6 +251,8 @@ mod tests {
             path_vars,
             produces: String::new(),
             consumes: String::new(),
+            produces_raw: String::new(),
+            consumes_raw: String::new(),
             return_type: "String".to_string(),
             params,
         }

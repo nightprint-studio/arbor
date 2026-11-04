@@ -329,6 +329,39 @@ fn functional_arguments(method: &Member, args: &[Node], callee: Callee, file: &F
         }
     }
 }
+/// Parameterized types are invariant (JLS §4.10.2): the one overload that binds takes a
+/// `Consumer<Integer>`, and a variable declared `Consumer<String>` is not one. The applicability rules
+/// read the erasure, where it fits; this reads the arguments, only where both sides write them —
+/// see [`crate::typing::parameterized::argument_mismatch`].
+fn parameterized_arguments(method: &Member, args: &[Node], callee: Callee, file: &FileCtx, out: &mut Vec<Diagnostic>) {
+    if args.len() != method.params.len() {
+        return;
+    }
+    for (i, (arg, param)) in args.iter().zip(&method.params).enumerate() {
+        let refused = crate::typing::parameterized::argument_mismatch(
+            &file.root,
+            file.source,
+            file.symbols,
+            param,
+            *arg,
+            file.resolver,
+            file.cache,
+        );
+        if let Some(r) = refused {
+            out.push(CheckId::ArgumentType.at(
+                *arg,
+                format!(
+                    "Argument {} of `{}`: `{}` cannot be passed where `{}` is expected",
+                    i + 1,
+                    callee.name(),
+                    r.found,
+                    r.expected
+                ),
+            ));
+        }
+    }
+}
+
 fn judge_args(
     candidates: &[Member],
     call: Node,
@@ -385,6 +418,7 @@ fn judge_args(
         OverloadFit::Applicable(kept) => {
             if let [bound] = kept.as_slice() {
                 functional_arguments(bound, &args, callee, file, out);
+                parameterized_arguments(bound, &args, callee, file, out);
             }
             return;
         }

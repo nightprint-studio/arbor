@@ -117,6 +117,9 @@ pub fn request_to_text(r: &HttpRequest) -> String {
         w.bool("follow_redirects", r.settings.follow_redirects);
         w.bool("verify_tls", r.settings.verify_tls);
         w.bool("cookie_jar", r.settings.cookie_jar);
+        if r.settings.stream {
+            w.bool("stream", true);
+        }
     }
     w.finish()
 }
@@ -341,7 +344,7 @@ mod tests {
         r.method = Method::Post;
         r.auth = Auth::ApiKey { name: "X-Api-Key".into(), value: "{{key}}".into(), location: ApiKeyIn::Query };
         r.body = Body { kind: BodyKind::Json, text: "{\n  \"titolo\": \"it's \\\"quoted\\\"\"\n}".into(), form: vec![] };
-        r.settings = Settings { timeout_ms: 1500, follow_redirects: false, verify_tls: false, cookie_jar: false };
+        r.settings = Settings { timeout_ms: 1500, follow_redirects: false, verify_tls: false, cookie_jar: false, stream: true };
         r.docs = "Creates a bando.\n\nSee the wiki.".into();
         r.tests = "status == 201\nbody.id exists".into();
         assert_eq!(request_from_text(&request_to_text(&r)).unwrap(), r);

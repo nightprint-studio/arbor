@@ -32,7 +32,9 @@
     return () => { active = false; unlisten?.(); };
   });
 
-  const style = $derived(appearanceStore.windowControlsStyle);
+  // `crescenti` draws the mac trio with its glyphs always showing.
+  const style = $derived(appearanceStore.windowControlsStyle === 'windows' ? 'windows' : 'mac');
+  const glyphsAlways = $derived(appearanceStore.windowControlsStyle === 'crescenti');
 
   // macOS greys the trio out while the window is in the background.
   let windowFocused = $state(true);
@@ -108,7 +110,7 @@
      corner). The side swap lives in app.css — see `.window-controls-slot`.
      `forceCustom` opts a macOS window that was built frameless back into ours. -->
 {#if !isMac || forceCustom}
-<div class="window-controls no-drag" data-style={style} class:zoom-open={zoomOpen} class:inactive={!windowFocused}>
+<div class="window-controls no-drag" data-style={style} class:zoom-open={zoomOpen} class:inactive={!windowFocused} class:glyphs-always={glyphsAlways}>
   {#if style === 'windows'}
     <button class="wc-btn wc-win wc-minimize" onclick={() => appWindow.minimize()} use:tooltip={'Minimize'} aria-label="Minimize">
       <svg class="wc-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -254,7 +256,8 @@
      count as "the user is here" too. */
   .window-controls[data-style="mac"]:hover .wc-mac .wc-icon,
   .window-controls[data-style="mac"]:focus-within .wc-mac .wc-icon,
-  .window-controls[data-style="mac"].zoom-open .wc-mac .wc-icon {
+  .window-controls[data-style="mac"].zoom-open .wc-mac .wc-icon,
+  .window-controls[data-style="mac"].glyphs-always .wc-mac .wc-icon {
     color: var(--wc-mac-glyph);
   }
 

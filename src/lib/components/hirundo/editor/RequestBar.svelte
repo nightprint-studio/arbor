@@ -6,12 +6,12 @@
    */
   import { Send, Square } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
-  import Select from '$lib/components/shared/ui/Select.svelte';
+  import MethodSelect from './MethodSelect.svelte';
   import { hirundoStore, type RequestTab } from '$lib/stores/hirundo/workspace.svelte';
   import { hirundoCommands } from '../hirundo-commands';
-  import { METHODS } from '$lib/types/hirundo';
   import UrlField from './UrlField.svelte';
-  import { applyUrl, methodColor, urlWithQuery } from '../request-model';
+  import { pathParamNames } from './completions';
+  import { applyUrl, urlWithQuery } from '../request-model';
 
   let { tab }: { tab: RequestTab } = $props();
 
@@ -22,15 +22,9 @@
 </script>
 
 <div class="rb">
-  <div class="rb-method" style:--method={methodColor(tab.request.method)}>
-    <Select
-      value={tab.request.method}
-      options={METHODS.map((m) => ({ value: m, label: m }))}
-      onchange={(v) => { tab.request.method = v as typeof tab.request.method; hirundoStore.touch(tab); }}
-    />
-  </div>
+  <MethodSelect value={tab.request.method} onchange={(m) => { tab.request.method = m; hirundoStore.touch(tab); }} />
   <div class="rb-url">
-    <UrlField value={urlWithQuery(tab.request)} path={tab.path} oninput={onUrl} onsend={hirundoCommands.send} />
+    <UrlField value={urlWithQuery(tab.request)} path={tab.path} extraKnown={pathParamNames(tab.request)} oninput={onUrl} onsend={hirundoCommands.send} />
   </div>
   {#if tab.sending}
     <Button variant="danger" tooltip={{ content: 'Cancel the request', shortcut: 'Esc' }} onclick={hirundoCommands.cancel}>
@@ -46,8 +40,8 @@
 </div>
 
 <style>
-  .rb { display: flex; gap: 6px; align-items: center; padding: 8px 12px 6px; }
-  .rb-method { width: 108px; flex: none; }
-  .rb-method :global(button) { color: var(--method); font-family: var(--font-mono); font-weight: 600; }
+  .rb { display: flex; gap: 8px; align-items: center; padding: 12px 12px 8px; }
+  /* One height for the three controls of the bar: method, URL, Send. */
+  .rb :global(.btn) { height: 32px; }
   .rb-url { flex: 1; min-width: 0; }
 </style>

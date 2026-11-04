@@ -419,10 +419,10 @@ fn java_file_offers(args: &IntentionsArgs) -> Vec<RankedOffer> {
         );
     }
 
-    // "Add parameter…" on a method's own name: it changes the method's shape and everything that calls
+    // "Add parameter…" anywhere in a method's signature: it changes the method's shape and everything that calls
     // it, so it is an intention on the declaration (a dialog, since the type, name and value are the
     // user's to say).
-    if crate::add_parameter::on_method_declaration_name(source, offset) {
+    if crate::add_parameter::in_method_signature(source, offset) {
         offers.push(
             action_offer("add-parameter", "Add parameter…", offset).in_section(OfferCategory::Intention),
         );

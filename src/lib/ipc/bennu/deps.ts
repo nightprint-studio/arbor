@@ -401,6 +401,19 @@ export function mavenReload(root: string): Promise<string> {
   return bennu('bennu_maven_reload', { args: { root } });
 }
 
+/** A project whose dependency classpath is older than the disk, and the tool that reloads it. */
+export interface StaleDependencyRoot {
+  root: string;
+  tool: 'maven' | 'gradle';
+}
+
+/** Which of `roots` have a dependency classpath out of date: a pom edited, or a library it was
+ *  resolved from rewritten (a module of the workspace that was just installed). A few `stat`s per
+ *  jar, so it is safe to ask on window focus. Wire: `bennu_dependencies_stale`. */
+export function dependenciesStale(roots: string[]): Promise<StaleDependencyRoot[]> {
+  return bennu('bennu_dependencies_stale', { args: { roots } });
+}
+
 /** Download the `-sources.jar` of every dependency, so Ctrl+B into a library lands on real source
  *  instead of a decompiled stub. A background job; artifacts that publish no sources are skipped
  *  rather than reported as failures. Wire: `bennu_maven_download_sources`. */

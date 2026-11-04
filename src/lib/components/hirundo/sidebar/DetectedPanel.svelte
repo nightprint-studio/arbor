@@ -17,6 +17,7 @@
   import { openPath } from '@tauri-apps/plugin-opener';
   import { hirundoContextMenuStore } from '$lib/stores/hirundo/contextmenu.svelte';
   import { endpointToRequest, hirundoDetected } from '$lib/stores/hirundo/detected.svelte';
+  import { hirundoSchemas } from '$lib/stores/hirundo/schemas.svelte';
   import { hirundoStore } from '$lib/stores/hirundo/workspace.svelte';
   import { methodColor, methodShort } from '../request-model';
   import type { DetectedEndpoint, Method } from '$lib/types/hirundo';
@@ -66,8 +67,11 @@
     })),
   );
 
-  function openAsRequest(e: DetectedEndpoint) {
-    hirundoStore.newRequest(hirundoStore.tree[0]?.path ?? null, endpointToRequest(e));
+  /** The request is made once Bennu has answered with the shape of the body, so its JSON starts from the DTO. */
+  async function openAsRequest(e: DetectedEndpoint) {
+    const root = hirundoDetected.rootOf(e);
+    const schema = root ? await hirundoSchemas.get(root, e.id) : null;
+    hirundoStore.newRequest(hirundoStore.tree[0]?.path ?? null, endpointToRequest(e, schema));
   }
 
   function onContext(row: Row, ev: MouseEvent) {

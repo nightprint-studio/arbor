@@ -48,6 +48,7 @@
 
 pub mod config;
 pub mod convention;
+pub mod detect;
 pub mod java;
 pub mod pack;
 pub mod prelude;

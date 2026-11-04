@@ -139,6 +139,13 @@
 <dl class="meta-grid">
   <dt>What this file has said</dt>
   <dd>Nothing outranks it: a type the file imports, then a package it wildcard-imports, then its own package, which needs no import.</dd>
+  <dt>Accepting a type name imports it</dt>
+  <dd>
+    With <em>Auto-import on accept</em> on, the import is added when you accept a type name from the list — after <code>new</code>, in a
+    declaration, a generic, a cast, an annotation, a <code>catch</code>, a <code>throws</code> — and a single <kbd>Ctrl</kbd> + <kbd>Z</kbd>
+    takes back the name and the import together. A name several packages share is imported when the ranking above has a clear winner and the
+    file reaches none of them yet; on a tie nothing is imported and <kbd>Alt</kbd> + <kbd>Enter</kbd> asks which.
+  </dd>
   <dt>What the project imports</dt>
   <dd>Every <code>import</code> in the codebase is somebody choosing a candidate, and the aggregate predicts the next choice. It is weighed against <strong>distance</strong> — the nearest package by shared prefix, so a sibling beats a cousin — with the JDK ahead of the rest of the classpath, because a name matching both a JDK type and something in a jar you never opened is almost always the JDK one.</dd>
 </dl>

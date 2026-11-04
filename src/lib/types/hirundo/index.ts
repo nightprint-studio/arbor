@@ -46,6 +46,8 @@ export interface Settings {
   verify_tls: boolean;
   /** Send the environment's cookies and keep the ones the answer sets. */
   cookie_jar: boolean;
+  /** A stream (Server-Sent Events): Send listens to it. */
+  stream: boolean;
 }
 
 export interface HttpRequest {
@@ -312,11 +314,36 @@ export interface DetectedEndpoint {
   controller: string;
   handler: string;
   return_type: string;
+  /** The media types the handler produces, as values (`application/json, text/event-stream`). */
   produces: string;
+  /** The media types it accepts, as values. */
+  consumes?: string;
   params: EndpointParam[];
   file: string;
   /** The line of the handler method (1-based). */
   line: number;
+}
+
+/** The shape of a DTO Bennu read from the code: fields, types, nesting. */
+export interface Schema {
+  type_text: string;
+  kind: 'object' | 'array' | 'map' | 'enum' | 'scalar';
+  fields?: SchemaField[];
+  constants?: string[];
+  item?: Schema;
+}
+
+export interface SchemaField {
+  name: string;
+  type_text: string;
+  /** What the type says: a primitive is never null. Validation annotations are not read. */
+  required: boolean;
+  schema?: Schema;
+}
+
+export interface EndpointSchema {
+  request: Schema | null;
+  response: Schema | null;
 }
 
 export type Recurrence =

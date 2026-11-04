@@ -23,6 +23,10 @@ export const hirundoOverrides: Record<string, SceneOverride> = {
   'hirundo/modals/OpenApiImportModal': { props: { onClose: noop }, setup: seedHirundo, settle: 700 },
   'hirundo/modals/SoapImportModal': { props: { onClose: noop }, setup: seedHirundo, settle: 700 },
   'hirundo/modals/HttpImportModal': { props: { onClose: noop }, setup: seedHirundo, settle: 700 },
+  'hirundo/modals/NewCollectionModal': { props: { onCreate: noop, onClose: noop }, setup: seedHirundo, settle: 600 },
+  'hirundo/modals/CreateVariableModal': { props: { name: 'baseUrl', requestPath: null, onClose: noop }, setup: seedHirundo, settle: 600 },
+  'hirundo/editor/MethodSelect': { props: { value: 'POST', onchange: noop }, setup: seedHirundo, settle: 300 },
+  'hirundo/modals/NewProjectModal': { props: { onClose: noop }, setup: seedHirundo, settle: 600 },
   'hirundo/modals/WorkspacesModal': { props: { onClose: noop }, setup: seedHirundo, settle: 900 },
   'hirundo/modals/ScheduleModal': { props: { onClose: noop, id: null }, setup: seedHirundo, settle: 900 },
 };

@@ -298,21 +298,24 @@ total = a + b;`, 'java')}</code></pre>
 
 <h2>Add parameter</h2>
 <ol class="step-list">
-  <li>Put the caret on a method's name — its declaration or a call of it — and press <kbd>Ctrl</kbd> + <kbd>F6</kbd>, or choose <strong>Add parameter…</strong> from <kbd>Alt</kbd> + <kbd>Enter</kbd>.</li>
-  <li>Write the parameter's <strong>type</strong> and <strong>name</strong>, the <strong>value</strong> every existing call passes (empty passes <code>0</code>, <code>false</code> or <code>null</code> for the type), and where it goes.</li>
+  <li>Put the caret anywhere in a method's signature — its modifiers, return type, name or parameter list — or on a call of it, and press <kbd>Ctrl</kbd> + <kbd>F6</kbd>, or choose <strong>Add parameter…</strong> from <kbd>Alt</kbd> + <kbd>Enter</kbd>.</li>
+  <li>Write the parameter's <strong>type</strong> and <strong>name</strong>, the <strong>value</strong> every existing call passes (empty passes <code>0</code>, <code>false</code> or <code>null</code> for the type), and where it goes — last, first, or before any existing parameter. With the caret inside the parameter list, the position starts at <em>before that parameter</em>.</li>
   <li>The preview lists the declaration, every override and every call, grouped by file. <kbd>Ctrl</kbd> + <kbd>Enter</kbd> applies it all as one bulk edit, with the imports the type needs.</li>
 </ol>
 <p>
   A call is edited only when it passes as many arguments as the declaration being changed takes, so the calls of another overload are left alone. When two overloads
-  take the same number of parameters their calls cannot be told apart by counting: from a call Bennu asks for the caret on the declaration, and from the
-  declaration the call edits are marked <strong>inferred</strong> for review.
+  take the same number of parameters their calls cannot be told apart by counting: from a call Bennu lists the signatures that could be meant and asks <strong>which overload</strong>,
+  and from the declaration the call edits are marked <strong>inferred</strong> for review.
+</p>
+<p>
+  The method's <strong>Javadoc</strong> follows: a <code>@param</code> line for the new parameter is added where the parameter now sits, in the declaration and in every override that has Javadoc of its own.
 </p>
 <p>
   It is also a quick fix. A call that passes one argument too many — <em>No overload of <code>total</code> takes 2 arguments</em> — offers
   <strong>Add parameter 'Type name' to 'total'</strong>: the extra argument becomes the parameter, taking its type and its name from what is written, and every other call passes the type's default.
 </p>
 <Callout variant="warning" title="Refused rather than guessed">
-  A <strong>method reference</strong> (<code>this::total</code>) has no argument list to add a value to, a <strong>varargs</strong> method has no single place for a new parameter, a method
+  A <strong>method reference</strong> (<code>this::total</code>) has no argument list to add a value to — the preview names the first one, so it can be changed to a lambda first — a <strong>varargs</strong> method has no single place for a new parameter, a method
   overriding a <strong>library</strong> type cannot have its signature changed, and a name the method already uses for a parameter or a local would collide. So does a call whose
   receiver the engine could not resolve. The preview names the reason and does not apply.
 </Callout>

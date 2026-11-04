@@ -78,11 +78,18 @@ pub fn method_reference_completion<M: CpMemberIndex>(
     let prefix = &source[site.name_start..caret];
     let typed = Typed::new(prefix, case);
 
+    let written = &source[..site.qualifier_end];
+    // `int[]::new` / `Foo[]::new`: an array type has exactly one thing to reference.
+    if let Some(element) = array_element(written) {
+        return Some(array_constructor_reference(source, caret, element, typed, resolver, catalog));
+    }
+
     // Rewrite `Qualifier::pre|rest` as `Qualifier.|rest` — the shape the receiver reading already
     // understands, typed prefix excised, the text after the caret kept so the call around the
-    // reference still parses.
+    // reference still parses. Type arguments are dropped on the way (`List<String>::` names the
+    // type `List`): `List<String>.` is not a receiver anything downstream can read.
     let mut repaired = String::with_capacity(source.len() + 2);
-    repaired.push_str(&source[..site.qualifier_end]);
+    repaired.push_str(without_type_arguments(written));
     repaired.push('.');
     let dot_offset = repaired.len();
     if source[caret..].starts_with('(') {
@@ -129,6 +136,79 @@ pub fn method_reference_completion<M: CpMemberIndex>(
             })
             .collect(),
     )
+}
+
+/// `text` without a trailing `<…>` type-argument list: `List<String>` → `List`,
+/// `Map.Entry<K, List<V>>` → `Map.Entry`. Unchanged when it does not end in a balanced one.
+fn without_type_arguments(text: &str) -> &str {
+    let t = text.trim_end();
+    if !t.ends_with('>') {
+        return t;
+    }
+    let mut depth = 0usize;
+    for (i, c) in t.char_indices().rev() {
+        match c {
+            '>' => depth += 1,
+            '<' => {
+                depth -= 1;
+                if depth == 0 {
+                    return t[..i].trim_end();
+                }
+            }
+            _ => {}
+        }
+    }
+    t
+}
+
+/// The element type written before one or more empty `[]` — `int[]` → `int`, `Foo[][]` → `Foo`.
+/// `None` for an index expression (`xs[0]`), whose brackets are not empty.
+fn array_element(text: &str) -> Option<&str> {
+    let mut t = text.trim_end();
+    let mut dims = 0;
+    while let Some(head) = t.strip_suffix(']') {
+        t = head.trim_end().strip_suffix('[')?.trim_end();
+        dims += 1;
+    }
+    (dims > 0).then_some(t)
+}
+
+const PRIMITIVES: &[&str] = &["boolean", "byte", "char", "short", "int", "long", "float", "double"];
+
+/// `Element[]::new` — the only member an array type can be referenced through.
+fn array_constructor_reference<M: CpMemberIndex>(
+    source: &str,
+    caret: usize,
+    element: &str,
+    typed: Typed<'_>,
+    resolver: &IndexResolver<M>,
+    catalog: Option<&dyn TypeNameCatalog>,
+) -> Vec<CompletionItem> {
+    if !typed.matches("new") {
+        return Vec::new();
+    }
+    let element = without_type_arguments(element);
+    let last_word = element.rsplit(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$')).next().unwrap_or("");
+    let mut import = None;
+    let primitive = PRIMITIVES.contains(&last_word) && element.len() == last_word.len();
+    if !primitive {
+        let mut repaired = String::with_capacity(source.len() + 2);
+        repaired.push_str(element);
+        repaired.push('.');
+        let dot = repaired.len();
+        repaired.push_str(&source[caret..]);
+        match resolve_receiver(&repaired, dot, resolver, catalog) {
+            Some(r) if r.is_type => import = r.import,
+            _ => return Vec::new(),
+        }
+    }
+    vec![CompletionItem {
+        label: "new".to_string(),
+        kind: "constructor".to_string(),
+        detail: Some(format!("{last_word}[]::new")),
+        auto_import: import,
+        ..Default::default()
+    }]
 }
 
 /// `Type::new`, when `Type` can be instantiated at all — not an interface, an abstract class, an
@@ -197,6 +277,22 @@ mod tests {
         for marked in ["run(this::|)", "run(resolver::|)", "run(find()::|)", "run(List<String>::|)", "run(a . b :: |)"] {
             assert!(site(marked).is_some(), "{marked}");
         }
+    }
+
+    #[test]
+    fn type_arguments_are_dropped_from_a_qualifier() {
+        assert_eq!(without_type_arguments("List<String>"), "List");
+        assert_eq!(without_type_arguments("a.Map.Entry<K, List<V>>"), "a.Map.Entry");
+        assert_eq!(without_type_arguments("Foo"), "Foo");
+        assert_eq!(without_type_arguments("run(Box<T>"), "run(Box");
+    }
+
+    #[test]
+    fn only_empty_brackets_make_an_array_type() {
+        assert_eq!(array_element("x(int[]"), Some("x(int"));
+        assert_eq!(array_element("x(Foo[][]"), Some("x(Foo"));
+        assert_eq!(array_element("x(all[0]"), None);
+        assert_eq!(array_element("x(Foo"), None);
     }
 
     /// A member access, a label, a ternary and a `::` with nothing before it are not references.

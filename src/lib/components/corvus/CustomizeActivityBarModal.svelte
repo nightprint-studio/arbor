@@ -25,14 +25,14 @@
    */
   import {
     GitBranch, GitMerge, GitCommitHorizontal, PanelBottom, Workflow, GitPullRequest,
-    TicketCheck, FolderTree, History, BarChart2, ShieldAlert, Boxes, TerminalSquare,
+    TicketCheck, FolderTree, History, BarChart2, ShieldAlert, Boxes, TerminalSquare, Sparkles,
   } from 'lucide-svelte';
   import CustomizeRailsModal, {
     type RailEditorRow, type RailEditorSection, type RailEditorTab,
   } from '$lib/components/shared/CustomizeRailsModal.svelte';
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import {
-    activityBarConfigStore, MANDATORY_IDS, BUILTIN_TOP, BUILTIN_BOTTOM,
+    activityBarConfigStore, MANDATORY_IDS, BUILTIN_TOP, BUILTIN_BOTTOM, BUILTIN_RIGHT_TOP,
     type ActivityBarDisplayItem,
   } from '$lib/stores/corvus/activityBarConfig.svelte';
   import type { ActivityBarEntry } from '$lib/types/plugin';
@@ -121,6 +121,7 @@
     stage:     GitCommitHorizontal as unknown as IconComponent,
     detail:    PanelBottom as unknown as IconComponent,
     terminal:  TerminalSquare as unknown as IconComponent,
+    imber:     Sparkles as unknown as IconComponent,
   };
 
   function pluginLabelFor(id: string): string {
@@ -196,7 +197,7 @@
           { id: 'left-bottom', ...SECTION_META.bottom, items: build(BUILTIN_BOTTOM, pluginBottomIds()) },
         ]
       : [
-          { id: 'right-top',    ...SECTION_META.top,    items: build([], pluginRightTopIds()) },
+          { id: 'right-top',    ...SECTION_META.top,    items: build(BUILTIN_RIGHT_TOP, pluginRightTopIds()) },
           { id: 'right-bottom', ...SECTION_META.bottom, items: build([], pluginRightBottomIds()) },
         ];
   }
@@ -210,7 +211,7 @@
   const RIGHT_TAB: RailEditorTab = {
     id: 'right',
     label: mirrored ? 'Left' : 'Right',
-    hint: `Plugins registered with side="right", currently on the ${mirrored ? 'left' : 'right'} bar. Nothing here yet? Install a plugin that uses add_sidebar.`,
+    hint: `Imber, and plugins registered with side="right", currently on the ${mirrored ? 'left' : 'right'} bar.`,
     sections: sections('right'),
   };
   // The physically-left bar first, whichever one that is — the tabs read as positions.
