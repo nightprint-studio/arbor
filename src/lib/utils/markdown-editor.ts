@@ -53,6 +53,7 @@ import {
   type Completion,
   type CompletionContext,
   type CompletionResult,
+  type CompletionSource,
 } from '@codemirror/autocomplete';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
@@ -2896,6 +2897,11 @@ export interface MarkdownEditorOptions {
   fileIndex?: (() => string[]) | null;
   /** Hand the find widget's query to a project-wide search. Omitted → no "Find in files" button. */
   onFindInFiles?: ((query: string) => void) | null;
+  /** Extra extensions the host appends — a vault's wikilinks, the formatting keymap. They sit
+   *  before the default keymap, so a host chord wins over a built-in one. */
+  extensions?: Extension[];
+  /** Extra completion sources, offered beside the editor's own link completion. */
+  completionSources?: CompletionSource[];
 }
 
 export interface MarkdownCompartments {
@@ -2927,7 +2933,8 @@ export function createMarkdownExtensions(
     markdownFileIndex.of(opts.fileIndex ?? null),
     linkFollowHandler(),
     followCursorHandler(),
-    autocompletion({ override: [linkCompletions] }),
+    autocompletion({ override: [linkCompletions, ...(opts.completionSources ?? [])] }),
+    ...(opts.extensions ?? []),
     history(),
     indentOnInput(),
     bracketMatching(),

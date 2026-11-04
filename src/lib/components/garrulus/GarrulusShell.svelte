@@ -36,6 +36,7 @@
   import GarrulusSearchView from './search/GarrulusSearchView.svelte';
   import { garrulusNotesStore } from '$lib/stores/garrulus/notes.svelte';
   import { GARRULUS_SECTIONS } from './garrulus-palette';
+  import { noteCommands } from './notes/note-commands';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { garrulusUiStore } from '$lib/stores/garrulus/ui.svelte';
   import { garrulusSyncStore } from '$lib/stores/garrulus/sync.svelte';
@@ -116,6 +117,17 @@
       return;
     }
 
+    const vaultOpen = garrulusVaultStore.isOpen;
+
+    // F2 carries no modifier, so it is read before the modifier gate below.
+    if (e.key === 'F2') {
+      if (vaultOpen && garrulusNotesStore.activePath) {
+        noteCommands.renameActive();
+        e.preventDefault();
+      }
+      return;
+    }
+
     if (!mod) return;
 
     if (key === 'k' && !e.shiftKey) {
@@ -137,6 +149,29 @@
       // to sync, so the shortcut opens the form that fixes that.
       if (garrulusSyncStore.tag === 'no-remote') garrulusUiStore.openRemoteConfig();
       else void garrulusSyncStore.syncNow();
+      e.preventDefault();
+      return;
+    }
+
+    // The note chords. Each is a no-op without a vault, and swallows the key
+    // only when it did something — a chord that does nothing should not also
+    // stop the WebView's own handling of it.
+    if (vaultOpen) {
+      let handled = true;
+      if (!e.shiftKey && key === 'o') noteCommands.quickSwitch();
+      else if (!e.shiftKey && key === 'n') noteCommands.newNote();
+      else if (e.shiftKey && key === 'n') noteCommands.newTypedNote();
+      else if (!e.shiftKey && key === 'd') noteCommands.openDaily();
+      else if (e.shiftKey && key === 'f') garrulusUiStore.selectSection('search');
+      else handled = false;
+      if (handled) {
+        e.preventDefault();
+        return;
+      }
+    }
+
+    if (!e.shiftKey && key === 'j') {
+      garrulusUiStore.toggleDock();
       e.preventDefault();
       return;
     }

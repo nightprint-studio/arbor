@@ -5,6 +5,11 @@ import { repoStore } from '$lib/stores/corvus/repo.svelte';
 import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
 import { pipelinesStore } from '$lib/stores/corvus/pipelines.svelte';
 import { uiStore } from '$lib/stores/ui.svelte';
+import { plansStore } from '$lib/stores/corvus/plans.svelte';
+import { imberSchedulesStore } from '$lib/stores/corvus/imber-schedules.svelte';
+import type { ImberAction, ImberJob } from '$lib/types/corvus/imber';
+import type { Plan } from '$lib/types/corvus/plan';
+import { imberStore } from '$lib/stores/corvus/imber.svelte';
 import { securityStore } from '$lib/stores/corvus/security.svelte';
 import {
   TAB_ID, REPO_PATH, branches, remoteBranches, commitNode, worktree, submodule, mr, ciRun, ciProvider,
@@ -55,6 +60,48 @@ function seedTab(): void {
   repoStore.setRemoteBranches(remoteBranches as never);
 }
 
+/** Schedules for the Imber Schedules window: a repeat that ended well, a one-time run waiting, a failed one, one that is off. */
+const NOW = Date.now();
+const imberJobs: ImberJob[] = [
+  { id: 's1', name: 'Morning check', enabled: true, recurrence: { kind: 'weekly', days: [0, 1, 2, 3, 4], hour: 9, minute: 0 }, missed: 'skip',
+    action: { kind: 'awake', conversation_id: 'c-1', prompt: 'What changed on main since yesterday? Summarise it.' }, root: REPO_PATH, mode: 'manual',
+    created_ms: NOW - 9 * 86_400_000, next_run_ms: NOW + 14 * 3_600_000, last_run: { at_ms: NOW - 10 * 3_600_000, ok: true, detail: '3 new commits on main, all from Marta: the coupon rounding fix and two docs changes.' }, runs: 7 },
+  { id: 's2', name: 'Fetch every 30 minutes', enabled: true, recurrence: { kind: 'interval', secs: 1800, anchor_ms: NOW - 3_600_000 }, missed: 'skip',
+    action: { kind: 'fetch', remote: null }, root: REPO_PATH, mode: 'manual', created_ms: NOW - 3_600_000, next_run_ms: NOW + 12 * 60_000,
+    last_run: { at_ms: NOW - 18 * 60_000, ok: false, detail: 'Authentication failed for origin' }, runs: 2 },
+  { id: 's3', name: 'Release reminder', enabled: true, recurrence: { kind: 'once', at_ms: NOW + 3 * 86_400_000 }, missed: 'run_once',
+    action: { kind: 'prompt', prompt: 'List the commits since the last tag and draft the release notes.' }, root: REPO_PATH, mode: 'auto',
+    created_ms: NOW, next_run_ms: NOW + 3 * 86_400_000, last_run: null, runs: 0 },
+  { id: 's4', name: 'Friday digest', enabled: false, recurrence: { kind: 'cron', expr: '0 0 17 * * 5' }, missed: 'skip',
+    action: { kind: 'prompt', prompt: 'Summarise this week’s merged work.' }, root: REPO_PATH, mode: 'manual', created_ms: NOW - 20 * 86_400_000, next_run_ms: null,
+    last_run: { at_ms: NOW - 4 * 86_400_000, ok: true, detail: 'Five merge requests landed this week.' }, runs: 3 },
+];
+
+/** A plan Imber built and started: one phase done, the MR open, the next phase waiting for it to be merged, a failed step to retry. */
+const imberPlan: Plan = {
+  id: 'plan-imber', name: 'Release 0.9 across api and web', status: 'paused', pause_reason: 'a step failed', template: false, created_ms: NOW - 600_000, updated_ms: NOW - 60_000,
+  phases: [
+    { id: 'ph1', name: 'Phase 1', gate: { kind: 'phase_done', state: 'open' }, steps: [
+      { id: 'st1', kind: 'push', branch: 'release/0.9', repo: { path: REPO_PATH, name: 'api' }, status: 'done' },
+      { id: 'mr1', kind: 'create_mr', source: 'release/0.9', target: 'main', title: 'Release 0.9', description: '', labels: [], draft: false, auto_merge: false, squash: false, delete_branch: false, repo: { path: REPO_PATH, name: 'api' }, status: 'done', result: { number: 118 } },
+    ] },
+    { id: 'ph2', name: 'Phase 2', gate: { kind: 'mr_merged', step_id: 'mr1', poll_secs: 30, timeout_secs: 7200, state: 'waiting' }, steps: [
+      { id: 'st3', kind: 'push', branch: 'release/0.9', repo: { path: `${REPO_PATH}-web`, name: 'web' }, status: 'failed', error: 'rejected: the remote is ahead of release/0.9' },
+      { id: 'st4', kind: 'pull', repo: { path: `${REPO_PATH}-web`, name: 'web' }, status: 'held' },
+    ] },
+  ],
+  finally: [{ id: 'st5', kind: 'tag', name: 'v0.9.0', repo: { path: REPO_PATH, name: 'api' }, status: 'queued' }],
+};
+
+/** What Imber did here: a commit and a branch that can be undone (the commit first), a deleted branch already restored, a push that cannot. */
+const imberActionLog: ImberAction[] = [
+  { id: 'a5', at_ms: NOW - 120_000, root: REPO_PATH, tool: 'git_commit', summary: 'Committed “fix: round coupon totals”', undo: { op: 'reset_soft' }, irreversible: null, undone_ms: null },
+  { id: 'a4', at_ms: NOW - 400_000, root: REPO_PATH, tool: 'git_push', summary: 'Pushed to origin', undo: null, irreversible: 'It was pushed to origin: others may already have it. Undoing it would need a force push, which Imber does not do on its own.', undone_ms: null },
+  { id: 'a3', at_ms: NOW - 900_000, root: REPO_PATH, tool: 'git_branch_create', summary: 'Created branch fix/coupon-totals', undo: { op: 'delete_branch' }, irreversible: null, undone_ms: null },
+  { id: 'a2', at_ms: NOW - 3_000_000, root: REPO_PATH, tool: 'git_branch_delete', summary: 'Deleted branch old/experiment', undo: { op: 'recreate_branch' }, irreversible: null, undone_ms: NOW - 2_900_000 },
+  { id: 'a1', at_ms: NOW - 7_000_000, root: REPO_PATH, tool: 'git_mr_create', summary: 'Opened merge request “Release 0.8”', undo: null, irreversible: 'The merge request was opened on the hosting provider. Close it there.', undone_ms: null },
+];
+
 const withTab = (o: SceneOverride): SceneOverride => ({ ...o, setup: async () => { seedTab(); await o.setup?.(); } });
 
 export const corvusOverrides: Record<string, SceneOverride> = {
@@ -71,6 +118,12 @@ export const corvusOverrides: Record<string, SceneOverride> = {
   'corvus/issues/IssueDetailModal': withTab({ props: { issue: issues[0], provider: 'linear', onClose: noop } }),
   'corvus/mr/CreateMrModal': withTab({
     props: { onClose: noop, onCreated: noop, currentBranch: 'feature/bennu', initialTargetBranch: 'main', initialTitle: 'gradle support & attachment on Imber chat' },
+  }),
+  'corvus/imber/ImberActionsModal': withTab({ props: { onClose: noop }, setup: () => imberStore.seedActions(imberActionLog) }),
+  'corvus/imber/ImberSchedulesModal': withTab({ props: { onClose: noop }, setup: () => imberSchedulesStore.seed(imberJobs) }),
+  'corvus/plan/PlanModal': withTab({
+    settle: 900,
+    setup: async () => { await plansStore.load(); plansStore.openModal('plan-release'); },
   }),
   'corvus/mr/MrModal': withTab({ props: { mr, onClose: noop, onRefresh: noop }, settle: 800 }),
   'corvus/pipeline/CiPipelineDetailModal': withTab({ props: { run: ciRun, tabId: TAB_ID, onClose: noop, onRetrigger: noop } }),
@@ -114,6 +167,10 @@ export const corvusExtras: ExtraScene[] = [
   { id: 'corvus/sidebar/StashList', load: () => import('$lib/components/corvus/sidebar/StashList.svelte'), setup: seedTab, props: { stashes, onRefresh: noop } },
   { id: 'corvus/sidebar/SubmoduleList', load: () => import('$lib/components/corvus/sidebar/SubmoduleList.svelte'), setup: seedTab, props: { submodules: [submodule, { ...submodule, name: 'vendor/openssl-src', path: 'vendor/openssl-src', branch: null, behind: 0, is_dirty: true }], onRefresh: noop } },
   { id: 'corvus/mr/MrSidebar', load: () => import('$lib/components/corvus/mr/MrSidebar.svelte'), setup: seedTab, props: { onOpenCreate: noop, onOpenDetail: noop } },
+  { id: 'corvus/plan/PlansTab', load: () => import('$lib/components/corvus/plan/PlansTab.svelte'), setup: async () => { seedTab(); await plansStore.load(); }, props: {}, settle: 600 },
+  { id: 'corvus/mr/CreateMrModal[plan]', load: () => import('$lib/components/corvus/mr/CreateMrModal.svelte'), setup: seedTab, props: { planMode: true, onClose: noop, onCreated: noop, onPlan: noop, currentBranch: 'feature/bennu', initialTargetBranch: 'main', initialTitle: 'Add OAuth2 PKCE flow' } },
+  { id: 'corvus/imber/ImberPlanCard', load: () => import('$lib/components/corvus/imber/ImberPlanCard.svelte'), setup: seedTab, props: { snapshot: imberPlan } },
+  { id: 'corvus/imber/ImberSchedulesModal[new]', load: () => import('$lib/components/corvus/imber/ImberSchedulesModal.svelte'), setup: () => { seedTab(); imberSchedulesStore.seed(imberJobs); imberSchedulesStore.edit('new'); }, props: { onClose: noop } },
   { id: 'corvus/stage/CommitForm', load: () => import('$lib/components/corvus/stage/CommitForm.svelte'), setup: seedTab, props: {} },
   { id: 'corvus/security/SecurityPanel', load: () => import('$lib/components/corvus/security/SecurityPanel.svelte'), setup: seedTab, props: {} },
   { id: 'corvus/BranchSwitchPopup', load: () => import('$lib/components/corvus/BranchSwitchPopup.svelte'), props: { x: 300, y: 200, branches: [{ name: 'main', is_head: false }, { name: 'feature/bennu', is_head: true }], onSelect: noop, onClose: noop } },

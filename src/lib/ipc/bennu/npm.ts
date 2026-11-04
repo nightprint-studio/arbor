@@ -61,3 +61,44 @@ export function npmVersionHints(file: string, source: string): Promise<NpmVersio
 export function npmRunScript(root: string, file: string, script: string): Promise<RunHandle> {
   return bennu('bennu_npm_run_script', { args: { root, file, script } });
 }
+
+/** Install the project's dependencies (`npm install` · `pnpm install` · `yarn install`, by lockfile)
+ *  into a Run console tab. `file` is any `package.json` of the project. Wire: `bennu_npm_install`. */
+export function npmInstall(root: string, file: string): Promise<RunHandle> {
+  return bennu('bennu_npm_install', { args: { root, file } });
+}
+
+/** One script of a package, with the line it is declared on. */
+export interface NodeScript {
+  name: string;
+  command: string;
+  line: number;
+}
+
+/** One `package.json` of the project — the root, then each workspace member. */
+export interface NodePackage {
+  id: string;
+  /** Relative to the project root, forward slashes; empty for the root. */
+  dir: string;
+  /** Absolute path of its `package.json`, forward-slashed. */
+  manifest: string;
+  version: string;
+  scripts: NodeScript[];
+}
+
+/** What the Node tool window lists. */
+export interface NodeProject {
+  /** `npm` · `pnpm` · `yarn` · `bun`, from the lockfile beside the root manifest. */
+  package_manager: string;
+  /** The lockfile's file name; empty before the first install. */
+  lockfile: string;
+  /** Whether `node_modules` exists. */
+  installed: boolean;
+  packages: NodePackage[];
+}
+
+/** The packages of the Node project in `root` (each workspace member too) with their scripts.
+ *  Reads manifests only. Wire: `bennu_node_packages`. */
+export function nodePackages(root: string): Promise<NodeProject> {
+  return bennu('bennu_node_packages', { args: { root } });
+}

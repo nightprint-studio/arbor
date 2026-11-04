@@ -4,11 +4,14 @@
    * template, with a preview that reflects each choice.
    */
   import { Wand2 } from 'lucide-svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
-  import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
+
+  /** Opens another settings page (the shell owns the navigation). */
+  let { onGoTo }: { onGoTo?: (page: string) => void } = $props();
 
   const s = bennuSettingsStore;
 
@@ -108,18 +111,13 @@
 <div class="card">
   <div class="card-section-title"><Wand2 size={12} /> Formatter</div>
   <p class="set-hint">
-    What <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> does to a <code>.java</code> file.
-    Indentation comes from Editor → Indentation, so the formatter and the editor never disagree. A
-    language with a language server is formatted by it instead, reading the project's own
-    <code>rustfmt.toml</code> or <code>.prettierrc</code> — nothing here applies to those.
+    What <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> does to a <code>.java</code> file — indentation, braces, wrapping,
+    imports and more — has its own page, with a live preview. A language with a language server is formatted by it
+    instead, reading the project's own <code>rustfmt.toml</code> or <code>.prettierrc</code>.
   </p>
-  <FormRow label="Blank lines between members" description="The most consecutive blank lines the formatter keeps. 0 removes them all.">
-    <NumberStepper value={s.javaBlankLines} min={0} max={5} narrow
-                   onchange={(v) => s.setJavaBlankLines(v)} ariaLabel="Blank lines between members" />
-  </FormRow>
-  <FormRow label="Indent case bodies" description="Indent the statements under a case label one level in from it — the Sun/Oracle convention, and IntelliJ's.">
-    <Toggle checked={s.javaIndentCaseBody} onchange={(v) => s.setJavaIndentCaseBody(v)} ariaLabel="Indent case bodies" />
-  </FormRow>
+  <div class="fmt-link">
+    <Button variant="outline" size="sm" onclick={() => onGoTo?.('formatter')}>Open the Formatter settings…</Button>
+  </div>
 </div>
 <div class="card">
   <div class="card-section-title"><Wand2 size={12} /> Preview</div>

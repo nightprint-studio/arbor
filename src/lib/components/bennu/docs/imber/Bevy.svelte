@@ -15,12 +15,14 @@
   <li><code>brp_get</code>: one entity in full.</li>
   <li><code>brp_resources</code> and <code>brp_get_resource</code>: the resources and one resource's value.</li>
   <li><code>brp_types</code>: the type registry, so it knows the shape of a component before it asks for it.</li>
+  <li><code>brp_screenshot</code>, <code>brp_stats</code>, <code>brp_actions</code> and <code>brp_states</code>: the game's window as an image (900 px wide unless asked otherwise), its frame time and diagnostics, and the actions it lets a remote client run. These need the <code>arbor-bevy-remote</code> plugin in the game (see <strong>Bevy Remote</strong>).</li>
+  <li><code>brp_watch</code>: one entity observed for a few seconds (5 by default, 30 at most), reporting which fields changed and their first and last value.</li>
 </ul>
 <p>Reading never asks. The connection itself and the protocol are explained on the <strong>Bevy Remote</strong> page.</p>
 
 <h2>Changing a running game</h2>
 <p>
-  <em>Let it change a running Bevy game</em> in Settings is a separate switch, off by default, and it needs the Bevy family on. It adds <code>brp_mutate</code>, <code>brp_insert</code>, <code>brp_remove</code>, <code>brp_spawn</code>, <code>brp_despawn</code> and <code>brp_set_resource</code>. These act on live state with no review and no undo. Imber asks once per conversation ("Let Imber change the running game?"), the yes covers every change in that conversation, and every change is listed in the run's summary. Autonomous mode does not skip the question.
+  <em>Let it change a running Bevy game</em> in Settings is a separate switch, off by default, and it needs the Bevy family on. It adds <code>brp_mutate</code>, <code>brp_insert</code>, <code>brp_remove</code>, <code>brp_spawn</code>, <code>brp_despawn</code>, <code>brp_set_resource</code>, <code>brp_reparent</code> and <code>brp_call</code>, and, to play the game, <code>brp_key</code>, <code>brp_type</code>, <code>brp_mouse</code>, <code>brp_gamepad</code>, <code>brp_action</code> and <code>brp_set_state</code> (<code>brp_action</code> runs one of the game's own registered actions). <code>brp_call</code> calls any Remote Protocol method by name; a method that only reads (<code>rpc.discover</code>, anything named <code>query</code>, <code>get</code> or <code>list</code>) runs without the question, any other asks like the rest. These act on live state with no review and no undo. Imber asks once per conversation ("Let Imber change the running game?"), the yes covers every change in that conversation, and every change is listed in the run's summary. Autonomous mode does not skip the question.
 </p>
 
 <h2>Reading a profiler recording</h2>

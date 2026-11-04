@@ -64,6 +64,12 @@ export function tagSlot(node: Node): number | undefined {
   return cut > 0 ? slots.get(name.slice(0, cut)) : undefined;
 }
 
+/** The slot a declared `prefix` wears in this tree, or `undefined` if the page never declared it.
+ *  For callers that find a tag by text (a `<script>` body) rather than as a `tag_name` node. */
+export function prefixSlot(tree: Tree, prefix: string): number | undefined {
+  return slotsOf(tree).get(prefix);
+}
+
 /** The slot for a `jsp_directive` leaf, or `undefined` if it is not a `taglib` one. */
 export function directiveSlot(node: Node): number | undefined {
   const prefix = TAGLIB_DIRECTIVE.exec(node.text)?.[2];

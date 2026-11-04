@@ -16,7 +16,7 @@ import { listen } from '@tauri-apps/api/event';
  */
 /** The backend product labels the router dispatches to. */
 export type Program =
-  | 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto' | 'bennu' | 'picus' | 'garrulus' | 'voice';
+  | 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto' | 'bennu' | 'picus' | 'hirundo' | 'garrulus' | 'voice';
 
 export function rpc<R>(program: Program, method: string, params: Record<string, unknown> = {}): Promise<R> {
   return invoke<R>('rpc', { program, method, params });
@@ -101,7 +101,7 @@ const ensured = new Set<Program>();
  *
  * Only `corvus`, `picus` and `voice` are borrowable.
  */
-export async function ensureBackend(program: 'corvus' | 'picus' | 'voice'): Promise<void> {
+export async function ensureBackend(program: 'corvus' | 'picus' | 'voice' | 'bennu' | 'hirundo'): Promise<void> {
   if (ensured.has(program)) return;
   // The shell records this window as a borrower, so the owner's window closing leaves the backend
   // running. A backend that died and came back is a new one with no borrowers: forget that it was
@@ -117,3 +117,9 @@ function watchDown(program: Program): void {
   watching.add(program);
   void listen(`arbor://${program}-be-down`, () => ensured.delete(program));
 }
+
+/** Bound helper for the Hirundo (HTTP client) backend — served out-of-process by `hirundo-be`, spawned lazily
+ *  (`ensure_product_backend('hirundo')` from a window that is not Hirundo's own). Collections, environments and
+ *  their types, request preparation and sending, cURL conversion. `BackendNotRunning` when it isn't up. */
+export const hirundo = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
+  rpc<R>('hirundo', method, params);

@@ -1,0 +1,36 @@
+[package]
+name         = "hirundo-be"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Hirundo backend — the headless HTTP-client process for Model D. Serves collections, environments (with their types), request preparation, sending and cURL import/export over framed-stdio IPC; keeps requests as files in the repo and secrets in the shell's keyring."
+
+[[bin]]
+name = "hirundo-be"
+path = "src/main.rs"
+
+[dependencies]
+arbor-ipc     = { path = "../../../foundation/ipc" }
+arbor-rpc     = { path = "../../../foundation/rpc" }
+# The Model-D backend runtime scaffold: `BackendIo` + the `App` builder + the `Dispatcher`.
+arbor-be      = { path = "../../../foundation/be" }
+# `init_active_profile()` seeds the active profile first in `main`.
+arbor-core    = { path = "../../../foundation/core" }
+hirundo-core  = { path = "../core" }
+hirundo-model = { path = "../model" }
+arbor-scheduler = { path = "../../../platform/scheduler" }
+bennu-generate = { path = "../../bennu/editing/generate" }
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+# Same workspace pins the other backends use; the sender is the only place Hirundo touches the network.
+tokio         = { workspace = true }
+reqwest       = { workspace = true }
+base64        = { workspace = true }
+mlua          = { workspace = true }
+toml          = "0.8"
+
+[build-dependencies]
+# The icon and Windows file properties of this executable, from the `icon.ico` beside this manifest.
+arbor-exe-icon = { path = "../../../foundation/exe-icon" }

@@ -12,6 +12,8 @@
 //! that actually fetches is the one that needed splitting off. Same division as `bennu-cargo`, and
 //! for the same reason: this half is testable without a network and the other half is not.
 
+pub mod lock;
 pub mod manifest;
 pub mod prelude;
 pub mod registry;
+pub mod workspace;

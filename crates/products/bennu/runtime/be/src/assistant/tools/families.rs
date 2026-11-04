@@ -102,7 +102,8 @@ pub fn family_of(tool: &str) -> Option<Family> {
         "file_owner" | "request_change" => Some(Family::Peers),
         other if other.starts_with("corvus_") => None,
         // What executes the project's code. By name, not by a word in it: bennu_tests only lists the tests.
-        "bennu_build" | "bennu_test_run" | "bennu_npm_run_script" | "bennu_cargo_run" => Some(Family::Run),
+        // The resolve behind `bennu_dependency_conflicts` runs the build tool (and its plugins), so it is Run too.
+        "bennu_build" | "bennu_test_run" | "bennu_npm_run_script" | "bennu_cargo_run" | "bennu_dependency_conflicts" => Some(Family::Run),
         other if other.starts_with("bennu_run_") || other.starts_with("bennu_debug") || other.starts_with("bennu_launch") => Some(Family::Run),
         _ => Some(Family::Project),
     }

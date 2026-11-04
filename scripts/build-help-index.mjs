@@ -2,7 +2,7 @@
 //
 // Bennu's own documentation is a set of Svelte pages (`src/lib/components/bennu/docs/*.svelte`): the right
 // place to write it, and unreadable to the backend, which has no Svelte. So this reads the pages, strips them
-// to text, cuts each at its `<h2>` sections, and writes `crates/products/bennu/assistant/help.json`, which the
+// to text, cuts each at its `<h2>` sections, and writes `crates/platform/imber/core/help.json`, which the
 // backend embeds. The assistant then asks for the few sections that match a question, instead of being sent
 // hundreds of kilobytes of documentation — or, worse, answering from a model that has never heard of Bennu.
 //
@@ -16,7 +16,7 @@ import { writeImberDocs } from './imber-docs-md.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const docsDir = path.join(root, 'src/lib/components/bennu/docs');
 const windowFile = path.join(root, 'src/lib/components/bennu/BennuWindow.svelte');
-const out = path.join(root, 'crates/products/bennu/assistant/help.json');
+const out = path.join(root, 'crates/platform/imber/core/help.json');
 
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ', '&rarr;': '→', '&larr;': '←', '&middot;': '·', '&hellip;': '…', '&mdash;': '—', '&ndash;': '–', '&rsaquo;': '›' };
 

@@ -193,3 +193,17 @@ shell router change; the in-process copy stays as the no-spawn fallback.
 `corvus-plugin` (the shared host wiring: dispatcher builder, headless installer,
 `AppCtx`), `git2`, `serde_json`, and `tokio` (the runtime for the async issue
 handlers + the host's `AppCtx::spawn`). No Tauri.
+
+## Imber (the assistant)
+
+`src/assistant/` is Corvus's side of Imber — the AI assistant shared with Bennu. The pure core (provider, agent
+loop, retry, price list, message view, `[assistant]` settings) is `imber-core`, the network is `imber-transport`,
+the API key is the shell vault's (`__assistant_key` over the reverse channel). What is here is Corvus's own:
+`tools` (the git tools, thin calls into the same handlers as the UI), `permission` (what may run unasked:
+manual vs auto, destructive always asks), `prompt`, `host` (the agent loop's host + the approval card),
+`commit_message` / `diff_text` (the commit-message request), `history` (log filters, ranges, show).
+
+`src/assistant/schedule/` holds Imber's schedules (once / interval / daily / weekly / cron): the job model and its
+rules (pure), the persisted list, the handlers of the Schedules window, the `schedule_*` tools and the loop that fires
+what is due. The calendar arithmetic is `arbor-scheduler::calendar`. Unattended runs follow
+`permission::unattended_allows`. See `docs/imber-corvus.md`.

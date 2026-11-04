@@ -7,11 +7,16 @@
    * to be decoded. `Enter` connects.
    */
   import { untrack } from 'svelte';
-  import { Plug } from 'lucide-svelte';
+  import { BookmarkPlus, Plug, Server, X } from 'lucide-svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
+  import RowList from '$lib/components/shared/ui/RowList.svelte';
   import { bennuBrpStore as brp } from '$lib/stores/bennu/brp.svelte';
+  import { brpSavedStore as saved } from '$lib/stores/bennu/brp-saved.svelte';
+
+  $effect(() => { void saved.load(); });
 
   // The field's starting value; the user edits it from here.
   let endpoint = $state(untrack(() => brp.endpoint));
@@ -52,7 +57,30 @@
         {#snippet iconStart()}<Plug size={12} />{/snippet}
         Connect
       </Button>
+      <IconButton
+        tooltip="Save this game"
+        size={26}
+        disabled={!endpoint.trim() || saved.isEndpointSaved(endpoint)}
+        onclick={() => void saved.saveEndpoint(endpoint)}
+      >
+        <BookmarkPlus size={14} />
+      </IconButton>
     </div>
+
+    {#if saved.endpoints.length > 0}
+      <h4 class="bc-sub">Saved games</h4>
+      <RowList items={saved.endpoints} key={(e) => e.endpoint}>
+        {#snippet row(e)}
+          <Server size={13} />
+          <span class="bc-name">{e.name}</span>
+          <span class="bc-url">{e.endpoint}</span>
+          <Button variant="ghost" size="sm" onclick={() => void brp.connect(e.endpoint)}>Connect</Button>
+          <IconButton tooltip="Forget" size={22} onclick={() => void saved.removeEndpoint(e.endpoint)}>
+            <X size={12} />
+          </IconButton>
+        {/snippet}
+      </RowList>
+    {/if}
 
     {#if brp.connectError}
       <Alert variant="error" compact title="Cannot connect" text={brp.connectError} />
@@ -72,4 +100,7 @@
     overflow-x: auto;
   }
   .bc-row { display: flex; gap: 8px; align-items: center; }
+  .bc-sub { margin: 6px 0 0; font-size: var(--font-size-xs); font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+  .bc-name { font-size: var(--font-size-sm); color: var(--text-primary); white-space: nowrap; }
+  .bc-url { flex: 1; min-width: 0; font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { BrpShape } from '$lib/ipc/bennu/brp';
 import {
   currentVariant, elementLabel, entityTag, elementPath, elementShape, isInlineNumbers, jsonKind, payloadShape,
-  shortTypeName,
+  shortTypeName, summarize, isInlineValue,
 } from './brp-value';
 
 const vec3: BrpShape = {
@@ -64,5 +64,27 @@ describe('brp-value', () => {
     expect(isInlineNumbers([0, 1, 2, 3, 4])).toBe(false);
     expect(isInlineNumbers(['a'])).toBe(false);
     expect(isInlineNumbers([])).toBe(false);
+  });
+});
+
+describe('summarize / isInlineValue', () => {
+  it('writes a value as one short line', () => {
+    expect(summarize({ current: 18, max: 30 })).toBe('{current: 18, max: 30}');
+    expect(summarize([-7, 0.8999999, 5])).toBe('[-7, 0.9, 5]');
+    expect(summarize('Goblin')).toBe('"Goblin"');
+    expect(summarize([])).toBe('[]');
+    expect(summarize({})).toBe('{}');
+    expect(summarize(null)).toBe('—');
+  });
+
+  it('marks what it leaves out and cuts what is long', () => {
+    expect(summarize([1, 2, 3, 4, 5])).toBe('[1, 2, 3, 4, …]');
+    expect(summarize({ a: { x: 1 }, b: [1, 2] })).toBe('{a: {…}, b: [2]}');
+    expect(summarize('x'.repeat(100)).endsWith('…')).toBe(true);
+  });
+
+  it('inlines only scalars', () => {
+    expect([1, 'a', true].every(isInlineValue)).toBe(true);
+    expect([{}, [], null].some(isInlineValue)).toBe(false);
   });
 });

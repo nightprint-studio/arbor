@@ -1,0 +1,14 @@
+[package]
+name         = "imber-transport"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Imber's HTTP transport: one streamed POST with silence-bounded timeouts, failures classified for the retry rules of imber-core. Shared by Bennu and Corvus."
+
+[dependencies]
+imber-core = { path = "../core" }
+# Same workspace pins the backends already use; the transport is the only place the assistant touches the network.
+reqwest    = { workspace = true }
+tokio      = { workspace = true }

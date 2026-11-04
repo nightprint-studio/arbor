@@ -23,6 +23,7 @@
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
     History, Tag, Trash2, ExternalLink, FolderPlus, FolderInput, Package, Boxes, ClipboardPaste, Sparkles, Info, Wand2,
+    Languages,
   } from 'lucide-svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import FilePropertiesModal from '$lib/components/shared/internal/FilePropertiesModal.svelte';
@@ -52,6 +53,8 @@
   import { bennuGitStatusStore } from '$lib/stores/bennu/git-status.svelte';
   import { GIT_BADGE_COLOR, GIT_BADGE_GLYPH, GIT_BADGE_LABEL } from '$lib/utils/git-badge';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { generatorsStore } from '$lib/stores/bennu/generators.svelte';
+  import { paletteIcon } from '$lib/utils/plugin-icons';
   import { treeExpansionStore } from '$lib/stores/bennu/tree-expansion.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { buildUnits as ipcBuildUnits } from '$lib/ipc/bennu/inspect';
@@ -623,6 +626,8 @@
           { separator: true, id: 'sep-new', label: '' },
           ...runItem,
           { id: 'optimize-imports', label: 'Optimize imports…', icon: Wand2 },
+          ...generateSubmenu(),
+          { id: 'convert-encoding', label: 'Convert encoding…', icon: Languages },
           { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
           { separator: true, id: 'sep-hist-dir', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
@@ -648,6 +653,7 @@
           { id: 'move',          label: 'Move to folder…',    icon: FolderInput },
           { separator: true, id: 'sep-move', label: '' },
           ...runItem,
+          { id: 'convert-encoding', label: 'Convert encoding…', icon: Languages },
           { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
           { separator: true, id: 'sep-hist-file', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
@@ -676,6 +682,7 @@
         case 'new-module': runNew(id, newDir); break;
         case 'run-tests': runTestsFor(node); break;
         case 'optimize-imports': bennuUiStore.openOptimizeImports(node.path); break;
+        case 'convert-encoding': bennuUiStore.openEncodingConvert([node.path]); break;
         case 'rename':    renamePath = node.path; break;
         case 'move':      movePicker = node; break;
         case 'delete':    deleting = node; break;
@@ -697,8 +704,23 @@
           break;
         case 'expand':    setFoldersOpen([node.path], true); break;
         case 'collapse':  setFoldersOpen([node.path], false); break;
+        default:
+          // A code generator from the "Generate" submenu, written into this folder's package.
+          if (id.startsWith('gen:')) bennuUiStore.openCodeGenerator(id.slice(4), node.path);
       }
     }, { actions: quick });
+  }
+
+  /** "Generate ▸" on a folder: the generators that write new classes, into the package the folder is. */
+  function generateSubmenu(): MenuItem[] {
+    const offered = generatorsStore.list.filter((g) => g.language === 'java' && g.targets.includes('folder'));
+    if (offered.length === 0) return [];
+    return [{
+      id: 'code-generators',
+      label: 'Generate',
+      icon: Wand2,
+      children: offered.map((g) => ({ id: `gen:${g.id}`, label: g.title.replace(/^Generate /, ''), icon: paletteIcon(g.icon) })),
+    }];
   }
 
   /** The path whose Properties dialog is open (null = closed). */
@@ -740,6 +762,7 @@
       { id: 'collapse', label: 'Collapse all', icon: ChevronsDownUp },
       { separator: true, id: 'sep-root-tree', label: '' },
       { id: 'optimize-imports', label: 'Optimize imports…', icon: Wand2 },
+      { id: 'convert-encoding', label: 'Convert encoding…', icon: Languages },
       { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
       { separator: true, id: 'sep-root-hist', label: '' },
       { id: 'copy-path', label: 'Copy path', icon: Copy },
@@ -756,6 +779,7 @@
         case 'expand':    expandAll(); break;
         case 'collapse':  collapseAll(); break;
         case 'optimize-imports': bennuUiStore.openOptimizeImports(root); break;
+        case 'convert-encoding': bennuUiStore.openEncodingConvert([root]); break;
         // Whole-project scope, because that is what the empty space stands for.
         case 'hist-show':
         case 'hist-label': bennuHistoryStore.showProject(root); break;

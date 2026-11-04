@@ -72,10 +72,8 @@ export const GARRULUS_SHORTCUTS: GarrulusShortcutGroup[] = [
       { keys: ['Ctrl', 'Shift', 'N'], description: 'New note of a type — pick the type first, its template fills the note' },
       { keys: ['Ctrl', 'D'], description: "Open today's daily note, creating it if this is the first line of the day" },
       { keys: ['Ctrl', 'S'], description: 'Save now — the editor also saves on its own; this makes the moment explicit' },
-      // F2 rather than a Ctrl+Shift letter: it is the IDE verb for rename, and
-      // this rename is the refactoring one — every link that pointed at the old
-      // title is rewritten with it.
-      { keys: ['F2'], description: 'Rename this note and update every link to it' },
+      // F2 rather than a Ctrl+Shift letter: it is the IDE verb for rename.
+      { keys: ['F2'], description: 'Rename or move this note — links to the old name show up under Problems' },
       { keys: ['Alt', 'Enter'], description: 'Intentions on the selection or the line — extract to a new note, promote to a type, turn into a task' },
       { keys: ['Ctrl', 'Shift', 'Space'], description: 'Inbox scratch — an unnamed, unfiled buffer that asks nothing' },
       { keys: ['Alt', 'Shift', 'E'], description: 'Export this note — the palette carries the format' },

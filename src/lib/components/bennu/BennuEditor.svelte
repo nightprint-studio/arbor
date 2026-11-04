@@ -35,6 +35,8 @@
   import BennuSheetView from './BennuSheetView.svelte';
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
+  import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
+  import { fileEncodingOverride, reinterpretFile } from './encoding/reinterpret';
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { editorToolbarButtons, EDITOR_TOOLBAR_POINT } from '$lib/contributions/editor-toolbar';
   import { firePluginAction } from '$lib/ipc/plugin';
@@ -73,7 +75,9 @@
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import { ChevronDown } from 'lucide-svelte';
+  import { ChevronDown, Regex as RegexIcon } from 'lucide-svelte';
+  import { bennuRegexStore } from '$lib/stores/bennu/regex.svelte';
+  import { literalUnderCaret, regexRequestFor, type EditorAccess } from './regex/open-in-tester';
   // The tab strip draws the same icons the project tree does — the shared file-type set, and
   // the lettered ring for a Java type's kind.
   import IconifyIconView from '@iconify/svelte';
@@ -100,6 +104,13 @@
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { bennuGitHistoryStore } from '$lib/stores/bennu/git-history.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuHttp, isHttpFile } from '$lib/stores/bennu/http.svelte';
+  import { endpointsInFile, endpointToHttpText, requestLineOf } from './http/controller-calls';
+  import { NEW_HTTP_FILE } from './http/http-lang';
+  import { createFileFromTemplate } from '$lib/ipc/bennu/templates';
+  import type { DetectedEndpoint } from '$lib/types/hirundo';
+  import { generatorsStore } from '$lib/stores/bennu/generators.svelte';
+  import { paletteIcon } from '$lib/utils/plugin-icons';
   import { bennuI18nStore } from '$lib/stores/bennu/i18n.svelte';
   import { isI18nBundle } from './i18n/bundle-path';
   import { markupEdit } from './i18n/markup-edit';
@@ -1313,7 +1324,7 @@
   // native-SQL comment that explains it.
   let nativeSqlDiags = $state<EditorDiagnostic[]>([]);
   const allDiags = $derived(
-    [...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags, ...advisoryDiags, ...nativeSqlDiags]
+    [...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags, ...advisoryDiags, ...nativeSqlDiags, ...httpDiags]
       .map((d) => (d.code && UNDEFINED_NAME_CODES.has(d.code) ? { ...d, emphasis: 'text' as const } : d)),
   );
 
@@ -1910,7 +1921,102 @@
     return true;
   }
 
+  // ── .http files: ▶ on every request, Ctrl+Enter on the caret, problems underlined ───────────────
+
+  const httpFile = $derived(isHttpFile(activePath));
+
+  /** The request under the caret is run. Returns false (the key is left alone) outside a .http file. */
+  function runHttpAtCaret(): boolean {
+    if (!httpFile || !activePath || !editorComp) return false;
+    const line = editorComp.lineColOfByteOffset(editorComp.caretByteOffset())?.line ?? 1;
+    void bennuHttp.run(activePath, editorComp.getValue(), line);
+    return true;
+  }
+
+  $effect(() => {
+    const path = activePath;
+    if (!httpFile || !path) return;
+    const text = projectStore.sourceOf(path);
+    void bennuHttp.loadEnvs(path);
+    // After a pause in typing: the outline for the gutter and the problems for the squiggles.
+    const timer = setTimeout(() => void bennuHttp.refresh(path, text), 300);
+    return () => clearTimeout(timer);
+  });
+
+  // ── Spring controllers: a call arrow on every mapped method ───────────────────────────────────
+
+  let controllerCalls = $state<DetectedEndpoint[]>([]);
+  $effect(() => {
+    const path = activePath;
+    const projectRoot = projectStore.project?.root;
+    if (!path || !projectRoot || !isJavaFileOf(path)) { controllerCalls = []; return; }
+    let current = true;
+    void endpointsInFile(projectRoot, path).then((r) => { if (current) controllerCalls = r; }).catch(() => { if (current) controllerCalls = []; });
+    return () => { current = false; };
+  });
+  const controllerMarks = $derived(
+    controllerCalls.map((e) => ({ line: e.line, glyph: '⇢', tooltip: `Call ${(e.methods[0] ?? 'GET').toUpperCase()} ${e.path} — run it with Hirundo`, className: 'cm-run-gutter' })),
+  );
+
+  /** The request for an endpoint, as .http text, with a base URL to start from when no environment gives one. */
+  async function controllerRequest(e: DetectedEndpoint, dirFile: string) {
+    await bennuHttp.loadEnvs(dirFile);
+    const hasBase = bennuHttp.envs.some((env) => env.vars.includes('baseUrl'));
+    return endpointToHttpText(e, { baseUrl: hasBase ? undefined : 'http://localhost:8080' });
+  }
+
+  async function runControllerCall(e: DetectedEndpoint) {
+    const projectRoot = projectStore.project?.root;
+    if (!projectRoot) return;
+    const dirFile = `${projectRoot}/controller-call.http`;
+    const text = await controllerRequest(e, dirFile);
+    await bennuHttp.run(dirFile, text, requestLineOf(text));
+  }
+
+  /** The request goes into `requests.http` at the project root — created if it is not there, else copied for you to paste. */
+  async function generateControllerRequest(e: DetectedEndpoint) {
+    const projectRoot = projectStore.project?.root;
+    if (!projectRoot) return;
+    const file = `${projectRoot.replace(/[\\/]+$/, '')}/requests.http`;
+    const text = await controllerRequest(e, file);
+    try {
+      await createFileFromTemplate(projectRoot, file, `${NEW_HTTP_FILE.split('\n').slice(0, 2).join('\n')}\n\n${text}`);
+      await projectStore.openFile(file);
+    } catch {
+      try { await navigator.clipboard.writeText(text); } catch { /* the toast says what to do */ }
+      toastStore.show('requests.http already exists: the request is on your clipboard, paste it there.', 'info');
+    }
+  }
+
+  function showControllerMenu(call: DetectedEndpoint, event: MouseEvent) {
+    const items: MenuItem[] = [
+      { id: 'run', label: `Run ${(call.methods[0] ?? 'GET').toUpperCase()} ${call.path}` },
+      { id: 'generate', label: 'Generate the request in a .http file' },
+    ];
+    bennuContextMenuStore.show(event.clientX, event.clientY, items, (id) => {
+      if (id === 'run') void runControllerCall(call);
+      else void generateControllerRequest(call);
+    });
+  }
+
+  const httpGutterMarks = $derived(
+    httpFile
+      ? bennuHttp.outline.map((o) => ({ line: o.request_line, glyph: '▶', tooltip: `Run ${o.title} (Ctrl+Enter)`, className: 'cm-run-gutter' }))
+      : [],
+  );
+  const httpDiags = $derived(httpFile ? bennuHttp.diagnostics : []);
+
+  // The palette's "Run request at cursor": a tick the editor answers.
+  let lastHttpTick = bennuHttp.runAtCaretTick;
+  $effect(() => {
+    const tick = bennuHttp.runAtCaretTick;
+    if (tick === lastHttpTick) return;
+    lastHttpTick = tick;
+    untrack(() => { runHttpAtCaret(); });
+  });
+
   const editorKeyBindings: KeyBinding[] = [
+    { key: 'Mod-Enter', run: () => runHttpAtCaret() },
     { key: 'Mod-p', run: () => { toggleParameterInfo(); return true; } },
     { key: 'Escape', run: () => dismissParameterInfo() },
   ];
@@ -2742,6 +2848,8 @@
     // `main` means run the program.
     ...testGutterMarks.filter((m) => !runGutterMarks.some((r) => r.line === m.line)),
     ...springGutterMarks.filter((g) => !runLines.includes(g.line)),
+    ...httpGutterMarks,
+    ...controllerMarks.filter((m) => !runLines.includes(m.line)),
   ]);
 
   /**
@@ -2834,6 +2942,15 @@
    * six places has six real answers, so the menu is anchored at the pointer and lists them all.
    */
   function onGutterClick(line: number, event: MouseEvent) {
+    const call = controllerCalls.find((c) => c.line === line);
+    if (call && !runLines.includes(line)) {
+      showControllerMenu(call, event);
+      return;
+    }
+    if (httpFile && activePath && editorComp && bennuHttp.outline.some((o) => o.request_line === line)) {
+      void bennuHttp.run(activePath, editorComp.getValue(), line);
+      return;
+    }
     if (runLines.includes(line)) {
       onRunGutterClick(line, event);
       return;
@@ -3622,6 +3739,30 @@
     }
   }
 
+  /** What the Regex Tester needs of this buffer: its text, the selection, and a way to write a range back. */
+  function regexAccess(): EditorAccess {
+    return {
+      path: activePath,
+      text: () => editorComp?.getValue() ?? '',
+      selection: () => {
+        const s = editorComp?.selectionRange();
+        return { from: s?.from ?? 0, to: s?.to ?? 0 };
+      },
+      replace: (from, to, text) => {
+        if (!editorComp) return;
+        const u2b = makeU16ToByte(editorComp.getValue());
+        editorComp.replaceByteRange(u2b(from), u2b(to), text);
+      },
+      detection: bennuRegexStore.detection,
+    };
+  }
+
+  /** Open the Regex Tester on the string literal under the caret (writing edits back into it), on the
+   *  selection, or empty. */
+  export function openRegexTester() {
+    bennuRegexStore.open(regexRequestFor(regexAccess()));
+  }
+
   /** Open the *Add parameter* dialog for the method under the caret — on its declaration or on a
    *  call of it. The BE finds the method from the caret; a caret on anything else is answered in
    *  the dialog itself. */
@@ -3979,11 +4120,14 @@
       return;
     }
     const src = editorComp.getValue();
+    // A selection narrows a Java format to it (the language servers format whole files).
+    const range = isJavaFileOf(path) ? selectionBytes() ?? undefined : undefined;
     const edits = await formatBuffer(
       path,
       src,
       bennuSettingsStore.tabSize,
       bennuSettingsStore.indentStyle !== 'tabs',
+      range,
     ).catch(() => []);
     if (!edits.length) {
       // A formatter that returns nothing has nothing to change — which is the good outcome, and
@@ -3994,6 +4138,15 @@
     editorComp.replaceByteRanges(
       edits.map((e) => ({ startByte: e.start, endByte: e.end, text: e.new_text })),
     );
+  }
+
+  /** Format just the selected code of a Java buffer — `formatDocument` already narrows to a selection. */
+  export async function formatSelection() {
+    if (!selectionBytes()) {
+      toastStore.show('Select the code to format first', 'info');
+      return;
+    }
+    await formatDocument();
   }
 
   /**
@@ -4625,15 +4778,19 @@
    *  classpath resolver and open the target's source view (member-precise). Registers the target
    *  with the SAME origin project so navigation chains library → library. */
   async function tryGoToLibraryNav(offset: number): Promise<boolean> {
-    const ctx = decompiledCtx;
-    if (!ctx || !editorComp) return false;
-    const loc = await ipcLibraryDeclaration(ctx.originFile, editorComp.getValue(), offset).catch(() => null);
+    // The registered context is the precise origin, but a library view reached any other way — a
+    // tab restored from a previous session, a class opened from Go to Class / the hierarchy / the
+    // Dependencies tab — has none. The open project's root picks the same classpath slot (the backend
+    // only uses the origin to choose one), so it is a complete answer rather than a degraded one.
+    const originFile = decompiledCtx?.originFile ?? projectStore.project?.root;
+    if (!originFile || !editorComp) return false;
+    const loc = await ipcLibraryDeclaration(originFile, editorComp.getValue(), offset).catch(() => null);
     if (!loc) return false;
     // The target is another library view — track it (same origin project) so it's read-only and
     // itself navigable. A chained target doesn't carry the type name for the download button, so its
     // banner is suppressed (canDownload: false); the initial go-to tab keeps its download banner.
     decompiledStore.register(loc.file, {
-      originFile: ctx.originFile,
+      originFile,
       originSource: '',
       name: '',
       canDownload: false,
@@ -4819,7 +4976,7 @@
     //    classpath resolver and open the target's source view (member-precise), chaining library →
     //    library. Runs BEFORE the project engine (a `/decompiled/` path ends in `.java` and would
     //    otherwise route into the project declaration and get nothing).
-    if (offset != null && decompiledCtx && (await tryGoToLibraryNav(offset))) return;
+    if (offset != null && isDecompiledView && (await tryGoToLibraryNav(offset))) return;
     // 1. BE go-to-declaration — any Java symbol (class/method/field/local) — when we have
     //    a byte offset to classify at. Authoritative + precise (jumps to the exact line).
     if (offset != null && (await tryGoToDeclarationBE(offset, action))) return;
@@ -5102,6 +5259,12 @@
       ...(isSpringConfigTab
         ? [{ id: 'config-class', label: 'Generate @ConfigurationProperties class…', icon: Wand2, iconColor: 'var(--success)' } as MenuItem]
         : []),
+      // The code generators this file can take — one entry per generator in the backend's registry.
+      ...codeGeneratorMenu(),
+      // A string literal is a pattern worth trying: opened in the tester, edits go back with the literal's own escaping.
+      ...(editorComp && literalUnderCaret(regexAccess())
+        ? [{ id: 'regex', label: 'Open in Regex Tester…', icon: RegexIcon, iconColor: 'var(--accent)', shortcut: 'Ctrl+Shift+X' } as MenuItem]
+        : []),
       // The class under the pointer, tried out — offered where the lab has something to try it with.
       ...(isJavaFile && (projectStore.capabilities?.bean_validation || projectStore.capabilities?.jackson)
         ? [{ id: 'dtolab', label: 'Open in DTO Lab', icon: Beaker, iconColor: 'var(--info)', shortcut: 'Alt+Shift+J' } as MenuItem]
@@ -5173,7 +5336,25 @@
     bennuHistoryStore.showSelection(root, activePath, lines.start, lines.end);
   }
 
+  /** "Generate code ▸" with the generators the open file can take, or nothing when none fit. */
+  function codeGeneratorMenu(): MenuItem[] {
+    const kind = isJavaFile ? 'java' : activePath?.toLowerCase().endsWith('.rs') ? 'rust' : 'none';
+    const offered = generatorsStore.offeredFor(kind);
+    if (offered.length === 0) return [];
+    return [{
+      id: 'code-generators',
+      label: 'Generate code',
+      icon: Wand2,
+      iconColor: 'var(--success)',
+      children: offered.map((g) => ({ id: `gen:${g.id}`, label: g.title.replace(/^Generate /, ''), icon: paletteIcon(g.icon) })),
+    }];
+  }
+
   function onEditorMenuSelect(id: string) {
+    if (id.startsWith('gen:')) {
+      bennuUiStore.openCodeGenerator(id.slice(4));
+      return;
+    }
     switch (id) {
       case 'cut': editorComp?.cutSelection(); break;
       case 'copy': editorComp?.copySelection(); break;
@@ -5199,6 +5380,7 @@
       case 'config-class': bennuUiStore.openConfigClass(); break;
       case 'envvar': void showEnvVar(); break;
       case 'dtolab': bennuDtoLabStore.openAtCaret(); break;
+      case 'regex': openRegexTester(); break;
       case 'save':
         void projectStore.saveActive().then((ok) => { if (ok) toastStore.show('Saved', 'success'); });
         break;
@@ -5746,7 +5928,14 @@
       {/if}
       <span class="ed-pos"><MapPin size={11} /> Ln {caretLine}, Col {caretCol}</span>
       <span class="ed-foot-sep">·</span>
-      <span class="ed-enc" use:tooltip={'File encoding'}>{projectStore.activeEncoding}</span>
+      <!-- Picking an encoding re-READS the file as it (nothing is written); "Convert…" rewrites it. -->
+      <EncodingPill
+        compact
+        encoding={projectStore.activeEncoding ?? 'UTF-8'}
+        overridden={!!(projectStore.activeFilePath && fileEncodingOverride(projectStore.activeFilePath))}
+        onChange={(enc) => { const p = projectStore.activeFilePath; if (p) void reinterpretFile(p, enc ?? null); }}
+        onConvert={() => bennuUiStore.openEncodingConvert()}
+      />
     </div>
   {/if}
 
@@ -6002,11 +6191,6 @@
   .ed-pos { display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .ed-pos :global(svg) { color: var(--text-disabled); }
   .ed-foot-sep { color: var(--text-disabled); }
-  .ed-enc {
-    white-space: nowrap; cursor: default;
-    font-variant-numeric: tabular-nums; letter-spacing: 0.2px;
-  }
-  .ed-enc:hover { color: var(--text-secondary); }
 
   .ed-goto {
     position: absolute; top: 64px; right: 14px;

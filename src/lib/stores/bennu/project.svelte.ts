@@ -37,6 +37,9 @@ import {
 // Splicing byte-offset edits into a source string — shared with the rename-preview apply, which is
 // where it started.
 import { applyByteEditsChecked } from '$lib/components/bennu/rename-apply';
+import { isJavaFile } from '$lib/components/bennu/file-kind';
+import { formatBuffer } from '$lib/ipc/bennu/format';
+import { bennuFormatStyleStore } from './format-style.svelte';
 // Which files open as a preview instead of as text — one predicate, so the store (which
 // decides whether to read the file at all), `saveText` (which refuses to write one) and the
 // editor (which decides what to mount) cannot disagree about what has a buffer behind it.
@@ -261,12 +264,37 @@ function createProjectStore() {
     }, AUTOSAVE_DEBOUNCE_MS));
   }
 
+  /**
+   * Format a Java buffer ahead of an explicit save when the project's style asks for it.
+   *
+   * Never blocks the save: any failure leaves the buffer as it was. Not run by the idle autosave —
+   * reformatting half-typed code under a caret that stopped for a second would be a surprise, and
+   * the next Ctrl+S (or leaving the window) formats it anyway.
+   */
+  async function formatBeforeSave(path: string): Promise<void> {
+    if (!bennuFormatStyleStore.formatOnSave || !isJavaFile(path) || isDemoPath(path)) return;
+    const text = sources.get(path);
+    if (text === undefined) return;
+    try {
+      const edits = await formatBuffer(
+        path, text, bennuSettingsStore.tabSize, bennuSettingsStore.indentStyle !== 'tabs',
+      );
+      // Typed in the meantime: the edits were computed for text that is gone.
+      if (!edits.length || sources.get(path) !== text) return;
+      // On screen: through the editor, as one undo step (its input handler updates `sources`).
+      if (applyLive(path, edits)) return;
+      const { text: formatted, rejected } = applyByteEditsChecked(text, edits);
+      if (!rejected.length) sources.set(path, formatted);
+    } catch { /* formatting must never stand between the user and their save */ }
+  }
+
   /** Save every file with unsaved edits (used by save-on-window-blur). Ungated — the caller decides
    *  when; it saves whatever is dirty, sequentially so the writes don't stampede the BE. A
    *  conflicted path is skipped rather than refused-and-toasted once per blur. */
   async function saveAllDirty() {
     for (const p of [...dirty]) {
       if (conflicted.has(p)) continue;
+      await formatBeforeSave(p);
       await saveText(p, sources.get(p) ?? '');
     }
   }
@@ -1777,6 +1805,7 @@ function createProjectStore() {
     async saveActive(): Promise<boolean> {
       const p = activeFilePath;
       if (!p) return false;
+      await formatBeforeSave(p);
       return saveText(p, sources.get(p) ?? '');
     },
 

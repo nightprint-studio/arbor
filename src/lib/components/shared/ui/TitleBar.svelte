@@ -294,18 +294,27 @@
   .tb {
     /* Stops in PIXELS, not percentages: a corner glow is a fixed physical size, and a
        percentage would stretch it across a wide window until it reached the tab strip in
-       the middle — where it would sit behind the tabs' own opaque backgrounds. */
+       the middle — where it would sit behind the tabs' own opaque backgrounds.
+
+       The glow is RADIAL, centred on the very corner: it fades along the window's top edge
+       and down its left edge at the same rate, so it follows a rounded corner instead of
+       cutting across it. The hairline below used to start at x=0 at full strength; on a
+       window the OS rounds, its first pixels sit outside the curve and read as a coloured
+       wedge. It now fades IN over the corner radius (`--tb-corner`) and only then reaches
+       its colour. */
+    --tb-corner: 14px;
     background-image:
       linear-gradient(
         90deg,
-        color-mix(in srgb, var(--product-tint, transparent) 42%, transparent) 0px,
+        transparent 0px,
+        color-mix(in srgb, var(--product-tint, transparent) 42%, transparent) calc(var(--tb-corner) + 10px),
         color-mix(in srgb, var(--product-tint, transparent) 14%, transparent) 150px,
         transparent 400px
       ),
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--product-tint, transparent) 11%, transparent) 0px,
-        color-mix(in srgb, var(--product-tint, transparent) 3%, transparent) 140px,
+      radial-gradient(
+        ellipse 380px 170px at 0 0,
+        color-mix(in srgb, var(--product-tint, transparent) 13%, transparent) 0px,
+        color-mix(in srgb, var(--product-tint, transparent) 5%, transparent) 150px,
         transparent 380px
       );
     background-size: 100% 2px, 100% 100%;

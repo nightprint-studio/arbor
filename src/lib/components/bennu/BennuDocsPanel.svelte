@@ -21,7 +21,7 @@
     ServerCog, Cog, Languages, Network, Gamepad2, Search, Coffee, FileCode2, Bug, History,
     FileText, Compass, ListTree, Sparkles, ShieldCheck, Wrench, Download, Package, Braces,
     Database, Layers, Palette, Flame, ScrollText, FileType2, SlidersHorizontal, ArrowLeftRight,
-    ListChecks, FolderPlus, Activity, Mic,
+    ListChecks, FolderPlus, Activity, Mic, Wand2,
   } from 'lucide-svelte';
   import Voice from './docs/Voice.svelte';
   import type { Component } from 'svelte';
@@ -57,7 +57,9 @@
   import Refactoring       from './docs/Refactoring.svelte';
   import Validation        from './docs/Validation.svelte';
   import LocalHistory      from './docs/LocalHistory.svelte';
+  import Formatter         from './docs/Formatter.svelte';
   import FileTypes         from './docs/FileTypes.svelte';
+  import RegexDocs         from './docs/Regex.svelte';
   import ToolConfig        from './docs/ToolConfig.svelte';
   // Search
   import Structural        from './docs/Structural.svelte';
@@ -88,6 +90,7 @@
   import AssertJ           from './docs/AssertJ.svelte';
   import DtoLab            from './docs/DtoLab.svelte';
   import Templates         from './docs/Templates.svelte';
+  import CodeGenerators    from './docs/CodeGenerators.svelte';
   import TemplateLanguage  from './docs/TemplateLanguage.svelte';
   import TemplateReference from './docs/TemplateReference.svelte';
   import I18n              from './docs/I18n.svelte';
@@ -157,15 +160,18 @@
     ] },
     { id: 'editor', label: 'Editor', icon: PenLine, items: [
       { id: 'editing',       label: 'The editor',              icon: PenLine     },
+      { id: 'regex',         label: 'Regex & languages in strings', icon: Braces },
       { id: 'navigation',    label: 'Navigation',              icon: Compass     },
       { id: 'goto',          label: 'Go to class, file, symbol', icon: Search    },
       { id: 'structure',     label: 'Structure & trees',       icon: ListTree    },
+      { id: 'generators',    label: 'Code generators',         icon: Wand2       },
       { id: 'templates',     label: 'Code templates',          icon: FileCode2   },
       { id: 'template-language',  label: 'The template language', icon: Braces   },
       { id: 'template-reference', label: 'Template reference',    icon: BookOpen },
       { id: 'refactoring',   label: 'Refactoring & intentions', icon: Wrench     },
       { id: 'voice',         label: 'Voice',                    icon: Mic         },
       { id: 'validation',    label: 'Validation & problems',   icon: ShieldCheck },
+      { id: 'formatter',     label: 'Formatter',               icon: Wand2       },
       { id: 'local-history', label: 'Local history',           icon: History     },
       { id: 'tool-config',   label: 'Tool configuration files', icon: SlidersHorizontal },
       { id: 'file-types',    label: 'Other file types',        icon: FileText    },
@@ -257,6 +263,7 @@
     'module-graph':      ModuleGraph,
     'encodings':         Encodings,
     'editing':           Editing,
+    'regex':             RegexDocs,
     'navigation':        Navigation,
     'goto':              GoTo,
     'structure':         Structure,
@@ -270,6 +277,7 @@
     'refactoring':       Refactoring,
     'voice':             Voice,
     'validation':        Validation,
+    'formatter':         Formatter,
     'local-history':     LocalHistory,
     'tool-config':       ToolConfig,
     'file-types':        FileTypes,
@@ -298,6 +306,7 @@
     'mockito':           Mockito,
     'assertj':           AssertJ,
     'dto-lab':           DtoLab,
+    'generators':        CodeGenerators,
     'templates':         Templates,
     'template-language': TemplateLanguage,
     'template-reference': TemplateReference,

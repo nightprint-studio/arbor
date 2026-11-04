@@ -28,6 +28,8 @@
   import { onMount, untrack } from 'svelte';
   import { EditorState } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
+  import type { Extension } from '@codemirror/state';
+  import type { CompletionSource } from '@codemirror/autocomplete';
   import {
     createMarkdownExtensions,
     goToHeading,
@@ -77,6 +79,11 @@
      * characters is cut — this is for acting on a passage, not for copying a document.
      */
     onSelection?: (selection: { text: string; x: number; y: number } | null) => void;
+    /** Extra extensions, read when the document is (re)built — a vault's wikilinks, the
+     *  formatting keymap. Build them once per document, not per render. */
+    extensions?: Extension[];
+    /** Extra completion sources, alongside the built-in link completion. */
+    completionSources?: CompletionSource[];
   }
 
   let {
@@ -92,6 +99,8 @@
     fileIndex,
     onFindInFiles,
     onSelection,
+    extensions,
+    completionSources,
   }: Props = $props();
 
   let hostEl = $state<HTMLDivElement | undefined>(undefined);
@@ -101,6 +110,14 @@
   /** Focus the document — a host calls this when its tab comes forward. */
   export function focus() {
     view?.focus();
+  }
+
+  /**
+   * Run an editor command (bold, insert table…) on the live view — what a toolbar calls.
+   * `false` when there is no view yet or the command declined.
+   */
+  export function exec(command: (view: EditorView) => boolean): boolean {
+    return view ? command(view) : false;
   }
 
   /**
@@ -129,6 +146,8 @@
               onOpenLink: onOpenLink ?? null,
               fileIndex: fileIndex ?? null,
               onFindInFiles: onFindInFiles ?? null,
+              extensions: extensions ?? [],
+              completionSources: completionSources ?? [],
             },
             compartments,
           ),

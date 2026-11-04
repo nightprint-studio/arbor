@@ -121,3 +121,10 @@ every currently-registered schedule across namespaces — that's why
   once at `register` / `update_trigger`; runtime path never re-parses.
 - **Initial delay**: applies to `FixedRate` / `FixedDelay` only. For cron
   it would just push past one occurrence; ignored.
+
+## Calendar recurrences (`calendar`)
+
+For jobs that are **data** — listed, edited, persisted, asked "when next?" — rather than tasks registered in
+memory: `Recurrence` (`once` / `interval` / `daily` / `weekly` / `cron`, times in local time), the pure
+`next_after(recurrence, instant)`, and the missed-run rule (`due`, `MissedPolicy::{Skip, RunOnce}`). Imber's
+schedules in Corvus are built on it.

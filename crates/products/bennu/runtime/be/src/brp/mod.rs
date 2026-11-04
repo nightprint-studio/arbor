@@ -13,6 +13,10 @@
 //! | `types.rs` | the registered types, and the editor shape of one |
 //! | `edit.rs` | mutate / insert / remove / spawn / despawn / reparent |
 //! | `assist.rs` | component values across many entities in one query — what the assistant's `brp_query` calls |
+//! | `drive.rs` | the `arbor.*` methods of the companion crate: screenshot, input, actions, stats, presence (also MCP tools) |
+//! | `console.rs` | any method the game lists in `rpc.discover`, called by name |
+//! | `states.rs` | Bevy states (`State<T>` / `NextState<T>`): list, read, move — also assistant and MCP tools |
+//! | `saved.rs` | saved endpoints and saved searches, persisted in the profile |
 //!
 //! ## One connection, process-wide
 //!
@@ -29,10 +33,15 @@
 //! the old game from one of the new.
 
 mod assist;
+mod console;
+mod drive;
 mod edit;
 mod entities;
 mod resources;
+mod saved;
 mod session;
+/// The assistant's tools name transitions the same way the handlers do, so the helpers are shared.
+pub(crate) mod states;
 mod types;
 mod watch;
 
@@ -63,6 +72,8 @@ struct Live {
     /// Type paths to ask for as `option`s so a snapshot carries names and parents.
     name_types: Vec<String>,
     parent_types: Vec<String>,
+    /// Engine marker components (camera, light, mesh, …) the snapshot asks each entity `has` about, to draw its icon.
+    kind_types: Vec<(String, &'static str)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

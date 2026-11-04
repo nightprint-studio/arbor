@@ -26,9 +26,12 @@
     expected?: string;
     /** Line ending, appended after a separator when supplied (`CRLF` / `LF`). */
     eol?: string;
+    /** When supplied, the menu ends with "Convert file encoding…" — the verb that REWRITES the file,
+     *  kept apart from the choices above, which only change how it is read. */
+    onConvert?: () => void;
   }
 
-  let { encoding, overridden = false, onChange, compact = false, expected, eol }: Props = $props();
+  let { encoding, overridden = false, onChange, compact = false, expected, eol, onConvert }: Props = $props();
 
   /** The file's encoding drifted away from what the project expects. */
   const drifted = $derived(!!expected && expected !== encoding);
@@ -48,7 +51,18 @@
   // Read-only display (no callback) → just renders the badge, no dropdown.
   const interactive = $derived(typeof onChange === 'function');
 
-  const items = $derived<DropdownItem[]>(
+  const items = $derived<DropdownItem[]>([...choiceItems, ...convertItems]);
+
+  const convertItems = $derived<DropdownItem[]>(
+    onConvert
+      ? [
+          { kind: 'separator' },
+          { kind: 'item', id: 'convert', label: 'Convert file encoding…', onclick: () => onConvert?.() },
+        ]
+      : [],
+  );
+
+  const choiceItems = $derived<DropdownItem[]>(
     ENCODING_CHOICES.map(c => ({
       kind:    'item',
       id:      c.value || 'auto',

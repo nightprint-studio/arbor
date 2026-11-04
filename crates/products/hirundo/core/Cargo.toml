@@ -1,0 +1,14 @@
+[package]
+name         = "hirundo-core"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Hirundo backend core — the canonical headless state (`HirundoState`) the `hirundo-be` HTTP-client process owns, and the `.hirundo/` store (collections, environments, local values) it reads and writes. Tauri-free by construction; the handlers live in hirundo-be."
+
+[dependencies]
+arbor-ipc     = { path = "../../../foundation/ipc" }
+hirundo-model = { path = "../model" }
+serde         = { workspace = true }
+serde_json    = { workspace = true }

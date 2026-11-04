@@ -135,6 +135,8 @@ pub struct Endpoint {
     pub path_vars: Vec<String>,
     /// `produces = …` when written.
     pub produces: String,
+    /// `consumes = …` when written.
+    pub consumes: String,
     /// The handler's return type as written (`ResponseEntity<Order>`, `void`).
     pub return_type: String,
     /// Its parameters, in declaration order.
@@ -733,6 +735,7 @@ mod tests {
             line: 1,
             path_vars: vec!["id".into()],
             produces: String::new(),
+            consumes: String::new(),
             return_type: "String".into(),
             params: Vec::new(),
         };

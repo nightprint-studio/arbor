@@ -144,7 +144,7 @@ where
 }
 
 #[arbor_rpc::handler]
-async fn fetch_remote(
+pub(crate) async fn fetch_remote(
     state: &CorvusState,
     tab_id: String,
     remote: String,

@@ -5,7 +5,9 @@
    * Everything here is the editing surface itself, which is why it is one page on every project
    * kind: a Cargo project draws its buffers with the same rules a Maven one does.
    */
-  import { Database, TextCursorInput } from 'lucide-svelte';
+  import { Database, Regex, TextCursorInput } from 'lucide-svelte';
+  import { bennuRegexStore } from '$lib/stores/bennu/regex.svelte';
+  import type { RegexDetection } from '$lib/components/bennu/inner-lang/detect';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
@@ -31,6 +33,12 @@
     postgres: 'PostgreSQL',
   };
   const sqlDialectOptions = SQL_DIALECTS.map((d) => ({ value: d, label: SQL_DIALECT_LABELS[d] }));
+
+  const regexDetectionOptions = [
+    { value: 'context', label: 'By context (recommended)' },
+    { value: 'names', label: 'By context and variable names' },
+    { value: 'off', label: 'Only when marked' },
+  ];
 
   /** One indent unit: real tabs when the indent style is tabs, else N spaces — so the preview's
    *  indentation tracks the settings above it faithfully. */
@@ -132,6 +140,17 @@
   >
     <Select value={s.sqlDialect} options={sqlDialectOptions}
             onchange={(v) => s.setSqlDialect(v as SqlDialectSetting)} ariaLabel="SQL dialect" />
+  </FormRow>
+</div>
+
+<div class="card">
+  <div class="card-section-title"><Regex size={12} /> Languages in strings</div>
+  <FormRow
+    label="Regular expressions"
+    description="How eagerly a string literal is coloured as a regex without a language=regex comment. Context: the pattern argument of Pattern.compile, String.matches / replaceAll / split, @Pattern(regexp = …), new RegExp(…) and Regex::new(…). Names also colours a variable called like a pattern (emailRegex) — a guess, so it can catch a date format. Off: only strings you mark with // language=regex. Other languages (Lua, HTML, JavaScript, CSS, JSON, XML, YAML, shell) are always marked by comment."
+  >
+    <Select value={bennuRegexStore.detection} options={regexDetectionOptions}
+            onchange={(v) => bennuRegexStore.setDetection(v as RegexDetection)} ariaLabel="Regex auto-detection" />
   </FormRow>
 </div>
 

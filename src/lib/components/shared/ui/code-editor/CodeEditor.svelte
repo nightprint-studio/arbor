@@ -90,6 +90,7 @@
     completion,
     keyBindings,
     marks = [],
+    singleLine = false,
     lineHighlights = [],
     gutterMarks = [],
     lineAnnotations = [],
@@ -232,6 +233,12 @@
      * a backend. Applied live, so a host can recompute them freely.
      */
     marks?: readonly { from: number; to: number; className: string }[];
+    /**
+     * A one-line field: the document never holds a line break (Enter does nothing, a multi-line paste is
+     * refused), so the editor can sit in a form row — a URL, a path — with the full highlighting and mark
+     * machinery. Static at mount, like `readOnly`. Pair it with `lineNumbers={false}`.
+     */
+    singleLine?: boolean;
     /**
      * Whole-line highlights — a class applied to the ROW, so the band spans the full width
      * however short the line is. For "execution is here", "this is the hunk", and anything
@@ -845,6 +852,7 @@
         indentCompartment.of(indentExtensions()),
         minimapCompartment.of(minimap ? minimapExtension() : []),
         placeholder ? cmPlaceholder(placeholder) : [],
+        singleLine ? EditorState.transactionFilter.of((tr) => (tr.docChanged && tr.newDoc.lines > 1 ? [] : tr)) : [],
         updateListener,
       ],
     };

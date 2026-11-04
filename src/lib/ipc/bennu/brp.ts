@@ -77,6 +77,8 @@ export interface BrpRefresh {
 }
 
 export interface BrpRow {
+  /** What a marker component says the entity is (`camera`, `light`, …), when one does. */
+  kind?: string | null;
   id: number;
   name: string | null;
   parent: number | null;
@@ -87,6 +89,8 @@ export interface BrpEntities {
   revision: string;
   total: number;
   rows: BrpRow[];
+  /** Ids in `rows` that are there only as ancestors of a hit. */
+  context: number[];
   generation: number;
 }
 
@@ -100,6 +104,8 @@ export interface BrpEntitiesArgs {
   without?: string[];
   offset?: number;
   limit?: number;
+  /** With a search or filter: also return each hit's ancestors (see `context`), to draw the hits as a tree. */
+  with_parents?: boolean;
 }
 
 export interface BrpEntity {
@@ -213,6 +219,107 @@ export const brpDespawn = (entity: number): Promise<void> => bennu('bennu_brp_de
 /** Move under `parent`, or detach when omitted. */
 export const brpReparent = (entity: number, parent?: number): Promise<void> =>
   bennu('bennu_brp_reparent', { args: { entity, parent } });
+
+// ── Console ──────────────────────────────────────────────────────────────────
+
+/** The methods the connected game lists in `rpc.discover`, sorted. */
+export const brpMethods = (): Promise<string[]> => bennu('bennu_brp_methods', {});
+/** Call any method with raw params; resolves with the game's `result`, rejects with its error message. */
+export const brpCall = (method: string, params?: unknown): Promise<unknown> =>
+  bennu('bennu_brp_call', { args: { method, params } });
+
+// ── Driving the game (the `arbor-bevy-remote` companion plugin) ──────────────
+// A game without the plugin rejects these with a sentence that says what to add.
+
+export interface BrpScreenshot {
+  mime_type: 'image/png';
+  /** Base64, no data-URI prefix. */
+  data: string;
+  width: number;
+  height: number;
+}
+
+export interface BrpFrameStats {
+  frames: number;
+  avg_ms: number;
+  min_ms: number;
+  max_ms: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  fps: number;
+}
+
+export interface BrpStats {
+  uptime_s: number | null;
+  frame: BrpFrameStats | null;
+  frame_ms_recent: number[];
+  diagnostics: { path: string; value: number | null; average: number | null; smoothed: number | null; suffix: string }[];
+  window: { title: string; width: number; height: number; physical_width: number; physical_height: number; scale_factor: number; focused: boolean } | null;
+}
+
+export interface BrpDriveInfo {
+  version: string;
+  bevy: string;
+  methods: string[];
+  keys: string[];
+  gamepad_buttons: string[];
+  gamepad_axes: string[];
+  actions: { name: string; description: string }[];
+  presence: { enabled: boolean; state: string; label: string } | null;
+}
+
+export type BrpMouseArgs = {
+  action: 'move' | 'down' | 'up' | 'click' | 'double_click' | 'drag' | 'wheel';
+  x?: number; y?: number; to_x?: number; to_y?: number;
+  button?: 'left' | 'right' | 'middle' | 'back' | 'forward';
+  steps?: number; duration_ms?: number; dx?: number; dy?: number; unit?: 'line' | 'pixel';
+};
+export type BrpKeyArgs = { key: string; action?: 'press' | 'down' | 'up'; modifiers?: string[]; hold_ms?: number };
+export type BrpTextArgs = { text: string; interval_ms?: number };
+export type BrpPadArgs = { button?: string; action?: 'press' | 'down' | 'up'; axis?: string; value?: number; hold_ms?: number };
+export type BrpPresenceArgs = { state?: 'idle' | 'connected' | 'paused'; label?: string; enabled?: boolean };
+
+export const brpDriveInfo = (): Promise<BrpDriveInfo> => bennu('bennu_brp_arbor_info', {});
+export const brpScreenshot = (maxWidth?: number): Promise<BrpScreenshot> =>
+  bennu('bennu_brp_screenshot', { args: maxWidth ? { max_width: maxWidth } : {} });
+export const brpStats = (history = 0): Promise<BrpStats> => bennu('bennu_brp_stats', { args: history ? { history } : {} });
+export const brpKey = (a: BrpKeyArgs): Promise<unknown> => bennu('bennu_brp_key', { args: a });
+export const brpText = (a: BrpTextArgs): Promise<unknown> => bennu('bennu_brp_text', { args: a });
+export const brpMouse = (a: BrpMouseArgs): Promise<unknown> => bennu('bennu_brp_mouse', { args: a });
+export const brpGamepad = (a: BrpPadArgs): Promise<unknown> => bennu('bennu_brp_gamepad', { args: a });
+export const brpInputCancel = (): Promise<unknown> => bennu('bennu_brp_input_cancel', {});
+export const brpAction = (name: string, arg?: unknown): Promise<unknown> =>
+  bennu('bennu_brp_action', { args: arg === undefined ? { name } : { name, arg } });
+export const brpActions = (): Promise<{ actions: { name: string; description: string }[] }> => bennu('bennu_brp_actions', {});
+export const brpPresence = (a: BrpPresenceArgs = {}): Promise<{ enabled: boolean; state: string; label: string }> =>
+  bennu('bennu_brp_presence', { args: a });
+
+/** `type path → { field path → hint }` from the game's `#[derive(RemoteInspect)]` types; `{}` without the plugin. */
+export const brpInspectHints = (): Promise<import('$lib/components/bennu/brp/brp-widgets').HintMap> =>
+  bennu('bennu_brp_inspect_hints', {});
+
+// ── Saved endpoints and searches ─────────────────────────────────────────────
+
+export interface BrpSavedEndpoint {
+  name: string;
+  endpoint: string;
+}
+
+/** A search-box string (`goblin has:Health`) with a name. */
+export interface BrpSavedQuery {
+  name: string;
+  search: string;
+}
+
+export interface BrpSaved {
+  endpoints: BrpSavedEndpoint[];
+  queries: BrpSavedQuery[];
+}
+
+export const brpSavedGet = (): Promise<BrpSaved> => bennu('bennu_brp_saved_get', {});
+/** Replace what is saved; resolves with what was stored (trimmed, de-duplicated, capped). */
+export const brpSavedSet = (saved: BrpSaved): Promise<BrpSaved> => bennu('bennu_brp_saved_set', { args: saved });
 
 // ── Events ───────────────────────────────────────────────────────────────────
 

@@ -70,8 +70,14 @@
   the server does, since substitution happens before there is any JavaScript to quote, and the rule the page grammar applies to attribute values.
 </p>
 <p>
-  The whole marker takes the JSP colour rather than being coloured inside: within JavaScript, <em>this part is not JavaScript</em> is the useful thing to say. A marker
-  spanning several lines is followed across them.
+  The marker is painted over the JavaScript the way it is in the page: a tag wears its taglib's colour, its attribute names and values are coloured, and an EL or OGNL
+  expression inside it (<code>test="$&lbrace;skin == 'text'&rbrace;"</code>) is read as one. A scriptlet takes the JSP meta colour. The JavaScript around it is read
+  with the markers taken out, so a <code>&lt;c:if&gt;</code> wrapping a block of script never turns the statements inside into a comparison. A marker spanning several
+  lines is followed across them.
+</p>
+<p>
+  A tag that <em>closes</em> inside the script — <code>&lt;/c:if&gt;</code> after a <code>&lt;c:if&gt;</code> that opened in it — does not end the script: only
+  <code>&lt;/script&gt;</code> does, so the markup after the block keeps its own colours.
 </p>
 
 <h2>A colour per taglib</h2>

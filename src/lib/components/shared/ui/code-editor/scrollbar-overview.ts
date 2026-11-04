@@ -25,10 +25,13 @@ import { esc, highlightToHtml } from './mini-highlight';
 import { lezerHighlightStyle } from './theme';
 
 /**
- * One line highlighted the way the buffer is, when the buffer's language is a Lezer / stream one (XML,
- * pom, mappers, YAML, JSON, SQL, …): the SAME parse tree and the SAME style the editor paints with, so
- * the lens can never colour a line differently from where it came from. `null` for a language with no
- * such tree (the Tree-sitter ones), which then use the approximate {@link highlightToHtml}.
+ * One line highlighted the way the buffer is: the SAME parse tree and the SAME style the editor
+ * paints with, so the lens can never colour a line differently from where it came from.
+ *
+ * A Lezer / stream language (XML, pom, mappers, YAML, JSON, SQL, …) contributes its parse tree; a
+ * Tree-sitter one (Java, JSP, …) has no such tree but its highlighter publishes whole-document mark
+ * decorations, read below like any host decoration. `null` only when the editor has neither (plain
+ * text, or a grammar still loading), which then use the approximate {@link highlightToHtml}.
  */
 function lezerLineHtml(view: EditorView, lineNumber: number): string | null {
   const state = view.state;
@@ -36,21 +39,24 @@ function lezerLineHtml(view: EditorView, lineNumber: number): string | null {
   // Parsed on demand up to this line: a stream language only parses what was scrolled to, and the
   // lens shows lines that never were. Bounded, so a huge file cannot stall a pointer move.
   const tree = ensureSyntaxTree(state, line.to, 40);
-  if (!tree || tree.length === 0) return null;
 
   // The spans the language paints, and the ones the HOST adds on top (a pom's coordinates, a `${…}`, a
   // query's tint): both are read off the editor, so the lens shows the line as the buffer does. Marks
   // are class-only decorations, which the lens rows carry under a `.cm-content` so the host's own
   // stylesheet (written as `.cm-content .cm-fw-…`) reaches them.
   const spans: { from: number; to: number; cls: string }[] = [];
-  highlightTree(tree, lezerHighlightStyle, (from, to, cls) => spans.push({ from, to, cls }), line.from, line.to);
+  const hasTree = !!tree && tree.length > 0;
+  if (tree && hasTree) highlightTree(tree, lezerHighlightStyle, (from, to, cls) => spans.push({ from, to, cls }), line.from, line.to);
+  let decorated = false;
   for (const source of state.facet(EditorView.decorations)) {
     const set = typeof source === 'function' ? source(view) : source;
+    if (set.size > 0) decorated = true;
     set.between(line.from, line.to, (from, to, deco) => {
       const cls = (deco.spec as { class?: string }).class;
       if (cls && to > from) spans.push({ from: Math.max(from, line.from), to: Math.min(to, line.to), cls });
     });
   }
+  if (!hasTree && !decorated) return null;
 
   // Cut the line at every span edge; each piece takes the classes of all spans covering it.
   const cuts = new Set<number>([line.from, line.to]);

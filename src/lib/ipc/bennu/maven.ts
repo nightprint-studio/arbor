@@ -115,3 +115,9 @@ export interface ProjectAdvisories {
 export function projectAdvisories(root: string): Promise<ProjectAdvisories> {
   return bennu('bennu_project_advisories', { args: { root } });
 }
+
+/** The same answer for a Node project: the lockfile's resolved packages, looked up as OSV's `npm`
+ *  ecosystem, behind the same `[maven] advisories` switch. Wire: `bennu_node_advisories`. */
+export function nodeAdvisories(root: string): Promise<ProjectAdvisories> {
+  return bennu('bennu_node_advisories', { args: { root } });
+}

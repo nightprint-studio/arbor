@@ -18,6 +18,7 @@
   import { getGitIdentity } from '$lib/ipc/corvus/graph';
   import { pushBranch } from '$lib/ipc/corvus/remote';
   import { plansStore, activeRepoRef } from '$lib/stores/corvus/plans.svelte';
+  import { imberStore } from '$lib/stores/corvus/imber.svelte';
 
   let { onCommit }: { onCommit?: () => void } = $props();
 
@@ -150,6 +151,8 @@
   allowPush
   allowPlan
   onSubmit={submit}
+  onGenerate={(hint) => imberStore.generateCommitMessage(hint)}
+  onCancelGenerate={() => imberStore.cancelCommitMessage()}
 >
   {#snippet extra()}
     <Contribution point="arbor:commit-form:action">

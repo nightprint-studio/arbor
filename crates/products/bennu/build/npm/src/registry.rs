@@ -155,6 +155,41 @@ impl Semver {
 
 // ── Which package manager runs this project ──────────────────────────────────
 
+/// How far `latest` is ahead of `current`, or `None` when it is not ahead (or either is not a
+/// version this can read). The three numbers only: `1.2.3-beta.1` against `1.2.3` is "the release
+/// of what you are on", which counts as a patch.
+pub fn bump(current: &str, latest: &str) -> Option<Bump> {
+    let (c, l) = (Semver::parse(current)?, Semver::parse(latest)?);
+    if l.major != c.major {
+        return (l.major > c.major).then_some(Bump::Major);
+    }
+    if l.minor != c.minor {
+        return (l.minor > c.minor).then_some(Bump::Minor);
+    }
+    if l.patch != c.patch {
+        return (l.patch > c.patch).then_some(Bump::Patch);
+    }
+    (c.pre && !l.pre).then_some(Bump::Patch)
+}
+
+/// The size of an available upgrade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bump {
+    Major,
+    Minor,
+    Patch,
+}
+
+impl Bump {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Major => "major",
+            Self::Minor => "minor",
+            Self::Patch => "patch",
+        }
+    }
+}
+
 /// The tool a project's scripts should be run with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageManager {
@@ -280,6 +315,17 @@ mod tests {
         // One file, not a directory shared with the scope's siblings.
         let p = cache_path(Path::new("/c"), "@sveltejs/kit");
         assert_eq!(p, Path::new("/c").join("@sveltejs__kit.json"));
+    }
+
+    #[test]
+    fn a_bump_is_sized_by_the_first_number_that_moved() {
+        assert_eq!(bump("1.2.3", "2.0.0"), Some(Bump::Major));
+        assert_eq!(bump("1.2.3", "1.3.0"), Some(Bump::Minor));
+        assert_eq!(bump("1.2.3", "1.2.9"), Some(Bump::Patch));
+        assert_eq!(bump("1.2.3", "1.2.3"), None);
+        assert_eq!(bump("2.0.0", "1.9.9"), None, "never a downgrade");
+        assert_eq!(bump("1.2.3-beta.1", "1.2.3"), Some(Bump::Patch));
+        assert_eq!(bump("workspace:*", "1.0.0"), None);
     }
 
     #[test]

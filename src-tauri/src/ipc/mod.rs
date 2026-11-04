@@ -229,6 +229,11 @@ pub fn build_router(app: &AppHandle) -> Router {
     // at attach/detach time.
     router.register("picus", Arc::new(SplitBroker::pure_oop("picus")));
 
+    // Hirundo backend: the HTTP client of the Bennu suite (collections as files in the repo,
+    // environments with types). Served out-of-process by `hirundo-be`, spawned lazily by
+    // [`ensure_hirundo_be`]; no in-process handlers, so `pure_oop`.
+    router.register("hirundo", Arc::new(SplitBroker::pure_oop("hirundo")));
+
     // Garrulus backend: the notes product (an Obsidian-shaped vault plus the sync
     // engine that keeps two machines on the same one). Like picus/bennu, served
     // out-of-process by `garrulus-be` — spawned lazily by [`ensure_garrulus_be`]
@@ -1252,6 +1257,20 @@ fn host_dispatch(
             .unwrap_or_default();
         return Ok(serde_json::json!(secret));
     }
+    // ── Hirundo secret variables ──────────────────────────────────────────────────
+    //
+    // A Hirundo variable marked `@secret` has no value in any file; `hirundo-be` asks for it here, per
+    // request. The backend names `<project>|<layer>:<id>|<name>`; the `hirundo/` namespace is applied
+    // shell-side (`hirundo_secret_account`), so this door can never read a git token or an API key.
+    if method == "__hirundo_secret" {
+        let raw: String = serde_json::from_value(params)
+            .map_err(|e| format!("__hirundo_secret: invalid account: {e}"))?;
+        let account = hirundo_secret_account(&raw)?;
+        let secret = crate::auth::credential_store::get(&account, "")
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        return Ok(serde_json::json!(secret));
+    }
     if method == "__picus_delete_secret" {
         let id: String = serde_json::from_value(params)
             .map_err(|e| format!("__picus_delete_secret: invalid connection id: {e}"))?;
@@ -1410,6 +1429,29 @@ fn host_dispatch(
     match resolved {
         Ok(session) => serde_json::to_value(session).map_err(|e| e.to_string()),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+/// The keychain account holding one Hirundo secret variable: the backend's `<project>|<layer>:<id>|<name>`
+/// under a `hirundo/` prefix applied here, so the backend can name only its own accounts. The text is
+/// bounded and free of control characters — it ends up in an OS credential store.
+pub(crate) fn hirundo_secret_account(raw: &str) -> Result<String, String> {
+    if raw.is_empty() || raw.len() > 1024 || raw.chars().any(|c| c.is_control()) {
+        return Err("invalid secret account".to_string());
+    }
+    Ok(format!("hirundo/{raw}"))
+}
+
+#[cfg(test)]
+mod hirundo_secret_account_tests {
+    use super::hirundo_secret_account;
+
+    #[test]
+    fn the_namespace_is_applied_here_and_hostile_input_is_refused() {
+        assert_eq!(hirundo_secret_account("/p/a|environment:staging|token").unwrap(), "hirundo//p/a|environment:staging|token");
+        assert!(hirundo_secret_account("").is_err());
+        assert!(hirundo_secret_account("a\nb").is_err());
+        assert!(hirundo_secret_account(&"a".repeat(1025)).is_err());
     }
 }
 
@@ -2083,11 +2125,12 @@ pub fn ensure_bennu_be(app: &AppHandle) {
 /// the one that does not emit it, and re-reads on its next call).
 pub fn recycle_backends_for_profile(app: &AppHandle) {
     type Ensure = fn(&AppHandle);
-    let backends: [(&'static str, Ensure); 6] = [
+    let backends: [(&'static str, Ensure); 7] = [
         ("bennu", ensure_bennu_be),
         ("sitta", ensure_sitta_be),
         ("merula", ensure_merula_be),
         ("picus", ensure_picus_be),
+        ("hirundo", ensure_hirundo_be),
         ("garrulus", ensure_garrulus_be),
         ("tyto", ensure_tyto_be),
     ];
@@ -2245,6 +2288,70 @@ fn spawn_picus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
         Ok(pair) => Some(pair),
         Err(e) => {
             tracing::warn!("failed to spawn picus-be ({e}) — Picus stays on its fixtures");
+            None
+        }
+    }
+}
+
+/// Lazily spawn `hirundo-be` and attach it to the router, **idempotently**. Called when the Hirundo window
+/// opens, or when another product borrows the backend (`ensure_product_backend`), off the main thread — the
+/// spawn blocks on the child's first `Hello` frame. The hirundo twin of [`ensure_picus_be`].
+pub fn ensure_hirundo_be(app: &AppHandle) {
+    // A lock of its own, so the other backends' spawns never contend with this one.
+    static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = match SPAWN_LOCK.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if split_broker::is_attached("hirundo") {
+        tracing::debug!("ensure_hirundo_be: already attached — no-op");
+        return;
+    }
+    let gen = split_broker::next_gen();
+    tracing::info!("ensure_hirundo_be: spawning hirundo-be (gen={gen})");
+    match spawn_hirundo_be(app, gen) {
+        Some((child, methods)) => {
+            tracing::info!("hirundo-be up (lazy, gen={gen}): {} method(s) served out-of-process", methods.len());
+            split_broker::attach("hirundo", gen, methods.into_iter().collect(), Arc::new(child) as Arc<dyn BrokerClient>);
+            use tauri::Emitter;
+            let _ = app.emit("arbor://hirundo-be-up", ());
+        }
+        None => {
+            tracing::info!("hirundo-be not available — the Hirundo window has no backend");
+        }
+    }
+}
+
+fn spawn_hirundo_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
+    use crate::process_ext::NoWindowExt;
+
+    let Some(bin) = backend_binary(app, "hirundo-be") else {
+        tracing::info!("hirundo-be binary not found (backends/ resource or beside the launcher)");
+        return None;
+    };
+
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.no_window();
+    log_backend_stderr(&mut cmd, "hirundo");
+
+    let app_for_events = app.clone();
+    let app_for_host = app.clone();
+    let app_for_disc = app.clone();
+    match ChildClient::spawn(
+        cmd,
+        move |topic, payload| forward_backend_event(&app_for_events, "hirundo", topic, payload),
+        move |method, params| host_dispatch(&app_for_host, method, params),
+        move || {
+            use tauri::Emitter;
+            tracing::warn!("hirundo-be disconnect callback fired (gen={gen})");
+            if split_broker::detach_if_current("hirundo", gen, "disconnect") {
+                let _ = app_for_disc.emit("arbor://hirundo-be-down", ());
+            }
+        },
+    ) {
+        Ok(pair) => Some(pair),
+        Err(e) => {
+            tracing::warn!("failed to spawn hirundo-be ({e})");
             None
         }
     }

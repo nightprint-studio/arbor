@@ -15,6 +15,17 @@
 /** The sidebar's sections, in the order the activity rail lists them. */
 export type SidebarSection = 'notes' | 'search' | 'tags' | 'types';
 
+/** The note dialogs. One slot rather than one flag each: only one can be in front,
+ *  and a dialog that opens another replaces it. `new` may arrive with a type already
+ *  chosen ("New Bug"); `pick-type` is the type list both "New note of a type" and
+ *  "Give this note a type" start from — `apply` is the note to type, or `null` when
+ *  the pick is for a new one. */
+export type NoteDialog =
+  | { kind: 'new'; typeId: string | null }
+  | { kind: 'pick-type'; apply: string | null }
+  | { kind: 'rename'; path: string }
+  | { kind: 'delete'; path: string };
+
 /** Which page of the vault dialog to land on. Both are the same decision made
  *  twice, so they are one dialog rather than two. */
 export type VaultPickerPage = 'open' | 'create';
@@ -41,6 +52,8 @@ function createGarrulusUiStore() {
   let vaultPickerOpen = $state(false);
   let vaultPickerPage = $state<VaultPickerPage>('open');
   let paletteOpen = $state(false);
+  let switcherOpen = $state(false);
+  let noteDialog = $state<NoteDialog | null>(null);
   let docsOpen = $state(false);
   /** Topic the docs panel lands on; `''` means "wherever it opens by default". */
   let docsSection = $state('');
@@ -56,7 +69,12 @@ function createGarrulusUiStore() {
    * the work, and F1 has to close it again from wherever the focus went.
    */
   const anyModalOpen = $derived(
-    remoteConfigOpen || commitMessageOpen || vaultPickerOpen || paletteOpen,
+    remoteConfigOpen ||
+      commitMessageOpen ||
+      vaultPickerOpen ||
+      paletteOpen ||
+      switcherOpen ||
+      noteDialog != null,
   );
 
   return {
@@ -67,6 +85,8 @@ function createGarrulusUiStore() {
     get vaultPickerOpen() { return vaultPickerOpen; },
     get vaultPickerPage() { return vaultPickerPage; },
     get paletteOpen() { return paletteOpen; },
+    get switcherOpen() { return switcherOpen; },
+    get noteDialog() { return noteDialog; },
     get docsOpen() { return docsOpen; },
     get docsSection() { return docsSection; },
     get anyModalOpen() { return anyModalOpen; },
@@ -128,6 +148,11 @@ function createGarrulusUiStore() {
       vaultPickerOpen = true;
     },
     closeVaultPicker() { vaultPickerOpen = false; },
+
+    openSwitcher() { switcherOpen = true; },
+    closeSwitcher() { switcherOpen = false; },
+    openNoteDialog(dialog: NoteDialog) { noteDialog = dialog; },
+    closeNoteDialog() { noteDialog = null; },
 
     togglePalette() { paletteOpen = !paletteOpen; },
     closePalette() { paletteOpen = false; },

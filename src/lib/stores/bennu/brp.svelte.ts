@@ -31,15 +31,24 @@ import {
   type BrpStateEvent, type BrpStatus, type BrpTypeInfo, type BrpTypeKind,
 } from '$lib/ipc/bennu/brp';
 import { isEmptySearch, parseSearch } from '$lib/components/bennu/brp/brp-search';
+import { currentStateName, parseStateTypes, pendingValue, type StateEntry } from '$lib/components/bennu/brp/brp-state';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
 /** One level of the tree (or the flat search result): the rows loaded and how many exist. */
 export interface BrpLevel {
   rows: BrpRow[];
   total: number;
+  /** A filtered result: the rows that are only there as ancestors of a hit. */
+  context?: number[];
 }
 
-export type BrpTab = 'entities' | 'resources' | 'types';
+/** What the bottom panel shows: the selected thing's detail, or one of the game-wide views. */
+export type BrpTab = 'detail' | 'types' | 'console' | 'screen' | 'input' | 'stats';
+
+/** The three roots of the sidebar tree. */
+export type BrpRoot = 'entities' | 'resources' | 'states';
+/** What the detail view is about. */
+export type BrpFocus = 'entity' | 'resource' | 'state';
 
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:15702';
 const POLL_MIN_MS = 1000;
@@ -47,6 +56,8 @@ const POLL_MAX_MS = 8000;
 /** Rows fetched per tree level before a "load more" row appears. */
 const LEVEL_PAGE = 500;
 const SEARCH_DEBOUNCE_MS = 200;
+/** Most nodes "expand all" opens: each is one request to the backend's snapshot. */
+const EXPAND_ALL_LIMIT = 400;
 
 const OFFLINE: BrpStatus = {
   connected: false, state: 'disconnected', endpoint: null, family: 'unknown', discovered: false,
@@ -69,7 +80,10 @@ function createBennuBrpStore() {
   let retry = $state<{ attempt: number; max: number } | null>(null);
 
   // ── Navigation ──
-  let tab = $state<BrpTab>('entities');
+  let tab = $state<BrpTab>('detail');
+  let focus = $state<BrpFocus | null>(null);
+  /** Which of the sidebar's three roots are open: none until the user opens one. */
+  const rootsOpen = new SvelteSet<BrpRoot>();
   let roots = $state<BrpLevel>({ rows: [], total: 0 });
   const children = new SvelteMap<number, BrpLevel>();
   const expanded = new SvelteSet<number>();
@@ -89,6 +103,12 @@ function createBennuBrpStore() {
 
   // ── Resources & types ──
   let resources = $state<BrpResourceEntry[]>([]);
+  let states = $state<StateEntry[]>([]);
+  let selectedState = $state<string | null>(null);
+  /** Current variant name of the selected state, and the variants it can take. */
+  let stateCurrent = $state<string | null>(null);
+  let stateVariants = $state<{ name: string; sample: unknown }[]>([]);
+  let stateError = $state<string | null>(null);
   let selectedResource = $state<string | null>(null);
   let resourceValue = $state<unknown>(undefined);
   let resourceError = $state<string | null>(null);
@@ -99,6 +119,8 @@ function createBennuBrpStore() {
 
   // ── Plumbing (not reactive) ──
   let wired = false;
+  /** Panels showing the game right now (the sidebar, the detail panel): polling stops with the last one. */
+  let users = 0;
   let lastGeneration = -1;
   let revision = '';
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -219,6 +241,10 @@ function createBennuBrpStore() {
     entityError = null;
     watching = false;
     resources = [];
+    states = [];
+    selectedState = null;
+    stateCurrent = null;
+    stateVariants = [];
     selectedResource = null;
     resourceValue = undefined;
     types = { items: [], total: 0 };
@@ -230,9 +256,13 @@ function createBennuBrpStore() {
   /** A new game (first connect, or the old one restarted): nothing cached describes it. */
   async function onNewWorld() {
     const keep = selected;
+    const open = [...expanded];
     clearWorld();
     await reload();
+    // The same game restarted: the nodes the user had open are still where they were.
+    for (const id of open) await toggle(id, true);
     void loadResources();
+    void loadStates();
     void searchTypes();
     if (keep !== null) void select(keep);
     if (polling) schedule(0);
@@ -285,6 +315,30 @@ function createBennuBrpStore() {
     }
   }
 
+  /**
+   * Open every node that has children, level by level, until `EXPAND_ALL_LIMIT` nodes are open — a
+   * world of ten thousand entities is not something to unfold in one click.
+   */
+  async function expandAll() {
+    let queue = [...roots.rows];
+    let opened = 0;
+    while (queue.length > 0 && opened < EXPAND_ALL_LIMIT) {
+      const next: BrpRow[] = [];
+      for (const row of queue) {
+        if (row.child_count === 0 || opened >= EXPAND_ALL_LIMIT) continue;
+        await toggle(row.id, true);
+        opened++;
+        next.push(...(children.get(row.id)?.rows ?? []));
+      }
+      queue = next;
+    }
+    if (opened >= EXPAND_ALL_LIMIT) toastStore.show(`Opened ${opened} nodes — the rest stay closed.`, 'info');
+  }
+
+  function collapseAll() {
+    expanded.clear();
+  }
+
   /** Fetch the next page of a level (`parent` undefined = the roots). */
   async function loadMore(parent?: number) {
     const level = parent === undefined ? roots : children.get(parent);
@@ -329,8 +383,9 @@ function createBennuBrpStore() {
         with: withPaths.length ? withPaths : undefined,
         without: noPaths.length ? noPaths : undefined,
         limit: LEVEL_PAGE,
+        with_parents: true,
       });
-      flat = { rows: r.rows, total: r.total };
+      flat = { rows: r.rows, total: r.total, context: r.context };
     } catch (e) {
       toastStore.show(message(e), 'error');
     }
@@ -355,6 +410,7 @@ function createBennuBrpStore() {
     search = '';
     searchNote = null;
     flat = null;
+    rootsOpen.add('entities');
     roots = await levelOf({});
     for (const a of await brpAncestors(id)) await toggle(a, true);
     await select(id);
@@ -408,6 +464,8 @@ function createBennuBrpStore() {
 
   /** The panel was hidden: stop asking, and stop the game pushing frames nobody reads. */
   function suspend() {
+    users = Math.max(0, users - 1);
+    if (users > 0) return;
     stopPolling();
     watching = false;
     void brpUnwatch().catch(() => {});
@@ -415,6 +473,7 @@ function createBennuBrpStore() {
 
   /** The panel is visible again: catch up, and re-subscribe the selected entity. */
   function resume() {
+    users++;
     startPolling();
     if (status.connected && selected !== null) {
       void reloadEntity().then(() => (status.can.watch && selected !== null ? startWatch(selected) : undefined));
@@ -426,6 +485,7 @@ function createBennuBrpStore() {
   async function select(id: number | null) {
     const token = ++selectToken;
     selected = id;
+    if (id !== null) focus = 'entity';
     entityError = null;
     watching = false;
     void brpUnwatch().catch(() => {});
@@ -549,6 +609,7 @@ function createBennuBrpStore() {
 
   async function selectResource(typePath: string | null) {
     selectedResource = typePath;
+    if (typePath !== null) focus = 'resource';
     resourceError = null;
     resourceValue = undefined;
     if (typePath !== null) await reloadResource();
@@ -606,6 +667,65 @@ function createBennuBrpStore() {
     }
   }
 
+  /** What the tree knows an entity to be (`camera`, `light`, …), from whichever loaded level lists it. */
+  function kindOf(id: number): string | null {
+    const levels = [roots, ...(flat ? [flat] : []), ...children.values()];
+    for (const level of levels) {
+      const row = level.rows.find((r) => r.id === id);
+      if (row) return row.kind ?? null;
+    }
+    return null;
+  }
+
+  // ── States ──
+
+  /** Find the game's state machines: every `State<T>` resource in the registry, with its `NextState<T>` if any. */
+  async function loadStates() {
+    try {
+      const page = await brpTypes({ kind: 'resource', query: 'State<', limit: 400 });
+      states = parseStateTypes(page.items.map((t) => t.type_path));
+    } catch {
+      states = [];
+    }
+  }
+
+  async function selectState(enumPath: string | null) {
+    selectedState = enumPath;
+    stateError = null;
+    stateCurrent = null;
+    stateVariants = [];
+    if (enumPath === null) return;
+    focus = 'state';
+    const entry = states.find((e) => e.enumPath === enumPath);
+    if (!entry) return;
+    try {
+      const [value, shape] = await Promise.all([brpResource(entry.statePath), brpTypeShape(enumPath)]);
+      if (enumPath !== selectedState) return;
+      stateCurrent = currentStateName(value.value);
+      stateVariants = shape.shape.kind === 'enum' ? shape.shape.variants.map((v) => ({ name: v.name, sample: v.sample })) : [];
+    } catch (e) {
+      if (enumPath === selectedState) stateError = message(e);
+    }
+  }
+
+  /** Ask the game to move the state machine to `variant` (it takes effect on its next state-transition run). */
+  async function setState(variant: string): Promise<boolean> {
+    const entry = states.find((e) => e.enumPath === selectedState);
+    const sample = stateVariants.find((v) => v.name === variant)?.sample;
+    if (!entry?.nextPath || sample === undefined) {
+      stateError = 'This game did not register NextState for this state, so it cannot be changed from here.';
+      return false;
+    }
+    const ok = await attempt('set state', () => brpInsert({ type_path: entry.nextPath!, value: pendingValue(sample) }));
+    if (ok) setTimeout(() => void selectState(entry.enumPath), 300);
+    return ok;
+  }
+
+  function openRoot(root: BrpRoot, open: boolean) {
+    if (open) rootsOpen.add(root);
+    else rootsOpen.delete(root);
+  }
+
   return {
     get status() { return status; },
     get endpoint() { return endpoint; },
@@ -617,6 +737,15 @@ function createBennuBrpStore() {
 
     get tab() { return tab; },
     setTab(t: BrpTab) { tab = t; },
+    get focus() { return focus; },
+    get rootsOpen() { return rootsOpen; },
+    openRoot,
+    get states() { return states; },
+    get selectedState() { return selectedState; },
+    get stateCurrent() { return stateCurrent; },
+    get stateVariants() { return stateVariants; },
+    get stateError() { return stateError; },
+    loadStates, selectState, setState,
     get roots() { return roots; },
     get children() { return children; },
     get expanded() { return expanded; },
@@ -626,6 +755,8 @@ function createBennuBrpStore() {
     get loadingTree() { return loadingTree; },
 
     get selected() { return selected; },
+    /** The kind of the selected entity, for its icon. */
+    get entityKind() { return selected === null ? null : kindOf(selected); },
     get entity() { return entity; },
     get entityError() { return entityError; },
     get watching() { return watching; },
@@ -641,7 +772,7 @@ function createBennuBrpStore() {
     selectType(path: string | null) { selectedType = path; },
 
     init, connect, disconnect, reload,
-    toggle, loadMore, setSearch, reveal, select, reloadEntity,
+    toggle, expandAll, collapseAll, loadMore, setSearch, reveal, select, reloadEntity,
     suspend, resume,
     mutateComponent, insertComponent, removeComponent, spawn, despawn, reparent,
     loadResources, selectResource, reloadResource, mutateResource, replaceResource, removeResource,

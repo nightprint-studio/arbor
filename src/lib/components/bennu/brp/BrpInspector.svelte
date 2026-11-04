@@ -14,7 +14,11 @@
   import PaneHeader from '$lib/components/shared/ui/PaneHeader.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import { bennuBrpStore as brp } from '$lib/stores/bennu/brp.svelte';
+  import BrpCopyMenu from './BrpCopyMenu.svelte';
+  import BrpIcon from './icons/BrpIcon.svelte';
+  import { entityIcon } from './icons/icon-kinds';
   import BrpValueCard from './BrpValueCard.svelte';
+  import { entityDocument } from './brp-format';
   import { entityTag, shortTypeName } from './brp-value';
 
   let {
@@ -43,7 +47,11 @@
   const title = $derived(entity?.name ?? (brp.selected !== null ? 'Entity' : 'Inspector'));
 </script>
 
-<PaneHeader {title}>
+<PaneHeader>
+  {#snippet children()}
+    <BrpIcon name={entityIcon(brp.entityKind, 0)} size={14} />
+    {title}
+  {/snippet}
   {#snippet end()}
     {#if entity}
       <Badge variant="chip" size="sm" label={entityTag(entity.id)} />
@@ -60,6 +68,7 @@
           <Plus size={13} />
         </IconButton>
       {/if}
+      <BrpCopyMenu what="entity" value={() => entityDocument(entity?.components ?? {})} />
       <IconButton tooltip="Refresh" size={22} onclick={() => void brp.reloadEntity()}>
         <RefreshCw size={13} />
       </IconButton>
@@ -81,7 +90,7 @@
     <StateBlock tone="error" fill={false} label={brp.entityError} />
   {/if}
   <div class="in-filter">
-    <Input bind:value={filter} size="sm" clearable placeholder="Filter components…" ariaLabel="Filter components" />
+    <Input bind:value={filter} size="sm" clearable quiet placeholder="Filter components…" ariaLabel="Filter components" />
   </div>
   <div class="in-list">
     {#each entries as typePath (typePath)}
@@ -102,6 +111,7 @@
 {/if}
 
 <style>
-  .in-filter { padding: 6px 10px; flex: none; }
-  .in-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+  .in-filter { padding: 4px 8px; flex: none; }
+  /* A block, not a flex column: sections keep their own height instead of shrinking to fit the scroll area. */
+  .in-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 8px; }
 </style>

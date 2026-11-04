@@ -253,8 +253,8 @@ export function buildGarrulusPalette(
     { id: 'save', title: 'Save this note now', icon: 'FileText', shortcut: 'Ctrl+S', when: !!note && !!a.saveNote, action: () => a.run(() => a.saveNote?.()) },
     {
       id: 'rename',
-      title: 'Rename this note and update every link to it',
-      subtitle: 'Shows what changes before it changes anything',
+      title: 'Rename or move this note…',
+      subtitle: 'Links to the old name are not rewritten — unresolved ones show under Problems',
       icon: 'Pencil',
       shortcut: 'F2',
       when: !!note && !!a.renameNote,

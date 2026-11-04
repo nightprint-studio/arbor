@@ -50,13 +50,17 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies' | `plugin:${str
  *  say "not here". It is reached from the editor's own toolbar — which appears on a bundle and nowhere
  *  else — from the palette, and from its shortcut. */
 export type RightPanel =
-  | 'maven' | 'gradle' | 'cargo' | 'tests' | 'ast' | 'i18n'
+  | 'maven' | 'gradle' | 'cargo' | 'node' | 'tests' | 'ast' | 'i18n'
+  /** The running Bevy game as one tree — entities, resources, states. Its detail opens in the bottom `bevyremote` panel. */
+  | 'bevy'
   /** The assistant — chat and agent. A design preview for now; offered on every project, since it
    *  needs nothing from one. */
   | 'assistant'
   /** The database tool window — entities and native queries checked against a Picus connection.
    *  Offered only when Picus is installed. */
   | 'picus'
+  /** The HTTP panel — the answer to the request run from a `.http` file, the environment, the history. */
+  | 'http'
   /** A view a plugin registered with `arbor.ui.add_view`, keyed `plugin:<plugin>:<view_id>`.
    *
    *  Bennu puts plugin views here rather than in the body, and that is a real choice about
@@ -199,6 +203,10 @@ function createBennuUiStore() {
   let vulnerabilitiesOpen = $state(false);
   // Project mojibake-scan modal (whole-project UTF-8-as-Cp1252 corruption report).
   let mojibakeScanOpen = $state(false);
+  // Encoding conversion (rewrites bytes) — `targets` pre-selects a tree row; absent = open file / project.
+  let encodingConvert = $state<{ targets?: string[] } | null>(null);
+  // "Reinterpret as…" — read the open file in another encoding, writing nothing.
+  let reinterpretOpen = $state(false);
   // Tomcat hot-swap settings modal (link a Tomcat + pick the deployed webapp).
   let tomcatConfigOpen = $state(false);
   // File Structure popup (Ctrl+F12) — a searchable quick-outline of the active file.
@@ -220,6 +228,10 @@ function createBennuUiStore() {
   let generateMode = $state<GenerateMode>('getters-setters');
   // Generate from one of the user's code templates, on the class at the caret — which kind.
   let templateGenerateKind = $state<'class' | 'config-properties' | null>(null);
+  // A code generator (Spring Security, converter, HTTP client, …) by registry id — one modal per generator.
+  let codeGeneratorId = $state<string | null>(null);
+  // The project-tree folder it was opened on, when it was: new classes go into that package.
+  let codeGeneratorDirectory = $state<string | null>(null);
   // A new code template of this kind, named from the palette — Settings has its own dialog.
   let newTemplateKind = $state<TemplateKindId | null>(null);
   // A @ConfigurationProperties class written from the configuration file at the caret.
@@ -317,6 +329,8 @@ function createBennuUiStore() {
     get moduleGraphOpen() { return moduleGraphOpen; },
     get vulnerabilitiesOpen() { return vulnerabilitiesOpen; },
     get mojibakeScanOpen() { return mojibakeScanOpen; },
+    get encodingConvert() { return encodingConvert; },
+    get reinterpretOpen() { return reinterpretOpen; },
     get tomcatConfigOpen() { return tomcatConfigOpen; },
     get fileStructureOpen() { return fileStructureOpen; },
     get aboutOpen()    { return aboutOpen; },
@@ -324,6 +338,8 @@ function createBennuUiStore() {
     get pluginsOpen()    { return pluginsOpen; },
     get generateOpen() { return generateOpen; },
     get templateGenerateKind() { return templateGenerateKind; },
+    get codeGeneratorId() { return codeGeneratorId; },
+    get codeGeneratorDirectory() { return codeGeneratorDirectory; },
     get newTemplateKind() { return newTemplateKind; },
     get configClassOpen() { return configClassOpen; },
     get jpaGenerateOpen() { return jpaGenerateOpen; },
@@ -441,6 +457,10 @@ function createBennuUiStore() {
     closeVulnerabilities() { vulnerabilitiesOpen = false; },
     openMojibakeScan() { mojibakeScanOpen = true; },
     closeMojibakeScan() { mojibakeScanOpen = false; },
+    openEncodingConvert(targets?: string[]) { encodingConvert = { targets }; },
+    closeEncodingConvert() { encodingConvert = null; },
+    openReinterpret() { reinterpretOpen = true; },
+    closeReinterpret() { reinterpretOpen = false; },
     openTomcatConfig() { tomcatConfigOpen = true; },
     closeTomcatConfig() { tomcatConfigOpen = false; },
     openFileStructure() { fileStructureOpen = true; },
@@ -465,6 +485,8 @@ function createBennuUiStore() {
     closeGenerate()      { generateOpen = false; },
     openTemplateGenerate(kind: 'class' | 'config-properties') { templateGenerateKind = kind; },
     closeTemplateGenerate() { templateGenerateKind = null; },
+    openCodeGenerator(id: string, directory?: string) { codeGeneratorDirectory = directory ?? null; codeGeneratorId = id; },
+    closeCodeGenerator() { codeGeneratorId = null; codeGeneratorDirectory = null; },
     openNewTemplate(kind: TemplateKindId) { newTemplateKind = kind; },
     closeNewTemplate() { newTemplateKind = null; },
     openConfigClass() { configClassOpen = true; },

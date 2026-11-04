@@ -126,3 +126,47 @@ export function entityTag(id: number): string {
   const generation = Math.floor(id / 4294967296);
   return `${index}v${generation}`;
 }
+
+/** Round a float for a one-line summary: `0.8999999` → `0.9`, `12450` stays. */
+function brief(n: number): string {
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)));
+}
+
+/**
+ * A component's value in one short line — what a collapsed section shows beside its name:
+ * `{current: 18, max: 30}`, `[-7, 0.9, 5]`, `"Goblin"`. Long ones are cut with an ellipsis.
+ */
+export function summarize(value: unknown, max = 56): string {
+  const cut = (s: string) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+  const scalar = (v: unknown): string => {
+    switch (jsonKind(v)) {
+      case 'null': return '—';
+      case 'bool': return String(v);
+      case 'number': return brief(v as number);
+      case 'string': return JSON.stringify(v);
+      case 'array': return `[${(v as unknown[]).length}]`;
+      default: return '{…}';
+    }
+  };
+  switch (jsonKind(value)) {
+    case 'array': {
+      const items = value as unknown[];
+      if (items.length === 0) return '[]';
+      const shown = items.slice(0, 4).map(scalar).join(', ');
+      return cut(`[${shown}${items.length > 4 ? ', …' : ''}]`);
+    }
+    case 'object': {
+      const entries = Object.entries(value as Record<string, unknown>);
+      if (entries.length === 0) return '{}';
+      return cut(`{${entries.slice(0, 3).map(([k, v]) => `${k}: ${scalar(v)}`).join(', ')}${entries.length > 3 ? ', …' : ''}}`);
+    }
+    default:
+      return cut(scalar(value));
+  }
+}
+
+/** A value edited on the header row itself, with no body to open: a lone number, string or flag. */
+export function isInlineValue(value: unknown): boolean {
+  const k = jsonKind(value);
+  return k === 'number' || k === 'string' || k === 'bool';
+}

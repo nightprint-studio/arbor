@@ -19,7 +19,7 @@ import { EditorState, StateEffect, RangeSetBuilder } from '@codemirror/state';
 import { StringStream } from '@codemirror/language';
 import type { StreamParser } from '@codemirror/language';
 
-import type { LanguageDescriptor, TokenClass, Tree, Node, Parser } from './types';
+import type { LanguageDescriptor, LeafSpan, TokenClass, Tree, Node, Parser } from './types';
 
 /** Fired once the (async) grammar load completes, to kick the first full parse. */
 export const parserReady = StateEffect.define<void>();
@@ -48,6 +48,9 @@ class TreeSitterHighlighter {
   tree: Tree | null = null;
   private parser: Parser | null = null;
   private destroyed = false;
+  /** The document as the user typed it — what `leafHighlight` reads. The tree's own `node.text`
+   *  comes from the (possibly `parseText`-masked) input, which is not the same string. */
+  private source = '';
 
   constructor(
     private view: EditorView,
@@ -81,7 +84,9 @@ class TreeSitterHighlighter {
       // so the cost is negligible), keeping per-keystroke typing incremental.
       let changeCount = 0;
       u.changes.iterChanges(() => { changeCount += 1; });
-      const incremental = changeCount === 1 && this.tree !== null;
+      // A `parseText` mask depends on text far from the edit (typing inside a `<script>` re-masks
+      // it), so the previous tree describes a different input: always reparse from scratch then.
+      const incremental = changeCount === 1 && this.tree !== null && !this.lang.parseText;
       if (incremental) {
         u.changes.iterChanges((fromA, toA, fromB, toB) => {
           this.tree!.edit({
@@ -99,7 +104,8 @@ class TreeSitterHighlighter {
   }
 
   private reparse(state: EditorState, incremental: boolean) {
-    const text = state.doc.toString();
+    this.source = state.doc.toString();
+    const text = this.lang.parseText ? this.lang.parseText(this.source) : this.source;
     try {
       const old = incremental ? (this.tree ?? undefined) : undefined;
       const next = this.parser!.parse(text, old);
@@ -130,6 +136,13 @@ class TreeSitterHighlighter {
       if (node.childCount === 0) {
         // Embedded language (e.g. JS in a JSP `<script>` body): tokenize the leaf's raw
         // text with the injected StreamParser instead of a single `classify` colour.
+        if (this.lang.leafHighlight && node.endIndex > node.startIndex) {
+          const spans = this.lang.leafHighlight(node.type, this.source.slice(node.startIndex, node.endIndex), node);
+          if (spans) {
+            for (const sp of spans) builder.add(node.startIndex + sp.from, node.startIndex + sp.to, tokenMark(sp.cls));
+            continue;
+          }
+        }
         const inj = injections?.[node.type];
         if (inj && node.endIndex > node.startIndex) {
           addInjectedTokens(builder, inj, node.text, node.startIndex);
@@ -191,8 +204,16 @@ function addInjectedTokens(
   text: string,
   base: number,
 ): void {
+  for (const sp of streamTokenSpans(parser, text)) builder.add(base + sp.from, base + sp.to, tokenMark(sp.cls));
+}
+
+/** Run a legacy-mode StreamParser over `text` and return its coloured spans (offsets relative to
+ *  `text`, ascending). Pure — also what a host's `leafHighlight` uses to colour the JS part of a
+ *  region it has split into several languages. */
+export function streamTokenSpans(parser: StreamParser<unknown>, text: string): LeafSpan[] {
+  const out: LeafSpan[] = [];
   let state: unknown;
-  try { state = parser.startState ? parser.startState(2) : {}; } catch { return; }
+  try { state = parser.startState ? parser.startState(2) : {}; } catch { return out; }
   let pos = 0; // UTF-16 offset of the current line's start within `text`
   for (const line of text.split('\n')) {
     if (line.length === 0) {
@@ -215,11 +236,12 @@ function addInjectedTokens(
       if (stream.pos <= start) { stream.pos = start + 1; continue; } // no-progress guard
       if (tok) {
         const cls = mapStreamToken(tok);
-        if (cls) builder.add(base + pos + start, base + pos + stream.pos, tokenMark(cls));
+        if (cls) out.push({ from: pos + start, to: pos + stream.pos, cls });
       }
     }
-    pos += line.length + 1; // +1 for the consumed `\n`
+    pos += line.length + 1; // +1 for the consumed newline
   }
+  return out;
 }
 
 /** Build the highlight ViewPlugin bound to a {@link LanguageDescriptor}. Also

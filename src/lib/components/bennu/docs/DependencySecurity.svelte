@@ -17,8 +17,8 @@
 <h2>What is sent, and to whom</h2>
 <p>
   The data source is <strong>OSV.dev</strong>, the open vulnerability database that aggregates GitHub advisories and other
-  sources. For each dependency Bennu sends the Maven <code>groupId:artifactId</code> and the version, and nothing else about
-  the project, to <code>api.osv.dev</code>.
+  sources. For each dependency Bennu sends the Maven <code>groupId:artifactId</code> (or, on a Node project, the npm package
+  name) and the version, and nothing else about the project, to <code>api.osv.dev</code>.
 </p>
 <Callout variant="warning" title="Different from the version check">
   The newer-version check reads a public file and says nothing about your project. This one sends your dependency
@@ -33,11 +33,11 @@
 <h2>When it is asked</h2>
 <ul>
   <li><strong>Editing a pom.xml</strong> — shortly after you stop typing, in the background. A cold lookup can take a few seconds and typing never waits for it.</li>
-  <li><strong>The Dependencies tool window</strong> — once the dependency list has loaded, to draw the badges. Maven projects only.</li>
+  <li><strong>The Dependencies tool window</strong> — once the dependency list has loaded, to draw the badges. Maven, Gradle and Node projects.</li>
   <li><strong>The Vulnerabilities window</strong> — on opening, and again on <em>Refresh</em>.</li>
 </ul>
 <p>
-  Cargo projects are not checked: the check is for Maven coordinates, and the palette entry is offered on Maven projects only.
+  Cargo projects are not checked. A Node project is checked in OSV's <code>npm</code> ecosystem — see below — and the Vulnerabilities window follows the project the Dependencies panel is showing.
 </p>
 
 <h3>Caching, limits and offline</h3>
@@ -57,6 +57,15 @@
 <p>
   The pom only marks what it declares. The Vulnerabilities window and the panel badges also cover everything those
   dependencies drag in, at the version actually on the classpath.
+</p>
+
+<h2>Node projects</h2>
+<p>
+  The same check, on the same switch, for a <code>package.json</code> project. What is looked up is what the <strong>lockfile</strong>
+  resolved (<code>package-lock.json</code>, <code>pnpm-lock.yaml</code> or <code>yarn.lock</code>) — every declared package and everything it
+  drags in — at its exact version. A project with no lockfile has only ranges, which OSV cannot be asked about, so nothing is looked up until
+  the first install. Findings carry the declaring <code>package.json</code> and line, and the badges, the window and the "Ask Imber" question
+  work exactly as on Maven; answers are cached separately under the same freshness window.
 </p>
 
 <h2>How findings are shown</h2>
@@ -115,7 +124,7 @@
 <h2>What it does not do</h2>
 <ul>
   <li>There is no one-click "update to the fixed version", and no way to ignore or suppress a finding.</li>
-  <li>It does not check Cargo or npm dependencies.</li>
+  <li>It does not check Cargo dependencies.</li>
   <li>It does not say whether your code reaches the vulnerable code — only that the version is affected.</li>
   <li>The freshness window follows the shared metadata setting; there is no separate control for it.</li>
 </ul>

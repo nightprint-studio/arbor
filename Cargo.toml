@@ -91,6 +91,12 @@ members = [
     "crates/products/sitta/be",
     "crates/products/tyto/core",
     "crates/products/tyto/be",
+    # Hirundo — the Bennu suite's HTTP client (Postman/Bruno style): requests as readable files in the repo,
+    # environments with types, inherited auth, cURL. `model` is the pure half (data, file format, request
+    # preparation, cURL); `core` the state and the `.hirundo/` store; `be` the headless process.
+    "crates/products/hirundo/model",
+    "crates/products/hirundo/core",
+    "crates/products/hirundo/be",
     # Local voice dictation (Whisper): platform-level, product-agnostic.
     "crates/platform/voice/core",
     "crates/platform/voice/be",
@@ -153,6 +159,9 @@ members = [
     # rendered from a user-owned template — plus the Java harness that checks them on the JVM.
     # Code generated from templates the user owns: engine, store, the class model, and each kind's context.
     "crates/products/bennu/editing/templates",
+    # Code generators (Spring Security, converters, HTTP clients, …): a registry of pure
+    # `options + context -> files` functions, with the Java writer they share.
+    "crates/products/bennu/editing/generate",
     "crates/products/bennu/frameworks/dtolab",
     # Bevy ECS, read from the source shape: the fourth framework extension, and the second that
     # is not Java's.
@@ -169,7 +178,10 @@ members = [
     "crates/products/bennu/build/toolconf",
     "crates/products/bennu/build/tomcat",
     "crates/products/bennu/editing/refactor",
-    "crates/products/bennu/assistant",
+    # Imber (the AI assistant), shared by Bennu and Corvus: the pure core (provider, loop, access
+    # policy, models, message view) and the HTTP transport it streams through.
+    "crates/platform/imber/core",
+    "crates/platform/imber/transport",
     # What a Cargo workspace IS, read off its manifests: the crate graph, the manifest
     # schema behind Cargo.toml validation + completion, and the cargo command catalogue.
     "crates/products/bennu/build/cargo",

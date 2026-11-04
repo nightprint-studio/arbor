@@ -13,7 +13,7 @@
  * green button pops the OS tiling panel. The actions stay — nothing else
  * offers them.
  */
-import { AppWindow, EyeOff, GitBranch, FolderTree, Music, Video, Coffee, Database, NotebookPen, LayoutGrid, PictureInPicture2, CornerUpLeft, Monitor } from 'lucide-svelte';
+import { AppWindow, EyeOff, GitBranch, FolderTree, Music, Video, Coffee, Database, NotebookPen, Send, LayoutGrid, PictureInPicture2, CornerUpLeft, Monitor } from 'lucide-svelte';
 import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
 import type { IconComponent } from '$lib/types/icon';
 import { windowsStore } from '$lib/stores/windows.svelte';
@@ -70,6 +70,7 @@ const PRODUCT_ICONS: Record<string, IconComponent> = {
   bennu:  Coffee,
   picus:  Database,
   garrulus: NotebookPen,
+  hirundo: Send,
 };
 
 /**

@@ -22,7 +22,8 @@
   <tbody>
     <tr><td><kbd>Alt</kbd> + <kbd>1</kbd></td><td><strong>Project</strong> — files</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>2</kbd></td><td><strong>Structure</strong> — symbols</td></tr>
-    <tr><td><kbd>Alt</kbd> + <kbd>N</kbd></td><td><strong>Dependencies</strong> — by module, or by crate on a Cargo project</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>N</kbd></td><td><strong>Dependencies</strong> — by module, by crate on a Cargo project, by package on a Node one</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>9</kbd></td><td>The <strong>Node</strong> window, right rail — each <code>package.json</code>'s scripts, and install; only when the workspace has a <code>package.json</code></td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>8</kbd></td><td>The <strong>build tool</strong> window, right rail — Maven's goals or Gradle's tasks on Java, Cargo's crates and commands on Rust; the open project's own kind when the workspace has both</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>5</kbd></td><td><strong>Tests</strong> — the catalogue, right rail</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>9</kbd></td><td><strong>Trees</strong> — the parse and the declaration model, right rail; Java and JSP, since both views read Bennu's own engines</td></tr>
@@ -79,6 +80,7 @@
     <tr><td><kbd>Alt</kbd> + <kbd>J</kbd></td><td>Add the next occurrence of the selected text as another cursor</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd></td><td>Select <strong>every</strong> occurrence of the selected text; <kbd>Esc</kbd> returns to one cursor. Completion and Emmet stand down while there are several</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>F6</kbd></td><td><strong>Add parameter</strong> to the method under the caret — its declaration, overrides and every call, with a preview</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>X</kbd></td><td><strong>Regex Tester</strong> — opens the string literal under the caret as a pattern (or the selection, or empty); <kbd>Ctrl</kbd> + <kbd>Enter</kbd> writes the edit back</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Delete</kbd></td><td><strong>Safe delete</strong> the member under the caret — only when nothing uses it; otherwise every use is listed</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Insert</kbd></td><td><strong>Generate</strong> a constructor, getters or setters</td></tr>
     <tr><td><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>I</kbd></td><td><strong>Implement / override methods</strong>, grouped by declaring type, abstract ones ticked</td></tr>

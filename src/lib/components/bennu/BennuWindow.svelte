@@ -28,6 +28,11 @@
     Cog, GitBranch, Database, Sparkles, Radar, Flame, Activity,
   } from 'lucide-svelte';
   import BennuPicusPanel from './picus/BennuPicusPanel.svelte';
+  import BennuHttpPanel from './http/BennuHttpPanel.svelte';
+  import { NEW_HTTP_FILE } from './http/http-lang';
+  import { bennuHttp, isHttpFile } from '$lib/stores/bennu/http.svelte';
+  import { createFileFromTemplate } from '$lib/ipc/bennu/templates';
+  import { Send as HttpIcon } from 'lucide-svelte';
   import BennuAssistantPanel from './assistant/BennuAssistantPanel.svelte';
   import BennuSkillsModal from './assistant/BennuSkillsModal.svelte';
   import AssistantContextModal from './assistant/AssistantContextModal.svelte';
@@ -97,6 +102,9 @@
   import BennuDependenciesPanel from './BennuDependenciesPanel.svelte';
   import BennuMavenPanel from './BennuMavenPanel.svelte';
   import BennuGradlePanel from './BennuGradlePanel.svelte';
+  import BennuNodePanel from './BennuNodePanel.svelte';
+  import BennuBevyPanel from './brp/BennuBevyPanel.svelte';
+  import NodeIcon from './NodeIcon.svelte';
   import BennuCargoPanel from './BennuCargoPanel.svelte';
   import BennuTestsCatalogPanel from './BennuTestsCatalogPanel.svelte';
   import BennuCargoTestsPanel from './BennuCargoTestsPanel.svelte';
@@ -134,6 +142,9 @@
   } from '$lib/ipc/bennu/overrides';
   import { safeDelete as ipcSafeDelete, type SafeDeletePlan } from '$lib/ipc/bennu/refactor';
   import BennuJpaGenerateModal from './BennuJpaGenerateModal.svelte';
+  import GeneratorModals from './generate/GeneratorModals.svelte';
+  import { generatorsStore } from '$lib/stores/bennu/generators.svelte';
+  import type { GeneratorHost } from '$lib/stores/bennu/generator-session.svelte';
   import { JPA_PALETTE_ACTIONS } from './jpa-actions';
   import BennuValidationModal from './BennuValidationModal.svelte';
   import BennuWorkspaceManagerModal from './BennuWorkspaceManagerModal.svelte';
@@ -148,6 +159,7 @@
   import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
   import BennuAddParameterModal from './BennuAddParameterModal.svelte';
+  import BennuRegexModal from './BennuRegexModal.svelte';
   import BennuMoveTargetPicker from './BennuMoveTargetPicker.svelte';
   import type { MoveTarget } from '$lib/ipc/bennu/refactor';
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
@@ -161,6 +173,9 @@
   import { bennuBlameStore } from '$lib/stores/bennu/blame.svelte';
   import BennuModuleGraphModal from './BennuModuleGraphModal.svelte';
   import BennuMojibakeScanModal from './BennuMojibakeScanModal.svelte';
+  import BennuEncodingConvertModal from './encoding/BennuEncodingConvertModal.svelte';
+  import BennuReinterpretModal from './encoding/BennuReinterpretModal.svelte';
+  import { undoLastEncodingConversion } from './encoding/conversion-effects';
   import BennuTomcatConfigModal from './BennuTomcatConfigModal.svelte';
   import ProfilerStartModal from './profiler/ProfilerStartModal.svelte';
   import ProfilerThresholdsModal from './profiler/ProfilerThresholdsModal.svelte';
@@ -221,6 +236,7 @@
   import { lspReloadWorkspace } from '$lib/ipc/bennu/lsp';
   import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
+  import { bennuRegexStore } from '$lib/stores/bennu/regex.svelte';
   import { bennuHierarchyStore } from '$lib/stores/bennu/hierarchy.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuTomcatStore } from '$lib/stores/bennu/tomcat.svelte';
@@ -228,6 +244,7 @@
   import { availableCatalogs } from './framework-catalogs';
   import { hotswapJsp } from '$lib/ipc/bennu/tomcat';
   import { mavenDownload } from '$lib/ipc/bennu/deps';
+  import { npmInstall } from '$lib/ipc/bennu/npm';
   import { gradleDownload } from '$lib/ipc/bennu/gradle';
   import { bennuGradleStore } from '$lib/stores/bennu/gradle.svelte';
   import { discoverTests } from '$lib/ipc/bennu/tests';
@@ -235,6 +252,10 @@
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { bennuDtoLabStore } from '$lib/stores/bennu/dtolab.svelte';
   import { bennuBrpStore } from '$lib/stores/bennu/brp.svelte';
+  import { brpSavedStore } from '$lib/stores/bennu/brp-saved.svelte';
+  import { brpDriveStore } from '$lib/stores/bennu/brp-drive.svelte';
+  import { copyToClipboard as copyBrpText } from '$lib/utils/clipboard';
+  import { entityDocument, toJson as brpJson, toRon as brpRon } from './brp/brp-format';
   import { bennuProfilerStore } from '$lib/stores/bennu/profiler.svelte';
   import { bennuLiveStore } from '$lib/stores/bennu/live.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
@@ -242,6 +263,7 @@
   import { bennuAgentsStore } from '$lib/stores/bennu/assistant-agents.svelte';
   import { assistantAttachmentsStore } from '$lib/stores/bennu/assistant-attachments.svelte';
   import { assistantLayoutStore } from '$lib/stores/bennu/assistant-layout.svelte';
+  import { bennuFormatStyleStore } from '$lib/stores/bennu/format-style.svelte';
 
   // Which file the editor is on, announced to the plugins as `bennu:file_opened`.
   //
@@ -252,6 +274,9 @@
   // opening, switching tab, restoring a session, closing the last tab and changing project all
   // go through here, and so will the sixth way somebody adds later.
   $effect(() => { notifyActiveFile(projectStore.activeFilePath); });
+  // The formatter style of the project open (format-on-save reads it). Re-read when the project
+  // changes; the Formatter settings page re-reads on its own when it opens.
+  $effect(() => { void bennuFormatStyleStore.load(projectStore.project?.root); });
   onDestroy(() => { resetActiveFileNotifier(); });
 
   onMount(() => {
@@ -282,6 +307,8 @@
     // The diff display preferences (unified/split, wrap, context, full file) the Changes panel's
     // shared diff viewer reads — Corvus's AppShell loads them, and this window never mounts it.
     void diffStore.loadConfig();
+    // Regex detection level + the Regex Tester's saved and recent patterns.
+    void bennuRegexStore.loadConfig();
     // Hydrate the config-backed editor toggles (autosave / auto-import) from the persisted config.
     void bennuSettingsStore.loadConfig();
     // The profile list + which one is active, for the titlebar's switcher. Idempotent, so a Bennu
@@ -393,7 +420,9 @@
     let unlistenBeUp: (() => void) | undefined;
     void listen('arbor://bennu-be-up', () => {
       void workspacesStore.restore();
+      void bennuRegexStore.loadConfig();
       void bennuSettingsStore.loadConfig();
+      void bennuFormatStyleStore.load(projectStore.project?.root);
     }).then((un) => { unlistenBeUp = un; });
     // The Project tree's sync with the disk. Two halves and they are separate on purpose: this one
     // is the subscription (watcher events + the focus safety net), and the `$effect` below is what
@@ -835,6 +864,7 @@
     createValidationFile: () => void;
     toggleBreakpointAtCaret: () => void;
     formatDocument: () => Promise<void>;
+    formatSelection: () => Promise<void>;
     optimizeImportsInBuffer: () => Promise<void>;
     navBack: () => void;
     navForward: () => void;
@@ -1071,6 +1101,11 @@
   const hasGradle = $derived(projectStore.hasModule('Gradle'));
   const hasCargo = $derived(projectStore.hasModule('Cargo'));
   const hasProjectTooling = $derived(hasMaven || hasGradle || hasCargo);
+  /** A `package.json` anywhere in the workspace. Not part of {@link hasProjectTooling}: that gates
+   *  Tests and the Alt+8 build-tool slot, which have nothing to show for Node — but it does open the
+   *  Dependencies window (a lockfile answers it) and the Node tool window. */
+  const hasNode = $derived(projectStore.hasModule('Node'));
+  const hasDependencyTooling = $derived(hasProjectTooling || hasNode);
   /** What Alt+8 opens: the primary kind's tool when the workspace has it, else whichever exists. */
   const buildToolKey = $derived<'maven' | 'gradle' | 'cargo'>(
     projectStore.isCargo && hasCargo
@@ -1104,6 +1139,8 @@
   );
   /** The live Bevy inspector needs a Bevy project to be inspecting a game of. */
   const bevyTools = $derived(projectStore.capabilities?.bevy === true);
+  // The saved games are palette entries ("connect to …"), so they are read as soon as the project is a Bevy one.
+  $effect(() => { if (bevyTools) void brpSavedStore.load(); });
   // The profiler records a JVM, Node or a native program — whatever the project holds — so it only
   // needs a project. Whether THIS machine can profile (a JDK with Flight Recorder, samply…) is the
   // panel's to explain, not a reason to hide the door.
@@ -1304,9 +1341,9 @@
     // Java from when the outline was the Java scanner and nothing else, and the gate outlived the
     // reason: a Cargo project had a working Structure panel and no way to open it.
     { id: 'structure', tooltip: 'Structure', shortcut: 'Alt+2', icon: ListTree,   active: bennuUiStore.leftPanel === 'structure', onclick: () => bennuUiStore.toggleLeft('structure') },
-    // Both ecosystems: the panel answers for a Maven reactor and for a Cargo workspace, from one
-    // report shape.
-    ...(hasProjectTooling
+    // Every ecosystem: the panel answers for a Maven reactor, a Cargo workspace and a Node project,
+    // from one report shape.
+    ...(hasDependencyTooling
       ? [{ id: 'dependencies', tooltip: 'Dependencies', shortcut: 'Alt+N', icon: Library, active: bennuUiStore.leftPanel === 'dependencies', onclick: () => bennuUiStore.toggleLeft('dependencies') }]
       : []),
     ...pluginRail('left', 'top'),
@@ -1371,6 +1408,15 @@
     ...(hasCargo
       ? [{ id: 'cargo', tooltip: 'Cargo — the crates, and what you can run on them', shortcut: buildToolKey === 'cargo' ? 'Alt+8' : undefined, icon: Cog, active: bennuUiStore.rightPanel === 'cargo', onclick: () => bennuUiStore.toggleRight('cargo') }]
       : []),
+    // Node has its own chord (Alt+8 is the one build tool of a Java or Rust project, and a frontend
+    // beside it should not take the slot from it).
+    ...(hasNode
+      ? [{ id: 'node', tooltip: 'Node — the packages, and the scripts you can run on them', shortcut: 'Alt+Shift+9', icon: NodeIcon, active: bennuUiStore.rightPanel === 'node', onclick: () => bennuUiStore.toggleRight('node') }]
+      : []),
+    // The running Bevy game: its entities, resources and states as one tree; the detail opens at the bottom.
+    ...(bevyTools
+      ? [{ id: 'bevy', tooltip: 'Bevy Remote — the running game: entities, resources, states', shortcut: 'Ctrl+Shift+A', icon: Radar, active: bennuUiStore.rightPanel === 'bevy', onclick: () => bennuUiStore.toggleRight('bevy') }]
+      : []),
   ]);
   const rightTopRaw = $derived<ActivityRailButton[]>([
     ...(hasProjectTooling
@@ -1388,7 +1434,8 @@
             onclick: () => bennuUiStore.toggleRight('tests'),
           },
         ]
-      : []),
+      // A frontend-only project: no Tests catalogue, no Alt+8 slot, but its own Node window.
+      : buildToolRails),
     ...(javaTools
       ? [
           // The parse, and the model Bennu derives from it. Both views are about Bennu's OWN
@@ -1406,6 +1453,9 @@
     ...(javaTools && picusTools
       ? [{ id: 'picus', tooltip: 'Database — check entities and native queries against a Picus connection', shortcut: 'Alt+D', icon: Database, active: bennuUiStore.rightPanel === 'picus', onclick: () => bennuUiStore.toggleRight('picus') }]
       : []),
+    // HTTP files: the answer to the request run from a .http file. Offered everywhere — a .http file
+    // can sit in any project, and the panel is only mounted while shown.
+    { id: 'http', tooltip: 'HTTP — the answer to a request run from a .http file, the environment, the history', icon: HttpIcon, active: bennuUiStore.rightPanel === 'http', onclick: () => bennuUiStore.toggleRight('http') },
     // The assistant. A design preview for now — it needs nothing from the project, so it is offered
     // wherever the right dock is.
     { id: 'assistant', tooltip: 'Imber — chat and agent', shortcut: 'Alt+A', icon: Sparkles, active: bennuUiStore.rightPanel === 'assistant', onclick: () => bennuUiStore.toggleRight('assistant') },
@@ -1419,9 +1469,6 @@
       : []),
     ...(dtoLabTools
       ? [{ id: 'dtolab', tooltip: 'DTO Lab', shortcut: 'Alt+Shift+J', icon: Beaker, active: bennuUiStore.bottomPanel === 'dtolab', onclick: () => bennuUiStore.toggleBottom('dtolab') }]
-      : []),
-    ...(bevyTools
-      ? [{ id: 'bevyremote', tooltip: 'Bevy Remote — inspect the running game', shortcut: 'Ctrl+Shift+A', icon: Radar, active: bennuUiStore.bottomPanel === 'bevyremote', onclick: () => bennuUiStore.toggleBottom('bevyremote') }]
       : []),
     ...(profilerTools
       ? [{ id: 'profiler', tooltip: 'Profiler — CPU, memory and locks of a run', shortcut: 'Ctrl+Shift+F9', icon: Flame, active: bennuUiStore.bottomPanel === 'profiler', onclick: () => bennuUiStore.toggleBottom('profiler') }]
@@ -1475,6 +1522,8 @@
     const gradle = hasGradle;
     const cargo = hasCargo;
     const tooling = hasProjectTooling;
+    const depTooling = hasDependencyTooling;
+    const node = hasNode;
     const jsp = jspTools;
     const dtoLab = dtoLabTools;
     const bevy = bevyTools;
@@ -1485,7 +1534,7 @@
     // The only dependencies that should re-run this are the three values read above.
     untrack(() =>
       bennuUiStore.dropUnavailablePanels({
-        left: tooling ? ['project', 'structure', 'dependencies'] : ['project', 'structure'],
+        left: depTooling ? ['project', 'structure', 'dependencies'] : ['project', 'structure'],
         // `i18n` is in both branches and needs no capability gate: it has no rail icon to lose, and
         // whether it applies is a question about the open FILE rather than about the project — a
         // fulcrum content tree can sit in a Maven repo as easily as in a Cargo one.
@@ -1494,9 +1543,12 @@
           ...(maven ? ['maven' as const] : []),
           ...(gradle ? ['gradle' as const] : []),
           ...(cargo ? ['cargo' as const] : []),
+          ...(node ? ['node' as const] : []),
+          ...(bevy ? ['bevy' as const] : []),
           ...(tooling ? ['tests' as const] : []),
           ...(java ? ['ast' as const] : []),
           ...(java && picus ? ['picus' as const] : []),
+          'http' as const,
         ],
         bottom: [
           // `hierarchy` survives every switch: it is opened by an action about the caret rather than
@@ -1584,6 +1636,7 @@
   const BRAND_ICONS: Record<string, IconComponent> = {
     Maven: MavenIcon as unknown as IconComponent,
     Gradle: GradleIcon as unknown as IconComponent,
+    Node: NodeIcon as unknown as IconComponent,
     JUnit: JUnitIcon as unknown as IconComponent,
     Bevy: BevyIcon as unknown as IconComponent,
   };
@@ -1603,6 +1656,19 @@
   }
 
   function run(fn: () => void) { bennuUiStore.closePalette(); queueMicrotask(fn); }
+
+  /** A starter `.http` file at the root of the project, opened in the editor. */
+  async function newHttpFile() {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    const file = `${root.replace(/[\\/]+$/, '')}/requests.http`;
+    try {
+      await createFileFromTemplate(root, file, NEW_HTTP_FILE);
+      await projectStore.openFile(file);
+    } catch (e) {
+      toastStore.show(String(e), 'error');
+    }
+  }
 
   /** Whether the project has switched the naming check on — what gates the two bulk-fix entries.
    *  Offering "Fix naming" to a project with no convention is offering to do nothing. */
@@ -1667,6 +1733,39 @@
     }
     bennuSettingsStore.setFlc('enabled', on);
     toastStore.show(on ? 'Model suggestions are on.' : 'Model suggestions are off.', 'info');
+  }
+
+  // The code generators (Spring Security, converters, HTTP clients, …) — listed by the backend's registry,
+  // so a new one reaches the palette without an edit here. Loaded once per project.
+  $effect(() => {
+    const root = projectStore.project?.root;
+    if (root) void generatorsStore.load(root);
+  });
+
+  /** What a generator dialog reads from this window: where the caret is, how an edit lands, how a new file opens. */
+  const generatorHost: GeneratorHost = {
+    site: () => {
+      const root = projectStore.project?.root;
+      if (!root) return null;
+      const directory = bennuUiStore.codeGeneratorDirectory;
+      if (directory) return { root, directory };
+      const ctx = editor?.caretContext() ?? null;
+      return { root, file: projectStore.activeFilePath, source: ctx?.source ?? null, offset: ctx?.offset ?? null };
+    },
+    applyEdits: (edits) => editor?.applyGeneratedEdits(edits),
+    openFile: (path) => projectStore.openFile(path),
+  };
+
+  /** One palette entry per generator the open file can take. */
+  function generatorEntries(path: string | null | undefined, isJava: boolean) {
+    const kind = isJava ? 'java' : path?.toLowerCase().endsWith('.rs') ? 'rust' : 'none';
+    return generatorsStore.offeredFor(kind).map((g) => ({
+      id: `generate-${g.id}`,
+      title: g.title,
+      icon: g.icon,
+      action: () => run(() => bennuUiStore.openCodeGenerator(g.id)),
+      when: !!projectStore.project,
+    }));
   }
 
   const paletteSections = $derived.by<PaletteSection[]>(() => {
@@ -1784,6 +1883,10 @@
         when: projectStore.isSplit },
       { id: 'unsplit', title: 'Editor: close split', icon: 'PanelRightClose',
         action: () => run(() => projectStore.unsplit()), when: projectStore.isSplit },
+      // Always available: on a string literal it opens that pattern (and writes edits back), anywhere
+      // else it opens empty. Also reachable from the editor's context menu on a literal.
+      { id: 'regex-tester', title: 'Regex Tester…', icon: 'Regex', shortcut: 'Ctrl+Shift+X',
+        action: () => run(() => editor?.openRegexTester()), when: true },
       { id: 'add-parameter', title: 'Add parameter…', icon: 'ListPlus', shortcut: 'Ctrl+F6',
         action: () => run(() => editor?.openAddParameter()), when: isJava },
       { id: 'safedelete', title: 'Safe delete…', icon: 'Trash2', shortcut: 'Alt+Delete',
@@ -1831,6 +1934,7 @@
         action: () => run(() => bennuUiStore.openTemplateGenerate('config-properties')), when: isJava },
       { id: 'generate-config-class', title: 'Generate a @ConfigurationProperties class from these keys', icon: 'Wand2',
         action: () => run(() => bennuUiStore.openConfigClass()), when: isSpringConfigFile(path) },
+      ...generatorEntries(path, isJava),
       { id: 'code-templates', title: 'Code templates…', icon: 'Command',
         action: () => run(() => bennuUiStore.openSettings('templates')), when: true },
       // Postfix templates are Java-only, gated like the Java-only kinds in Settings: absent on a
@@ -1858,6 +1962,17 @@
       // in the safe family.
       { id: 'format', title: 'Format file', icon: 'Wand2', shortcut: 'Alt+Shift+F',
         action: () => run(() => void editor?.formatDocument()), when: isJava || isLspFile(path) },
+      // The same key does this when there is a selection; the entry is for finding it by name.
+      { id: 'format-selection', title: 'Format selection', icon: 'Wand2',
+        action: () => run(() => void editor?.formatSelection()), when: isJava },
+      { id: 'format-detect', title: 'Detect code style…', icon: 'Wand2',
+        action: () => run(() => {
+          bennuFormatStyleStore.setScope('project');
+          void bennuFormatStyleStore.detect();
+          bennuUiStore.openSettings('formatter');
+        }), when: !!projectStore.project && !projectStore.isCargo },
+      { id: 'format-settings', title: 'Formatter settings…', icon: 'Wand2',
+        action: () => run(() => bennuUiStore.openSettings('formatter')), when: !projectStore.isCargo },
       // Eclipse's own binding for this, and it is the one people reach for: IntelliJ's Ctrl+Alt+O
       // is unusable here (Chromium drops Ctrl+Alt+<letter> on IT/DE/FR/ES layouts to preserve
       // AltGr).
@@ -1889,6 +2004,17 @@
         action: () => run(() => void editor?.checkMojibake()), when: !!path },
       { id: 'mojibakeproject', title: 'Scan project for mojibake…', icon: 'ShieldCheck',
         action: () => run(() => bennuUiStore.openMojibakeScan()), when: !!projectStore.project },
+      // Two different verbs on purpose. Reinterpret changes how a file is READ and writes nothing;
+      // Convert rewrites its bytes (preview, backup and a one-step undo included).
+      { id: 'encoding-reinterpret', title: 'Reinterpret file as encoding…', icon: 'RefreshCw',
+        action: () => run(() => bennuUiStore.openReinterpret()), when: !!path },
+      { id: 'encoding-convert-file', title: 'Convert file encoding…', icon: 'Languages',
+        action: () => run(() => bennuUiStore.openEncodingConvert()), when: !!path },
+      { id: 'encoding-convert-project', title: 'Convert project encoding…', icon: 'Languages',
+        action: () => run(() => bennuUiStore.openEncodingConvert([projectStore.project!.root])),
+        when: !!projectStore.project },
+      { id: 'encoding-convert-undo', title: 'Undo last encoding conversion', icon: 'Undo2',
+        action: () => run(() => void undoLastEncodingConversion()), when: !!projectStore.project },
       { id: 'newvalidator', title: 'Add Struts validators…', icon: 'ShieldCheck',
         action: () => run(() => bennuUiStore.openValidationCreator()),
         when: projectStore.activeFilePath?.toLowerCase().endsWith('-validation.xml') ?? false },
@@ -1969,8 +2095,8 @@
         action: () => run(() => void bennuLiveStore.stopAll()), when: liveTools },
       // The live Bevy inspector. Every verb a palette entry, because attaching to a game, refreshing
       // and spawning are things you do while the editor has focus, not while the panel does.
-      { id: 'bevyremote', title: 'Toggle Bevy Remote inspector', icon: 'Plug', shortcut: 'Ctrl+Shift+A',
-        action: () => run(() => bennuUiStore.toggleBottom('bevyremote')), when: bevyTools },
+      { id: 'bevyremote', title: 'Toggle Bevy Remote (sidebar)', icon: 'Plug', shortcut: 'Ctrl+Shift+A',
+        action: () => run(() => bennuUiStore.toggleRight('bevy')), when: bevyTools },
       { id: 'bevyremote-connect', title: 'Bevy Remote: connect to the running game', icon: 'Plug',
         action: () => run(() => { bennuUiStore.showBottom('bevyremote'); if (!bennuBrpStore.connected) void bennuBrpStore.connect(); }),
         when: bevyTools && !bennuBrpStore.connected },
@@ -1981,14 +2107,72 @@
       { id: 'bevyremote-spawn', title: 'Bevy Remote: spawn an empty entity', icon: 'Plus',
         action: () => run(() => { bennuUiStore.showBottom('bevyremote'); void bennuBrpStore.spawn(); }),
         when: bevyTools && bennuBrpStore.connected && bennuBrpStore.status.can.spawn },
-      { id: 'dependencies', title: 'Dependencies',  icon: 'Library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: hasProjectTooling },
+      { id: 'bevyremote-console', title: 'Bevy Remote: console (call any method)', icon: 'Terminal',
+        action: () => run(() => { bennuUiStore.showBottom('bevyremote'); bennuBrpStore.setTab('console'); }),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-screen', title: 'Bevy Remote: screen (screenshot, click through)', icon: 'Eye',
+        action: () => run(() => { bennuUiStore.showBottom('bevyremote'); bennuBrpStore.setTab('screen'); }),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-input', title: 'Bevy Remote: input (keyboard, mouse, gamepad, record and replay)', icon: 'Keyboard',
+        action: () => run(() => { bennuUiStore.showBottom('bevyremote'); bennuBrpStore.setTab('input'); }),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-stats', title: 'Bevy Remote: statistics (frame time, FPS)', icon: 'Activity',
+        action: () => run(() => { bennuUiStore.showBottom('bevyremote'); bennuBrpStore.setTab('stats'); }),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-indicator-on', title: 'Bevy Remote: show the indicator border in the game', icon: 'Eye',
+        action: () => run(() => void brpDriveStore.setPresence({ enabled: true, state: 'connected', label: 'Arbor' }).catch(() => {})),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-indicator-off', title: 'Bevy Remote: hide the indicator border in the game', icon: 'EyeOff',
+        action: () => run(() => void brpDriveStore.setPresence({ enabled: false }).catch(() => {})),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-entities', title: 'Bevy Remote: entities', icon: 'Box',
+        action: () => run(() => { bennuUiStore.showRight('bevy'); bennuBrpStore.openRoot('entities', true); }),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-resources', title: 'Bevy Remote: resources', icon: 'Database',
+        action: () => run(() => { bennuUiStore.showRight('bevy'); bennuBrpStore.openRoot('resources', true); }),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-states', title: 'Bevy Remote: states (the game modes)', icon: 'Workflow',
+        action: () => run(() => { bennuUiStore.showRight('bevy'); bennuBrpStore.openRoot('states', true); }),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-detail', title: 'Bevy Remote: detail of the selection', icon: 'PanelBottom',
+        action: () => run(() => { bennuUiStore.showBottom('bevyremote'); bennuBrpStore.setTab('detail'); }),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-types', title: 'Bevy Remote: type registry', icon: 'Braces',
+        action: () => run(() => { bennuUiStore.showBottom('bevyremote'); bennuBrpStore.setTab('types'); }),
+        when: bevyTools && bennuBrpStore.connected },
+      { id: 'bevyremote-copy-json', title: 'Bevy Remote: copy the selected entity as JSON', icon: 'Copy',
+        action: () => run(() => void copyBrpText(brpJson(entityDocument(bennuBrpStore.entity?.components ?? {})), { successToast: 'Copied the entity as JSON', errorToast: true })),
+        when: bevyTools && bennuBrpStore.connected && bennuBrpStore.entity !== null },
+      { id: 'bevyremote-copy-ron', title: 'Bevy Remote: copy the selected entity as RON', icon: 'Copy',
+        action: () => run(() => void copyBrpText(brpRon(entityDocument(bennuBrpStore.entity?.components ?? {})), { successToast: 'Copied the entity as RON', errorToast: true })),
+        when: bevyTools && bennuBrpStore.connected && bennuBrpStore.entity !== null },
+      // One entry per saved game: switching is a verb, not a menu you have to reach for.
+      ...brpSavedStore.endpoints.map((e) => ({
+        id: `bevyremote-go:${e.endpoint}`,
+        title: `Bevy Remote: connect to ${e.name} (${e.endpoint})`,
+        icon: 'Plug',
+        action: () => run(() => { bennuUiStore.showBottom('bevyremote'); void bennuBrpStore.connect(e.endpoint); }),
+        when: bevyTools && !(bennuBrpStore.connected && bennuBrpStore.status.endpoint === e.endpoint),
+      })),
+      // Saved searches run in the entity list.
+      ...brpSavedStore.queries.map((q) => ({
+        id: `bevyremote-query:${q.name}`,
+        title: `Bevy Remote: search “${q.name}”`,
+        icon: 'Bookmark',
+        action: () => run(() => { bennuUiStore.showBottom('bevyremote'); bennuUiStore.showRight('bevy'); bennuBrpStore.setSearch(q.search); }),
+        when: bevyTools && bennuBrpStore.connected,
+      })),
+      { id: 'dependencies', title: 'Dependencies',  icon: 'Library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: hasDependencyTooling },
       // The same subject from the other angle: the list says what each module needs, the graph says
       // who needs *it*, what a change to it rebuilds, and whether the project has a cycle. Named for
       // the ecosystem's own word so a Rust workspace is not offered a "module" graph.
       { id: 'resolvedeptree', title: 'Resolve dependency tree', icon: 'Workflow',
         action: () => run(() => {
-          const root = projectStore.project?.root;
-          if (root) void dependenciesStore.loadTree(root, true);
+          // The module the Dependencies window is on, so a Node package gets its lockfile read and not
+          // a Maven run on its folder.
+          const t = moduleFocusStore.targetFor('Maven', 'Gradle', 'Cargo', 'Node');
+          const root = t?.toolRoot ?? projectStore.project?.root;
+          if (root) void dependenciesStore.loadTree(root, true, t?.kind === 'Node');
         }),
         when: !!projectStore.project },
       { id: 'vulnerabilities', title: 'Vulnerabilities…', icon: 'ShieldAlert',
@@ -2011,9 +2195,20 @@
       // wrong and the hamburger is one more thing to remember.
       { id: 'pluginlogs', title: 'Toggle Plugin Logs', icon: 'ScrollText',    action: () => run(() => bennuUiStore.togglePluginLogs()), when: true },
       { id: 'maven',     title: 'Toggle Maven',     icon: 'Maven',       shortcut: buildToolKey === 'maven' ? 'Alt+8' : undefined, action: () => run(() => bennuUiStore.toggleRight('maven')), when: hasMaven },
+      { id: 'http',      title: 'Toggle HTTP (.http requests)', icon: 'Send', action: () => run(() => bennuUiStore.toggleRight('http')), when: true },
+      { id: 'http-run',  title: 'HTTP: Run the request at the cursor', icon: 'Play', shortcut: 'Ctrl+Enter', action: () => run(() => bennuHttp.requestRunAtCaret()), when: isHttpFile(projectStore.activeFilePath) },
+      { id: 'http-all',  title: 'HTTP: Run every request in this file', icon: 'Play', action: () => run(() => { const f = projectStore.activeFilePath; if (f) void bennuHttp.runAll(f, projectStore.sourceOf(f)); }), when: isHttpFile(projectStore.activeFilePath) },
+      { id: 'http-new',  title: 'HTTP: New .http file', subtitle: 'requests.http at the project root, with a few requests to start from', icon: 'Send', action: () => run(() => void newHttpFile()), when: !!projectStore.project },
       { id: 'picus',     title: 'Toggle Database (Picus)', icon: 'Database', shortcut: 'Alt+D', action: () => run(() => bennuUiStore.toggleRight('picus')), when: javaTools && picusTools },
       { id: 'gradle',    title: 'Toggle Gradle',    icon: 'Gradle',      shortcut: buildToolKey === 'gradle' ? 'Alt+8' : undefined, action: () => run(() => bennuUiStore.toggleRight('gradle')), when: hasGradle },
       { id: 'cargo',     title: 'Toggle Cargo',    icon: 'Cog',         shortcut: buildToolKey === 'cargo' ? 'Alt+8' : undefined, action: () => run(() => bennuUiStore.toggleRight('cargo')), when: hasCargo },
+      { id: 'node',      title: 'Toggle Node (packages and scripts)', icon: 'Node', shortcut: 'Alt+Shift+9', action: () => run(() => bennuUiStore.toggleRight('node')), when: hasNode },
+      { id: 'node-install', title: 'Node: install dependencies', icon: 'Download',
+        action: () => run(() => withModule(['Node'], 'Install dependencies', (m) => {
+          void npmInstall(m.toolRoot, `${m.toolRoot}/package.json`)
+            .then(() => bennuUiStore.showBottom('run'))
+            .catch((e) => toastStore.show(`install: ${e}`, 'error'));
+        })), when: hasNode },
       // Runs the real `cargo add`. In the View section beside the Cargo window because that is where
       // it is otherwise reached from, and gated on the ecosystem: there is nothing to add to a pom.
       { id: 'cargoadd',  title: 'Add dependency… (cargo add)', icon: 'Library',
@@ -2372,6 +2567,12 @@
       bennuLogViewStore.setClean(!bennuLogViewStore.settings.clean);
       return true;
     }
+    // The Regex Tester, from wherever focus is (the editor included — it opens off the literal under the caret).
+    if (matchesBinding(e, keybindingsStore.getBinding('regex_tester'))) {
+      e.preventDefault();
+      editor?.openRegexTester();
+      return true;
+    }
     // "Go to project…" — a modal with its own input, so it opens from here and not mid-switch.
     if (!projectSwitcherStore.open && matchesBinding(e, keybindingsStore.getBinding('goto_project'))) {
       e.preventDefault();
@@ -2677,7 +2878,7 @@
     // Bevy Remote inspector (Ctrl+Shift+A, "attach") — silent on a project that is not a Bevy one.
     if (mod && e.shiftKey && !e.altKey && isKey(e, 'a')) {
       if (!bevyTools) return;
-      e.preventDefault(); bennuUiStore.toggleBottom('bevyremote'); return;
+      e.preventDefault(); bennuUiStore.toggleRight('bevy'); return;
     }
 
     // Spring beans (Ctrl+Shift+F12) — the framework catalog with a keyboard door, since it
@@ -2764,6 +2965,13 @@
       e.preventDefault(); void downloadDependencies(r).catch(() => undefined); return;
     }
 
+    // The Node window. Alt+Shift+9: Alt+8 is the one build tool of a Java or Rust project, and the
+    // Alt+Shift+1..8 chords are Corvus's sidebar sections (never a Ctrl+Alt+letter: it is AltGr).
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, '9')) {
+      if (!hasNode) return;
+      e.preventDefault(); bennuUiStore.toggleRight('node'); return;
+    }
+
     // Expand the macro at the caret. Alt+Shift+M, in the same safe family as the format binding
     // above and beside Ctrl+Shift+M (structural search) without colliding with it.
     if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'm')) {
@@ -2793,7 +3001,7 @@
       if (isKey(e, '0')) { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }
       // Both ecosystems, matching their rail icons: the Dependencies panel answers for a Cargo
       // workspace as well as a Maven reactor, and a cargo command streams into the same console.
-      if (isKey(e, 'n') && hasProjectTooling) { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
+      if (isKey(e, 'n') && hasDependencyTooling) { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
       // The Run console. A letter and not a digit because IntelliJ's Alt+4 is already Endpoints
       // here, and moving an existing tool's shortcut to make room would cost more than it buys.
       if (isKey(e, 'r')) { e.preventDefault(); bennuUiStore.toggleBottom('run'); return; }
@@ -2998,6 +3206,8 @@
             {#if bennuUiStore.rightPanel === 'maven'}<BennuMavenPanel />{/if}
             {#if bennuUiStore.rightPanel === 'gradle'}<BennuGradlePanel />{/if}
             {#if bennuUiStore.rightPanel === 'cargo'}<BennuCargoPanel />{/if}
+            {#if bennuUiStore.rightPanel === 'node'}<BennuNodePanel />{/if}
+            {#if bennuUiStore.rightPanel === 'bevy'}<BennuBevyPanel />{/if}
             <!-- The catalogue is per-ecosystem: a Rust test is identified by crate + target +
                  module + name, which is four levels the Java panel has no columns for. -->
             {#if bennuUiStore.rightPanel === 'tests'}
@@ -3020,6 +3230,7 @@
             <!-- Mounted only while shown: it brings Picus's backend up and reads a schema, which is
                  work for someone looking at it. -->
             {#if bennuUiStore.rightPanel === 'picus' && picusTools}<BennuPicusPanel />{/if}
+            {#if bennuUiStore.rightPanel === 'http'}<BennuHttpPanel />{/if}
             {#if bennuUiStore.rightPanel === 'assistant'}<BennuAssistantPanel />{/if}
             <!-- A plugin's own view, mounted with the FULL form renderer — so an `embed`
                  viewport, a split layout and live parameter fields all work here exactly as
@@ -3166,6 +3377,16 @@
   <BennuMojibakeScanModal onClose={() => bennuUiStore.closeMojibakeScan()} />
 {/if}
 
+{#if bennuUiStore.reinterpretOpen}
+  <BennuReinterpretModal onClose={() => bennuUiStore.closeReinterpret()} />
+{/if}
+
+{#if bennuUiStore.encodingConvert}
+  <BennuEncodingConvertModal
+    targets={bennuUiStore.encodingConvert.targets}
+    onClose={() => bennuUiStore.closeEncodingConvert()} />
+{/if}
+
 {#if bennuUiStore.tomcatConfigOpen}
   <BennuTomcatConfigModal onClose={() => bennuUiStore.closeTomcatConfig()} />
 {/if}
@@ -3257,6 +3478,14 @@
   />
 {/if}
 
+{#if bennuUiStore.codeGeneratorId}
+  <GeneratorModals
+    id={bennuUiStore.codeGeneratorId}
+    host={generatorHost}
+    onClose={() => { bennuUiStore.closeCodeGenerator(); editor?.focusEditor(); }}
+  />
+{/if}
+
 {#if bennuUiStore.jpaGenerateOpen}
   <BennuJpaGenerateModal
     action={bennuUiStore.jpaGenerateAction}
@@ -3327,6 +3556,10 @@
     onPick={(target) => { void editor?.applyMoveTarget(target); }}
     onClose={() => { bennuRefactorStore.closeMove(); editor?.focusEditor(); }}
   />
+{/if}
+
+{#if bennuRegexStore.request}
+  <BennuRegexModal onClose={() => { bennuRegexStore.close(); editor?.focusEditor(); }} />
 {/if}
 
 {#if bennuRefactorStore.addParameterCtx}

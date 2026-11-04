@@ -21,7 +21,7 @@ use serde_json::json;
 use crate::repo::{git, open, snapshot_policy};
 
 #[arbor_rpc::handler]
-fn reset_to_commit(state: &CorvusState, tab_id: String, oid: String, mode: ResetMode) -> Result<(), String> {
+pub(crate) fn reset_to_commit(state: &CorvusState, tab_id: String, oid: String, mode: ResetMode) -> Result<(), String> {
     // Validate the OID before spawning a subprocess — same typed-error wire
     // string as in-process (`AppError::CommitNotFound` Displays "Commit not
     // found: …"); over the seam the shell wraps it as `AppError::Other` but the

@@ -47,6 +47,7 @@ pub fn endpoints(units: &[JavaUnit]) -> Vec<Endpoint> {
                 };
                 let methods = http_methods(ann, implied);
                 let produces = ann.pair("produces").unwrap_or_default().trim_matches('"').to_string();
+                let consumes = ann.pair("consumes").unwrap_or_default().trim_matches('"').to_string();
                 let mut paths = paths_of(ann);
                 if paths.is_empty() {
                     // A bare `@GetMapping` maps the class path itself.
@@ -65,6 +66,7 @@ pub fn endpoints(units: &[JavaUnit]) -> Vec<Endpoint> {
                         offset: m.name_offset,
                         line: line_at(&u.text, m.name_offset),
                         produces: produces.clone(),
+                        consumes: consumes.clone(),
                         return_type: m.return_type.clone(),
                         params: params.clone(),
                     });

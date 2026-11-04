@@ -13,8 +13,37 @@
   The libraries a project pulls in — listed, searchable and, with sources, readable in the same editor as your own code.
 </p>
 <p>
-  The panel describes one Maven or Cargo project at a time. When the workspace has several (a Rust crate in a Node project's subfolder, two
+  The panel describes one Maven, Gradle, Cargo or Node project at a time. When the workspace has several (a Rust crate in a Node project's subfolder, two
   projects side by side), a tree of them tops the panel and picks which; with one there is nothing to pick.
+</p>
+
+<h2>Node projects</h2>
+<p>
+  A folder with a <code>package.json</code> is a Node project — npm, pnpm or Yarn, told apart by the lockfile beside it. The
+  panel lists one group per <code>package.json</code>: the root, and every member of a monorepo's workspace
+  (<code>workspaces</code> in the manifest, or <code>pnpm-workspace.yaml</code>). Each row is a declared dependency, with:
+</p>
+<ul class="prop-list">
+  <li><strong>The version you actually get</strong>from <code>package-lock.json</code>, <code>pnpm-lock.yaml</code> or <code>yarn.lock</code> — the range in the manifest (<code>^4.17.0</code>) is only shown when there is no lockfile yet</li>
+  <li><strong>The kind</strong><code>runtime</code>, <code>dev</code>, <code>peer</code> or <code>optional</code> — the section of the manifest it is declared in</li>
+  <li><strong>Where it comes from</strong>a tag for anything that is not the registry: <code>workspace</code> (a sibling package, shown at its own version), <code>git</code>, <code>file</code>, <code>url</code>, an <code>npm:</code> <code>alias</code> or a pnpm <code>catalog</code></li>
+  <li><strong>Whether it is installed</strong>a declared package with no <code>node_modules</code> folder (found the way Node finds it, up through the parent folders) is called out as <em>not installed</em>; peer and optional ones are exempt, since they are legitimately absent. Until there is a lockfile or a <code>node_modules</code>, the panel says the column is unknown</li>
+  <li><strong>A newer release</strong>an <code>↑ 5.0.1</code> badge, amber for a major bump, on a package whose resolved version is behind the registry's <code>latest</code>. It uses the same <em>look packages up online</em> switch and cache window as the version hints inside <code>package.json</code>, so turning that off removes the badges</li>
+  <li><strong>Vulnerabilities</strong>the shield badge — see <strong>Dependency security</strong></li>
+</ul>
+<p>
+  <strong>Resolve tree</strong> on a Node project reads the lockfile — no <code>npm ls</code>, no network, no package manager — and
+  runs as a row in the Jobs panel. It gives the <strong>Duplicate versions</strong> group (a package present at several versions, with
+  who asked for each), the <em>via …</em> line on every transitive row and the full routes down to it. Without a lockfile there is no
+  resolved graph to read, and the panel says to install first.
+</p>
+<p>
+  The <strong>Node</strong> tool window (right rail, <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>9</kbd>) is the other half of a
+  <code>package.json</code>: each package's <code>scripts</code> as rows that run in the Run console with the project's package
+  manager, and <strong>Install</strong> (<code>npm install</code>, <code>pnpm install</code> or <code>yarn install</code>). Above the scripts a
+  <strong>Dependencies</strong> row summarises the project — declared and transitive counts, how many packages have a newer release, how many are
+  vulnerable — and opens the Dependencies panel on it; the toolbar also opens the Vulnerabilities window. A project that is only a frontend gets the Dependencies panel and the Node window
+  but no Tests catalogue and no <kbd>Alt</kbd> + <kbd>8</kbd> build-tool slot.
 </p>
 
 <h2>How the classpath is found</h2>

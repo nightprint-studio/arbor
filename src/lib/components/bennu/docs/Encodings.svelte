@@ -58,7 +58,8 @@
   A file written in Cp1252 and decoded as UTF-8 loses the byte rather than garbling it: the editor shows a replacement
   glyph — one character standing where <code>è</code> was written. There is no quick fix and there cannot be one, because
   the byte that would say what it was is gone before the text reaches the editor. Reload the file in the encoding it is
-  actually written in — <strong>Project Configuration → Encoding</strong>, or the footer's encoding picker for one file.
+  actually written in — <strong>Project Configuration → Encoding</strong>, or the footer's encoding picker for one file
+  (see <a href="#reinterpret">Reinterpret</a> below).
   Typing over the glyph saves a file the original byte has already been thrown away from.
 </p>
 <Callout variant="warning" title="Both are checked while you type, in any text file">
@@ -73,4 +74,44 @@
 <Callout variant="tip" title="Clean accents are never flagged">
   Detection is exact — a table of real corruption sequences, not a guess about which characters look odd — so correct
   accented text stays unmarked.
+</Callout>
+
+<h2 id="reinterpret">Reinterpret: read it differently, change nothing</h2>
+<p>
+  The encoding pill in the editor's footer — or <strong>Reinterpret file as encoding…</strong> in the palette — makes Bennu
+  <em>read</em> the open file as another encoding. The file on disk is not touched; the choice is remembered for that file in
+  your profile, and <strong>As the project reads it</strong> takes it back. Use it when accents show as <code>Ã©</code> or a
+  replacement glyph: the bytes are fine, they were just read with the wrong rule.
+</p>
+
+<h2>Convert: rewrite the file</h2>
+<p>
+  <strong>Convert file encoding…</strong> (palette, the footer pill's last entry) rewrites the bytes in another encoding.
+  <strong>Convert project encoding…</strong> and the tree's <strong>Convert encoding…</strong> on a folder or module do the same for
+  a whole subtree. The dialog previews as you change options, and nothing is written until you press the button
+  (<kbd>Ctrl</kbd> + <kbd>Enter</kbd>):
+</p>
+<ul>
+  <li><strong>From</strong> is, by default, each file's own encoding as Bennu reads it. Set it explicitly when the preview marks
+    files <em>Not valid</em> — it then suggests what they look like.</li>
+  <li><strong>Byte-order mark</strong> (UTF-8 and UTF-16 targets): keep what the file had, add one, or remove it.</li>
+  <li><strong>A character that does not fit</strong> — the euro sign has no Latin-1 byte, an emoji has no Cp1252 one: stop (nothing is
+    written, and the preview lists every character and where it is), replace it with <code>?</code>, or write an escape
+    (<code>\uXXXX</code> in Java and properties files, <code>&amp;#xXXXX;</code> in XML and JSP).</li>
+  <li><strong>Line endings are never changed</strong>, and binary files and files that are not valid in their source encoding are
+    skipped and listed rather than damaged.</li>
+  <li>A file that declares its own encoding — an XML prolog, a JSP <code>pageEncoding</code> — has it updated, unless you turn that off.</li>
+  <li><strong>Declare it in the pom</strong> (whole-project conversions): sets <code>project.build.sourceEncoding</code> so the build
+    and Bennu agree with the files.</li>
+</ul>
+<p>
+  Many files run as a <strong>Job</strong> with progress, and can be cancelled from the Jobs panel. Before a file is rewritten it
+  is copied to a backup folder in your profile and recorded in Local History, grouped as one change. <strong>Undo
+  conversion</strong> (in the dialog afterwards, or <em>Undo last encoding conversion</em> in the palette) puts back every file
+  that has not been edited since, and the way Bennu reads them with it.
+</p>
+<Callout variant="warning" title="Converting changes how Bennu reads the file, too">
+  Converting part of a project pins each converted file to its new encoding (so the editor keeps showing it correctly);
+  converting the whole project changes the project's encoding instead. Local History keeps older revisions as they were
+  written, so a revision from before the conversion is read with the new rule.
 </Callout>

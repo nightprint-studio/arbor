@@ -23,16 +23,19 @@ import type { SourceEdit } from '$lib/types/bennu';
  *
  * An empty list means the file is already formatted — not that nothing could format it.
  *
- * Wire: `bennu_format` — `{ file, source, tab_size?, insert_spaces? }`.
+ * `range` (UTF-8 byte offsets) formats just that part of the buffer — the selection.
+ *
+ * Wire: `bennu_format` — `{ file, source, tab_size?, insert_spaces?, range? }`.
  */
 export function formatBuffer(
   file: string,
   source: string,
   tabSize?: number,
   insertSpaces?: boolean,
+  range?: { start: number; end: number },
 ): Promise<SourceEdit[]> {
   return bennu('bennu_format', {
-    args: { file, source, tab_size: tabSize, insert_spaces: insertSpaces },
+    args: { file, source, tab_size: tabSize, insert_spaces: insertSpaces, range },
   });
 }
 

@@ -252,6 +252,7 @@ mod tests {
 
     fn config(pack: &str, pairs: &[(Target, Convention)]) -> NamingConfig {
         NamingConfig {
+            inherit: true,
             enabled: true,
             ignore: Vec::new(),
             rules: BTreeMap::from([(
@@ -415,6 +416,7 @@ mod reserved_word_tests {
 
     fn config(pairs: &[(Target, Convention)]) -> NamingConfig {
         NamingConfig {
+            inherit: true,
             enabled: true,
             ignore: Vec::new(),
             rules: BTreeMap::from([(

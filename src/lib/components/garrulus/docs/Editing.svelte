@@ -34,10 +34,11 @@
     <code>#</code>, only that section.</li>
 </ul>
 <p>
-  <kbd>Ctrl</kbd>+<kbd>Click</kbd>, or <kbd>Enter</kbd> with the caret on it, follows a
-  link. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Click</kbd> opens it beside this note
-  instead. <kbd>Alt</kbd>+<kbd>←</kbd> and <kbd>Alt</kbd>+<kbd>→</kbd> walk back and
-  forward through where you have been.
+  Typing <code>[[</code> (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd>) offers the vault's
+  note titles, best match first; <kbd>Tab</kbd> or <kbd>Enter</kbd> takes one and closes the
+  brackets. <kbd>Ctrl</kbd>+<kbd>Click</kbd>, or <kbd>Enter</kbd> with the caret inside it,
+  follows a link. Links are resolved the way the index resolves them: by title (or its last
+  path segment), ignoring case and a trailing <code>.md</code>.
 </p>
 <p>
   A link to a note that does not exist is styled differently and is <b>not</b> a
@@ -51,12 +52,23 @@
   text. One click turns a mention into a link.
 </p>
 
+<h2>The formatting strip</h2>
+<p>
+  The thin toolbar above a note runs the same commands as the keyboard, and each tooltip shows
+  its chord: <kbd>Alt</kbd>+<kbd>B</kbd> bold, <kbd>Alt</kbd>+<kbd>I</kbd> italic,
+  <kbd>Alt</kbd>+<kbd>C</kbd> code, <kbd>Alt</kbd>+<kbd>S</kbd> strikethrough,
+  <kbd>Alt</kbd>+<kbd>H</kbd> highlight, <kbd>Alt</kbd>+<kbd>L</kbd> link,
+  <kbd>Alt</kbd>+<kbd>Q</kbd> quote (a second press makes it a callout, a third removes it),
+  <kbd>Alt</kbd>+<kbd>T</kbd> task, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> table. Pressing
+  a chord again on formatted text takes the formatting off.
+</p>
+
 <h2>Tags and fields</h2>
 <p>
   <code>#tag</code> anywhere in the body is a tag, and <code>#nested/tag</code> nests.
   Typing <code>#</code> completes against the vocabulary already in the vault, which is
   what keeps a vault from ending up with <code>#todo</code>, <code>#to-do</code> and
-  <code>#todos</code>.
+  <code>#todos</code>. A tag is drawn as a chip; <kbd>Ctrl</kbd>+<kbd>Click</kbd> searches for it.
 </p>
 <p>
   The block at the top of a note is its fields, rendered as a form: a dropdown where the
@@ -111,11 +123,25 @@
   rather than as a wall of HTML.
 </p>
 
+<h2>Creating notes</h2>
+<ul>
+  <li><kbd>Ctrl</kbd>+<kbd>N</kbd> — <b>new note</b>. Type a title and press <kbd>Enter</kbd>:
+    the path follows the title until you edit it, and a slash in it puts the note in a folder
+    (created as needed). An untyped note starts empty.</li>
+  <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> — <b>new note of a type</b>. Pick the
+    type (typing filters, <kbd>Enter</kbd> takes the first) and the type decides the folder,
+    the file name and what the note starts with. The palette also lists every type by name.</li>
+  <li><kbd>Ctrl</kbd>+<kbd>D</kbd> — <b>today's daily note</b>, created from the daily type's
+    template on the first visit of the day.</li>
+</ul>
+
 <h2>Changing a note after the fact</h2>
 <ul>
-  <li><kbd>F2</kbd> — <b>rename the note and every link to it</b>. What will change is
-    shown before anything changes. Renaming by hand in a file manager is how a vault
-    accumulates broken links; this is why the key exists.</li>
+  <li><kbd>F2</kbd> — <b>rename or move the note</b>; the file name is pre-selected, and a
+    folder in the path moves it. Links that pointed at the old name are not rewritten —
+    the ones that no longer resolve are listed under Problems.</li>
+  <li><b>Give this note a type…</b> (command palette) — tags the open note with a type
+    without touching what is already written.</li>
   <li><kbd>Alt</kbd>+<kbd>Enter</kbd> — <b>intentions</b> on the selection or the line:
     extract it into a new note leaving a link behind, give an untyped note a type, turn
     a paragraph into a callout, turn a line into a task, link a mention.</li>

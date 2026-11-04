@@ -72,6 +72,8 @@
     onchange?:    (v: number) => void;
     onblur?:      (e: FocusEvent) => void;
     onkeydown?:   (e: KeyboardEvent) => void;
+    /** No ▲▼ column and no frame until hovered or focused — a number that reads as text and edits in place (↑/↓ still step it). */
+    quiet?:       boolean;
   }
 
   let {
@@ -87,6 +89,7 @@
     iconStart, iconEnd,
     prefix, suffix,
     oninput, onchange, onblur, onkeydown,
+    quiet = false,
   }: Props = $props();
 
   /** Pin a candidate value to the [min, max] range when those bounds
@@ -128,6 +131,7 @@
   class:narrow
   class:disabled
   class:readonly
+  class:quiet
   class:has-icon-start={!!iconStart || !!prefix}
   class:has-icon-end={!!iconEnd || !!suffix}
 >
@@ -160,6 +164,7 @@
   {#if iconEnd}
     <span class="num-icon-end">{@render iconEnd()}</span>
   {/if}
+  {#if !quiet}
   <span class="num-ctrls" aria-hidden="true">
     <!-- tabindex=-1 keeps Tab focus on the input, not the steppers —
          keyboard users get ↑/↓ via the native number-input behavior. -->
@@ -184,6 +189,7 @@
       <ChevronDown size={10} />
     </button>
   </span>
+  {/if}
 </span>
 
 <style>
@@ -228,6 +234,8 @@
   .num-stepper.readonly {
     background: var(--bg-elevated);
   }
+  .num-stepper.quiet.narrow { width: 60px; }
+  .num-stepper.quiet:not(:hover):not(:focus-within) { background: transparent; border-color: transparent; }
 
   .num-value {
     flex: 1;

@@ -1,0 +1,14 @@
+[package]
+name         = "bennu-generate"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu code generators: a registry of pure `options + project context -> files` functions (Spring Security, JPA converters, Jackson (de)serializers, HTTP clients for Spring endpoints, builders, mappers, test skeletons, Tauri/Bevy skeletons) and the Java writer they share. No I/O: the backend gathers the context and writes the result."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Reads a pasted SOAP envelope / WSDL: the tolerant scanner and element tree the XML editor already uses.
+bennu-xml  = { path = "../../formats/xml" }

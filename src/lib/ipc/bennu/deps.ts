@@ -127,7 +127,7 @@ export function coordOf(d: { group: string; name: string }): string {
  *  scopes, and calling them the same thing would be a small lie in the one place the panel is
  *  supposed to be precise. */
 export function scopeLabel(ecosystem: string): string {
-  return ecosystem === 'cargo' ? 'Kind' : 'Scope';
+  return ecosystem === 'cargo' || ecosystem === 'node' ? 'Kind' : 'Scope';
 }
 
 /** The project's dependencies. Reads poms and the already-resolved classpath; never runs Maven,
@@ -135,6 +135,50 @@ export function scopeLabel(ecosystem: string): string {
  *  `Cargo.lock` instead, and never runs cargo. Wire: `bennu_dependencies`. */
 export function dependencies(root: string): Promise<DependencyReport> {
   return bennu('bennu_dependencies', { args: { root } });
+}
+
+// ── Node ─────────────────────────────────────────────────────────────────────
+//
+// The same report and tree shapes, for a `package.json` project (npm, pnpm, Yarn; workspaces
+// included): `ecosystem` is `node`, a dependency's `scope` is `runtime` · `dev` · `peer` ·
+// `optional`, and its `source` is `npm` · `workspace` · `git` · `file` · `url` · `alias` · `catalog`.
+// Separate wires because a root can be a Maven project and a Node one at once, and the panel says
+// which of the two it is looking at.
+
+/** The declared dependencies of every package of a Node project, with the versions its lockfile
+ *  chose and whether each is installed. Reads files only. Wire: `bennu_node_dependencies`. */
+export function nodeDependencies(root: string): Promise<DependencyReport> {
+  return bennu('bennu_node_dependencies', { args: { root } });
+}
+
+/** The resolved tree of a Node project, read out of its lockfile — no network, no package manager.
+ *  A Job while it runs. Rejects with the reason when there is no lockfile to read. Wire:
+ *  `bennu_node_dependency_tree`. */
+export function nodeDependencyTree(root: string): Promise<DependencyTree> {
+  return bennu('bennu_node_dependency_tree', { args: { root } });
+}
+
+/** A declared package with a newer release on the registry. */
+export interface OutdatedPackage {
+  name: string;
+  /** What the lockfile resolved. */
+  current: string;
+  latest: string;
+  bump: 'major' | 'minor' | 'patch';
+}
+
+export interface NodeOutdated {
+  /** Registry lookups are on (`Look packages up online`). When false nothing was asked. */
+  enabled: boolean;
+  /** Packages not looked up yet (one request is capped); asking again continues. */
+  pending: number;
+  items: OutdatedPackage[];
+}
+
+/** Which declared packages are behind the registry's `latest`. Uses the cache and the switch
+ *  `package.json` version hints use. Wire: `bennu_node_outdated`. */
+export function nodeOutdated(root: string): Promise<NodeOutdated> {
+  return bennu('bennu_node_outdated', { args: { root } });
 }
 
 // ── The resolved tree ───────────────────────────────────────────────────────────

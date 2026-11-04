@@ -311,6 +311,9 @@
 
     {#snippet footer()}
       <ModalFooter hint="to run">
+        {#if plan.status !== 'running'}
+          <Button variant="ghost" onclick={() => plansStore.requestDelete(plan)}><Trash2 size={12} /> Delete</Button>
+        {/if}
         {#if plan.status === 'running'}
           <Button variant="secondary" onclick={() => plansStore.stop(plan.id)}><Square size={12} /> Stop</Button>
         {:else}

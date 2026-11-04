@@ -1,5 +1,7 @@
 /** Mock answers for the "bennu" area — see fixtures/index.ts. Keys: Tauri command, or `program.method` for rpc. */
 import type { FixtureHandler } from './index';
+import { DEFAULT_FORMAT_STYLE, effectiveStyle } from '$lib/components/bennu/format-layers';
+import type { FormatPatch } from '$lib/types/bennu-format';
 
 const vp = (type_name: string, label: string, params: [string, string, boolean][] = [], is_field = true) => ({
   type_name, label, is_field,
@@ -37,6 +39,34 @@ const rev = (id: string, ago: number, kind: string, size: number, extra: Record<
 const javaRules = { type: 'PascalCase', method: 'camelCase', field: 'camelCase', constant: 'UPPER_SNAKE_CASE', parameter: 'camelCase', local: 'camelCase', package: 'any' };
 const emptyNaming = { enabled: false, inherit: true, ignore: [], rules: {}, overrides: [] };
 const javaNaming = { enabled: true, inherit: true, ignore: ['**/generated/**'], rules: { java: javaRules }, overrides: [] };
+
+/**
+ * A stand-in for the Java formatter, enough for the settings page to show a believable preview
+ * offline: it re-indents by brace depth with the style's indent unit and caps blank lines.
+ */
+function fakeFormat(src: string, style: { indent_width?: number; use_tabs?: boolean; max_blank_lines?: number }): string {
+  const unit = style.use_tabs ? '\t' : ' '.repeat(style.indent_width ?? 4);
+  const maxBlank = style.max_blank_lines ?? 1;
+  const out: string[] = [];
+  let depth = 0, blanks = 0, caseBody = 0;
+  for (const raw of src.split('\n')) {
+    const line = raw.trim();
+    if (!line) { if (++blanks <= maxBlank) out.push(''); continue; }
+    blanks = 0;
+    if (line.startsWith('}')) caseBody = 0;
+    const isCase = /^(case .*|default):$/.test(line);
+    const level = Math.max(0, depth - (/^[})\]]/.test(line) ? 1 : 0)) + (isCase ? 0 : caseBody);
+    out.push(unit.repeat(level) + (line.startsWith('*') ? ' ' : '') + line);
+    depth += (line.match(/{/g)?.length ?? 0) - (line.match(/}/g)?.length ?? 0);
+    if (isCase) caseBody = 1;
+  }
+  return out.join('\n');
+}
+
+const FORMAT_GLOBAL = { ...DEFAULT_FORMAT_STYLE };
+const FORMAT_PROJECT: FormatPatch = { line_width: 100, wrap_chain: 'chop' };
+const FORMAT_EDITORCONFIG: FormatPatch = { indent_width: 2 };
+const FORMAT_DETECTED: FormatPatch = { brace_method: 'next_line' };
 
 export const bennuFixtures: Record<string, FixtureHandler> = {
   // Must answer: the modal re-scans whenever `result` is null, so a null (or failing) reply makes it loop.
@@ -182,5 +212,27 @@ export const bennuFixtures: Record<string, FixtureHandler> = {
     vp('fieldexpression', 'Field expression', [['expression', 'ognl', true]]),
     vp('expression', 'Expression', [['expression', 'ognl', true]], false),
   ],
+  'bennu.bennu_format_settings': {
+    defaults: DEFAULT_FORMAT_STYLE,
+    global: FORMAT_GLOBAL,
+    project: FORMAT_PROJECT,
+    effective: effectiveStyle({ defaults: DEFAULT_FORMAT_STYLE, global: FORMAT_GLOBAL, detected: FORMAT_DETECTED, editorconfig: FORMAT_EDITORCONFIG, project: FORMAT_PROJECT }),
+    editorconfig: FORMAT_EDITORCONFIG,
+    detected: FORMAT_DETECTED,
+  },
+  'bennu.bennu_format_set_global': null,
+  'bennu.bennu_format_set_project': null,
+  'bennu.bennu_format_preview': (p) => fakeFormat(String(p.args?.source ?? ''), p.args?.style ?? {}),
+  'bennu.bennu_format_detect': {
+    files: 214,
+    patch: { indent_width: 4, brace_method: 'next_line', brace_block: 'next_line', line_width: 140, wrap_chain: 'chop' },
+    evidence: [
+      { key: 'indent_width', value: 4, share: 0.97, samples: 6120 },
+      { key: 'brace_method', value: 'next_line', share: 0.91, samples: 1380 },
+      { key: 'brace_block', value: 'next_line', share: 0.88, samples: 3410 },
+      { key: 'line_width', value: 140, share: 0.95, samples: 214 },
+      { key: 'wrap_chain', value: 'chop', share: 0.82, samples: 96 },
+    ],
+  },
   'bennu.bennu_validation_author': (p) => String((p.args as { existing_xml?: string })?.existing_xml ?? ''),
 };

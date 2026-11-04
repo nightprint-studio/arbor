@@ -222,6 +222,23 @@ export interface LanguageDescriptor {
   injections?: Record<string, StreamParser<unknown>>;
 
   /**
+   * Optional same-length rewrite of the document text handed to the PARSER (the editor keeps the
+   * original). For a grammar whose raw-text token cannot survive a construct that is legal in the
+   * language it hosts — a JSP `<script>` body holding `</c:if>`, which ends the raw text early.
+   * Must preserve every offset (replace characters, never add or remove them). When set, every
+   * edit reparses from scratch, since the mask can change far from the edit.
+   */
+  parseText?: (text: string) => string;
+
+  /**
+   * Optional colouring of a **leaf** by the host, from the ORIGINAL text of that leaf — for a leaf
+   * that mixes languages (JSP tags and EL inside `<script>` JavaScript) where one stream parser
+   * ({@link injections}) cannot say it all. Spans are relative to the leaf, ascending by `from`.
+   * Return `null` to fall through to {@link injections} / `classify`.
+   */
+  leafHighlight?: (type: string, text: string, node: Node) => LeafSpan[] | null;
+
+  /**
    * Optional highlight for text the grammar **does not put in the tree**, painted from the
    * raw document instead.
    *
@@ -312,3 +329,6 @@ export interface CodeEditorIntel {
 export type { Parser, Tree, Node };
 export type { CompletionSource };
 export type { InlineCompletion, InlineCompletionOutcomeHandler, InlineCompletionSource };
+
+/** A coloured span relative to the start of the leaf it came from. */
+export interface LeafSpan { from: number; to: number; cls: TokenClass | string }

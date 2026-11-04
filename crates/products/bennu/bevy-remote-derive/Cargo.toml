@@ -1,0 +1,22 @@
+[package]
+name         = "arbor-bevy-remote-derive"
+version      = "0.1.0"
+edition      = "2024"
+rust-version = "1.89"
+license      = "GPL-3.0-only"
+authors      = ["Nightprint Studio"]
+description  = "`#[derive(RemoteInspect)]` for arbor-bevy-remote: field attributes that tell Arbor's Bevy Remote inspector to draw a colour picker, a slider, a date, an angle."
+readme       = "README.md"
+publish      = false
+
+# Standalone, like the crate it serves: it is used from a game's dependency tree, not from Arbor's workspace.
+[workspace]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# The same three crates, at the same major versions, that Arbor's own `arbor-rpc-macros` already uses.
+syn        = { version = "2", features = ["full"] }
+quote      = "1"
+proc-macro2 = "1"

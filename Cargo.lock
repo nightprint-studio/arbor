@@ -950,14 +950,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bennu-assistant"
-version = "0.3.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "bennu-be"
 version = "0.3.0"
 dependencies = [
@@ -978,7 +970,6 @@ dependencies = [
  "arbor-syntax",
  "base64 0.22.1",
  "bennu-assertj",
- "bennu-assistant",
  "bennu-bevy",
  "bennu-cargo",
  "bennu-check",
@@ -991,6 +982,7 @@ dependencies = [
  "bennu-ext",
  "bennu-flc",
  "bennu-fulcrum-i18n",
+ "bennu-generate",
  "bennu-gradle",
  "bennu-i18n",
  "bennu-index",
@@ -1033,6 +1025,8 @@ dependencies = [
  "bennu-web",
  "bennu-wgsl",
  "bennu-xml",
+ "imber-core",
+ "imber-transport",
  "libc",
  "notify",
  "regex",
@@ -1101,6 +1095,7 @@ version = "0.3.0"
 dependencies = [
  "arbor-core",
  "arbor-ipc",
+ "imber-core",
  "serde",
  "serde_json",
  "toml 0.8.23",
@@ -1124,6 +1119,7 @@ dependencies = [
  "arbor-core",
  "bennu-cargo",
  "bennu-gradle",
+ "bennu-npm",
  "bennu-xml",
  "serde",
 ]
@@ -1182,6 +1178,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-generate"
+version = "0.3.0"
+dependencies = [
+ "bennu-xml",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bennu-gradle"
 version = "0.3.0"
 dependencies = [
@@ -1236,6 +1241,10 @@ dependencies = [
 [[package]]
 name = "bennu-intentions"
 version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "bennu-jackson"
@@ -1429,6 +1438,7 @@ name = "bennu-npm"
 version = "0.3.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2566,6 +2576,7 @@ dependencies = [
  "arbor-plugin-rpc",
  "arbor-process-ext",
  "arbor-rpc",
+ "arbor-scheduler",
  "base64 0.22.1",
  "corvus-core",
  "corvus-git",
@@ -2579,6 +2590,8 @@ dependencies = [
  "corvus-provider-descriptor",
  "dirs 6.0.0",
  "git2",
+ "imber-core",
+ "imber-transport",
  "regex",
  "schemars 1.2.1",
  "serde",
@@ -4549,6 +4562,48 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hirundo-be"
+version = "0.3.0"
+dependencies = [
+ "arbor-be",
+ "arbor-core",
+ "arbor-exe-icon",
+ "arbor-ipc",
+ "arbor-rpc",
+ "arbor-scheduler",
+ "base64 0.22.1",
+ "bennu-generate",
+ "hirundo-core",
+ "hirundo-model",
+ "mlua",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "hirundo-core"
+version = "0.3.0"
+dependencies = [
+ "arbor-ipc",
+ "hirundo-model",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hirundo-model"
+version = "0.3.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "hmac"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4902,6 +4957,23 @@ checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
 dependencies = [
  "byteorder-lite",
  "quick-error",
+]
+
+[[package]]
+name = "imber-core"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "imber-transport"
+version = "0.3.0"
+dependencies = [
+ "imber-core",
+ "reqwest 0.12.28",
+ "tokio",
 ]
 
 [[package]]

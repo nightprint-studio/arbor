@@ -57,4 +57,6 @@ pub mod module_graph;
 pub mod tree;
 // The resolved tree as `gradle dependencies` prints it.
 pub mod gradle_tree;
+// The Node producer: `package.json` + lockfile, and the resolved tree read out of the lockfile.
+pub mod node;
 pub mod prelude;

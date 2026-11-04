@@ -57,6 +57,10 @@ pub struct EntitiesArgs {
     pub offset: usize,
     #[serde(default)]
     pub limit: Option<usize>,
+    /// With a search or filter: also return the ancestors of every hit (listed in `context`), so the
+    /// frontend can draw the matches under their parents instead of as a flat list.
+    #[serde(default)]
+    pub with_parents: bool,
 }
 
 #[derive(Serialize)]
@@ -64,6 +68,8 @@ pub struct EntitiesDto {
     pub revision: String,
     pub total: usize,
     pub rows: Vec<RowView>,
+    /// Ids in `rows` that are there only as ancestors of a hit (`with_parents`).
+    pub context: Vec<u64>,
     pub generation: u64,
 }
 
@@ -110,6 +116,8 @@ async fn bennu_brp_entities(_ctx: &BennuState, args: EntitiesArgs) -> Result<Ent
     };
     let search = args.search.unwrap_or_default();
     let limit = args.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
+    // Decided here: `search` and `only` move into the blocking task below.
+    let with_parents = args.with_parents && (!search.is_empty() || only.is_some());
     let page = {
         let snapshot = Arc::clone(&snapshot);
         tokio::task::spawn_blocking(move || {
@@ -124,10 +132,17 @@ async fn bennu_brp_entities(_ctx: &BennuState, args: EntitiesArgs) -> Result<Ent
         .await
         .map_err(|e| format!("entity page failed: {e}"))?
     };
+    let (mut rows, mut context) = (page.rows, Vec::new());
+    if with_parents {
+        let ancestors = snapshot.missing_ancestors(&rows);
+        context = ancestors.iter().map(|r| r.id).collect();
+        rows.extend(ancestors);
+    }
     Ok(EntitiesDto {
         revision: snapshot.revision().to_string(),
         total: page.total,
-        rows: page.rows,
+        rows,
+        context,
         generation: lock().generation,
     })
 }
@@ -180,13 +195,17 @@ async fn refresh_snapshot() -> Result<(Arc<Snapshot>, bool, u64), String> {
     let generation = lock().generation;
 
     let option: Vec<&String> = live.name_types.iter().chain(&live.parent_types).collect();
-    let data = if option.is_empty() { json!({}) } else { json!({ "option": option }) };
+    let mut data = if option.is_empty() { json!({}) } else { json!({ "option": option }) };
+    // Which engine markers (camera, light, …) each entity has: booleans, cheap, and what an icon is chosen from.
+    if !live.kind_types.is_empty() {
+        data["has"] = json!(live.kind_types.iter().map(|(path, _)| path).collect::<Vec<_>>());
+    }
     let raw = call(Op::Query, Some(json!({ "data": data, "strict": false }))).await?;
 
     // Turning 100k query rows into an index is real CPU work.
-    let (names, parents) = (live.name_types.clone(), live.parent_types.clone());
+    let (names, parents, kinds) = (live.name_types.clone(), live.parent_types.clone(), live.kind_types.clone());
     let fresh = Arc::new(
-        tokio::task::spawn_blocking(move || Snapshot::from_query(&raw, &names, &parents))
+        tokio::task::spawn_blocking(move || Snapshot::from_query_with_kinds(&raw, &names, &parents, &kinds))
             .await
             .map_err(|e| format!("snapshot indexing failed: {e}"))?,
     );

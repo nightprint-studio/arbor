@@ -14,3 +14,7 @@ description  = "What a `package.json` says, with spans: its dependencies, its sc
 # strict parser answers nothing at all about it. So the reader is hand-rolled, for the same reason
 # `bennu-cargo`'s manifest reader is.
 serde = { workspace = true }
+# Lockfiles: `package-lock.json` is JSON, and a lockfile is machine-written, so unlike a manifest it
+# is read whole — no spans needed, and a strict parser is the right one. Already a workspace
+# dependency; this crate just did not need it until it read lockfiles.
+serde_json = { workspace = true }

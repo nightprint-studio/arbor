@@ -7,16 +7,21 @@
    * modal and Bennu's `.md` tabs use. What is left here is the vault's half of the contract:
    * which bytes to show, which note answered, and what a blur means.
    *
-   * Nothing about wikilinks, tags or note types is inlined here either: when the shared editor
-   * grows its `LinkProvider` / `TagProvider` seam, that provider object becomes one more prop on
-   * this component and nothing else moves (`docs/garrulus-design.md` §7.0).
+   * Nothing about wikilinks or tags is inlined here either: the syntax lives in
+   * `$lib/utils/markdown-vault`, and what the vault answers (which titles exist, what following a
+   * link does) is the provider built in `vault-link-provider.ts` (`docs/garrulus-design.md` §7.0).
    *
    * **The bytes are the record.** `onChange` reports the document verbatim and `onBlur` asks the
    * store to write it; nothing on this path trims, re-indents or re-wraps. A save that tidied the
    * file would rewrite lines the user never touched and turn the next sync into a diff nobody can
    * read.
    */
+  import type { EditorView } from '@codemirror/view';
   import MarkdownEditor from '$lib/components/shared/ui/MarkdownEditor.svelte';
+  import { markdownFormatKeymap } from '$lib/utils/markdown-format';
+  import { vaultMarkdown } from '$lib/utils/markdown-vault';
+  import { garrulusNotesStore } from '$lib/stores/garrulus/notes.svelte';
+  import { createVaultLinkProvider, refreshVaultTags } from './vault-link-provider';
 
   interface Props {
     /** Vault-relative path of the note. Echoed back on every callback so the
@@ -41,7 +46,20 @@
 
   let { notePath, revision, text, docPath, readOnly = false, onChange, onBlur }: Props = $props();
 
-  let editor = $state<{ focus: () => void } | null>(null);
+  let editor = $state<{ focus: () => void; exec: (c: (v: EditorView) => boolean) => boolean } | null>(
+    null,
+  );
+
+  // One provider and one extension set for this mount: the editor reads them when a document is
+  // (re)built, so rebuilding them per render would only make garbage.
+  const vault = vaultMarkdown(createVaultLinkProvider());
+  const extensions = [...vault.extensions, markdownFormatKeymap];
+
+  // Tags in use change when notes do; the catalogue array is replaced on every refresh.
+  $effect(() => {
+    void garrulusNotesStore.notes;
+    void refreshVaultTags();
+  });
 
   /** The document's identity for the editor: the note, plus the read that produced these bytes. */
   const docKey = $derived(`${notePath}#${revision}`);
@@ -57,6 +75,11 @@
   export function focus() {
     editor?.focus();
   }
+
+  /** Run a formatting command on the note — what the toolbar calls. */
+  export function exec(command: (view: EditorView) => boolean): boolean {
+    return editor?.exec(command) ?? false;
+  }
 </script>
 
 <MarkdownEditor
@@ -65,6 +88,8 @@
   {text}
   {docPath}
   {readOnly}
+  {extensions}
+  completionSources={vault.completionSources}
   onChange={(t, key) => onChange(noteOf(key), t)}
   onBlur={(key) => onBlur?.(noteOf(key))}
 />

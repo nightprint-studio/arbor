@@ -56,6 +56,8 @@ function createPlansStore() {
   let modalPlanId = $state<string | null>(null);
   /** The Create-MR modal opened in plan mode, or null. */
   let mrDraft = $state<MrDraft | null>(null);
+  /** The plan the user asked to delete, until they confirm or cancel. */
+  let deleting = $state<Plan | null>(null);
 
   const upsert = (plan: Plan) => {
     const i = plans.findIndex(p => p.id === plan.id);
@@ -82,6 +84,7 @@ function createPlansStore() {
     get loaded() { return loaded; },
     get modalPlanId() { return modalPlanId; },
     get mrDraft() { return mrDraft; },
+    get deleting() { return deleting; },
     /** The plan entry points add to when the user does not pick one. */
     get current() { return current; },
     get running() { return plans.filter(p => p.status === 'running'); },
@@ -148,6 +151,15 @@ function createPlansStore() {
     create: (name?: string) => attempt('Could not create the plan', () => createPlan(name)),
     copy: (id: string, opts: { name?: string; template?: boolean } = {}) =>
       attempt('Could not copy the plan', () => copyPlan(id, opts)),
+    /** Ask for confirmation before deleting; the confirm modal is hosted by `PlanHost`. */
+    requestDelete(plan: Plan) { if (plan.status !== 'running') deleting = plan; },
+    cancelDelete() { deleting = null; },
+    async confirmDelete() {
+      const plan = deleting;
+      deleting = null;
+      if (!plan) return;
+      if (await store.remove(plan.id) !== null && modalPlanId === plan.id) modalPlanId = null;
+    },
     remove: (id: string) => attempt('Could not delete the plan', () => deletePlan(id)),
     run: (id: string) => attempt('Could not run the plan', () => runPlan(id)),
     stop: (id: string) => attempt('Could not stop the plan', () => stopPlan(id)),

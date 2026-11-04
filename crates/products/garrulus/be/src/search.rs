@@ -89,3 +89,9 @@ fn garrulus_problems(state: &GarrulusState) -> Result<VaultProblems, String> {
         orphans:    index.orphans().into_iter().cloned().collect(),
     })
 }
+
+/// Every tag in the vault, lowercased and sorted — what `#` completes to in the editor.
+#[arbor_rpc::handler]
+fn garrulus_tags(state: &GarrulusState) -> Result<Vec<String>, String> {
+    Ok(state.index_read()?.tags().into_iter().cloned().collect())
+}

@@ -327,6 +327,22 @@ impl ToolHost {
         })
     }
 
+    /// Attach a PNG some other tool made (a running game's frame) to the call `call_id`, the way a page
+    /// screenshot is: saved under the conversation, held until the loop takes it with `shown_images`.
+    pub(super) fn attach_png(&self, call_id: &str, bytes: &[u8], caption: &str) -> Result<String, String> {
+        if bytes.len() as u64 > MAX_IMAGE_BYTES {
+            return Err(format!("the picture is {} MB, more than the model can be sent; ask for a smaller `max_width`", bytes.len() / 1_000_000));
+        }
+        let (w, h) = image_dimensions(bytes).unwrap_or((0, 0));
+        let path = store::save(&self.session.conversation_id, bytes, "image/png")?;
+        let tokens = estimate_image_tokens(w, h);
+        store::hold(
+            call_id,
+            store::Pending { image: ImageRef { media_type: "image/png".to_string(), path, tokens }, width: w, height: h, caption: caption.to_string() },
+        );
+        Ok(format!("{w}x{h}, about {tokens} tokens"))
+    }
+
     /// The pictures the call that just ran left behind, drawn in the thread and handed to the loop.
     pub(super) fn shown_images(&self, call_id: &str) -> Vec<ImageRef> {
         let held = store::take(call_id);

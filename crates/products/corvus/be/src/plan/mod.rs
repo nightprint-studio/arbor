@@ -57,17 +57,17 @@ fn new_phase(plan: &Plan) -> Phase {
 }
 
 #[arbor_rpc::handler]
-fn plan_list(state: &CorvusState) -> Result<Vec<Plan>, String> {
+pub(crate) fn plan_list(state: &CorvusState) -> Result<Vec<Plan>, String> {
     Ok(store::list(state))
 }
 
 #[arbor_rpc::handler]
-fn plan_get(state: &CorvusState, plan_id: String) -> Result<Plan, String> {
+pub(crate) fn plan_get(state: &CorvusState, plan_id: String) -> Result<Plan, String> {
     store::get(state, &plan_id)
 }
 
 #[arbor_rpc::handler]
-fn plan_create(state: &CorvusState, name: Option<String>) -> Result<Plan, String> {
+pub(crate) fn plan_create(state: &CorvusState, name: Option<String>) -> Result<Plan, String> {
     let name = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| format!("Plan {}", store::list(state).len() + 1));
     Ok(store::insert(state, store::blank(&name)))
 }
@@ -117,7 +117,7 @@ fn plan_copy(state: &CorvusState, plan_id: String, name: Option<String>, templat
 /// puts it in a phase of its own after the last — "start this only once the rest has finished" —
 /// and `to_finally` puts it in the `finally` steps instead.
 #[arbor_rpc::handler]
-fn plan_add_step(
+pub(crate) fn plan_add_step(
     state: &CorvusState,
     plan_id: Option<String>,
     phase_id: Option<String>,
@@ -170,7 +170,7 @@ fn plan_add_step(
 
 /// Run a plan — from the start when it is new or finished, from where it stopped when paused.
 #[arbor_rpc::handler]
-async fn plan_run(state: &CorvusState, plan_id: String) -> Result<Plan, String> {
+pub(crate) async fn plan_run(state: &CorvusState, plan_id: String) -> Result<Plan, String> {
     let plan = store::mutate(state, &plan_id, |p| {
         if p.template {
             return Err("a template is copied, not run".into());
@@ -193,7 +193,7 @@ async fn plan_run(state: &CorvusState, plan_id: String) -> Result<Plan, String> 
 /// Stop a plan: a running one finishes the steps in flight, a paused one goes straight on to its
 /// `finally` steps; both end `Cancelled`.
 #[arbor_rpc::handler]
-async fn plan_stop(state: &CorvusState, plan_id: String) -> Result<Plan, String> {
+pub(crate) async fn plan_stop(state: &CorvusState, plan_id: String) -> Result<Plan, String> {
     if !exec::request_cancel(&plan_id) {
         let paused = store::read(state, &plan_id, |p| p.status == PlanStatus::Paused)?;
         if !paused {
@@ -210,7 +210,7 @@ async fn plan_stop(state: &CorvusState, plan_id: String) -> Result<Plan, String>
 
 /// Put a failed or skipped step back in the queue; the plan picks it up when resumed.
 #[arbor_rpc::handler]
-fn plan_retry_step(state: &CorvusState, plan_id: String, step_id: String) -> Result<Plan, String> {
+pub(crate) fn plan_retry_step(state: &CorvusState, plan_id: String, step_id: String) -> Result<Plan, String> {
     store::mutate(state, &plan_id, |p| {
         editable(p)?;
         let s = p.find_step_mut(&step_id).ok_or_else(|| format!("step '{step_id}' not found"))?;
@@ -224,7 +224,7 @@ fn plan_retry_step(state: &CorvusState, plan_id: String, step_id: String) -> Res
 
 /// Give up on a step: later phases stop waiting for it.
 #[arbor_rpc::handler]
-fn plan_skip_step(state: &CorvusState, plan_id: String, step_id: String) -> Result<Plan, String> {
+pub(crate) fn plan_skip_step(state: &CorvusState, plan_id: String, step_id: String) -> Result<Plan, String> {
     store::mutate(state, &plan_id, |p| {
         editable(p)?;
         let s = p.find_step_mut(&step_id).ok_or_else(|| format!("step '{step_id}' not found"))?;
@@ -239,7 +239,7 @@ fn plan_skip_step(state: &CorvusState, plan_id: String, step_id: String) -> Resu
 /// Open the gate before phase `phase_id` — the go-ahead for a manual gate, "skip the wait" for the
 /// others. A paused plan resumes; a running one notices within a second.
 #[arbor_rpc::handler]
-async fn plan_release_gate(state: &CorvusState, plan_id: String, phase_id: String) -> Result<Plan, String> {
+pub(crate) async fn plan_release_gate(state: &CorvusState, plan_id: String, phase_id: String) -> Result<Plan, String> {
     let (plan, resume) = store::mutate(state, &plan_id, |p| {
         let phase = p.phases.iter_mut().find(|ph| ph.id == phase_id).ok_or_else(|| format!("phase '{phase_id}' not found"))?;
         phase.gate.state = model::GateState::Open;
@@ -253,4 +253,93 @@ async fn plan_release_gate(state: &CorvusState, plan_id: String, phase_id: Strin
         exec::start(&plan_id, exec::Run::Full)?;
     }
     Ok(plan)
+}
+
+/// What a plan is built from by something that is not the editor (Imber): phases of steps, each step
+/// optionally carrying an id other steps' gates can name.
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct StepIn {
+    pub id: Option<String>,
+    #[serde(flatten)]
+    pub spec: StepSpec,
+    pub repo: Option<RepoRef>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct PhaseIn {
+    pub name: Option<String>,
+    pub gate: Option<model::GateSpec>,
+    #[serde(default)]
+    pub steps: Vec<StepIn>,
+}
+
+/// A draft plan from phases, validated. Nothing runs: the user reviews it in the Plan window and runs it.
+/// `default_repo` stands for steps that name no repository.
+pub(crate) fn create_draft(state: &CorvusState, name: &str, phases: Vec<PhaseIn>, default_repo: &RepoRef) -> Result<Plan, String> {
+    let mut plan = store::blank(name);
+    for (i, p) in phases.into_iter().enumerate() {
+        let steps = p
+            .steps
+            .into_iter()
+            .map(|s| Step {
+                id: s.id.filter(|x| !x.is_empty()).unwrap_or_else(|| store::new_id("st")),
+                spec: s.spec,
+                repo: s.repo.unwrap_or_else(|| default_repo.clone()),
+                status: StepStatus::Queued,
+                error: None,
+                started_ms: None,
+                finished_ms: None,
+                result: None,
+            })
+            .collect();
+        plan.phases.push(Phase {
+            id: store::new_id("ph"),
+            name: p.name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| format!("Phase {}", i + 1)),
+            gate: p.gate.map(|spec| model::Gate { spec, ..Default::default() }).unwrap_or_default(),
+            steps,
+        });
+    }
+    plan.validate()?;
+    Ok(store::insert(state, plan))
+}
+
+/// Set the condition that starts phase `phase_id` (the first phase has none: nothing precedes it). The change
+/// is validated on a copy: a gate that would make the plan incoherent leaves the plan as it was.
+pub(crate) fn set_gate(state: &CorvusState, plan_id: &str, phase_id: &str, spec: model::GateSpec) -> Result<Plan, String> {
+    store::mutate(state, plan_id, |p| {
+        editable(p)?;
+        let at = p.phases.iter().position(|ph| ph.id == phase_id).ok_or_else(|| format!("phase '{phase_id}' not found"))?;
+        if at == 0 {
+            return Err("the first phase has no gate: nothing comes before it".into());
+        }
+        let mut next = p.clone();
+        next.phases[at].gate = model::Gate { spec, ..Default::default() };
+        next.validate()?;
+        *p = next;
+        Ok(p.clone())
+    })
+}
+
+/// Take a step out of a plan. An empty phase is left in place (the user may fill it again). Validated on a
+/// copy, so removing a step a gate or a merge refers to is refused rather than half done.
+pub(crate) fn remove_step(state: &CorvusState, plan_id: &str, step_id: &str) -> Result<Plan, String> {
+    store::mutate(state, plan_id, |p| {
+        editable(p)?;
+        let mut next = p.clone();
+        let mut found = false;
+        for ph in &mut next.phases {
+            let before = ph.steps.len();
+            ph.steps.retain(|s| s.id != step_id);
+            found |= ph.steps.len() != before;
+        }
+        let before = next.finally.len();
+        next.finally.retain(|s| s.id != step_id);
+        found |= next.finally.len() != before;
+        if !found {
+            return Err(format!("step '{step_id}' not found"));
+        }
+        next.validate()?;
+        *p = next;
+        Ok(p.clone())
+    })
 }

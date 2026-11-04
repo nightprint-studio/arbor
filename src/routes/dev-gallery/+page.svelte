@@ -116,6 +116,7 @@
   ul { columns: 3; list-style: none; padding: 0; }
   a { color: var(--accent, #6af); text-decoration: none; }
   a.skip { opacity: 0.5; }
-  .tag { position: fixed; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 4px; background: #000a; }
-  .tag.bad { background: #a00c; color: #fff; }
+  /* Dev-only label of the scene on screen: out of the way (top right, no pointer events), in theme colours. */
+  .tag { position: fixed; right: 8px; bottom: 34px; padding: 1px 8px; border-radius: var(--radius-sm, 4px); background: var(--bg-overlay, #1c2128); border: 1px solid var(--border-subtle, #30363d); color: var(--text-muted, #8b949e); font-size: 11px; opacity: 0.6; pointer-events: none; }
+  .tag.bad { background: var(--error, #a00); color: #fff; opacity: 1; }
 </style>

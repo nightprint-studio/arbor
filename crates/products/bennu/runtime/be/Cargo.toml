@@ -129,6 +129,8 @@ bennu-jakartaee = { path = "../../frameworks/jakartaee" }
 bennu-jaxrs = { path = "../../frameworks/jaxrs" }
 bennu-dtolab = { path = "../../frameworks/dtolab" }
 bennu-templates = { path = "../../editing/templates" }
+# The code generators' registry: pure `options + context -> files`; this crate gathers the context.
+bennu-generate = { path = "../../editing/generate" }
 # The third extension: XML schemas (DTD + XSD → completion, ghost text, hover, go-to, checks).
 # Unlike the other two it is not capability-gated — the resolved grammar is its gate, and a
 # document nothing describes costs one scan and one map lookup.
@@ -249,7 +251,9 @@ tokio      = { workspace = true }
 reqwest    = { workspace = true }
 # The assistant: its pure core (provider, loop, access policy) is a workspace crate; `regex` is the
 # workspace pin already used elsewhere — here for the assistant's text-search tool (grep, in Rust).
-bennu-assistant = { path = "../../assistant" }
+# Package renamed `imber-core` (shared with Corvus); the alias keeps every `bennu_assistant::` path in this crate valid.
+bennu-assistant = { package = "imber-core", path = "../../../../platform/imber/core" }
+imber-transport = { path = "../../../../platform/imber/transport" }
 regex      = { workspace = true }
 # New Project: a downloaded project skeleton is extracted with `unzip_limited` (zip-slip guard,
 # entry/size caps). A workspace-internal crate that already owns the `zip` dependency — Bennu does

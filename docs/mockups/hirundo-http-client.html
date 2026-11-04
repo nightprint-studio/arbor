@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hirundo — client HTTP della suite Bennu, proposta</title>
+<style>
+  :root {
+    --bg-base:#0d1117; --bg-elevated:#161b22; --bg-overlay:#1c2128; --bg-hover:#21262d;
+    --border:#30363d; --fg:#e6edf3; --fg-muted:#8b949e; --fg-subtle:#6e7681;
+    --accent:#2f81f7; --accent-fg:#79c0ff; --accent-soft:rgba(47,129,247,.15);
+    --success:#3fb950; --success-soft:rgba(63,185,80,.14);
+    --warning:#d29922; --warning-soft:rgba(210,153,34,.15);
+    --danger:#f85149; --danger-soft:rgba(248,81,73,.14);
+    --purple:#a371f7; --teal:#39c5cf;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:#010409;color:var(--fg);font:14px/1.5 var(--font);padding:16px}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:28px 0 8px}
+  p.lead{color:var(--fg-muted);margin:0 0 14px;max-width:760px}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}
+  .tab{background:var(--bg-elevated);border:1px solid var(--border);color:var(--fg-muted);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit}
+  .tab.on{color:var(--fg);border-color:var(--accent);background:var(--accent-soft)}
+  .screen{display:none} .screen.on{display:block}
+  .win{background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .titlebar{display:flex;align-items:center;gap:10px;padding:8px 12px;font-size:12px;color:var(--fg-muted)}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--border)}
+  .logo{color:var(--teal);font-weight:600}
+  .env{margin-left:auto;display:flex;gap:6px;align-items:center}
+  .pill{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid var(--border);color:var(--fg-muted)}
+  .pill.ok{color:var(--success);background:var(--success-soft);border-color:transparent}
+  .pill.warn{color:var(--warning);background:var(--warning-soft);border-color:transparent}
+  .pill.bad{color:var(--danger);background:var(--danger-soft);border-color:transparent}
+  .pill.acc{color:var(--accent-fg);background:var(--accent-soft);border-color:transparent}
+  .body{display:grid;grid-template-columns:40px 240px 1fr;gap:6px;padding:0 6px 6px}
+  .rail{display:flex;flex-direction:column;gap:4px;padding:4px 0;align-items:center}
+  .ri{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--fg-muted);font-size:15px}
+  .ri.on{background:var(--accent-soft);color:var(--accent-fg)}
+  .search{margin:0 8px 6px;background:var(--bg-overlay);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12.5px;color:var(--fg-subtle);display:flex;justify-content:space-between}
+  .src{margin:0 8px 6px;font-size:11.5px;color:var(--fg-muted);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .trash{margin-left:auto;color:var(--danger);opacity:.9}
+  .rtabs{display:flex;gap:2px;padding:6px 8px 0;overflow-x:auto;border-bottom:1px solid var(--border)}
+  .rt{display:flex;gap:6px;align-items:center;padding:5px 10px;border-radius:8px 8px 0 0;font-size:12.5px;color:var(--fg-muted);white-space:nowrap}
+  .rt b{font:600 10px var(--mono)} .rt i{font-style:normal;opacity:.6} .rt em{color:var(--warning);font-style:normal;font-size:10px}
+  .rt.on{background:var(--bg-elevated);color:var(--fg);box-shadow:inset 0 2px 0 var(--accent)} .rt.pv u{text-decoration:none;font-style:italic}
+  .toolbar{display:flex;gap:2px;padding:2px 12px 8px;flex-wrap:wrap;align-items:center}
+  .tb{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--fg-muted);font-size:13px}
+  .tb:hover{background:var(--bg-hover);color:var(--fg)} .tb.stop{color:var(--danger);margin-left:auto}
+  .sep{width:1px;height:16px;background:var(--border);margin:0 4px}
+  .tr.hov{background:var(--bg-hover)}
+  .tr .trash{display:none} .tr.hov .trash,.tr.sel .trash{display:inline}
+  .panel{background:var(--bg-base);border-radius:10px;min-width:0;overflow:hidden}
+  .ph{padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg-subtle);display:flex;justify-content:space-between}
+  .tree{padding:0 6px 10px;font-size:13px}
+  .tr{display:flex;gap:8px;align-items:center;padding:3px 8px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tr.sel{background:var(--accent-soft)} .tr.i1{padding-left:22px} .tr.i2{padding-left:36px}
+  .m{font:600 10px var(--mono);width:34px;flex:none}
+  .GET{color:var(--success)} .POST{color:var(--warning)} .PUT{color:var(--accent-fg)} .DEL{color:var(--danger)} .PATCH{color:var(--purple)}
+  .main{display:grid;grid-template-rows:auto 1fr;min-width:0}
+  .reqbar{display:flex;gap:6px;padding:10px 12px;flex-wrap:wrap}
+  .method{background:var(--bg-overlay);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font:600 12px var(--mono);color:var(--success)}
+  .url{flex:1;min-width:180px;background:var(--bg-overlay);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font:12.5px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .var{color:var(--purple)}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:6px 14px;font:600 13px var(--font)}
+  .btn.ghost{background:var(--bg-overlay);border:1px solid var(--border);color:var(--fg)}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:0 6px 6px}
+  .sub{display:flex;gap:14px;padding:0 12px;border-bottom:1px solid var(--border);font-size:12.5px;color:var(--fg-muted);overflow-x:auto}
+  .sub span{padding:6px 0;white-space:nowrap} .sub .on{color:var(--fg);border-bottom:2px solid var(--accent)}
+  pre{margin:0;padding:10px 12px;font:12px/1.6 var(--mono);overflow:auto;color:var(--fg)}
+  .k{color:var(--accent-fg)} .s{color:#a5d6ff} .n{color:var(--warning)} .c{color:var(--fg-subtle)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  td,th{text-align:left;padding:5px 12px;border-bottom:1px solid var(--bg-hover);vertical-align:top}
+  th{color:var(--fg-subtle);font-weight:500;font-size:11px}
+  .stat{display:flex;gap:8px;padding:8px 12px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--fg-muted)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}
+  .card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:12px}
+  .card b{display:block;margin-bottom:2px} .card span{color:var(--fg-muted);font-size:13px}
+  .imber{border:1px solid var(--accent);background:var(--accent-soft);border-radius:10px;padding:10px 12px;margin:8px 12px;font-size:12.5px}
+  kbd{font:10.5px var(--mono);padding:0 5px;border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;background:var(--bg-overlay);color:var(--fg-muted)}
+  .check{display:flex;gap:8px;padding:5px 12px;font-size:12.5px;align-items:center}
+  .bar{height:8px;border-radius:4px;background:var(--accent);display:inline-block}
+  @media (max-width:760px){
+    .body{grid-template-columns:40px 1fr} .main{grid-column:1 / -1} .split{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<h1>Hirundo <span class="pill acc">proposta</span></h1>
+<p class="lead">Client HTTP/API della suite Bennu, stile Postman/Bruno: collezioni di richieste <b>come file nel repo</b> (leggibili, diffabili da Corvus), ambienti, auth, test, import da OpenAPI/Postman/curl. Tastiera-first e integrato con Imber e con gli endpoint che Bennu già conosce dal codice Java.</p>
+
+<div class="tabs" id="tabs">
+  <button class="tab on" data-s="s1">1 · Workspace</button>
+  <button class="tab" data-s="s2">2 · Ambienti &amp; auth</button>
+  <button class="tab" data-s="s3">3 · Test &amp; runner</button>
+  <button class="tab" data-s="s4">4 · Import &amp; integrazioni</button>
+</div>
+
+<!-- 1 WORKSPACE -->
+<div class="screen on" id="s1">
+ <div class="win">
+  <div class="titlebar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="logo">Hirundo</span> gestionale-api
+   <span class="env"><span class="pill">Ctrl+E</span><span class="pill ok">● staging</span></span></div>
+  <div class="body">
+   <div class="rail">
+    <div class="ri on" title="Collezioni">☰</div><div class="ri" title="Rilevati dal codice">&lt;/&gt;</div>
+    <div class="ri" title="Ambienti">◎</div><div class="ri" title="Cronologia">↺</div>
+    <div class="ri" title="Runner e pianificazioni">▶</div>
+   </div>
+   <div class="panel">
+    <div class="ph"><span>Collezioni</span><span>＋ ⋯</span></div>
+    <div class="search"><span>Cerca (fuzzy)… “lsbn”</span><kbd>Ctrl+P</kbd></div>
+    <div class="tree">
+     <div class="tr hov">▾ Bandi <span class="pill acc">🔑 Bearer</span><span class="trash">🗑</span></div>
+     <div class="tr i1 sel"><span class="m GET">GET</span>Lista bandi<span class="trash">🗑</span></div>
+     <div class="tr i1"><span class="m POST">POST</span>Crea bando<span class="trash">🗑</span></div>
+     <div class="tr i1"><span class="m PUT">PUT</span>Aggiorna bando</div>
+     <div class="tr i1"><span class="m DEL">DEL</span>Elimina bando</div>
+     <div class="tr">▾ Auth</div>
+     <div class="tr i1"><span class="m POST">POST</span>Login</div>
+     <div class="tr i1"><span class="m POST">POST</span>Refresh token</div>
+     <div class="tr">▸ Utenti</div>
+    </div>
+    <div class="ph"><span>Rilevati dal codice</span><span>&lt;/&gt;</span></div>
+    <div class="src"><span class="pill acc">progetto: gestionale ▾</span><span>solo il progetto Bennu scelto (14 endpoint)</span></div>
+   </div>
+   <div class="main">
+    <div class="panel" style="grid-row:1">
+     <div class="rtabs">
+      <span class="rt on"><b class="GET">GET</b> Lista bandi <i>×</i></span>
+      <span class="rt"><b class="POST">POST</b> Crea bando <i>×</i></span>
+      <span class="rt"><b class="POST">POST</b> Login <em>●</em></span>
+      <span class="rt pv"><b class="GET">GET</b> <u>Dettaglio</u> <i>×</i></span>
+      <span class="rt add">＋</span>
+     </div>
+     <div class="reqbar"><span class="method">GET</span><span class="url"><span class="var">{{baseUrl}}</span>/api/bandi?stato=APERTO&amp;page=0</span><button class="btn">Invia <kbd>Ctrl+↵</kbd></button></div>
+     <div class="toolbar">
+      <span class="tb" title="Salva (Ctrl+S)">💾</span><span class="tb" title="Salva come…">📄</span><span class="tb" title="Duplica (Ctrl+D)">⧉</span>
+      <i class="sep"></i>
+      <span class="tb" title="Copia come cURL / incolla cURL (Ctrl+Shift+U)">⇄</span><span class="tb" title="Genera codice: Java RestClient, WebClient, Rust reqwest…">&lt;/&gt;</span><span class="tb" title="Copia link / condividi">🔗</span>
+      <i class="sep"></i>
+      <span class="tb" title="Modifica in blocco">☰</span><span class="tb" title="Formatta body (Ctrl+Shift+F)">{ }</span><span class="tb" title="Variabili risolte: anteprima">{{ }}</span>
+      <i class="sep"></i>
+      <span class="tb" title="Confronta con risposta precedente">⇆</span><span class="tb" title="Salva risposta come esempio">📌</span><span class="tb" title="Timeline / cronologia">↺</span><span class="tb" title="Vai al controller (Bennu)">↗</span>
+      <i class="sep"></i>
+      <span class="tb" title="Impostazioni richiesta: timeout, redirect, TLS, proxy">⚙</span><span class="tb" title="Chiedi a Imber">✦</span>
+      <span class="tb stop" title="Annulla richiesta (Esc)">■</span>
+     </div>
+     <div class="sub"><span class="on">Params</span><span>Headers (3)</span><span>Auth (eredita: Bandi)</span><span>Body</span><span>Test (2)</span><span>Docs</span><span style="margin-left:auto">Modifica in blocco ☰</span></div>
+     <table><tr><th>Chiave</th><th>Valore</th><th>Descrizione</th></tr>
+      <tr><td>stato</td><td>APERTO</td><td style="color:var(--fg-muted)">enum StatoBando</td></tr>
+      <tr><td>page</td><td>0</td><td style="color:var(--fg-muted)">da @RequestParam</td></tr></table>
+    </div>
+    <div class="panel" style="margin-top:6px">
+     <div class="stat"><span class="pill ok">200 OK</span><span>184 ms</span><span>2,3 KB</span><span>HTTP/1.1</span><span style="margin-left:auto">Pretty · Raw · Headers · Cookie · Timeline</span></div>
+<pre>{
+  <span class="k">"content"</span>: [
+    { <span class="k">"id"</span>: <span class="n">42</span>, <span class="k">"titolo"</span>: <span class="s">"Bando mobilità 2026"</span>, <span class="k">"stato"</span>: <span class="s">"APERTO"</span> },
+    { <span class="k">"id"</span>: <span class="n">43</span>, <span class="k">"titolo"</span>: <span class="s">"Bando asili nido"</span>, <span class="k">"stato"</span>: <span class="s">"APERTO"</span> }
+  ],
+  <span class="k">"totalElements"</span>: <span class="n">2</span>
+}</pre>
+     <div class="imber"><b>Imber</b> · Il campo <code>stato</code> torna sempre APERTO: filtro ok. Vuoi che generi il test di schema e il DTO Java/Rust da questa risposta?</div>
+    </div>
+   </div>
+  </div>
+ </div>
+</div>
+
+<!-- 2 ENV -->
+<div class="screen" id="s2">
+ <div class="grid">
+  <div class="card"><b>Ambienti</b><span>local · staging · prod. Variabili <code>{{baseUrl}}</code>, a cascata: collezione → ambiente → locale (non committata). I segreti restano nel keyring di Arbor, mai nel file.</span>
+   <table style="margin-top:8px"><tr><th>Variabile</th><th>staging</th></tr>
+    <tr><td>baseUrl</td><td>https://stg.example.it</td></tr>
+    <tr><td>token</td><td><span class="pill warn">🔒 keyring</span></td></tr></table></div>
+  <div class="card"><b>Auth</b><span>Bearer, Basic, API key, OAuth2 (code+PKCE, client credentials), JWT con refresh automatico dalla richiesta “Refresh token”. Si definisce su <b style="display:inline">collezione</b>, cartella o singola richiesta: chi sta sotto eredita, e può sovrascrivere o scegliere “nessuna”.</span></div>
+  <div class="card"><b>Modifica in blocco</b><span>Params, header e variabili hanno una vista testo: incolli <code>chiave: valore</code> (o <code>k=v&amp;k2=v2</code>, o un blocco di header copiato dal browser) una riga per voce e li converte in tabella, e viceversa. Spunta/disattiva a gruppi.</span></div>
+  <div class="card"><b>cURL ⇄ richiesta</b><span>Incolli un <code>curl …</code> (anche “Copy as cURL” di Chrome/DevTools) e diventa una richiesta; da ogni richiesta copi il curl con le variabili risolte oppure no. <kbd>Ctrl+Shift+U</kbd>.</span></div>
+  <div class="card"><b>Prod protetto</b><span>Ambienti marcati “prod” colorano la barra di rosso e chiedono conferma per POST/PUT/DELETE.</span> <span class="pill bad">prod</span></div>
+  <div class="card"><b>Cookie &amp; TLS</b><span>Cookie jar per ambiente, certificati client, CA custom, proxy, timeout, redirect.</span></div>
+ </div>
+</div>
+
+<!-- 3 TEST -->
+<div class="screen" id="s3">
+ <div class="win"><div class="titlebar"><span class="logo">Runner</span> Collezione “Bandi” · staging<span class="env"><span class="pill ok">12 ok</span><span class="pill bad">1 ko</span></span></div>
+  <div class="panel" style="margin:0 6px 6px">
+   <div class="check"><span class="pill ok">PASS</span>Lista bandi → status 200 <span style="margin-left:auto;color:var(--fg-subtle)">184 ms</span></div>
+   <div class="check"><span class="pill ok">PASS</span>Lista bandi → schema valido (OpenAPI)</div>
+   <div class="check"><span class="pill ok">PASS</span>Crea bando → 201, header Location</div>
+   <div class="check"><span class="pill bad">FAIL</span>Aggiorna bando → atteso 200, ricevuto 409</div>
+   <div style="padding:8px 12px"><span class="bar" style="width:92%"></span> <span style="color:var(--fg-muted);font-size:12px">12/13 · 1,9 s</span></div>
+<pre><span class="c">-- 90% dei casi: asserzioni dichiarative</span>
+status == 200
+body.content[*].stato == "APERTO"
+time &lt; 500ms
+
+<span class="c">-- il resto: Lua (lo stesso dei plugin di Arbor), sandboxed</span>
+<span class="k">local</span> r = hirundo.response.json()
+hirundo.expect(#r.content &gt; 0, <span class="s">"almeno un bando"</span>)
+hirundo.env.set(<span class="s">"bandoId"</span>, r.content[1].id)</pre>
+  </div></div>
+ <div class="grid" style="margin-top:10px">
+  <div class="card"><b>Pianificazioni</b><span>Stesso scheduler di Corvus/Imber, non uno nuovo: “ogni notte alle 02:00 esegui la collezione Smoke su staging”, ordine tra più endpoint, ripeti n volte, notifica se fallisce.</span>
+   <table style="margin-top:8px"><tr><td>Smoke staging</td><td>ogni giorno 02:00</td><td><span class="pill ok">ok</span></td></tr>
+    <tr><td>Carico leggero</td><td>lun–ven 08:00</td><td><span class="pill bad">1 ko</span></td></tr></table></div>
+  <div class="card"><b>Dove si vede</b><span>Attività “Runner” nella barra a sinistra: esecuzioni in corso, storico e pianificazioni in un unico posto (stessa modale delle schedulazioni).</span></div>
+ </div>
+ <p class="lead" style="margin-top:10px">Concatenamento (output di una richiesta → input della successiva), dati da CSV/JSON per iterazioni, esecuzione dal command palette e da Corvus come step di pipeline. Confronto tra due risposte (diff) e storico per richiesta.</p>
+</div>
+
+<!-- 4 IMPORT -->
+<div class="screen" id="s4">
+ <div class="grid">
+  <div class="card"><b>Dal codice Bennu</b><span>Un selettore di <b style="display:inline">progetto</b> (default: quello aperto in Bennu, multi-selezione opzionale): vedi solo gli endpoint dei progetti che scegli, mai tutti e 10. Spring/Struts/JAX-RS già indicizzati: metodo, path, parametri e body d’esempio dal DTO; “Salva nella collezione” li rende richieste tue. Da richiesta → “Vai al controller” (e viceversa: gutter “Invia con Hirundo”).</span></div>
+  <div class="card"><b>Import / export</b><span>OpenAPI 3, Postman v2.1, Bruno, Insomnia, HAR, cURL (incolla un curl → richiesta). Export come cURL, Java RestClient/WebClient, Rust reqwest/ureq usando i generatori di Bennu.</span></div>
+  <div class="card"><b>Imber</b><span>“Crea le richieste per questo controller”, “spiega questo 500”, “scrivi i test dalla risposta”. Tool MCP per lanciare una richiesta o una collezione.</span></div>
+  <div class="card"><b>Formato su disco</b><span>Una cartella <code>.hirundo/</code> nel repo: un file leggibile per richiesta, ambienti separati dai segreti. Si diffa e si fa review con Corvus.</span></div>
+  <div class="card"><b>Oltre HTTP</b><span>Più avanti: WebSocket, SSE, GraphQL con introspezione, gRPC con reflection.</span></div>
+  <div class="card"><b>Tastiera</b><span><kbd>Ctrl+↵</kbd> invia · <kbd>Ctrl+P</kbd> cerca richiesta · <kbd>Ctrl+E</kbd> ambiente · palette per ogni azione · tab con frecce.</span></div>
+ </div>
+</div>
+
+<script>
+document.getElementById('tabs').addEventListener('click',e=>{
+  const b=e.target.closest('.tab'); if(!b) return;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t===b));
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===b.dataset.s));
+});
+</script>
+</body>
+</html>

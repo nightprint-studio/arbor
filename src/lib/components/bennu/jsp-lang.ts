@@ -26,8 +26,9 @@ import { Parser, Language, type Node } from 'web-tree-sitter';
 import { css } from '@codemirror/legacy-modes/mode/css';
 import type { StreamParser } from '@codemirror/language';
 import type { LanguageDescriptor, TokenClassName } from '$lib/components/shared/ui/code-editor';
-import { javascriptStream, namespaceTokenClass } from '$lib/components/shared/ui/code-editor';
-import { directiveSlot, tagSlot } from './jsp-taglibs';
+import { namespaceTokenClass } from '$lib/components/shared/ui/code-editor';
+import { directiveSlot, prefixSlot, tagSlot } from './jsp-taglibs';
+import { EL_ATOMS, EL_KEYWORDS, jspScriptSpans, maskScriptBodies } from './jsp-script-highlight';
 import { makeHoverSource } from './bennu-hover';
 import { markupCompletionSource, markupExtHover } from './markup-intel';
 import { jspScriptCompletion, jspScriptHover } from './jsp-script-intel';
@@ -81,16 +82,8 @@ const PUNCT = new Set([
 /** Anonymous leaves inside an expression that join rather than separate. */
 const EL_OPERATOR_PUNCT = new Set(['.', ':', '@']);
 
-/** The words EL and OGNL reserve. They are `el_identifier` nodes to the grammar — telling a
- *  keyword from a name is a job for a vocabulary, not for a parser, and putting the vocabulary
- *  here keeps the grammar from having to guess whether `${empty}` is a name. */
-const EL_KEYWORDS = new Set([
-  'and', 'or', 'not', 'eq', 'ne', 'lt', 'gt', 'le', 'ge', 'div', 'mod', 'empty', 'instanceof',
-  'in', 'new',
-]);
-
-/** …and the ones that are values. */
-const EL_ATOMS = new Set(['true', 'false', 'null']);
+// EL_KEYWORDS / EL_ATOMS — the vocabulary of the expression languages, which the grammar leaves
+// to the highlighter — live in `jsp-script-highlight.ts`, shared with the `<script>` body.
 
 function classify(
   node: Node,
@@ -183,8 +176,17 @@ export const jspLanguage: LanguageDescriptor = {
   // JSP comments (`<%-- … --%>`) are the safe universal toggle: unlike an HTML comment
   // they're stripped server-side, so commenting a line never ships markup to the client.
   commentTokens: { block: { open: '<%--', close: '--%>' } },
-  // Embedded highlighting via stream parsers, for the two bodies the grammar hands over as raw
-  // text: `<script>` → JavaScript, `<style>` → CSS.
+  // The grammar's raw-text token for a `<script>` body ends at the first `</`, which a JSP tag
+  // closing inside the script (`</c:if>`) is. The parser is shown a copy with those masked, and the
+  // body is coloured from the real text by `jspScriptSpans`: JavaScript with the JSP constructs
+  // blanked out, the JSP constructs painted over it.
+  parseText: maskScriptBodies,
+  leafHighlight: (type, text, node) =>
+    type === 'script_content'
+      ? jspScriptSpans(text, (prefix) => prefixSlot(node.tree, prefix))
+      : null,
+  // Embedded highlighting via a stream parser for the other body the grammar hands over as raw
+  // text: `<style>` → CSS.
   //
   // EL and OGNL are **not** here any more. They used to be, because they were single tokens and
   // a lexer was the only way to see inside one; the grammar decomposes them now, so `classify`
@@ -192,7 +194,6 @@ export const jspLanguage: LanguageDescriptor = {
   // leaving these listed would have been an injection that never runs and an expression that
   // renders plain.
   injections: {
-    script_content: javascriptStream as unknown as StreamParser<unknown>,
     style_content: css as unknown as StreamParser<unknown>,
   },
   // Completion + hover come from the page's own tag libraries — the TLDs its `<%@ taglib %>`

@@ -25,7 +25,7 @@
  */
 
 /** Every product of the suite. */
-export type ProductId = 'corvus' | 'merula' | 'sitta' | 'bennu' | 'picus' | 'tyto' | 'garrulus';
+export type ProductId = 'corvus' | 'merula' | 'sitta' | 'bennu' | 'picus' | 'tyto' | 'garrulus' | 'hirundo';
 
 export interface ProductIdentity {
   id: ProductId;
@@ -84,6 +84,12 @@ export const PRODUCTS: ProductIdentity[] = [
     // product is named for, and the behaviour it is for.
     id: 'garrulus', name: 'Garrulus', bird: 'jay', role: 'Note e appunti', accent: '#3b8ee0',
     blurb: 'A vault of plain markdown notes — links, tags, tasks and templates per note kind — that keeps itself in step across your machines. The files stay yours: any other markdown editor opens the same folder.',
+  },
+  {
+    // The swallow: always in motion between two places, which is what a request is. Teal, the
+    // colour the Hirundo mock is drawn in, and unused by the rest of the roster.
+    id: 'hirundo', name: 'Hirundo', bird: 'swallow', role: 'HTTP client', accent: '#22b8cf',
+    blurb: 'Collections of HTTP requests kept as readable files in your project, environments that know whether they are local or production, auth that inherits, and tests you can run on a schedule.',
   },
 ];
 

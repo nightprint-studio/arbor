@@ -99,6 +99,10 @@ import { jinjaHover } from './jinja-hover';
 import { MARKDOWN_FENCE_LANGUAGES } from './markdown-fences';
 import { isDockerfile } from '$lib/utils/file-names';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
+import { bennuRegexStore } from '$lib/stores/bennu/regex.svelte';
+import { withInnerLanguages } from './inner-lang/plugin';
+import { httpParser } from './http/http-lang';
+import { httpCompletion } from './http/http-completion';
 
 /** A CM-language descriptor: no tree-sitter parser, highlight from `cmExtension`.
  *  `fold` opts into the Lezer fold gutter (only for languages whose grammar carries
@@ -438,12 +442,21 @@ const javaWithSql: LanguageDescriptor = {
   },
 };
 
+/** `.http` / `.rest`: the requests of IntelliJ's HTTP Client format, run through Hirundo's engine. */
+const httpLang: LanguageDescriptor = { ...streamLang('http', httpParser), intel: { completion: httpCompletion } };
+
 /** Resolve the editor language for a file path. Falls back to a plain (no-highlight,
  *  still editable) descriptor for unknown types.
  *
  *  Reads `bennuSettingsStore.sqlDialect` for `.sql` files, so call this from a `$derived`
  *  (as `BennuEditor` does) and the editor re-mounts when the setting changes. */
 export function languageForPath(path: string | null): LanguageDescriptor {
+  // Java, JS/TS and Rust files also colour the languages their string literals hold (a regex, a
+  // `// language=lua` snippet…). Reads the detection setting, so it is a `$derived` dependency too.
+  return withInnerLanguages(baseLanguageForPath(path), path, bennuRegexStore.detection);
+}
+
+function baseLanguageForPath(path: string | null): LanguageDescriptor {
   if (!path) return plainLang;
   const name = path.split(/[\\/]/).pop() ?? path;
 
@@ -518,6 +531,7 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'yml': case 'yaml': return yamlLang;
     case 'properties': return propertiesLang;
     case 'log': return logFileLang;
+    case 'http': case 'rest': return httpLang;
     case 'ini': case 'conf': case 'cfg': return propsLang;
     case 'ron': return ronLanguage;
     case 'mmd': case 'mermaid': return mermaidDiagramLanguage;

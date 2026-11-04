@@ -76,6 +76,7 @@
     <tr><td><Kbd action="prev_tab" size="sm" /></td><td>Previous tab</td></tr>
     <tr><td><Kbd action="switch_project" size="sm" /></td><td>Bennu: switch between open projects, across workspaces, Alt+Tab style — keep pressing to walk the list, release the modifier to switch</td></tr>
     <tr><td><Kbd action="goto_project" size="sm" /></td><td>Bennu: go to any project by typing — every workspace plus recents</td></tr>
+    <tr><td><Kbd action="regex_tester" size="sm" /></td><td>Bennu: open the Regex Tester on the string literal under the caret, the selection, or empty</td></tr>
     <tr><td><Kbd action="console_clean_view" size="sm" /></td><td>Bennu: turn the console's clean view on or off — columns, lines and stack frames you chose not to read</td></tr>
     <tr><td><Kbd action="assistant_review_apply" size="sm" /></td><td>Bennu's Imber (focus in the panel): review the isolated copy's combined diff, then apply it to the project</td></tr>
     <tr><td><Kbd action="assistant_next_mode" size="sm" /></td><td>Bennu's Imber (focus in the panel): next permission mode — Manual, Accept edits, Autonomous</td></tr>
@@ -161,6 +162,8 @@
     <tr><td><Kbd action="push" size="sm" /></td><td>Push current branch</td></tr>
     <tr><td><Kbd action="plan_add_push" size="sm" /></td><td>Add the current branch's push to the plan instead of pushing now</td></tr>
     <tr><td><Kbd action="plan_open" size="sm" /></td><td>Open the plan</td></tr>
+    <tr><td><Kbd action="imber_toggle" size="sm" /></td><td>Open or close Imber, the assistant</td></tr>
+    <tr><td><Kbd action="imber_commit_message" size="sm" /></td><td>Imber: write the commit message from the staged changes (in the commit box)</td></tr>
     <tr><td><Kbd action="new_branch" size="sm" /></td><td>Create new branch</td></tr>
     <tr><td><Kbd action="stash" size="sm" /></td><td>Stash changes</td></tr>
     <tr><td><Kbd action="stage_all" size="sm" /></td><td>Stage all changes</td></tr>

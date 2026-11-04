@@ -24,6 +24,9 @@
   import OpenVaultModal from './OpenVaultModal.svelte';
   import GarrulusCommitModal from './shell/GarrulusCommitModal.svelte';
   import GarrulusRemoteModal from './shell/GarrulusRemoteModal.svelte';
+  import NoteDialogs from './notes/NoteDialogs.svelte';
+  import { noteCommands } from './notes/note-commands';
+  import { garrulusNotesStore } from '$lib/stores/garrulus/notes.svelte';
   import {
     buildGarrulusPalette,
     type GarrulusPaletteActions,
@@ -51,8 +54,9 @@
   /**
    * What this window can actually do today.
    *
-   * The verbs whose surface has not landed — every note verb, the dock, the
-   * graph, the trash, settings — are **not passed**, and `buildGarrulusPalette`
+   * The verbs whose surface has not landed — intentions, inbox scratch, export,
+   * the graph and table views, the trash, settings — are **not passed**, and
+   * `buildGarrulusPalette`
    * filters their entries out. That is the honest form of "not yet": a palette
    * that lists a command which does nothing is worse than one that lists fewer.
    * Adding the surface is what makes its verb appear; nothing here needs editing
@@ -68,6 +72,20 @@
     commitWithMessage: () => garrulusUiStore.openCommitMessage(),
     configureRemote: () => garrulusUiStore.openRemoteConfig(),
 
+    // Notes. The same objects the shell's chords call, so a verb is one thing.
+    newNote: noteCommands.newNote,
+    newTypedNote: noteCommands.newTypedNote,
+    openDailyNote: noteCommands.openDaily,
+    quickSwitch: noteCommands.quickSwitch,
+    saveNote: noteCommands.saveActive,
+    renameNote: noteCommands.renameActive,
+    deleteNote: noteCommands.deleteActive,
+    applyType: noteCommands.applyTypeToActive,
+
+    // Finding things.
+    search: () => garrulusUiStore.selectSection('search'),
+    showConflicts: () => garrulusUiStore.showDock('conflicts'),
+
     // Vault.
     openVault: () => garrulusUiStore.openVaultPicker('open'),
     createVault: () => garrulusUiStore.openVaultPicker('create'),
@@ -78,10 +96,8 @@
     // View and help.
     showSection: (id) => garrulusUiStore.selectSection(id),
     toggleSidebar: () => garrulusUiStore.toggleSidebar(),
-    // The dock. Only the conflicts panel exists so far, but the ids are the
-    // store's, so the palette entries land where they say they will as the other
-    // two arrive — and until they do, the dock opens on conflicts rather than on
-    // an empty frame.
+    // The dock: conflicts, tasks and problems. An id the store does not know
+    // opens conflicts rather than an empty frame.
     showDock: (id) => garrulusUiStore.showDock(id as DockPanel),
     toggleDock: () => garrulusUiStore.toggleDock(),
     openDocs: (section) => garrulusUiStore.openDocs(section),
@@ -92,9 +108,7 @@
 
   const context = $derived<GarrulusPaletteContext>({
     vaultOpen: garrulusVaultStore.isOpen,
-    // No editor in this window yet. It stays null rather than guessing, and the
-    // note verbs are absent from `actions` for the same reason.
-    notePath: null,
+    notePath: garrulusNotesStore.activePath,
     syncTag: garrulusSyncStore.tag,
     // The count is on the state itself — `conflict` is the only tag carrying it.
     conflicts: garrulusSyncStore.tag === 'conflict' ? garrulusSyncStore.count : 0,
@@ -133,6 +147,8 @@
     onClose={() => garrulusUiStore.closeVaultPicker()}
   />
 {/if}
+
+<NoteDialogs />
 
 {#if garrulusUiStore.remoteConfigOpen}
   <!-- `vaultName` is not decoration: it seeds the name proposed when creating the

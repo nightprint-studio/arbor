@@ -72,3 +72,4 @@ desktop.ini
 # ── UI gallery snapshots / baseline copies (see docs/ui-gallery.md) ───────────
 .gallery-out/
 .gallery-baseline/
+.gallery-shots/

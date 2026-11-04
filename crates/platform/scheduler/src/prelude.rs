@@ -13,3 +13,4 @@ pub use crate::opts::{Gate, ScheduleOpts};
 pub use crate::scheduler::Scheduler;
 pub use crate::snapshot::ScheduleSnapshot;
 pub use crate::trigger::{Trigger, validate_cron};
+pub use crate::calendar::{due, format_local, parse_clock, parse_local_datetime, parse_weekday, next_after, next_after_in, validate as validate_recurrence, Due, MissedPolicy, Recurrence, GRACE_MS, MIN_INTERVAL_SECS};

@@ -356,7 +356,7 @@ fn revert_commit(state: &CorvusState, tab_id: String, oid: String) -> Result<Che
 /// Read the commit template from git's `commit.template` config entry (if set).
 /// Returns `None` if no template is configured or the file cannot be read.
 #[arbor_rpc::handler]
-fn get_git_commit_template(state: &CorvusState, tab_id: String) -> Result<Option<String>, String> {
+pub(crate) fn get_git_commit_template(state: &CorvusState, tab_id: String) -> Result<Option<String>, String> {
     let repo = open(state, &tab_id)?;
 
     let config = match repo.config() {

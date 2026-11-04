@@ -27,6 +27,7 @@ $targets = [ordered]@{
     'bennu'    = 'crates\products\bennu\runtime\be'
     'corvus'   = 'crates\products\corvus\be'
     'garrulus' = 'crates\products\garrulus\be'
+    'hirundo'  = 'crates\products\hirundo\be'
     'merula'   = 'crates\products\merula\be'
     'picus'    = 'crates\products\picus\be'
     'sitta'    = 'crates\products\sitta\be'

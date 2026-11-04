@@ -42,6 +42,12 @@ fn ttl(cfg: &CargoConfig) -> Duration {
     Duration::from_secs(u64::from(hours) * 3600)
 }
 
+/// Whether the cached answer for `name` is still inside the freshness window — what tells a caller
+/// whether asking for it will cost a request.
+pub(crate) fn is_cache_fresh(name: &str, cfg: &CargoConfig) -> bool {
+    is_fresh(&cache_path(&cache_dir(), name), ttl(cfg))
+}
+
 /// How many packages one hints request may fetch. A cold `package.json` with eighty dependencies
 /// would otherwise be eighty requests before the first hint appeared; the rest arrive on the next
 /// pass, from cache, in one go.
@@ -179,7 +185,7 @@ fn judgeable(range: &str) -> bool {
 }
 
 /// The `latest` dist-tag for one package, from cache or from the registry.
-async fn latest_of(name: &str, cfg: &CargoConfig, cached_only: bool) -> Option<String> {
+pub(crate) async fn latest_of(name: &str, cfg: &CargoConfig, cached_only: bool) -> Option<String> {
     let dir = cache_dir();
     if cached_only || is_fresh(&cache_path(&dir, name), ttl(cfg)) {
         if let Some(body) = read_cache(&dir, name) {
@@ -250,13 +256,47 @@ fn bennu_npm_run_script(ctx: &BennuState, args: RunScriptArgs) -> Result<RunHand
     if args.script.trim().is_empty() {
         return Err("no script name".to_string());
     }
-    let manifest = PathBuf::from(&args.file);
-    let cwd = manifest.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let cwd = manifest_dir(&args.file);
     let pm = package_manager_for(&cwd);
+    spawn_pm(ctx, &args.root, &cwd, pm, pm.run_args(&args.script), &args.script)
+}
 
+/// Install the dependencies of the package whose manifest is `file`, streaming into the Run console.
+///
+/// `npm install` / `pnpm install` / `yarn install` — whichever the lockfile says the project uses.
+/// Run from the manifest's folder: in a workspace the package managers install the whole workspace
+/// from any member, and from the root that is what the person asking meant.
+#[arbor_rpc::handler]
+fn bennu_npm_install(ctx: &BennuState, args: InstallArgs) -> Result<RunHandle, String> {
+    let cwd = manifest_dir(&args.file);
+    let pm = package_manager_for(&cwd);
+    spawn_pm(ctx, &args.root, &cwd, pm, vec!["install".to_string()], "install")
+}
+
+#[derive(Deserialize)]
+pub struct InstallArgs {
+    /// The project root — where the Run console files this run.
+    pub root: String,
+    /// A `package.json` of the project.
+    pub file: String,
+}
+
+fn manifest_dir(file: &str) -> PathBuf {
+    Path::new(file).parent().unwrap_or(Path::new(".")).to_path_buf()
+}
+
+/// Spawn `pm <args>` in `cwd`, streamed into the Run console as `<pm> <title>`.
+fn spawn_pm(
+    ctx: &BennuState,
+    root: &str,
+    cwd: &Path,
+    pm: bennu_npm::prelude::PackageManager,
+    pm_args: Vec<String>,
+    title: &str,
+) -> Result<RunHandle, String> {
     let mut cmd = std::process::Command::new(pm.program());
-    cmd.current_dir(&cwd);
-    for a in pm.run_args(&args.script) {
+    cmd.current_dir(cwd);
+    for a in &pm_args {
         cmd.arg(a);
     }
     // A console shows text and has no cursor for a progress bar to move around. `FORCE_COLOR=0`
@@ -271,10 +311,10 @@ fn bennu_npm_run_script(ctx: &BennuState, args: RunScriptArgs) -> Result<RunHand
     let program = pm.program().to_string();
     crate::build::spawn_streamed(
         cmd,
-        format!("{program} {}", args.script),
-        format!("{program} {}", pm.run_args(&args.script).join(" ")),
+        format!("{program} {title}"),
+        format!("{program} {}", pm_args.join(" ")),
         cwd.display().to_string(),
-        &args.root,
+        root,
         ctx.event_sink(),
         |_| {},
     )

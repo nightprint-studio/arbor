@@ -20,5 +20,7 @@ bennu-cargo = { path = "../cargo" }
 # The Gradle half, for the same reason: the build-script reader and the version catalog are the
 # Gradle counterpart of `bennu-cargo`, and the report shape is shared.
 bennu-gradle = { path = "../gradle" }
+# The Node half: `package.json`, its lockfiles (npm / pnpm / Yarn) and the workspace globs.
+bennu-npm = { path = "../npm" }
 # `user_home()` — the resolved sources live under `$CARGO_HOME`, which defaults to `~/.cargo`.
 arbor-core  = { path = "../../../../foundation/core" }

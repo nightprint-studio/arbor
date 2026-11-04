@@ -21,6 +21,8 @@
    * note in the task summary — and moving them there is a delete, not a rewrite.
    */
   import { Eye, Pencil, Save } from 'lucide-svelte';
+  import type { EditorView } from '@codemirror/view';
+  import MarkdownToolbar from '$lib/components/shared/ui/MarkdownToolbar.svelte';
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Kbd from '$lib/components/shared/internal/Kbd.svelte';
@@ -39,7 +41,10 @@
   let reading = $state(false);
   /** The tab a close was asked for while it had unsaved bytes. */
   let closing = $state<string | null>(null);
-  let editorRef = $state<{ focus: () => void } | null>(null);
+  let editorRef = $state<{
+    focus: () => void;
+    exec: (c: (v: EditorView) => boolean) => boolean;
+  } | null>(null);
 
   const open = $derived(garrulusNotesStore.open);
   const note = $derived(garrulusNotesStore.active);
@@ -163,6 +168,7 @@
     <div class="gnw-head">
       <span class="gnw-path" use:tooltip={note.path}>{note.path}</span>
       <span class="gnw-spacer"></span>
+      <MarkdownToolbar disabled={reading} onCommand={(cmd) => editorRef?.exec(cmd)} />
       <span class="gnw-count">{words} {words === 1 ? 'word' : 'words'}</span>
       <span class="gnw-state">
         {#if note.saving}

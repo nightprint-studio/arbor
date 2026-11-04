@@ -34,6 +34,7 @@ use serde_json::json;
 // inventory, so `arbor_rpc::registry()` collects them and `Hello` advertises
 // them. The shell pushes repo paths to `repo_registry`; `bisect` and `stash`
 // are the git domains served out-of-process so far.
+mod assistant;
 mod assistant_worktree;
 mod avatar;
 mod bisect;
@@ -1543,6 +1544,9 @@ fn main() {
     // Plans: the executor is a detached task per run, so it needs the process-wide state by value.
     let plan_state = Arc::clone(&state);
     app.init(move || plan::init(plan_state));
+    // Imber: a run outlives the handler that started it, so it too needs the process-wide state by value.
+    let imber_state = Arc::clone(&state);
+    app.init(move || assistant::init(imber_state));
 
     if let Err(e) = app.run(dispatcher) {
         eprintln!("corvus-be: serve loop ended with error: {e}");

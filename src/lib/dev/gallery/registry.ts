@@ -10,8 +10,12 @@ import { merulaOverrides, merulaExtras } from './merula';
 import { tytoOverrides, tytoExtras } from './tyto';
 import { studioOverrides, studioExtras } from './studio';
 import { garrulusOverrides, garrulusExtras } from './garrulus';
+import { hirundoOverrides, hirundoExtras } from './hirundo';
 import { sittaOverrides, sittaExtras } from './sitta';
 import { sharedOverrides, sharedExtras } from './shared';
+import { genOverrides, genExtras } from './gen';
+import { panelsOverrides, panelsExtras } from './panels';
+import { editorOverrides, editorExtras } from './editor';
 
 export const overrides: Record<string, SceneOverride> = {
   ...sharedOverrides,
@@ -22,7 +26,11 @@ export const overrides: Record<string, SceneOverride> = {
   ...tytoOverrides,
   ...studioOverrides,
   ...garrulusOverrides,
+  ...hirundoOverrides,
   ...sittaOverrides,
+  ...genOverrides,
+  ...panelsOverrides,
+  ...editorOverrides,
 };
 
 export const extras: ExtraScene[] = [
@@ -34,5 +42,9 @@ export const extras: ExtraScene[] = [
   ...tytoExtras,
   ...studioExtras,
   ...garrulusExtras,
+  ...hirundoExtras,
   ...sittaExtras,
+  ...genExtras,
+  ...panelsExtras,
+  ...editorExtras,
 ];

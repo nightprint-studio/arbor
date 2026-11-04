@@ -13,6 +13,11 @@ pub use crate::encoding::{
     decode as decode_bytes, decode_for_index, encode as encode_text, has_crlf, normalize_newlines,
     project_encoding_label, restore_crlf, source_encoding_label, EncodingPlan, IndexDecode, UTF8,
 };
+pub use crate::convert::{
+    convert as convert_encoding, detect as detect_encoding, detect_bom, find_declaration,
+    looks_binary, rewrite_declaration, BomPolicy, Codec, ConvertError, ConvertOptions, Converted,
+    DetectBasis, Detected, Fallback, EscapeStyle, Unrepresentable, MAX_SAMPLES,
+};
 pub use crate::error::ProjectError;
 pub use crate::ignored::IgnoreStack;
 pub use crate::jdk::{detect as detect_jdk, module_level};

@@ -17,7 +17,8 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import SecurityFindingsBrowser from '$lib/components/shared/internal/security/SecurityFindingsBrowser.svelte';
-  import { projectAdvisories, type ProjectAdvisories } from '$lib/ipc/bennu/maven';
+  import { nodeAdvisories, projectAdvisories, type ProjectAdvisories } from '$lib/ipc/bennu/maven';
+  import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuConfigStore } from '$lib/stores/bennu/config.svelte';
   import { advisoriesToFindings, assessmentPrompt } from './advisory-findings';
@@ -42,7 +43,10 @@
     loading = true;
     error = '';
     try {
-      data = await projectAdvisories(root);
+      // The Dependencies panel's project, when it is on a Node one: its packages are the ones to ask
+      // about, and the whole-project root would be the Java classpath (or nothing at all).
+      const shown = dependenciesStore.target;
+      data = shown?.node ? await nodeAdvisories(shown.root) : await projectAdvisories(root);
     } catch (e) {
       error = String(e);
     } finally {

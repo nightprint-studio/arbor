@@ -35,8 +35,12 @@ import { merulaFixtures } from './merula';
 import { tytoFixtures } from './tyto';
 import { studioFixtures } from './studio';
 import { garrulusFixtures } from './garrulus';
+import { hirundoFixtures } from './hirundo';
 import { sittaFixtures } from './sitta';
 import { sharedFixtures } from './shared';
+import { genFixtures } from './gen';
+import { panelsFixtures } from './panels';
+import { editorFixtures } from './editor';
 
 export const fixtures: Record<string, FixtureHandler> = {
   ...windowPlugin,
@@ -49,5 +53,9 @@ export const fixtures: Record<string, FixtureHandler> = {
   ...tytoFixtures,
   ...studioFixtures,
   ...garrulusFixtures,
+  ...hirundoFixtures,
   ...sittaFixtures,
+  ...genFixtures,
+  ...panelsFixtures,
+  ...editorFixtures,
 };

@@ -53,6 +53,8 @@
     onchange?: (value: string) => void;
     oninput?: (value: string) => void;
     onkeydown?: (e: KeyboardEvent) => void;
+    /** Draw no frame until hovered or focused: a value that reads as text and edits in place (an inspector's field). */
+    quiet?: boolean;
     onfocus?: (e: FocusEvent) => void;
     onblur?: (e: FocusEvent) => void;
     /** Fired when the clear button is clicked. */
@@ -68,6 +70,7 @@
     readonly    = false,
     narrow      = false,
     block       = true,
+    quiet       = false,
     size        = 'md',
     error       = null,
     clearable   = false,
@@ -110,6 +113,7 @@
   class="input-wrap sz-{size}"
   class:narrow
   class:block={block && !narrow}
+  class:quiet
   class:disabled
   class:readonly
   class:has-error={!!error}
@@ -187,6 +191,7 @@
   .input-wrap.has-error { border-color: var(--error); }
   .input-wrap.disabled { opacity: 0.45; cursor: not-allowed; }
   .input-wrap.readonly { background: var(--bg-elevated); }
+  .input-wrap.quiet:not(:hover):not(:focus-within) { background: transparent; border-color: transparent; }
 
   /* The field is a positioning context so the ghost layer can sit exactly over the input's text box. */
   .input-field { position: relative; display: flex; flex: 1; min-width: 0; }

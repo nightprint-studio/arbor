@@ -9,6 +9,17 @@
 
 import { bennu } from '../rpc';
 
+/** Mirrors the BE `RegexPattern` — a regex the Regex Tester keeps, with the text it was tried on. */
+export interface BennuRegexPattern {
+  name: string;
+  pattern: string;
+  flags: string;
+  /** `'java'` | `'js'` | `'rust'`. */
+  flavour: string;
+  text: string;
+  replacement: string;
+}
+
 /** Mirrors the BE `AssistantConfig` — what a new assistant conversation starts with. No key: that lives
  *  in the credential vault. */
 /** Mirrors the BE `LimitsConfig` — spending limits in euros; 0 switches one off. */
@@ -194,6 +205,13 @@ export interface BennuConfig {
    *  `'portable'` (default). Highlighting only: a `.sql` file in a Java project carries nothing
    *  that says which engine it targets, and the two disagree about string quoting. */
   sql_dialect: string;
+  /** How eagerly a string literal is taken for a regex without a `language=regex` comment:
+   *  `'off'` | `'context'` (default) | `'names'`. */
+  regex_detection: string;
+  /** Patterns kept in the Regex Tester, by name. */
+  regex_saved: BennuRegexPattern[];
+  /** The patterns tried most recently in the Regex Tester, newest first. */
+  regex_recent: BennuRegexPattern[];
   /** The build the split-button runs by default (and on Ctrl+F9): `'mvn'` (Maven compile) or
    *  `'validate'` (whole-project validation without compiling). */
   preferred_build_type: string;

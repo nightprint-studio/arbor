@@ -150,6 +150,11 @@
   import { pipelinesStore } from '$lib/stores/corvus/pipelines.svelte';
   import { plansStore } from '$lib/stores/corvus/plans.svelte';
   import PlanHost from '$lib/components/corvus/plan/PlanHost.svelte';
+  import ImberPanel from '$lib/components/corvus/imber/ImberPanel.svelte';
+  import { imberStore } from '$lib/stores/corvus/imber.svelte';
+  import { imberSchedulesStore } from '$lib/stores/corvus/imber-schedules.svelte';
+  import ImberSchedulesModal from '$lib/components/corvus/imber/ImberSchedulesModal.svelte';
+  import ImberActionsModal from '$lib/components/corvus/imber/ImberActionsModal.svelte';
   import { linkedWorktreesStore } from '$lib/stores/corvus/linkedWorktrees.svelte';
   import { openRepo, checkIsGitRepo, initRepo } from '$lib/ipc/corvus/graph';
   import {
@@ -1456,6 +1461,8 @@
         case 'push':             window.dispatchEvent(new CustomEvent('arbor:push')); break;
         case 'plan_open':        plansStore.openModal(); break;
         case 'plan_add_push':    window.dispatchEvent(new CustomEvent('arbor:plan-add-push')); break;
+        case 'imber_toggle':     imberStore.toggle(); break;
+        case 'imber_commit_message': window.dispatchEvent(new CustomEvent('arbor:imber-commit-message')); break;
         case 'new_branch':       window.dispatchEvent(new CustomEvent('arbor:new-branch')); break;
         case 'stash':            window.dispatchEvent(new CustomEvent('arbor:stash')); break;
         case 'jump_to_head':     window.dispatchEvent(new CustomEvent('arbor:jump-to-head')); break;
@@ -1640,6 +1647,11 @@
     const unlistenPlans = plansStore.setupListeners();
     plansStore.load();
 
+    // Imber (the assistant): the run's streamed message, approvals and `done`
+    const unlistenImber = imberStore.setupListeners();
+    // Starting the schedule loop is the backend's first list call: do it now, so schedules fire without the window ever opening.
+    imberSchedulesStore.load();
+
     // Linked Worktrees (cross-project sync) events + initial load
     const unlistenLinks = linkedWorktreesStore.setupListeners();
     linkedWorktreesStore.load();
@@ -1666,6 +1678,7 @@
       unlistenPluginLogs();
       unlistenPipelines();
       unlistenPlans();
+      unlistenImber();
       unlistenLinks();
       unlistenSync();
       unlistenStats();
@@ -1702,6 +1715,7 @@
   );
   const showSidebar       = $derived(hasRepo && uiStore.activeSidebarSection !== null);
   const showRightSidebar  = $derived(hasRepo && uiStore.activeRightSidebar !== null);
+  const showImber         = $derived(hasRepo && imberStore.open);
 
   const leftPluginKey  = $derived(parsePluginKey(uiStore.activeSidebarSection));
   const rightPluginKey = $derived(parsePluginKey(uiStore.activeRightSidebar));
@@ -2162,6 +2176,13 @@
               />
             </PanelCard>
           {/if}
+
+          <!-- Imber — the assistant, on the repository of the active tab. -->
+          {#if showImber}
+            <PanelCard orientation="right" initialSize={uiStore.rightSidebarWidth} minSize={280} maxSize={640} onResize={uiStore.setRightSidebarWidth}>
+              <ImberPanel />
+            </PanelCard>
+          {/if}
         {/snippet}
       </WorkspaceShell>
     {/if}
@@ -2473,6 +2494,12 @@
        returns the user exactly where they were (repo list, search position
        and all). -->
   <PlanHost />
+  {#if imberStore.actionsOpen}
+    <ImberActionsModal onClose={() => imberStore.hideActions()} />
+  {/if}
+  {#if imberSchedulesStore.open}
+    <ImberSchedulesModal onClose={() => imberSchedulesStore.hide()} />
+  {/if}
 
   {#if workspaceManagerOpen}
     <WorkspaceManagementModal

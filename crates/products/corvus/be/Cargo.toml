@@ -39,6 +39,12 @@ corvus-plugin     = { path = "../plugin" }
 # installers to `corvus_be_api_installer`, so plugins/hooks running OOP can call them.
 corvus-plugin-ns  = { path = "../plugin-ns" }
 corvus-core       = { path = "../core" }
+# Imber, the suite's assistant: the shared core (provider, agent loop, price list, message view) and the HTTP
+# transport it streams through. The git tools and the approval rule are this crate's own (`src/assistant`).
+imber-core        = { path = "../../../platform/imber/core" }
+imber-transport   = { path = "../../../platform/imber/transport" }
+# Calendar recurrences + next-run + missed-run rule for Imber's schedules (pure; the engine's own cron parser).
+arbor-scheduler   = { path = "../../../platform/scheduler" }
 corvus-git        = { path = "../git" }
 # System-git detection + PortableGit download: corvus-be self-detects its own git
 # (no longer fed the resolved program by the shell). `arbor-core` for the

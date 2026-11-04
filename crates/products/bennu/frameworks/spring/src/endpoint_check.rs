@@ -250,6 +250,7 @@ mod tests {
             line: 10,
             path_vars,
             produces: String::new(),
+            consumes: String::new(),
             return_type: "String".to_string(),
             params,
         }

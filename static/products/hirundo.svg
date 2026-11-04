@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Hirundo — an H whose crossbar is a request going across: two stems, a bar, and an arrowhead
+    at its right end. Teal (the swallow's gloss) on the suite's dark card.
+  -->
+  <defs>
+    <linearGradient id="hi-bg" x1="256" y1="0" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#123541"/><stop offset="55%" stop-color="#0b2029"/><stop offset="100%" stop-color="#06141a"/>
+    </linearGradient>
+    <linearGradient id="hi-fg" x1="150" y1="400" x2="370" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1098ad"/><stop offset="55%" stop-color="#22b8cf"/><stop offset="100%" stop-color="#99e9f2"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" ry="112" fill="url(#hi-bg)"/>
+  <g fill="none" stroke="url(#hi-fg)" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160 130 V382"/>
+    <path d="M352 130 V382"/>
+    <path d="M160 256 H322"/>
+    <path d="M286 220 L322 256 L286 292"/>
+  </g>
+</svg>

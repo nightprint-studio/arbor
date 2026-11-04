@@ -642,7 +642,7 @@ impl ToolHost {
             n if spawn::is_agent_tool(n) => self.run_agent_tool(n, &call.input),
             n if live::is_live_tool(n) => self.run_live(n, &call.input),
             n if debug::is_debug_tool(n) => self.run_debug(n, &call.input),
-            n if brp::is_brp_tool(n) => self.run_brp(n, &call.input),
+            n if brp::is_brp_tool(n) => self.run_brp(&call.id, n, &call.input),
             n if screenshot::is_screenshot_tool(n) => self.run_screenshot(&call.id, n, &call.input),
             n if profile::is_profile_tool(n) => self.run_profile(n, &call.input),
             "create_file" => self.run_create(&call.input),
@@ -704,7 +704,7 @@ impl Host for ToolHost {
     }
 
     fn take_images(&self, call: &ToolCall) -> Vec<bennu_assistant::prelude::ImageRef> {
-        if screenshot::is_screenshot_tool(&call.name) { self.shown_images(&call.id) } else { Vec::new() }
+        if screenshot::is_screenshot_tool(&call.name) || brp::is_brp_picture_tool(&call.name) { self.shown_images(&call.id) } else { Vec::new() }
     }
 
     /// The wait before a retry ends early on Stop, and on "Retry now" in the panel.

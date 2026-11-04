@@ -115,6 +115,8 @@ macro_rules! invoke_handlers {
             $crate::window::picus::open_picus_window,
             // Dedicated Garrulus (notes / vault) window
             $crate::window::garrulus::open_garrulus_window,
+            // Dedicated Hirundo (HTTP client) window
+            $crate::window::hirundo::open_hirundo_window,
             // Picus connection passwords. Shell-side on purpose: the secret goes
             // from the form straight to Arbor's keychain and never enters the
             // backend process — `picus-be` asks for it over the reverse channel at
@@ -122,6 +124,10 @@ macro_rules! invoke_handlers {
             $crate::commands::picus_commands::picus_store_secret,
             $crate::commands::picus_commands::picus_delete_secret,
             $crate::commands::picus_commands::picus_has_secret,
+            // Hirundo secret variables: same shape, same reason (the value never enters the backend).
+            $crate::commands::hirundo_commands::hirundo_store_secret,
+            $crate::commands::hirundo_commands::hirundo_delete_secret,
+            $crate::commands::hirundo_commands::hirundo_has_secret,
             // The assistant's provider key, in its own vault; never reaches a backend until a request.
             $crate::commands::assistant_commands::assistant_store_key,
             $crate::commands::assistant_commands::assistant_delete_key,

@@ -2184,6 +2184,22 @@ fn bennu_spring_set_property_file(
     Ok(FrameworkService::global().pin_property_file(&args.root, chosen))
 }
 
+/// The typed models behind the catalogs, for the tools that need more than a display row
+/// (`crate::model_tools`). Same slot, same lifetime rules as the handlers above.
+pub(crate) fn spring_model_of(root: &str) -> Option<Arc<bennu_spring::prelude::SpringModel>> {
+    FrameworkService::global().slot(root)?.spring.as_ref().map(|s| s.model())
+}
+
+/// The JPA model of a project, when the JPA extension is active.
+pub(crate) fn jpa_model_of(root: &str) -> Option<Arc<bennu_jpa::prelude::JpaModel>> {
+    FrameworkService::global().slot(root)?.jpa.as_ref().map(|j| j.model())
+}
+
+/// The rows of one catalog kind, exactly as `bennu_catalog` answers (host-contributed kinds included).
+pub(crate) fn catalog_of(root: &str, kind: &str) -> Vec<ExtEntry> {
+    catalog_rows(CatalogArgs { root: root.to_string(), kind: kind.to_string(), limit: None }).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

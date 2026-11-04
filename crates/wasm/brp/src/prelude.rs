@@ -13,7 +13,7 @@ pub use crate::registry::{
 };
 pub use crate::sse::{run_watch_stream, WatchEvent};
 pub use crate::world::{
-    components_set_changed, entity_ids, entity_index, parse_entity_ref, preferred_type_paths,
+    components_set_changed, entity_ids, entity_index, parse_entity_ref, preferred_type_paths, resolve_kind_types,
     short_type_name, type_paths, unwrap_components, unwrap_resource,
     ComponentsReply, EntityRow, Page, PageQuery, RowView, Snapshot,
 };

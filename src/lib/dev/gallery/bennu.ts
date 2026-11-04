@@ -2,11 +2,13 @@
 import { Folder, GitBranch, Play, Bug, Package, ListChecks, Database, Search } from 'lucide-svelte';
 import type { SceneOverride, ExtraScene } from './scenes';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
+import { bennuRegexStore } from '$lib/stores/bennu/regex.svelte';
 import { mount } from 'svelte';
 import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
 import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
 import { bennuRunConfigStore } from '$lib/stores/bennu/run-config.svelte';
 import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
+import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
 
 const noop = () => {};
 
@@ -15,8 +17,12 @@ const DEMO = 'demo://GestionaleAtti';
 const ACTION = `${DEMO}/web/src/main/java/it/comune/gestionale/web/action/BandoAction.java`;
 const BANDO = `${DEMO}/core/src/main/java/it/comune/gestionale/core/model/Bando.java`;
 const seedProject = () => { projectStore.loadDemo(); };
+/** The code-generator dialogs need a window to read from; the gallery has none, so they open on "no project". */
+const generatorModal: SceneOverride = { props: () => ({ host: { site: () => null, applyEdits: noop, openFile: noop }, onClose: noop }) };
+const GENERATOR_MODALS = ['Security', 'Converter', 'Jackson', 'HttpClient', 'DtoMapper', 'Builder', 'ValueMembers', 'TestSkeleton', 'TauriCommand', 'Bevy', 'RustHttpClient', 'RatatuiApp', 'RatatuiWidget', 'RatatuiList', 'RatatuiKeymap', 'RatatuiDialog', 'SoapCall', 'CxfRest'];
 
 export const bennuOverrides: Record<string, SceneOverride> = {
+  ...Object.fromEntries(GENERATOR_MODALS.map((name) => [`bennu/generate/${name}GenerateModal`, generatorModal])),
   'bennu/BennuCustomizeRailsModal': {
     props: () => ({
       onClose: noop,
@@ -66,6 +72,12 @@ export const bennuOverrides: Record<string, SceneOverride> = {
   },
   'bennu/BennuHtmlScriptsModal': {
     props: () => ({ path: `${DEMO}/web/src/main/webapp/index.html`, onAllow: noop, onCancel: noop }),
+  },
+  'bennu/BennuRegexModal': {
+    setup: () => bennuRegexStore.open({
+      pattern: '(?<year>\\d{4})-(?<month>0[1-9]|1[0-2])-(?<day>[0-3]\\d)', flavour: 'java', flags: '', target: null,
+    }),
+    props: { onClose: noop },
   },
   'bennu/BennuJpaGenerateModal': {
     setup: seedProject,
@@ -141,6 +153,13 @@ bennuOverrides['bennu/BennuLocalHistoryModal'] = {
   settle: 1200,
 };
 Object.assign(bennuOverrides, {
+  // The settings dialog landing on Java › Formatter: the page needs the dialog's shell (its card and
+  // section classes live there), and the demo project gives it a project scope to switch to.
+  'bennu/BennuSettingsModal': {
+    setup: () => { seedProject(); bennuUiStore.openSettings('formatter'); },
+    props: { onClose: noop },
+    settle: 1500,
+  },
   'bennu/BennuGenerateModal': { setup: seedProject, props: () => ({ mode: 'getters-setters', onClose: noop, onInsert: noop, onTemplates: noop }) },
   'bennu/BennuNewFolderModal': { setup: seedProject, props: () => ({ dir: `${DEMO}/core/src/main/java/it/comune/gestionale/core`, asPackage: true, onClose: noop }) },
   'bennu/BennuNewModuleModal': { setup: seedProject, props: () => ({ fromDir: DEMO, onClose: noop }) },

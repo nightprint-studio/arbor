@@ -8,6 +8,7 @@
 //! submodules. The submodules stay `pub` for rustdoc navigation.
 
 pub mod action;
+pub mod calendar;
 pub mod error;
 pub mod key;
 pub mod opts;

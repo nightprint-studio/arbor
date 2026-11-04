@@ -58,6 +58,12 @@ export function openGarrulusWindow(): Promise<void> {
   return invoke('open_garrulus_window');
 }
 
+/** Open (or focus, if already open) the dedicated Hirundo window — the HTTP client
+ *  (collections as files in the project, environments with types, tests). */
+export function openHirundoWindow(): Promise<void> {
+  return invoke('open_hirundo_window');
+}
+
 /** Open (or focus, if already open) the launcher (Canopy) window. */
 export function openLauncherWindow(): Promise<void> {
   return invoke('open_launcher_window');
@@ -95,6 +101,7 @@ export const PRODUCT_WINDOW_OPENERS: Record<string, () => Promise<void>> = {
   bennu: openBennuWindow,      // Java editor
   picus: openPicusWindow,      // SQL studio
   garrulus: openGarrulusWindow, // Notes vault
+  hirundo: openHirundoWindow,   // HTTP client
 };
 
 // ── Product window running-state (launcher ↔ product windows) ────────────────

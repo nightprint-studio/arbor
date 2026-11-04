@@ -115,7 +115,9 @@
 </p>
 <p>
   A library method's receiver is typed against the project's classpath, so it works on anything your dependencies resolve to, and it
-  chains: from inside one library view you can go on to the next.
+  chains: from inside one library view you can go on to the next — including a view you opened by hand (Go to Class, the hierarchy, a tab restored
+  from the last session), a bare call or field of the class you are reading, and a member the receiver inherits, which lands where it is declared
+  (<code>list.stream()</code> opens <code>Collection.stream</code>).
 </p>
 <Callout variant="info" title="A decompiled stub">
   Generated from the bytecode: the type declaration and every field and method signature, with a header saying it is decompiled —

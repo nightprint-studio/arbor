@@ -15,7 +15,7 @@
 
 use std::time::Duration;
 
-use arbor_brp::prelude::{methods, BrpCapabilities, BrpClient, MethodMap, Op, TypeRegistry, DEFAULT_ENDPOINT};
+use arbor_brp::prelude::{methods, resolve_kind_types, BrpCapabilities, BrpClient, MethodMap, Op, TypeFilter, TypeRegistry, DEFAULT_ENDPOINT};
 use arbor_ipc::prelude::EventSink;
 use bennu_core::prelude::BennuState;
 use serde::{Deserialize, Serialize};
@@ -217,7 +217,7 @@ async fn establish(endpoint: &str, timeout: Duration) -> Result<Live, String> {
         None => None,
     };
     // A registry is megabytes of JSON; indexing it must not run on a runtime worker.
-    let (caps, registry) = tokio::task::spawn_blocking(move || {
+    let (caps, registry, kind_types) = tokio::task::spawn_blocking(move || {
         let registry = match schema {
             Some(s) => {
                 caps.ingest_schema(&s);
@@ -225,13 +225,16 @@ async fn establish(endpoint: &str, timeout: Duration) -> Result<Live, String> {
             }
             None => TypeRegistry::default(),
         };
-        (caps, registry)
+        let (_, components) = registry.search(TypeFilter::Component, "", 0, usize::MAX);
+        let kind_types = resolve_kind_types(components.iter().map(|i| i.type_path.as_str()));
+        (caps, registry, kind_types)
     })
     .await
     .map_err(|e| format!("registry indexing failed: {e}"))?;
 
     use arbor_brp::prelude::preferred_type_paths;
     Ok(Live {
+        kind_types,
         endpoint: endpoint.to_string(),
         timeout,
         name_types: preferred_type_paths(&caps.name_types),

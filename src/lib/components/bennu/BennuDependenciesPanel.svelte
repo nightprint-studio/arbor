@@ -2,12 +2,13 @@
   /**
    * Dependencies (left tool window) — what the open project actually depends on.
    *
-   * **Maven and Cargo, one panel.** The questions a dependency list is opened to answer are the same
-   * either way, so the report shape is (see `bennu-deps`'s `model.rs`, whose module doc has the
+   * **Maven, Gradle, Cargo and Node, one panel.** The questions a dependency list is opened to answer
+   * are the same either way, so the report shape is (see `bennu-deps`'s `model.rs`, whose module doc has the
    * field-by-field mapping). What differs is the words, and those come from
    * {@link DependencyReport.ecosystem} rather than from a second component.
    *
-   * One group per module (Maven) or crate (Cargo), each row carrying the four things:
+   * One group per module (Maven), crate (Cargo) or package (Node — each `package.json` of a
+   * workspace), each row carrying the four things:
    *
    * - **the coordinate and the version** — with `${…}` expanded and `<dependencyManagement>`
    *   applied, or the requirement replaced by whatever `Cargo.lock` actually chose;
@@ -61,9 +62,9 @@
 
   let filter = $state('');
 
-  // The module the report describes: a Maven, Gradle or Cargo module anywhere in the workspace (the
-  // project root for a plain one). A module tree picks it when there are several.
-  const target = $derived(moduleFocusStore.targetFor('Maven', 'Gradle', 'Cargo'));
+  // The module the report describes: a Maven, Gradle, Cargo or Node module anywhere in the workspace
+  // (the project root for a plain one). A module tree picks it when there are several.
+  const target = $derived(moduleFocusStore.targetFor('Maven', 'Gradle', 'Cargo', 'Node'));
   const root = $derived(target?.toolRoot ?? null);
   // A primitive on purpose: `target` is a fresh object whenever the active file changes, and an
   // effect that read it would re-read the report on every tab switch.
@@ -73,12 +74,17 @@
   const ecosystem = $derived(report?.ecosystem ?? '');
   const isCargo = $derived(ecosystem === 'cargo');
   const isGradle = $derived(ecosystem === 'gradle');
-  /** What a module is called here. A Cargo "module" is a crate and a Gradle one a project, and the
-   *  panel should say so. */
-  const unitWord = $derived(isCargo ? 'crate' : isGradle ? 'project' : 'module');
-  const manifestWord = $derived(isCargo ? 'Cargo.toml' : isGradle ? 'build script' : 'pom');
+  const isNode = $derived(ecosystem === 'node');
+  /** Ecosystems whose tree has no "dropped" versions: both versions are built, so a conflict is a duplicate. */
+  const duplicates = $derived(isCargo || isNode);
+  /** What a module is called here. A Cargo "module" is a crate, a Gradle one a project and a Node
+   *  one a package, and the panel should say so. */
+  const unitWord = $derived(isCargo ? 'crate' : isGradle ? 'project' : isNode ? 'package' : 'module');
+  const manifestWord = $derived(isCargo ? 'Cargo.toml' : isGradle ? 'build script' : isNode ? 'package.json' : 'pom');
   /** The tool the resolved tree is asked of. */
   const treeTool = $derived(isCargo ? 'cargo' : isGradle ? 'Gradle' : 'Maven');
+  /** Where Node's tree comes from — the lockfile, which costs no package-manager run. */
+  const nodeLockfile = 'the lockfile';
 
   // The resolved tree, once asked for (Maven only).
   const tree = $derived(dependenciesStore.tree);
@@ -97,27 +103,30 @@
     const path = root;
     const busyIndexing = bennuIndexStore.indexing;
     const cargo = targetKind === 'Cargo';
+    const node = targetKind === 'Node';
     if (!path) {
       dependenciesStore.reset();
       return;
     }
     // A project switch shows the tree already resolved for it (or none) — never starts Maven.
-    dependenciesStore.adoptTree(path);
-    // While the JAVA index runs the classpath is in flux; read once when it settles. A Cargo project
-    // builds no index, so waiting for one would mean waiting forever.
-    if (!cargo && busyIndexing) return;
+    dependenciesStore.adoptTree(path, node);
+    // While the JAVA index runs the classpath is in flux; read once when it settles. A Cargo or Node
+    // project builds no index, so waiting for one would mean waiting forever.
+    if (!cargo && !node && busyIndexing) return;
     // After the swap has painted (the cached report is already on screen), and dropped if another
     // swap comes first.
     return afterPaint(() => {
-      void dependenciesStore.load(path, true).then(() => {
-        // After the report: the badges name artifacts the classpath now knows the versions of.
-        if (!cargo) void dependenciesStore.loadAdvisories(path);
+      void dependenciesStore.load(path, true, node).then(() => {
+        // After the report: the badges name artifacts the classpath (or the lockfile) now knows the
+        // versions of.
+        if (!cargo) void dependenciesStore.loadAdvisories(path, node);
+        if (node) void dependenciesStore.loadOutdated(path);
       });
     }, 200);
   });
 
   function resolveTree() {
-    if (root) void dependenciesStore.loadTree(root, true);
+    if (root) void dependenciesStore.loadTree(root, true, targetKind === 'Node');
   }
 
   /** A dependency matches by what it is, and — once the tree is resolved — by what it pulls in: searching
@@ -197,7 +206,11 @@
   /** Declared, and not in the local repository. The number worth surfacing without being asked. */
   const missing = $derived(
     report?.resolved_known
-      ? (report?.modules ?? []).flatMap((m) => m.dependencies).filter((d) => !d.resolved).length
+      ? (report?.modules ?? [])
+          .flatMap((m) => m.dependencies)
+          // A Node peer or optional dependency is legitimately absent (a platform binary, a package
+          // the host app provides), so only what the project cannot run without counts as missing.
+          .filter((d) => !d.resolved && (!isNode || d.scope === 'runtime' || d.scope === 'dev')).length
       : 0,
   );
 
@@ -244,7 +257,7 @@
         <IconButton
           tooltip={dependenciesStore.treeLoading
             ? 'Resolving the dependency tree…'
-            : tree ? 'Resolve the tree again' : `Resolve the tree — who brings what, and ${isCargo ? 'duplicate versions' : 'version conflicts'}`}
+            : tree ? 'Resolve the tree again' : `Resolve the tree — who brings what, and ${duplicates ? 'duplicate versions' : 'version conflicts'}`}
           size={24}
           onclick={resolveTree}
           disabled={dependenciesStore.treeLoading}
@@ -263,7 +276,7 @@
   {#if !root}
     <EmptyState message="Open a project to see its dependencies." />
   {:else if dependenciesStore.error}
-    <div class="dep-scroll"><BennuModuleTree kinds={['Maven', 'Gradle', 'Cargo']} ariaLabel="Projects" onModuleContextMenu={openTreeMenu} /></div>
+    <div class="dep-scroll"><BennuModuleTree kinds={['Maven', 'Gradle', 'Cargo', 'Node']} ariaLabel="Projects" onModuleContextMenu={openTreeMenu} /></div>
     <div class="dep-notice">
       <Alert variant="error" compact text={dependenciesStore.error} />
     </div>
@@ -271,7 +284,7 @@
     <div class="dep-loading"><Spinner size={16} /><span>Reading the project's manifests…</span></div>
   {:else if report}
     <div class="dep-body">
-      <BennuModuleTree kinds={['Maven', 'Gradle', 'Cargo']} ariaLabel="Projects" onModuleContextMenu={openTreeMenu} />
+      <BennuModuleTree kinds={['Maven', 'Gradle', 'Cargo', 'Node']} ariaLabel="Projects" onModuleContextMenu={openTreeMenu} />
       {#if solo}
         <div class="dep-notice dep-solo">
           <span>Showing one {unitWord} only.</span>
@@ -298,6 +311,10 @@
             {#if isCargo}
               There is no <code>Cargo.lock</code> yet, so the version each of these resolves to is
               unknown — what is shown is the requirement as written. Any cargo command creates one.
+            {:else if isNode}
+              There is no lockfile and no <code>node_modules</code> yet, so the version each of these
+              resolves to is unknown — what is shown is the range as written. Install the dependencies
+              once (<code>npm install</code>, <code>pnpm install</code> or <code>yarn</code>).
             {:else}
               The dependency classpath hasn't been resolved yet, so whether each of these is in your
               local repository is unknown. It resolves in the background as the project indexes.
@@ -307,10 +324,16 @@
       {:else if missing > 0}
         <div class="dep-notice">
           <Alert variant="warning" compact>
-            {missing} declared {missing === 1 ? 'dependency is' : 'dependencies are'} not in the local
-            {isCargo ? 'registry' : 'repository'} — types from {missing === 1 ? 'it' : 'them'} won't
-            resolve. {isCargo ? 'Run any cargo command' : 'Build the project'} once to download
-            {missing === 1 ? 'it' : 'them'}.
+            {#if isNode}
+              {missing} declared {missing === 1 ? 'package is' : 'packages are'} not installed
+              (no <code>node_modules</code> folder for {missing === 1 ? 'it' : 'them'}) — imports of
+              {missing === 1 ? 'it' : 'them'} won't resolve. Install the dependencies once.
+            {:else}
+              {missing} declared {missing === 1 ? 'dependency is' : 'dependencies are'} not in the local
+              {isCargo ? 'registry' : 'repository'} — types from {missing === 1 ? 'it' : 'them'} won't
+              resolve. {isCargo ? 'Run any cargo command' : 'Build the project'} once to download
+              {missing === 1 ? 'it' : 'them'}.
+            {/if}
           </Alert>
         </div>
       {/if}
@@ -323,8 +346,9 @@
           {:else}
             <Alert variant="info" compact>
               To see <strong>who brings each dependency in</strong> and which ones come in
-              <strong>{isCargo ? 'at more than one version' : 'with conflicting versions'}</strong>, resolve
-              the tree. It runs {treeTool} in the background.
+              <strong>{duplicates ? 'at more than one version' : 'with conflicting versions'}</strong>, resolve
+              the tree.
+              {#if isNode}It is read from {nodeLockfile}, in the background.{:else}It runs {treeTool} in the background.{/if}
             </Alert>
           {/if}
           <div class="dep-notice-act">
@@ -338,7 +362,7 @@
 
       <!-- Without the dropped nodes the tree can still say who brings what, but a conflict is
            exactly a dropped node — so an empty conflicts group would read as "none", which it is not. -->
-      {#if tree && !tree.verbose}
+      {#if tree && !tree.verbose && !isNode}
         <div class="dep-notice">
           <Alert variant="info" compact>
             This Maven did not report the versions it dropped, so <strong>version conflicts</strong>
@@ -357,11 +381,11 @@
       {:else}
         {#if conflicts.length > 0}
           <SidebarSection
-            label={isCargo ? 'Duplicate versions' : 'Version conflicts'}
+            label={duplicates ? 'Duplicate versions' : 'Version conflicts'}
             expanded={isOpen('__conflicts')}
             onToggle={() => toggle('__conflicts')}
             badge={conflicts.length}
-            badgeTitle={`${isCargo ? 'Crates' : 'Artifacts'} the resolved tree sees at more than one version`}
+            badgeTitle={`${isCargo ? 'Crates' : isNode ? 'Packages' : 'Artifacts'} the resolved tree sees at more than one version`}
           >
             {#snippet icon()}<TriangleAlert size={13} />{/snippet}
             <DependencyConflicts {conflicts} {ecosystem} />
@@ -404,6 +428,7 @@
                       resolvedKnown={report.resolved_known}
                       usage={treeIndex.artifacts.get(coordOf(d))}
                       vuln={vulnFor(dependenciesStore.advisories, coordOf(d), d.version)}
+                      newer={isNode ? dependenciesStore.outdated.get(d.name) : undefined}
                       pulls={pullsOf(m.module, d)}
                       {query}
                       onOpen={openDeclaration}

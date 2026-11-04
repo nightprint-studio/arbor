@@ -45,6 +45,9 @@
   <li>Plans are saved, and survive a restart. A step that was running when the app closed is shown as failed ("interrupted") so you can retry it.</li>
 </ul>
 
+<h2>Managing plans</h2>
+<p>The <strong>Plans</strong> tab groups plans by what needs you: running, paused, drafts, finished, templates. A row runs or stops a plan, and deletes one (<Kbd keys={['Del']} size="sm" /> on the focused row, or <em>Delete</em> in the plan window) after a confirmation. A running plan cannot be deleted.</p>
+
 <h2>Notes</h2>
 <ul>
   <li>Steps use the same credentials and the same code as the buttons they stand for.</li>

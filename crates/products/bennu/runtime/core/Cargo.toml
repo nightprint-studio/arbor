@@ -12,6 +12,8 @@ arbor-ipc  = { path = "../../../../foundation/ipc" }
 # Resolves bennu's own per-profile config dir (`bennu_config_path`) for the typed
 # `BennuConfig` persistence — exactly as tyto-core uses `tyto_config_path`.
 arbor-core = { path = "../../../../foundation/core" }
+# The assistant's settings table (`[assistant]`) is defined once in Imber's core and shared with Corvus.
+imber-core = { path = "../../../../platform/imber/core" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 # The typed product config (`config.toml`) is round-tripped through `toml`.

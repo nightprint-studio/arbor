@@ -9,7 +9,7 @@ export type Tone = 'success' | 'info' | 'warning' | 'neutral';
  *  what the library needs, what its tests need, and what is supplied from outside. */
 export function scopeTone(scope: string): Tone {
   if (scope === 'compile' || scope === 'normal' || scope === 'runtime') return 'success';
-  if (scope === 'provided' || scope === 'system' || scope === 'build') return 'info';
+  if (scope === 'provided' || scope === 'system' || scope === 'build' || scope === 'peer') return 'info';
   if (scope === 'test' || scope === 'dev') return 'warning';
   return 'neutral';
 }
@@ -23,10 +23,16 @@ export function originLabel(d: Dependency): string {
   }
 }
 
-export function originTooltip(d: Dependency, isCargo: boolean): string {
-  const unit = isCargo ? 'crate' : 'module';
+export function originTooltip(d: Dependency, ecosystem: string): string {
+  const isCargo = ecosystem === 'cargo';
+  const unit = isCargo ? 'crate' : ecosystem === 'node' ? 'package' : 'module';
   switch (d.origin.kind) {
     case 'managed':
+      if (ecosystem === 'node') {
+        return d.origin.from === 'catalog'
+          ? `Declared here as \`catalog:\` — the workspace catalog supplies ${d.version || 'the version'}.`
+          : `A sibling package of this workspace (\`workspace:\`) — ${d.version || 'its'} version is the one in its own package.json.`;
+      }
       return isCargo
         ? `Declared here as \`workspace = true\` — ${d.origin.from}'s [workspace.dependencies] supplies ${d.version || 'the version'}.`
         : `Declared here without a version — ${d.origin.from}'s <dependencyManagement> pins ${d.version || 'it'}. Opens that pom.`;

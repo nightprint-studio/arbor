@@ -10,4 +10,5 @@ pub use crate::config::{
     load as load_config, load_workspaces, save as save_config, save_workspaces, BennuConfig,
     BennuWorkspace, BennuWorkspaces, CargoConfig, CustomLspServer, LibraryBeansConfig, LogViewConfig,
     LogViewRule, LspConfig, MavenConfig, NewProjectConfig, OnboardingConfig, ProfilerToolsConfig, ProjectSession,
+    RegexPattern,
 };

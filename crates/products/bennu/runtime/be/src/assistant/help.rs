@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use serde::Deserialize;
 
 /// The index, built from the documentation pages and embedded in the binary.
-const INDEX_JSON: &str = include_str!("../../../../assistant/help.json");
+const INDEX_JSON: &str = include_str!("../../../../../../platform/imber/core/help.json");
 
 /// How much of a section is returned. Long sections are cut, with a note, so one answer stays small.
 const SECTION_CHARS: usize = 1500;

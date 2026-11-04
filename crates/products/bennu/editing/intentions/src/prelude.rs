@@ -22,7 +22,13 @@ pub use crate::override_stub::{class_body_insertion, render_override, OverrideSp
 pub use crate::quick_fix::{fixes_for, Fix};
 
 // The Java formatter — re-indentation and whitespace tidying, as line-range edits.
-pub use crate::format::{format_edits, format_source, FormatStyle};
+pub use crate::format::{
+    detect::{detect_style, Detection},
+    editorconfig::editorconfig_style,
+    format_edits, format_range, format_source,
+    imports::organize_imports,
+    AnnotationPlacement, BraceStyle, FormatStyle, LineEnding, StaticImports, WrapPolicy,
+};
 
 // The accessor a field does not have yet — the text a completion candidate inserts.
 pub use crate::accessor_stub::{accessor_name, offers, render_accessor, Accessor, FieldSpec};

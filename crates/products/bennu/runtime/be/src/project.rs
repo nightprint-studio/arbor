@@ -486,7 +486,7 @@ fn encoding_override_for<'a>(
         .or_else(|| cfg.encoding_overrides.get(root).map(|s| s.as_str()))
 }
 
-fn normalise_key(path: &str) -> String {
+pub(crate) fn normalise_key(path: &str) -> String {
     let slashed = path.replace('\\', "/");
     if cfg!(windows) { slashed.to_lowercase() } else { slashed }
 }

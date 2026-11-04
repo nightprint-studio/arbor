@@ -48,6 +48,9 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // found by typing. Ctrl+Shift+D — free in Bennu and in the global map, and not a Chromium
   // DevTools chord (unlike Ctrl+Shift+J / C / I).
   goto_project:        { key: 'd',    ctrl: true,  shift: true,  description: 'Go to project (Bennu)',      group: 'Navigation' },
+  // The Regex Tester. Ctrl+Shift+X is Corvus's "plugins" — a different window — and free in Bennu; X for
+  // regeX. On a string literal it opens that pattern (and writes edits back); anywhere else it opens empty.
+  regex_tester:        { key: 'x',    ctrl: true,  shift: true,  description: 'Regex Tester — open the pattern under the caret (Bennu)', group: 'Navigation' },
   // Bennu's own window handles it, so Corvus's Ctrl+Shift+L (Pull) is a different window's.
   console_clean_view:  { key: 'l',    ctrl: true,  shift: true,  description: 'Toggle the console clean view (Bennu)', group: 'Navigation' },
   switch_project_prev:{ key: 'Tab',  ctrl: true,  shift: true,  description: 'Switch project, backwards (Bennu)', group: 'Navigation' },
@@ -176,6 +179,10 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // Plans (ordered remote steps across repos). Ctrl+Shift+J opens the modal; Ctrl+Shift+E queues the current branch's push.
   plan_open:      { key: 'j',     ctrl: true,  shift: true,  description: 'Open the plan',         group: 'Git' },
   plan_add_push:  { key: 'e',     ctrl: true,  shift: true,  description: 'Add push to the plan',  group: 'Git' },
+  // Imber, the assistant. Ctrl+Shift+Y opens its panel (Y: the only free Ctrl+Shift letter that is not a
+  // Chromium DevTools chord). Ctrl+G writes the commit message from the staged changes — inside the message box.
+  imber_toggle:   { key: 'y',     ctrl: true,  shift: true,  description: 'Toggle Imber (assistant)', group: 'Git' },
+  imber_commit_message: { key: 'g', ctrl: true,             description: 'Imber: generate the commit message', group: 'Git' },
   stage_all:      { key: 'a',     ctrl: true,  shift: true,  description: 'Stage all changes',     group: 'Git' },
   unstage_all:    { key: 'u',     ctrl: true,  shift: true,  description: 'Unstage all changes',   group: 'Git' },
 

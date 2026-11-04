@@ -12,6 +12,7 @@
 export { default as CodeEditor } from './CodeEditor.svelte';
 export type {
   LanguageDescriptor,
+  LeafSpan,
   CodeEditorIntel,
   TokenClass,
   TokenClassName,
@@ -67,7 +68,7 @@ export {
   type CodeEditorExtensionsOptions, type CodeEditorPreferences, type CompletionPreferences,
 } from './extensions';
 export { intellijEditingKeymap } from './intellij-keymap';
-export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from './highlight';
+export { createHighlightPlugin, streamTokenSpans, makeByteToU16, makeU16ToByte, parserReady } from './highlight';
 // Tab stops of an inserted completion — see `snippet-stops.ts` for why this is not CodeMirror's own
 // `snippet()`.
 export { insertWithStops, snippetStops } from './snippet-stops';

@@ -30,6 +30,7 @@
     merula: () => import('$lib/components/merula/MerulaWindow.svelte'),
     picus:  () => import('$lib/components/picus/PicusWindow.svelte'),
     garrulus: () => import('$lib/components/garrulus/GarrulusWindow.svelte'),
+    hirundo: () => import('$lib/components/hirundo/HirundoWindow.svelte'),
   };
 
   let Shell = $state<Component | null>(null);

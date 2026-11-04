@@ -34,12 +34,14 @@
     pulls?: TreeNode[];
     /** Known vulnerabilities of this artifact at its version, when there are any. */
     vuln?: { count: number; severity: string };
+    /** Node: a newer release on the registry than the one the lockfile resolved. */
+    newer?: { latest: string; bump: string };
     /** The panel's filter, lower-cased: a row whose *pulled-in* artifact matches it opens to show it. */
     query?: string;
     onOpen: (d: Dependency) => void;
   }
 
-  let { dep, ecosystem, resolvedKnown, usage, pulls = [], vuln, query = '', onOpen }: Props = $props();
+  let { dep, ecosystem, resolvedKnown, usage, pulls = [], vuln, newer, query = '', onOpen }: Props = $props();
 
   const pullHit = (n: TreeNode) => !!query && `${nodeCoord(n)} ${n.version}`.toLowerCase().includes(query);
 
@@ -49,6 +51,10 @@
   );
 
   const isCargo = $derived(ecosystem === 'cargo');
+  /** Cargo and Node build both versions of a clash, so neither has a "kept" and a "dropped" one. */
+  const noDrops = $derived(ecosystem === 'cargo' || ecosystem === 'node');
+  /** A major bump may break; a minor or patch one is the routine kind. */
+  const newerTone = $derived(newer?.bump === 'major' ? 'warning' : 'info');
   const coord = $derived(coordOf(dep));
   const parts = $derived(splitCoord(coord));
   const unresolved = $derived(resolvedKnown && !dep.resolved);
@@ -62,7 +68,7 @@
 </script>
 
 <div class="row" class:unresolved class:open>
-  <button type="button" class="main" onclick={() => onOpen(dep)} use:tooltip={originTooltip(dep, isCargo)}>
+  <button type="button" class="main" onclick={() => onOpen(dep)} use:tooltip={originTooltip(dep, ecosystem)}>
     <span class="top">
       <span class="name">{parts.name}</span>
       <span class="version mono" class:unknown={!dep.version} class:conflict={conflicted}>
@@ -78,7 +84,7 @@
       {#if dep.variant}
         <Badge variant="tone" tone="neutral" size="sm" label={isCargo ? `= ${dep.variant}` : dep.variant} />
       {/if}
-      {#if dep.source && dep.source !== 'crates.io'}<Badge variant="tone" tone="neutral" size="sm" label={dep.source} />{/if}
+      {#if dep.source && dep.source !== 'crates.io' && dep.source !== 'npm'}<Badge variant="tone" tone="neutral" size="sm" label={dep.source} />{/if}
       {#if dep.optional}<Badge variant="tone" tone="neutral" size="sm" label="optional" />{/if}
       {#if dep.condition}
         <Badge variant="tone" tone="neutral" size="sm" label={isCargo ? dep.condition : `profile: ${dep.condition}`} />
@@ -90,7 +96,12 @@
       {#if conflicted}
         <span class="note warn"><TriangleAlert size={10} />{usage?.versions.length} versions</span>
       {/if}
-      {#if unresolved}<span class="note warn"><CircleSlash size={10} /> not resolved</span>{/if}
+      {#if unresolved}<span class="note warn"><CircleSlash size={10} /> {ecosystem === 'node' ? 'not installed' : 'not resolved'}</span>{/if}
+      {#if newer}
+        <span use:tooltip={`${newer.latest} is the latest release (${newer.bump} update from ${dep.version})`}>
+          <Badge variant="tone" tone={newerTone} size="sm" label={`↑ ${newer.latest}`} />
+        </span>
+      {/if}
       {#if vuln}
         <span use:tooltip={`${vuln.count} known ${vuln.count === 1 ? 'vulnerability' : 'vulnerabilities'} (${vuln.severity}) — see Vulnerabilities`}>
           <Badge variant="chip" size="sm" color={vulnColor}>
@@ -117,7 +128,7 @@
           {#each usage.versions as v, i (v)}
             <li>
               <span class="mono">{v}</span>
-              {#if !isCargo}<span class="d-tag">{i === 0 ? 'kept' : 'dropped'}</span>{/if}
+              {#if !noDrops}<span class="d-tag">{i === 0 ? 'kept' : 'dropped'}</span>{/if}
             </li>
           {/each}
         </ul>

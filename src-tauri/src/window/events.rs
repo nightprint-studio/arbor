@@ -171,7 +171,7 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
                     // the launcher and every other product's IPC mid-close).
                     if matches!(
                         id,
-                        "corvus" | "merula" | "sitta" | "tyto" | "bennu" | "picus" | "garrulus"
+                        "corvus" | "merula" | "sitta" | "tyto" | "bennu" | "picus" | "garrulus" | "hirundo"
                     ) {
                         crate::ipc::split_broker::detach_unless_borrowed(id, "window-closed");
                     }

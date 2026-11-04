@@ -551,9 +551,13 @@ const javaCompletionSource: CompletionSource = async (
 const javaHoverSource = makeHoverSource(async (path, src, byteOffset) => {
   // Inside a library/JDK source view (a tracked decompiled tab), hover resolves against the ORIGIN
   // project's classpath resolver — its own `/decompiled/` path is under no project.
-  const ctx = decompiledStore.ctx(path);
-  const info = ctx
-    ? await ipcLibraryHover(ctx.originFile, src, byteOffset)
+  // A library view with no registered context (restored tab, opened from Go to Class) is still a
+  // library view: the data-dir `/decompiled/` segment says so, and the open project's root picks the
+  // same classpath slot the registered origin would.
+  const origin = decompiledStore.ctx(path)?.originFile
+    ?? (path.includes('/decompiled/') && projectStore.isForeign(path) ? projectStore.project?.root : undefined);
+  const info = origin
+    ? await ipcLibraryHover(origin, src, byteOffset)
     : await ipcHover(path, src, byteOffset);
   if (info) return info;
   // The language had nothing to say — ask the framework extensions. This is where

@@ -54,7 +54,7 @@ pub struct RepoArgs {
     title = "Git status",
     safety = read,
 ))]
-fn corvus_status(state: &CorvusState, args: RepoArgs) -> Result<RepoStatus, String> {
+pub(crate) fn corvus_status(state: &CorvusState, args: RepoArgs) -> Result<RepoStatus, String> {
     let tab = tab_for(state, &args.root)?;
     let repo = open(state, &tab)?;
     get_status(&repo).map_err(|e| e.to_string())
@@ -90,7 +90,7 @@ pub struct LogEntry {
     title = "Git log",
     safety = read,
 ))]
-fn corvus_log(state: &CorvusState, args: LogArgs) -> Result<Vec<LogEntry>, String> {
+pub(crate) fn corvus_log(state: &CorvusState, args: LogArgs) -> Result<Vec<LogEntry>, String> {
     let tab = tab_for(state, &args.root)?;
     let workdir = repo_path(state, &tab)?;
     let repo = open(state, &tab)?;
@@ -129,7 +129,7 @@ pub(crate) fn walk_log(repo: &Repository, rel: Option<&str>, limit: usize) -> Re
 
 /// Whether `commit` changed `rel` relative to its first parent (a root commit changes
 /// whatever it contains).
-fn commit_touches(commit: &git2::Commit<'_>, rel: &str) -> bool {
+pub(crate) fn commit_touches(commit: &git2::Commit<'_>, rel: &str) -> bool {
     let entry_id = |c: &git2::Commit<'_>| {
         c.tree().ok().and_then(|t| t.get_path(std::path::Path::new(rel)).ok()).map(|e| e.id())
     };
@@ -167,7 +167,7 @@ pub struct BlameRange {
     title = "Git blame",
     safety = read,
 ))]
-fn corvus_blame(state: &CorvusState, args: BlameArgs) -> Result<Vec<BlameRange>, String> {
+pub(crate) fn corvus_blame(state: &CorvusState, args: BlameArgs) -> Result<Vec<BlameRange>, String> {
     let tab = tab_for(state, &args.file)?;
     let workdir = repo_path(state, &tab)?;
     let repo = open(state, &tab)?;
@@ -233,7 +233,7 @@ pub struct CommitResult {
     title = "Commit staged changes",
     safety = write,
 ))]
-fn corvus_commit(state: &CorvusState, args: CommitArgs) -> Result<CommitResult, String> {
+pub(crate) fn corvus_commit(state: &CorvusState, args: CommitArgs) -> Result<CommitResult, String> {
     let message = args.message.trim().to_string();
     if message.is_empty() {
         return Err("The commit message is empty.".to_string());
@@ -296,7 +296,7 @@ pub struct StageResult {
     title = "Stage files",
     safety = write,
 ))]
-fn corvus_stage(state: &CorvusState, args: StageArgs) -> Result<StageResult, String> {
+pub(crate) fn corvus_stage(state: &CorvusState, args: StageArgs) -> Result<StageResult, String> {
     let (tab, rels) = resolve_paths(state, &args.root, &args.paths)?;
     if rels.is_empty() {
         return Err("Name at least one file or folder to stage.".to_string());
@@ -313,7 +313,7 @@ fn corvus_stage(state: &CorvusState, args: StageArgs) -> Result<StageResult, Str
     title = "Unstage files",
     safety = write,
 ))]
-fn corvus_unstage(state: &CorvusState, args: StageArgs) -> Result<StageResult, String> {
+pub(crate) fn corvus_unstage(state: &CorvusState, args: StageArgs) -> Result<StageResult, String> {
     let (tab, rels) = resolve_paths(state, &args.root, &args.paths)?;
     if rels.is_empty() {
         return Err("Name at least one file or folder to unstage.".to_string());
@@ -371,7 +371,7 @@ pub struct DiffResult {
     title = "Diff the uncommitted work",
     safety = read,
 ))]
-fn corvus_diff(state: &CorvusState, args: DiffArgs) -> Result<DiffResult, String> {
+pub(crate) fn corvus_diff(state: &CorvusState, args: DiffArgs) -> Result<DiffResult, String> {
     let staged = args.staged.unwrap_or(false);
     let tab = tab_for(state, &args.root)?;
     let workdir = repo_path(state, &tab)?;
@@ -438,7 +438,7 @@ pub struct PushResult {
     title = "Push the current branch",
     safety = destructive,
 ))]
-async fn corvus_push(state: &CorvusState, args: PushArgs) -> Result<PushResult, String> {
+pub(crate) async fn corvus_push(state: &CorvusState, args: PushArgs) -> Result<PushResult, String> {
     let remote = args.remote.unwrap_or_else(|| "origin".to_string());
     let tab = tab_for(state, &args.root)?;
 

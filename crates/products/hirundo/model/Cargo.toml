@@ -1,0 +1,16 @@
+[package]
+name         = "hirundo-model"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Hirundo's data model and its pure logic: requests, collections, environments and their types, auth, variable resolution, the readable file format, request preparation, and cURL in both directions. No network, no filesystem — everything here is a function of its inputs, so every rule is a test."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# The request files are TOML: read with `toml`, written by this crate's own small writer so that
+# bodies and header blocks stay multi-line and diffable.
+toml       = "0.8"
+base64     = { workspace = true }

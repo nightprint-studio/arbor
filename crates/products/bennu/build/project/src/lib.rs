@@ -21,6 +21,7 @@
 
 pub mod capability;
 pub mod cargo;
+pub mod convert;
 pub mod encoding;
 pub mod error;
 pub mod ignored;

@@ -24,6 +24,14 @@ and answering it means reading the poms the way Maven reads them.
 Shown next to each other, those two answer the questions a dependency panel is opened for: *why is
 this on my classpath*, *why this version*, and *why is this one missing*.
 
+## Node (`node.rs`)
+
+The third producer of the same report, for a `package.json` project. The manifests (root plus every
+workspace member) say what is declared; the **lockfile** — `package-lock.json`, `pnpm-lock.yaml` or
+`yarn.lock`, parsed by `bennu-npm` — says what was resolved and who requires whom, so the resolved
+tree (`node::tree`) is also read from it rather than from `npm ls`. Installed-ness is a `node_modules`
+folder found the way Node finds it. Dependency `scope` is `runtime`/`dev`/`peer`/`optional`.
+
 ## Structure, not tag-scanning
 
 `<dependencyManagement>` contains `<dependency>` elements that look identical to real ones and are
@@ -54,4 +62,4 @@ cannot say which of them resolved, and says so rather than showing them all as m
 
 ## Consumers
 
-`bennu-be` (`bennu_dependencies`), for the Dependencies tool window.
+`bennu-be` (`bennu_dependencies`, and `bennu_node_*` for Node projects), for the Dependencies tool window.

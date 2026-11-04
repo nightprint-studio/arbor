@@ -97,6 +97,7 @@ const DUO = 3.4;
  * | Picus | the table strata its stem is bored through |
  * | Tyto | the record ring |
  * | Garrulus | the note's ruled lines |
+ * | Hirundo | the corner marks of a request in flight |
  */
 const MARKS: Record<ProductId, Record<MarkWeight, MarkPart[]>> = {
   // C — one arc of 260°, leaving the gap on the right.
@@ -187,6 +188,18 @@ const MARKS: Record<ProductId, Record<MarkWeight, MarkPart[]>> = {
       p('M16.5 6.6 A7 7 0 1 0 19 12 H15.2', DUO),
     ],
   },
+  // H — two stems and a crossbar that carries an arrow: a request going across.
+  hirundo: {
+    line: [p('M6 4 V20', LINE), p('M18 4 V20', LINE), p('M6 12 H18', LINE)],
+    solid: [p('M6.2 4.4 V19.6', SOLID), p('M17.8 4.4 V19.6', SOLID), p('M6.2 12 H17.8', SOLID)],
+    duotone: [
+      faint(bar(2.2, 2.6, 2.6, 2.6, 0.8)),
+      faint(bar(19.2, 18.8, 2.6, 2.6, 0.8)),
+      p('M6.4 4.6 V19.4', DUO),
+      p('M17.6 4.6 V19.4', DUO),
+      p('M6.4 12 H17.6', DUO),
+    ],
+  },
 };
 
 /**
@@ -207,4 +220,5 @@ export const PRODUCT_LETTER: Record<ProductId, string> = {
   picus: 'P',
   tyto: 'T',
   garrulus: 'G',
+  hirundo: 'H',
 };

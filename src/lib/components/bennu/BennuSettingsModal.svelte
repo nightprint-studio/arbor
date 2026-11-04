@@ -30,7 +30,7 @@
   import {
     Settings, Coffee, TextCursorInput, ListTree, Bug, FoldVertical, Braces, RotateCcw, Wand2,
     ServerCog, Monitor, Sparkles, Command, Terminal, Beaker, FileCode2, Save, Boxes, Workflow,
-    FileStack, CaseSensitive, SpellCheck, Mic, Brain, Ghost, MessageSquare, ShieldCheck, Wrench, Wallet,
+    FileStack, CaseSensitive, SpellCheck, Mic, Brain, Ghost, MessageSquare, ShieldCheck, Wrench, Wallet, Ruler,
   } from 'lucide-svelte';
   import VoiceSettings from '$lib/components/shared/internal/VoiceSettings.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -56,6 +56,7 @@
   import BennuFoldingSettings from './settings/BennuFoldingSettings.svelte';
   import BennuJavaSettings from './settings/BennuJavaSettings.svelte';
   import BennuJavaStyleSettings from './settings/BennuJavaStyleSettings.svelte';
+  import BennuFormatterSettings from './settings/BennuFormatterSettings.svelte';
   import BennuJdkSettings from './settings/BennuJdkSettings.svelte';
   import BennuDebuggerSettings from './settings/BennuDebuggerSettings.svelte';
   import BennuLspSettings from './settings/BennuLspSettings.svelte';
@@ -183,7 +184,9 @@
       ...(isCargo ? [] : [{
         id: 'java', label: 'Java', icon: Braces, iconColor: 'var(--warning)', children: [
           { id: 'style',       label: 'Code Style',    icon: Wand2 },
-          { id: 'jdk',         label: 'JDK locations', icon: Coffee },
+          // The formatter has its own page: ~80 options with a live preview do not fit a card.
+          { id: 'formatter',   label: 'Formatter',     icon: Ruler },
+          { id: 'jdk',        label: 'JDK locations', icon: Coffee },
           { id: 'debugger',    label: 'Debugger',      icon: Bug },
           // Global like the templates: what a field called `email` is given does not change per project.
           { id: 'test-values', label: 'Test Values',   icon: Beaker },
@@ -287,7 +290,9 @@
       {:else if active === 'java'}
         <BennuJavaSettings onGoTo={(page) => (active = page)} />
       {:else if active === 'style'}
-        <BennuJavaStyleSettings />
+        <BennuJavaStyleSettings onGoTo={(page) => (active = page)} />
+      {:else if active === 'formatter'}
+        <BennuFormatterSettings />
       {:else if active === 'jdk'}
         <BennuJdkSettings />
       {:else if active === 'debugger'}

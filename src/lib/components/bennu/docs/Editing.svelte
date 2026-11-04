@@ -291,21 +291,21 @@
   where the team and the CI read it from. <strong>Java</strong> is formatted by Bennu:
 </p>
 <ul>
-  <li>every line re-indented to its nesting, with the indentation the footer shows;</li>
+  <li>every line re-indented to its nesting;</li>
   <li>trailing whitespace stripped;</li>
   <li>runs of blank lines collapsed.</li>
 </ul>
 <p>
-  Its style is <strong>Settings → Java → Code Style → Formatter</strong>: how many consecutive blank lines survive between members
-  (0 removes them all), and whether the statements under a <code>case</code> label are indented from it. The indentation itself
-  comes from Editor → Indentation, so the formatter and the editor cannot disagree, and both persist — a file formats the same
-  way tomorrow.
+  That is all it does until you ask for more: <strong>Settings → Java → Formatter</strong> has every option — braces, spacing,
+  wrapping, imports, annotations, comments — with a live preview, a style per project, and detection from the code already there.
+  With text selected the same key formats just the selection, and a file can be formatted when it is saved. The <em>Formatter</em>
+  page of this documentation describes it all.
 </p>
-<Callout variant="info" title="It deliberately stops there">
-  It never rewraps a long line, reorders anything, adds or removes braces, or changes the spacing inside an expression. Those are
-  the rules that can be wrong — <code>a &lt; b</code> and <code>Map&lt;K, V&gt;</code> differ by context, <code>-1</code> and
-  <code>a - 1</code> by parse — and a formatter that occasionally rewrites an expression is one nobody dares run on inherited
-  code. Comments and text blocks are left exactly as written, and a file that does not parse still formats.
+<Callout variant="info" title="Opt-in by design">
+  Out of the box it never rewraps a long line, reorders anything, adds or removes braces, or changes the spacing inside an
+  expression. Those are the rules that can be wrong — <code>a &lt; b</code> and <code>Map&lt;K, V&gt;</code> differ by context,
+  <code>-1</code> and <code>a - 1</code> by parse — so each one is a choice you make. Comments and text blocks are left exactly as
+  written, and a file that does not parse still formats.
 </Callout>
 
 <h2>Optimize imports</h2>

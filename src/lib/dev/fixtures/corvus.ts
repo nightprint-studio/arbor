@@ -275,7 +275,61 @@ export const pipelineRun = {
   ],
 };
 
+const planRepo = (name: string, workspace: string) => ({ path: `C:/Work/${workspace}/${name}`, name, workspace });
+const planStep = (id: string, spec: Record<string, unknown>, repo: ReturnType<typeof planRepo>, status = 'queued', extra: Record<string, unknown> = {}) =>
+  ({ id, ...spec, repo, status, error: null, started_ms: null, finished_ms: null, result: null, ...extra });
+const gate = (spec: Record<string, unknown>, state = 'idle') => ({ ...spec, state, since_ms: null });
+const gw = planRepo('api-gateway', 'Platform');
+const wc = planRepo('web-client', 'Platform');
+const ic = planRepo('infra-config', 'Ops');
+const bs = planRepo('billing-service', 'Billing');
+const mrSpec = (title: string) => ({ kind: 'create_mr', source: 'feature/auth-v2', target: 'main', title, description: '', labels: [], draft: false, auto_merge: false, squash: false, delete_branch: false });
+
+/** Plans for the gallery: one waiting on a merge, one paused on a failed push, one draft, one template. */
+export const plans = [
+  {
+    id: 'plan-release', name: 'Release 2.4', status: 'running', pause_reason: null, template: false, created_ms: 1, updated_ms: 5,
+    phases: [
+      { id: 'ph1', name: 'Publish', gate: gate({ kind: 'phase_done' }, 'open'), steps: [
+        planStep('s1', { kind: 'push', branch: 'feature/auth-v2' }, gw, 'done', { finished_ms: 1800 }),
+        planStep('s2', { kind: 'push', branch: 'feature/auth-v2' }, wc, 'done'),
+        planStep('s3', { kind: 'push', branch: 'chore/bump-redis' }, ic, 'done'),
+      ] },
+      { id: 'ph2', name: 'Review', gate: gate({ kind: 'phase_done' }, 'open'), steps: [
+        planStep('s4', mrSpec('Add OAuth2 PKCE flow'), gw, 'done', { result: { number: 482, url: 'https://example.test/482' } }),
+        planStep('s5', mrSpec('Use PKCE login client'), wc, 'done', { result: { number: 117, url: 'https://example.test/117' } }),
+      ] },
+      { id: 'ph3', name: 'Roll out', gate: gate({ kind: 'mr_merged', step_id: 's4', poll_secs: 30, timeout_secs: 7200 }, 'waiting'), steps: [
+        planStep('s6', { kind: 'merge_mr', from_step: 's5', number: null, squash: false, delete_branch: false }, wc, 'held'),
+        planStep('s7', { kind: 'run_pipeline', branch: 'main', workflow_id: null, variables: [] }, ic, 'held'),
+        planStep('s8', { kind: 'run_pipeline', branch: 'main', workflow_id: null, variables: [] }, bs, 'held'),
+      ] },
+    ],
+    finally: [planStep('s9', { kind: 'tag', name: 'v2.4.0', message: null, target: 'main' }, gw, 'queued')],
+  },
+  {
+    id: 'plan-hotfix', name: 'Hotfix auth', status: 'paused', pause_reason: '1 step(s) failed in “Publish”', template: false, created_ms: 1, updated_ms: 4,
+    phases: [
+      { id: 'hp1', name: 'Publish', gate: gate({ kind: 'phase_done' }), steps: [
+        planStep('h1', { kind: 'push', branch: 'hotfix/session' }, gw, 'done'),
+        planStep('h2', { kind: 'push', branch: 'hotfix/session' }, wc, 'failed', { error: 'rejected: non-fast-forward\nthe remote has 2 commits you do not have' }),
+      ] },
+      { id: 'hp2', name: 'Review', gate: gate({ kind: 'phase_done' }), steps: [planStep('h3', mrSpec('Fix session fixation'), gw, 'held')] },
+    ],
+    finally: [],
+  },
+  {
+    id: 'plan-draft', name: 'Weekly deps bump', status: 'draft', pause_reason: null, template: false, created_ms: 1, updated_ms: 3,
+    phases: [{ id: 'dp1', name: 'Phase 1', gate: gate({ kind: 'phase_done' }), steps: [
+      planStep('d1', { kind: 'pull' }, gw), planStep('d2', { kind: 'pull' }, bs),
+    ] }],
+    finally: [],
+  },
+  { id: 'plan-tpl', name: 'Release template', status: 'draft', pause_reason: null, template: true, created_ms: 1, updated_ms: 2, phases: [], finally: [] },
+];
+
 export const corvusFixtures: Record<string, FixtureHandler> = {
+  'corvus.plan_list': plans,
   'plugin:window|available_monitors': [],
   'plugin:window|current_monitor': { name: 'Built-in Retina Display', position: { x: 0, y: 0 }, size: { width: 2880, height: 1800 }, scaleFactor: 2 },
 

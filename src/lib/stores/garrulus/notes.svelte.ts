@@ -37,13 +37,19 @@
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import {
+  applyType as ipcApplyType,
+  createNote as ipcCreateNote,
+  deleteNote as ipcDeleteNote,
   onVaultChanged,
   quickSwitch as ipcQuickSwitch,
   readNote as ipcReadNote,
+  renameNote as ipcRenameNote,
+  renderTemplate as ipcRenderTemplate,
   search as ipcSearch,
   writeNote as ipcWriteNote,
   type Hit,
 } from '$lib/ipc/garrulus';
+import { stripCursorMarker, todayStamp } from '$lib/components/garrulus/notes/note-naming';
 import { garrulusVaultStore } from './vault.svelte';
 
 /** Ceiling on the enumeration. Past this the sidebar is not the tool anyway —
@@ -434,6 +440,129 @@ function createGarrulusNotesStore() {
       } finally {
         note.saving = false;
       }
+    },
+
+    // ── Lifecycle: create · rename · delete · retype · daily ─────────────────
+    // Each is a deliberate act (a dialog's confirm, a chord), and each answers by
+    // re-reading the catalogue rather than patching it: the index is the authority
+    // on titles and types, and a patch that guessed them would drift from it.
+    // Always called through the store object (`this` is the store).
+
+    /**
+     * Create a note and open it. The backend refuses to overwrite, so a path that
+     * raced into existence since the dialog validated it surfaces as an error
+     * here instead of replacing someone's text.
+     */
+    async create(path: string, text = ''): Promise<boolean> {
+      try {
+        await ipcCreateNote(path, stripCursorMarker(text));
+      } catch (e) {
+        toastStore.show(`Creating ${path} failed — ${e}`, 'error');
+        return false;
+      }
+      if (loadedVaultId) await loadCatalogue(loadedVaultId);
+      await this.openNote(path);
+      return true;
+    },
+
+    /**
+     * Move a note, carrying its open tab with it.
+     *
+     * Unsaved edits are written to the *old* path first: the move is a file
+     * operation, and a buffer that outlived it would be saved back to a path that
+     * no longer exists — recreating the note the user just renamed.
+     *
+     * Links that pointed at the old name are not rewritten; they show up in the
+     * Problems panel as unresolved.
+     */
+    async rename(path: string, newPath: string): Promise<boolean> {
+      const tab = findOpen(path);
+      if (tab && tab.text !== tab.saved) {
+        await this.save(path);
+        if (tab.text !== tab.saved) return false; // the save failed and said why
+      }
+      try {
+        await ipcRenameNote(path, newPath);
+      } catch (e) {
+        toastStore.show(`Renaming ${path} failed — ${e}`, 'error');
+        return false;
+      }
+      if (tab) {
+        tab.path = newPath;
+        tab.title = noteFileName(newPath).replace(/\.(md|markdown)$/i, '');
+      }
+      if (activePath === path) activePath = newPath;
+      recent = recent.map((r) => (r.path === path ? { ...r, path: newPath } : r));
+      if (loadedVaultId) await loadCatalogue(loadedVaultId);
+      // The title comes from the index (frontmatter, then H1, then the stem).
+      const meta = byPath.get(newPath);
+      if (tab && meta) tab.title = meta.title;
+      return true;
+    },
+
+    /** Delete a note into the vault's trash and close its tab. */
+    async remove(path: string): Promise<boolean> {
+      try {
+        await ipcDeleteNote(path);
+      } catch (e) {
+        toastStore.show(`Deleting ${path} failed — ${e}`, 'error');
+        return false;
+      }
+      this.close(path, true);
+      recent = recent.filter((r) => r.path !== path);
+      if (loadedVaultId) await loadCatalogue(loadedVaultId);
+      return true;
+    },
+
+    /**
+     * Give an existing note a type. The note is saved first and re-read after, so
+     * the editor shows the frontmatter the backend wrote rather than a stale copy
+     * that the next save would write back over it.
+     */
+    async applyType(path: string, typeId: string): Promise<boolean> {
+      const tab = findOpen(path);
+      if (tab && tab.text !== tab.saved) {
+        await this.save(path);
+        if (tab.text !== tab.saved) return false;
+      }
+      try {
+        await ipcApplyType(path, typeId);
+      } catch (e) {
+        toastStore.show(`Typing ${path} failed — ${e}`, 'error');
+        return false;
+      }
+      if (tab) {
+        tab.typeId = typeId;
+        await load(tab);
+      }
+      if (loadedVaultId) await loadCatalogue(loadedVaultId);
+      return true;
+    },
+
+    /**
+     * Open today's daily note, creating it from the daily type's template on the
+     * first line of the day. `typeId` is the vault's daily type (`daily` unless the
+     * vault says otherwise); without that type the note is a plain dated file.
+     */
+    async openDaily(typeId = 'daily', hasType = true): Promise<void> {
+      const title = todayStamp();
+      let path = `daily/${title}.md`;
+      let text = '';
+      if (hasType) {
+        try {
+          const rendered = await ipcRenderTemplate(typeId, title);
+          path = rendered.path;
+          text = rendered.text;
+        } catch (e) {
+          toastStore.show(`The daily template failed — ${e}`, 'error');
+          return;
+        }
+      }
+      if (byPath.has(path)) {
+        await this.openNote(path);
+        return;
+      }
+      await this.create(path, text);
     },
   };
 }

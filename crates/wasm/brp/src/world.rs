@@ -20,6 +20,8 @@ pub struct EntityRow {
     pub id: u64,
     pub name: Option<String>,
     pub parent: Option<u64>,
+    /// What the entity is, when a marker component says so: `camera`, `light`, `mesh`, … (see [`KIND_COMPONENTS`]).
+    pub kind: Option<&'static str>,
 }
 
 /// A row as served to a UI: the entity plus what a tree needs to draw its expander.
@@ -29,6 +31,7 @@ pub struct RowView {
     pub name: Option<String>,
     pub parent: Option<u64>,
     pub child_count: usize,
+    pub kind: Option<&'static str>,
 }
 
 /// What a UI asks of the snapshot.
@@ -88,6 +91,12 @@ impl Snapshot {
     /// Build from a `world.query` result that asked for the name and parent components as
     /// `option`s. `name_types` / `parent_types` are the registered paths for those components.
     pub fn from_query(result: &Value, name_types: &[String], parent_types: &[String]) -> Self {
+        Self::from_query_with_kinds(result, name_types, parent_types, &[])
+    }
+
+    /// As [`Snapshot::from_query`], with the query also asked `has: [kind component paths]`: each row takes the
+    /// kind of the first of `kinds` (a `(type path, kind)` list in priority order) its `has` map says it has.
+    pub fn from_query_with_kinds(result: &Value, name_types: &[String], parent_types: &[String], kinds: &[(String, &'static str)]) -> Self {
         let Some(items) = result.as_array() else { return Self::default() };
         let rows = items
             .iter()
@@ -102,6 +111,9 @@ impl Snapshot {
                     id,
                     name: find(name_types).and_then(parse_name),
                     parent: find(parent_types).and_then(parse_entity_ref),
+                    kind: item.get("has").and_then(Value::as_object).and_then(|has| {
+                        kinds.iter().find(|(path, _)| has.get(path).and_then(Value::as_bool) == Some(true)).map(|(_, kind)| *kind)
+                    }),
                 })
             })
             .collect();
@@ -131,6 +143,7 @@ impl Snapshot {
             name: r.name.clone(),
             parent: r.parent,
             child_count: self.children.get(&r.id).map_or(0, Vec::len),
+            kind: r.kind,
         }
     }
 
@@ -160,6 +173,24 @@ impl Snapshot {
         }
     }
 
+    /// The ancestors of every row in `matched` that are not themselves in it — what a filtered tree needs
+    /// to show a hit under its parents. Each is returned once, with its real child count.
+    pub fn missing_ancestors(&self, matched: &[RowView]) -> Vec<RowView> {
+        let have: HashSet<u64> = matched.iter().map(|r| r.id).collect();
+        let mut seen: HashSet<u64> = HashSet::new();
+        let mut out = Vec::new();
+        for row in matched {
+            for a in self.ancestors(row.id) {
+                if !have.contains(&a) && seen.insert(a) {
+                    if let Some(r) = self.get(a) {
+                        out.push(self.view(r));
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// The chain of ancestors of `id`, outermost first, `id` excluded — what a UI expands to
     /// reveal a row found by search. Bounded so a parent cycle in a corrupt snapshot ends.
     pub fn ancestors(&self, id: u64) -> Vec<u64> {
@@ -178,12 +209,57 @@ impl Snapshot {
 }
 
 fn matches_search(r: &EntityRow, needle: &str) -> bool {
-    if r.name.as_ref().is_some_and(|n| n.to_lowercase().contains(needle)) {
-        return true;
+    if let Some(name) = r.name.as_ref().map(|n| n.to_lowercase()) {
+        if name.contains(needle) || is_subsequence(needle, &name) {
+            return true;
+        }
     }
     // Digits search the id as a user sees it (index) as well as the raw bits.
     needle.chars().all(|c| c.is_ascii_digit())
         && (r.id.to_string().contains(needle) || entity_index(r.id).to_string() == needle)
+}
+
+/// Bevy marker components that say what an entity *is*, in the priority an entity with several gets (a camera
+/// that also has a `Transform` is a camera). `(short type name, kind)`.
+pub const KIND_COMPONENTS: &[(&str, &str)] = &[
+    ("Camera", "camera"),
+    ("Camera2d", "camera"),
+    ("Camera3d", "camera"),
+    ("DirectionalLight", "light"),
+    ("PointLight", "light"),
+    ("SpotLight", "light"),
+    ("Mesh3d", "mesh"),
+    ("Mesh2d", "mesh"),
+    ("Sprite", "sprite"),
+    ("Node", "ui"),
+    ("Text", "text"),
+    ("Text2d", "text"),
+    ("Window", "window"),
+];
+
+/// From the registered **component** type paths, the Bevy marker components worth asking each entity `has` about,
+/// as `(type path, kind)` in [`KIND_COMPONENTS`] order. Only engine types (`bevy_…`) count: a game's own `Node` or
+/// `Camera` is not the marker.
+pub fn resolve_kind_types<'a>(component_paths: impl IntoIterator<Item = &'a str>) -> Vec<(String, &'static str)> {
+    let paths: Vec<&str> = component_paths.into_iter().filter(|p| p.starts_with("bevy_")).collect();
+    let mut out = Vec::new();
+    for (short, kind) in KIND_COMPONENTS {
+        if let Some(path) = paths.iter().find(|p| short_type_name(p) == *short) {
+            out.push((path.to_string(), *kind));
+        }
+    }
+    out
+}
+
+/// Whether the letters of `needle` appear in `hay` in order, not necessarily next to each other:
+/// `gbch` finds `goblin chief`. Two letters or fewer stay a plain substring match — a subsequence of
+/// that length matches nearly every name.
+fn is_subsequence(needle: &str, hay: &str) -> bool {
+    if needle.chars().count() <= 2 {
+        return false;
+    }
+    let mut letters = hay.chars();
+    needle.chars().filter(|c| !c.is_whitespace()).all(|n| letters.any(|h| h == n))
 }
 
 /// The slot index of an entity's bits — the low 32 bits. The generation (high bits) is what makes a
@@ -390,6 +466,59 @@ mod tests {
     }
 
     #[test]
+    fn the_kind_markers_are_found_among_engine_components_only() {
+        let kinds = resolve_kind_types([
+            "bevy_camera::components::Camera3d",
+            "game::ui::Node",
+            "bevy_ui::ui_node::Node",
+            "bevy_light::point_light::PointLight",
+            "bevy_transform::components::Transform",
+        ]);
+        let found: Vec<(String, &str)> = kinds.iter().map(|(p, k)| (short_type_name(p), *k)).collect();
+        assert_eq!(found, vec![("Camera3d".to_string(), "camera"), ("PointLight".to_string(), "light"), ("Node".to_string(), "ui")]);
+        assert_eq!(kinds[2].0, "bevy_ui::ui_node::Node");
+    }
+
+    #[test]
+    fn a_row_takes_the_first_kind_its_has_map_confirms() {
+        let kinds = vec![("c::Camera".to_string(), "camera"), ("c::Mesh3d".to_string(), "mesh")];
+        let s = Snapshot::from_query_with_kinds(
+            &json!([
+                { "entity": 1, "components": {}, "has": { "c::Camera": false, "c::Mesh3d": true } },
+                { "entity": 2, "components": {}, "has": { "c::Camera": true, "c::Mesh3d": true } },
+                { "entity": 3, "components": {} }
+            ]),
+            &names(),
+            &parents(),
+            &kinds,
+        );
+        let kind = |id| s.page(&PageQuery { limit: 10, ..Default::default() }).rows.into_iter().find(|r| r.id == id).unwrap().kind;
+        assert_eq!((kind(1), kind(2), kind(3)), (Some("mesh"), Some("camera"), None));
+    }
+
+    #[test]
+    fn a_search_is_fuzzy_from_three_letters() {
+        let s = world();
+        let hit = |q: &str| s.page(&PageQuery { search: q, limit: 10, ..Default::default() }).rows.len();
+        assert_eq!(hit("plr"), 1); // Player
+        assert_eq!(hit("pl"), 1); // plain substring
+        assert_eq!(hit("ro"), 1); // Root, and Player does not contain "ro"
+        assert_eq!(hit("zzz"), 0);
+    }
+
+    #[test]
+    fn a_hit_comes_with_the_ancestors_it_hangs_under() {
+        let s = world();
+        // The unnamed child of Player alone matched: Player and Root come with it, outermost first.
+        let hit = vec![s.view(s.get(4294967298).unwrap())];
+        let ids: Vec<u64> = s.missing_ancestors(&hit).iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![4294967296, 4294967297]);
+        // Ancestors that already matched are not repeated.
+        let all = s.page(&PageQuery { search: "", only: Some(&s.rows.iter().map(|r| r.id).collect()), limit: 10, ..Default::default() });
+        assert!(s.missing_ancestors(&all.rows).is_empty());
+    }
+
+    #[test]
     fn component_filter_restricts_and_flattens() {
         let s = world();
         let only: HashSet<u64> = [4294967298u64].into_iter().collect();
@@ -406,7 +535,7 @@ mod tests {
 
     #[test]
     fn dangling_parent_is_still_reachable_as_a_root() {
-        let s = Snapshot::build(vec![EntityRow { id: 7, name: None, parent: Some(99) }]);
+        let s = Snapshot::build(vec![EntityRow { id: 7, name: None, parent: Some(99), kind: None }]);
         assert_eq!(s.page(&PageQuery { limit: 5, ..Default::default() }).total, 1);
     }
 
@@ -415,7 +544,7 @@ mod tests {
         let a = world();
         let b = world();
         assert_eq!(a.revision(), b.revision());
-        let c = Snapshot::build(vec![EntityRow { id: 1, name: Some("x".into()), parent: None }]);
+        let c = Snapshot::build(vec![EntityRow { id: 1, name: Some("x".into()), parent: None, kind: None }]);
         assert_ne!(a.revision(), c.revision());
     }
 
@@ -424,8 +553,8 @@ mod tests {
         let s = world();
         assert_eq!(s.ancestors(4294967298), vec![4294967296, 4294967297]);
         let cyc = Snapshot::build(vec![
-            EntityRow { id: 1, name: None, parent: Some(2) },
-            EntityRow { id: 2, name: None, parent: Some(1) },
+            EntityRow { id: 1, name: None, parent: Some(2), kind: None },
+            EntityRow { id: 2, name: None, parent: Some(1), kind: None },
         ]);
         assert!(cyc.ancestors(1).len() <= 2);
     }

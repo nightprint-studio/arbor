@@ -146,6 +146,9 @@ mod crates_io;
 // the two answer the same question about two ecosystems, and the day one of them grows a private
 // registry or an auth token the other must not inherit it.
 mod npm;
+// The Dependencies tool window for a Node project (`bennu_node_*`): declared + locked versions, the
+// tree read from the lockfile, OSV advisories, and which packages are behind on the registry.
+mod node_deps;
 // The Project tree's filesystem watcher — what makes a `git checkout` or an `npm install` show up
 // without reopening the project.
 mod tree_watch;
@@ -187,6 +190,8 @@ mod hints;
 // `bennu_format` — reformat a buffer, routing to whichever engine knows the language: a server for
 // the ones that have one, Bennu's own formatter for Java.
 mod format;
+// The layers the formatter's style is built from (global, detected, .editorconfig, project) and the settings page's handlers.
+mod format_style;
 // `bennu_optimize_imports` — drop the unused imports and reorder the rest. Java-only, and it reads
 // the checker's own unused-import judgement so the command and the squiggle cannot disagree.
 mod optimize_imports;
@@ -243,6 +248,9 @@ mod project_paths;
 // Mojibake check: `bennu_mojibake_check` — find UTF-8-decoded-as-Cp1252 corruption (`Ã©` → `é`,
 // `â€™` → `'`) in a file, with the corrected character for a one-click fix.
 mod mojibake;
+// Encoding conversion: `bennu_encoding_convert_plan` / `_apply` / `_undo` — rewrite a file, folder or
+// the whole project from one encoding to another, with a dry run, backups and a one-step undo.
+mod encoding_convert;
 // Alt+Enter intentions: `bennu_intentions_at` — every applicable quick-fix at the caret
 // (parameterize logging, NP-safe equals, isEmpty()/boolean/negated-comparison simplifications),
 // over the pure `bennu-intentions` catalog.
@@ -270,6 +278,9 @@ mod copy_paste;
 // Index inspector: `bennu_index_stats` — a cheap snapshot of the per-project index (symbol
 // + config counts, JDK level, build-ready flag) for an inspector panel.
 mod index_stats;
+// Typed, bounded views of the framework models for MCP and Imber: `bennu_endpoints`, `bennu_beans`,
+// `bennu_entities`, `bennu_scheduled_jobs`, `bennu_config_properties`.
+mod model_tools;
 // Encoding report: `bennu_encoding_report` — the source files whose bytes weren't valid in the
 // project's declared (Maven `sourceEncoding`) encoding (recovered + indexed, but flagged) for
 // a future "non-compliant files" UI.
@@ -288,6 +299,9 @@ mod inspect;
 // The per-project index lifecycle: build the symbol index off-thread on open, cache
 // the native provider, serve completion from it, and patch a single file on edit.
 mod generate_override;
+// Code generators (Spring Security, converters, HTTP clients, …): the context they read and the files they write.
+mod code_generate;
+mod hirundo_endpoints;
 mod index_service;
 // Focus-aware rate limit for the per-file "done of total" progress events.
 mod progress_gate;

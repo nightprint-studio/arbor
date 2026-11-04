@@ -45,7 +45,7 @@ use crate::worktree_links::{self, orchestrator};
 // ── Read-only ────────────────────────────────────────────────────────────────
 
 #[arbor_rpc::handler]
-fn list_local_branches(state: &CorvusState, tab_id: String) -> Result<Vec<BranchInfo>, String> {
+pub(crate) fn list_local_branches(state: &CorvusState, tab_id: String) -> Result<Vec<BranchInfo>, String> {
     let repo = open(state, &tab_id)?;
     corvus_git::branch::list_local_branches(&repo).map_err(|e| e.to_string())
 }
@@ -353,7 +353,7 @@ where
 }
 
 #[arbor_rpc::handler]
-fn create_branch(state: &CorvusState, tab_id: String, name: String, from_oid: String) -> Result<BranchInfo, String> {
+pub(crate) fn create_branch(state: &CorvusState, tab_id: String, name: String, from_oid: String) -> Result<BranchInfo, String> {
     // Refuse names reserved by an active alias mapping in any link this repo
     // belongs to (the user must remove the alias first).
     if let Some(repo_id) = repo_id_for_tab(state, &tab_id) {
@@ -373,7 +373,7 @@ fn create_branch(state: &CorvusState, tab_id: String, name: String, from_oid: St
 }
 
 #[arbor_rpc::handler]
-fn delete_branch(state: &CorvusState, tab_id: String, name: String) -> Result<(), String> {
+pub(crate) fn delete_branch(state: &CorvusState, tab_id: String, name: String) -> Result<(), String> {
     {
         let repo = open(state, &tab_id)?;
         corvus_git::branch::delete_branch(&repo, &name).map_err(|e| e.to_string())?;
@@ -438,7 +438,7 @@ fn checkout_branch(state: &CorvusState, tab_id: String, name: String) -> Result<
 }
 
 #[arbor_rpc::handler]
-fn checkout_branch_safe(state: &CorvusState, tab_id: String, name: String) -> Result<CheckoutResult, String> {
+pub(crate) fn checkout_branch_safe(state: &CorvusState, tab_id: String, name: String) -> Result<CheckoutResult, String> {
     let name_for_checkout = name.clone();
     let result = safe_checkout_with_stash(state, &tab_id, |r| {
         with_checkout_snapshot(state, |snap| corvus_git::branch::checkout_branch(r, &name_for_checkout, snap))

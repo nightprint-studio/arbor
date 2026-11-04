@@ -305,6 +305,9 @@ export const backlinks = (path: string): Promise<Backlinks> =>
 /** Broken links and orphans across the vault. */
 export const problems = (): Promise<VaultProblems> => garrulus<VaultProblems>('garrulus_problems');
 
+/** Every tag in the vault, lowercased and sorted. */
+export const tags = (): Promise<string[]> => garrulus<string[]>('garrulus_tags');
+
 // ── Remote ───────────────────────────────────────────────────────────────────
 
 /**

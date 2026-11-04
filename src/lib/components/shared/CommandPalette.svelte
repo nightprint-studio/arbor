@@ -14,6 +14,8 @@
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { plansStore } from '$lib/stores/corvus/plans.svelte';
+  import { imberStore } from '$lib/stores/corvus/imber.svelte';
+  import { imberSchedulesStore } from '$lib/stores/corvus/imber-schedules.svelte';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { windowsStore } from '$lib/stores/windows.svelte';
@@ -272,6 +274,8 @@
     'action:push':               'push',
     'action:plan-add-push':      'plan_add_push',
     'action:plan-open':          'plan_open',
+    'action:imber-toggle':       'imber_toggle',
+    'action:imber-commit-message': 'imber_commit_message',
     'action:fetch':              'fetch',
     'action:stash':              'stash',
     'action:commit':             'commit',
@@ -479,6 +483,54 @@
       title: 'Plan: Open', subtitle: 'Compose and run ordered steps across repositories',
       action: () => { onClose(); tick().then(() => plansStore.openModal()); },
     });
+
+    // ── Imber (the assistant) ───────────────────────────────────────────────
+    actions.push({
+      id: 'action:imber-schedules', kind: 'action', icon: 'CalendarClock', group: 'Imber',
+      title: 'Imber: Schedules…', subtitle: 'See, create and manage everything Imber is scheduled to do',
+      action: () => { onClose(); tick().then(() => imberSchedulesStore.show()); },
+    });
+    if (hasTab) {
+      actions.push(
+        { id: 'action:imber-undo', kind: 'action', icon: 'Undo2', group: 'Imber',
+          title: 'Imber: Undo Last Action', subtitle: imberStore.canUndo ? 'Take back the last commit, branch, merge… Imber made here' : 'Nothing Imber did here can be undone yet',
+          action: () => { onClose(); void imberStore.undo(); } },
+        { id: 'action:imber-actions', kind: 'action', icon: 'History', group: 'Imber',
+          title: 'Imber: Actions…', subtitle: 'What Imber changed here, and what can (and cannot) be undone',
+          action: () => { onClose(); tick().then(() => imberStore.showActions()); } },
+      );
+      actions.push({
+        id: 'action:imber-schedule-new', kind: 'action', icon: 'CalendarPlus', group: 'Imber',
+        title: 'Imber: New Schedule…', subtitle: 'Run a prompt, or wake this conversation, at a time or on a repeat',
+        action: () => { onClose(); tick().then(() => imberSchedulesStore.show({ create: true })); },
+      });
+      actions.push(
+        { id: 'action:imber-toggle', kind: 'action', icon: 'Sparkles', group: 'Imber',
+          title: imberStore.open ? 'Imber: Close Assistant' : 'Imber: Open Assistant',
+          subtitle: 'Ask for a commit, push, branch, merge, merge request — or for the history explained',
+          action: () => { onClose(); imberStore.toggle(); } },
+        { id: 'action:imber-mode', kind: 'action', icon: 'ShieldCheck', group: 'Imber',
+          title: imberStore.mode === 'manual' ? 'Imber: Switch to Auto Mode' : 'Imber: Switch to Manual Mode',
+          subtitle: imberStore.mode === 'manual'
+            ? 'Imber runs changes without asking (force pushes and deletions still ask)'
+            : 'Imber shows every change as a command and waits for your approval',
+          action: () => { onClose(); void imberStore.toggleMode(); } },
+        { id: 'action:imber-new', kind: 'action', icon: 'MessageSquarePlus', group: 'Imber',
+          title: 'Imber: New Conversation', subtitle: 'Start over on this repository',
+          action: () => { onClose(); void imberStore.newConversation(); } },
+        { id: 'action:imber-chat', kind: 'action', icon: 'MessageCircle', group: 'Imber',
+          title: imberStore.current?.kind === 'chat' ? 'Imber: Switch to Operate' : 'Imber: Switch to Chat',
+          subtitle: imberStore.current?.kind === 'chat' ? 'Give Imber the git tools again' : 'Only talk: no tools, nothing is touched',
+          action: () => { onClose(); imberStore.show(); imberStore.setKind(imberStore.current?.kind === 'chat' ? 'operate' : 'chat'); } },
+      );
+      if (hasStaged) {
+        actions.push(
+          { id: 'action:imber-commit-message', kind: 'action', icon: 'Sparkles', group: 'Imber',
+            title: 'Imber: Generate Commit Message', subtitle: 'Write the message from the staged changes into the commit box (never commits)',
+            action: () => closeAndDispatch('arbor:imber-commit-message') },
+        );
+      }
+    }
 
     // ── Stage & Commit ──────────────────────────────────────────────────────
     if (hasTab) {

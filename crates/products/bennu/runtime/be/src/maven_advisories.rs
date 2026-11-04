@@ -145,11 +145,47 @@ async fn bennu_project_advisories(
     ctx: &BennuState,
     args: ProjectAdvisoryArgs,
 ) -> Result<ProjectAdvisories, String> {
+    check_project(ctx, args.root, Eco::Maven, crate::dependencies::report_of).await
+}
+
+/// Which OSV ecosystem a lookup is made in, and therefore which package names and which cache.
+///
+/// The on/off switch is the same for both (`[maven] advisories`): "ask OSV about my dependencies" is
+/// one decision about the network, not one per language.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Eco {
+    Maven,
+    Npm,
+}
+
+impl Eco {
+    /// The ecosystem name OSV's API expects.
+    fn osv(self) -> &'static str {
+        match self {
+            Self::Maven => "Maven",
+            Self::Npm => "npm",
+        }
+    }
+
+    fn cache_dir(self) -> PathBuf {
+        arbor_core::prelude::bennu_data_dir().join(match self {
+            Self::Maven => "maven-advisories",
+            Self::Npm => "npm-advisories",
+        })
+    }
+}
+
+/// The vulnerabilities window's question, for whichever ecosystem `read` produces the report of.
+pub(crate) async fn check_project(
+    ctx: &BennuState,
+    root: String,
+    eco: Eco,
+    read: fn(&str) -> bennu_deps::prelude::Report,
+) -> Result<ProjectAdvisories, String> {
     let cfg = bennu_core::config::load().maven;
     if !cfg.advisories {
         return Ok(ProjectAdvisories { enabled: false, checked: 0, truncated: false, items: Vec::new() });
     }
-    let root = args.root;
     // Up to four hundred lookups against OSV: seconds on a warm cache, much longer on a cold one. A row only when it
     // outlasts a couple of seconds — a cached answer comes back before anyone could read it.
     let task = Task::start(
@@ -160,10 +196,10 @@ async fn bennu_project_advisories(
             .system()
             .deferred(Duration::from_secs(2)),
     );
-    let report = tokio::task::spawn_blocking(move || crate::dependencies::report_of(&root))
+    let report = tokio::task::spawn_blocking(move || read(&root))
         .await
         .map_err(|e| format!("report: {e}"))?;
-    let answer = project_advisories(&cfg, &report).await;
+    let answer = project_advisories(&cfg, &report, eco).await;
     task.line(&format!("{} dependencies checked.", answer.checked));
     task.ok();
     Ok(answer)
@@ -176,7 +212,12 @@ const MAX_PROJECT_DETAIL_FETCHES: usize = 200;
 
 /// The version a dependency really has: the one the build resolved when the pom did not write a
 /// literal one (BOM, parent management, a `${property}`), read back from the jar's path.
-fn effective_version(d: &bennu_deps::prelude::Dependency) -> Option<String> {
+fn effective_version(d: &bennu_deps::prelude::Dependency, eco: Eco) -> Option<String> {
+    // A Node dependency without a lockfile carries its range (`^1.2.0`) where the version would be,
+    // and OSV can only be asked about a version. Nothing resolved it, so there is nothing to ask.
+    if matches!(eco, Eco::Npm) {
+        return is_exact_version(&d.version).then(|| d.version.clone());
+    }
     if !d.version.is_empty() && !d.version.contains("${") {
         return Some(d.version.clone());
     }
@@ -188,7 +229,14 @@ fn effective_version(d: &bennu_deps::prelude::Dependency) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-async fn project_advisories(cfg: &MavenConfig, report: &bennu_deps::prelude::Report) -> ProjectAdvisories {
+/// `1.2.3`, `1.2.3-beta.1`, `1.2.3+build` — a version, not a range.
+pub(crate) fn is_exact_version(v: &str) -> bool {
+    let core = v.split(['-', '+']).next().unwrap_or(v);
+    let mut parts = core.split('.');
+    parts.clone().count() >= 2 && parts.all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
+async fn project_advisories(cfg: &MavenConfig, report: &bennu_deps::prelude::Report, eco: Eco) -> ProjectAdvisories {
     use std::collections::BTreeMap;
     struct Entry {
         direct: bool,
@@ -199,7 +247,7 @@ async fn project_advisories(cfg: &MavenConfig, report: &bennu_deps::prelude::Rep
     let mut by_key: BTreeMap<(String, String), Entry> = BTreeMap::new();
     for m in &report.modules {
         for d in &m.dependencies {
-            let Some(version) = effective_version(d) else { continue };
+            let Some(version) = effective_version(d, eco) else { continue };
             let e = by_key.entry((d.coord(), version)).or_insert_with(|| Entry {
                 direct: true,
                 modules: Vec::new(),
@@ -231,7 +279,7 @@ async fn project_advisories(cfg: &MavenConfig, report: &bennu_deps::prelude::Rep
         .map(|(coord, version)| Target { coord: coord.clone(), version: version.clone(), line: 0, span: None })
         .collect();
 
-    let found = resolve_all(&targets, cfg, usize::MAX, MAX_PROJECT_DETAIL_FETCHES).await;
+    let found = resolve_all(&targets, cfg, usize::MAX, MAX_PROJECT_DETAIL_FETCHES, eco).await;
     let mut items: Vec<ProjectAdvisory> = found
         .into_iter()
         .filter(|(_, list)| !list.is_empty())
@@ -265,10 +313,6 @@ fn severity_rank(severity: &str) -> u8 {
     }
 }
 
-fn cache_dir() -> PathBuf {
-    arbor_core::prelude::bennu_data_dir().join("maven-advisories")
-}
-
 fn ttl(cfg: &MavenConfig) -> Duration {
     let hours = if cfg.metadata_ttl_hours == 0 { 24 } else { cfg.metadata_ttl_hours };
     Duration::from_secs(u64::from(hours) * 3600)
@@ -299,8 +343,9 @@ async fn resolve_all(
     cfg: &MavenConfig,
     max_misses: usize,
     detail_cap: usize,
+    eco: Eco,
 ) -> Vec<(usize, Vec<Advisory>)> {
-    let dir = cache_dir();
+    let dir = eco.cache_dir();
     let mut found: Vec<(usize, Vec<Advisory>)> = Vec::new();
     let mut misses: Vec<usize> = Vec::new();
     for (i, t) in targets.iter().enumerate() {
@@ -311,7 +356,7 @@ async fn resolve_all(
     }
     misses.truncate(max_misses);
     for chunk in misses.chunks(MAX_COORDS) {
-        found.extend(lookup(targets, chunk, &dir, detail_cap).await);
+        found.extend(lookup(targets, chunk, &dir, detail_cap, eco).await);
     }
     found.sort_by_key(|(i, _)| *i);
     found
@@ -352,7 +397,7 @@ fn resolved_versions(file: &str) -> std::collections::HashMap<u32, String> {
     let wanted = file.replace('\\', "/");
     for d in report.modules.iter().flat_map(|m| m.dependencies.iter()) {
         if d.declared_in.file.eq_ignore_ascii_case(&wanted) {
-            if let Some(v) = effective_version(d) {
+            if let Some(v) = effective_version(d, Eco::Maven) {
                 out.insert(d.declared_in.line, v);
             }
         }
@@ -381,7 +426,7 @@ async fn advisories_for(cfg: &MavenConfig, file: &str, source: &str) -> Vec<PomA
     let owned = file.to_string();
     let resolved = tokio::task::spawn_blocking(move || resolved_versions(&owned)).await.unwrap_or_default();
     let targets = targets_of(&pom, &resolved);
-    resolve_all(&targets, cfg, MAX_COORDS, MAX_DETAIL_FETCHES)
+    resolve_all(&targets, cfg, MAX_COORDS, MAX_DETAIL_FETCHES, Eco::Maven)
         .await
         .into_iter()
         .filter(|(_, list)| !list.is_empty())
@@ -423,8 +468,9 @@ async fn lookup(
     misses: &[usize],
     dir: &Path,
     detail_cap: usize,
+    eco: Eco,
 ) -> Vec<(usize, Vec<Advisory>)> {
-    let Ok(ids_per_target) = query_batch(targets, misses).await else { return Vec::new() };
+    let Ok(ids_per_target) = query_batch(targets, misses, eco).await else { return Vec::new() };
 
     let mut records: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
     let mut wanted: Vec<String> = ids_per_target.iter().flatten().cloned().collect();
@@ -467,15 +513,8 @@ async fn lookup(
 }
 
 /// `querybatch`: the advisory ids affecting each of `targets[misses]`, in the same order.
-async fn query_batch(targets: &[Target], misses: &[usize]) -> Result<Vec<Vec<String>>, String> {
-    let queries: Vec<Value> = misses
-        .iter()
-        .map(|&i| {
-            let t = &targets[i];
-            json!({ "package": { "ecosystem": "Maven", "name": t.coord }, "version": t.version })
-        })
-        .collect();
-    let body = json!({ "queries": queries }).to_string();
+async fn query_batch(targets: &[Target], misses: &[usize], eco: Eco) -> Result<Vec<Vec<String>>, String> {
+    let body = batch_body(targets, misses, eco).to_string();
     let resp = arbor_core::prelude::client()
         .post(format!("{OSV}/querybatch"))
         .header("content-type", "application/json")
@@ -487,7 +526,24 @@ async fn query_batch(targets: &[Target], misses: &[usize]) -> Result<Vec<Vec<Str
         return Err(format!("status {}", resp.status()));
     }
     let v: Value = resp.json().await.map_err(|e| format!("body: {e}"))?;
-    Ok(v["results"]
+    Ok(ids_of_batch(&v))
+}
+
+/// The `querybatch` request for `targets[misses]`: one query per target, in the ecosystem's own names.
+fn batch_body(targets: &[Target], misses: &[usize], eco: Eco) -> Value {
+    let queries: Vec<Value> = misses
+        .iter()
+        .map(|&i| {
+            let t = &targets[i];
+            json!({ "package": { "ecosystem": eco.osv(), "name": t.coord }, "version": t.version })
+        })
+        .collect();
+    json!({ "queries": queries })
+}
+
+/// The advisory ids of each result of a `querybatch` answer, in request order.
+fn ids_of_batch(v: &Value) -> Vec<Vec<String>> {
+    v["results"]
         .as_array()
         .map(|rs| {
             rs.iter()
@@ -499,7 +555,7 @@ async fn query_batch(targets: &[Target], misses: &[usize]) -> Result<Vec<Vec<Str
                 })
                 .collect()
         })
-        .unwrap_or_default())
+        .unwrap_or_default()
 }
 
 async fn fetch_record(id: &str) -> Result<Value, String> {
@@ -609,17 +665,65 @@ mod tests {
         assert_eq!(a.cve, None);
     }
 
+    fn target(coord: &str, version: &str) -> Target {
+        Target { coord: coord.into(), version: version.into(), line: 0, span: None }
+    }
+
+    #[test]
+    fn the_npm_request_names_the_npm_ecosystem_and_the_package_as_written() {
+        let targets = [target("lodash", "4.17.20"), target("@babel/core", "7.1.0"), target("skipped", "1.0.0")];
+        let body = batch_body(&targets, &[0, 1], Eco::Npm);
+        let q = body["queries"].as_array().unwrap();
+        assert_eq!(q.len(), 2);
+        assert_eq!(q[0], json!({ "package": { "ecosystem": "npm", "name": "lodash" }, "version": "4.17.20" }));
+        assert_eq!(q[1]["package"]["name"], "@babel/core");
+        assert_eq!(batch_body(&targets, &[0], Eco::Maven)["queries"][0]["package"]["ecosystem"], "Maven");
+    }
+
+    #[test]
+    fn a_batch_answer_maps_back_to_the_targets_in_order() {
+        let answer = json!({ "results": [{ "vulns": [{ "id": "GHSA-a" }, { "id": "GHSA-b" }] }, {}, { "vulns": [{ "id": "GHSA-c" }] }] });
+        assert_eq!(ids_of_batch(&answer), vec![vec!["GHSA-a", "GHSA-b"], vec![], vec!["GHSA-c"]]);
+        assert!(ids_of_batch(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn an_npm_record_gives_the_fixed_version_from_its_semver_ranges() {
+        let rec = json!({
+            "id": "GHSA-35jh-r3h4-6jhm", "aliases": ["CVE-2021-23337"], "summary": "Command injection in lodash",
+            "database_specific": { "severity": "HIGH" },
+            "affected": [{ "package": { "ecosystem": "npm", "name": "lodash" },
+                "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "0" }, { "fixed": "4.17.21" }] }] }]
+        });
+        let a = advisory_of(&rec, "lodash", "4.17.20");
+        assert_eq!(a.cve.as_deref(), Some("CVE-2021-23337"));
+        assert_eq!(a.severity, "high");
+        assert_eq!(a.fixed.as_deref(), Some("4.17.21"));
+        assert_eq!(advisory_of(&rec, "lodash", "4.17.21").fixed, None, "nothing above what you have");
+    }
+
+    #[test]
+    fn a_node_dependency_is_only_looked_up_once_a_lockfile_gave_it_a_version() {
+        let mut d = bennu_deps::prelude::Dependency::default();
+        d.version = "4.17.21".into();
+        assert_eq!(effective_version(&d, Eco::Npm).as_deref(), Some("4.17.21"));
+        for range in ["^4.17.0", "~1.2.3", "workspace:*", "latest", ""] {
+            d.version = range.into();
+            assert_eq!(effective_version(&d, Eco::Npm), None, "`{range}` is a range, not a version");
+        }
+    }
+
     #[test]
     fn a_managed_dependency_takes_the_version_the_build_resolved() {
         let mut d = bennu_deps::prelude::Dependency::default();
         d.version = "${spring.version}".into();
         d.resolved = "/home/u/.m2/repository/org/springframework/spring-core/5.3.10/spring-core-5.3.10.jar".into();
-        assert_eq!(effective_version(&d).as_deref(), Some("5.3.10"));
+        assert_eq!(effective_version(&d, Eco::Maven).as_deref(), Some("5.3.10"));
         d.version = "1.2.3".into();
-        assert_eq!(effective_version(&d).as_deref(), Some("1.2.3"));
+        assert_eq!(effective_version(&d, Eco::Maven).as_deref(), Some("1.2.3"));
         d.version.clear();
         d.resolved.clear();
-        assert_eq!(effective_version(&d), None);
+        assert_eq!(effective_version(&d, Eco::Maven), None);
     }
 
     #[test]

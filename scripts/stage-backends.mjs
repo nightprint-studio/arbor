@@ -31,6 +31,7 @@ const BACKENDS = [
   'merula-be',
   'sitta-be',
   'picus-be',
+  'hirundo-be',
   'garrulus-be',
   'bennu-be',
   'tyto-be',

@@ -42,6 +42,7 @@
     if (label === 'bennu' || label.startsWith('bennu-')) return import('$lib/components/bennu/BennuWindow.svelte');
     if (label === 'picus' || label.startsWith('picus-')) return import('$lib/components/picus/PicusWindow.svelte');
     if (label === 'garrulus' || label.startsWith('garrulus-')) return import('$lib/components/garrulus/GarrulusWindow.svelte');
+    if (label === 'hirundo' || label.startsWith('hirundo-')) return import('$lib/components/hirundo/HirundoWindow.svelte');
     if (label === 'workspace') return import('$lib/components/shared/workspace/WorkspaceContainer.svelte');
     if (label === 'main' || label === 'launcher') return import('$lib/components/launcher/LauncherWindow.svelte');
     // corvus + any unknown label → the Git AppShell.

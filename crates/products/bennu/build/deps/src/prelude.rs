@@ -7,6 +7,7 @@
 // The one call a host makes, per ecosystem.
 pub use crate::cargo::read as read_cargo;
 pub use crate::gradle::read as read_gradle;
+pub use crate::node::{packages as node_packages, NodePackage, NodeScript, read as read_node, source_of as node_source_of, tree as node_tree};
 pub use crate::graph::read;
 
 // What it returns.

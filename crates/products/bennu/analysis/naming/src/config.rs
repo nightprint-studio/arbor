@@ -374,6 +374,7 @@ mod tests {
     fn round_trips_through_toml_shaped_json() {
         // The config is decoded from TOML in the be layer; serde shape is what matters here.
         let cfg = NamingConfig {
+            inherit: true,
             enabled: true,
             ignore: vec!["**/gen/**".into()],
             rules: BTreeMap::from([(
@@ -406,6 +407,7 @@ mod tests {
     fn an_override_replaces_only_the_targets_it_names() {
         // Test sources spell method names their own way on purpose; everything else still applies.
         let cfg = NamingConfig {
+            inherit: true,
             enabled: true,
             rules: java_rules(&[(Target::Method, Convention::Camel), (Target::Type, Convention::Pascal)]),
             overrides: vec![NamingOverride {
@@ -426,6 +428,7 @@ mod tests {
     #[test]
     fn a_later_override_wins_over_an_earlier_one() {
         let cfg = NamingConfig {
+            inherit: true,
             enabled: true,
             rules: java_rules(&[(Target::Method, Convention::Camel)]),
             overrides: vec![
@@ -441,6 +444,7 @@ mod tests {
     #[test]
     fn an_override_with_no_paths_claims_nothing() {
         let cfg = NamingConfig {
+            inherit: true,
             enabled: true,
             rules: java_rules(&[(Target::Method, Convention::Camel)]),
             overrides: vec![NamingOverride { name: "wip".into(), paths: Vec::new(), rules: java_rules(&[(Target::Method, Convention::Any)]) }],

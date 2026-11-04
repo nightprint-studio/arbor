@@ -66,7 +66,7 @@ use crate::repo::open;
 /// List pull / merge requests for the active repo.
 /// `state_filter`: "open" | "closed" | "merged" | "all"
 #[arbor_rpc::handler]
-async fn list_mrs(
+pub(crate) async fn list_mrs(
     state:        &CorvusState,
     tab_id:       String,
     state_filter: Option<String>,

@@ -1,0 +1,31 @@
+[package]
+name         = "arbor-bevy-remote"
+version      = "0.1.0"
+edition      = "2024"
+rust-version = "1.89"
+license      = "GPL-3.0-only"
+authors      = ["Nightprint Studio"]
+description  = "A Bevy plugin that adds Arbor-specific methods to the stock Bevy Remote Protocol server: screenshots, keyboard / mouse / gamepad input, named actions, runtime statistics and an on-screen presence indicator."
+readme       = "README.md"
+publish      = false
+
+# Standalone on purpose: this crate is dropped into a *game's* dependency tree (by path or, later,
+# from crates.io), so it must build without Arbor's workspace and must not pull Bevy into Arbor's.
+[workspace]
+
+[features]
+default = ["overlay"]
+# The coloured border + label that shows a remote client is connected. Needs Bevy's UI; a game that
+# renders without it can turn this off and keep every method.
+overlay = ["bevy/bevy_ui", "bevy/bevy_ui_render", "bevy/bevy_text", "bevy/bevy_picking"]
+
+[dependencies]
+# Bevy 0.18 is the one supported version for now (see README › Version matrix). `default-features =
+# false`: the game decides what Bevy it renders with; this crate asks only for what it touches.
+bevy       = { version = "0.18", default-features = false, features = ["bevy_remote", "bevy_window", "bevy_render"] }
+# Already in every Bevy tree (bevy_remote's own wire format); named here because the methods parse
+# and build JSON directly.
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+# `#[derive(RemoteInspect)]`, re-exported from the prelude. Sits beside this crate; its own deps are syn / quote / proc-macro2.
+arbor-bevy-remote-derive = { path = "../bevy-remote-derive" }

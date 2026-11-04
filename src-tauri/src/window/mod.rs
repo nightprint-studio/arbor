@@ -56,6 +56,7 @@ pub mod explorer;
 /// App-wide focus, aggregated from the per-window `Focused` events.
 pub mod focus;
 pub mod garrulus;
+pub mod hirundo;
 pub mod hud;
 pub mod launcher;
 /// A full-screen overlay's macOS manners: standing above the menu bar and the Dock,
@@ -324,6 +325,7 @@ pub fn apply_product_icon<R: Runtime>(window: &WebviewWindow<R>, product: &str) 
         "picus" => include_bytes!("../../icons/products/picus.png"),
         "tyto" => include_bytes!("../../icons/products/tyto.png"),
         "garrulus" => include_bytes!("../../icons/products/garrulus.png"),
+        "hirundo" => include_bytes!("../../icons/products/hirundo.png"),
         _ => return,
     };
     if let Err(e) = tauri::image::Image::from_bytes(bytes).and_then(|img| window.set_icon(img)) {
@@ -559,6 +561,8 @@ pub fn product_id_for_label(label: &str) -> Option<&'static str> {
         Some("picus")
     } else if label == garrulus::GARRULUS_WINDOW_LABEL || label.starts_with("garrulus-") {
         Some("garrulus")
+    } else if label == hirundo::HIRUNDO_WINDOW_LABEL || label.starts_with("hirundo-") {
+        Some("hirundo")
     } else {
         None
     }

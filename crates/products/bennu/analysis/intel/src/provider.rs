@@ -1713,8 +1713,13 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
             match p.kind() {
                 // `recv.foo(...)` — caret on the method name.
                 "method_invocation" if p.child_by_field_name("name") == Some(node) => {
-                    let obj = p.child_by_field_name("object")?; // bare same-class call → not resolved here
+                    let Some(obj) = p.child_by_field_name("object") else {
+                        // A bare call: `helper(x)` is a method of the enclosing class, of a class
+                        // that encloses it, or one they inherit.
+                        return self.enclosing_member_target(source, offset, text, false);
+                    };
                     let binary = receiver_binary(obj)?;
+                    let binary = self.declaring_owner(&binary, text, false).unwrap_or(binary);
                     return Some(LibraryTarget {
                         binary,
                         member: Some(LibraryMember {
@@ -1727,6 +1732,7 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
                 "field_access" if p.child_by_field_name("field") == Some(node) => {
                     let obj = p.child_by_field_name("object")?;
                     let binary = receiver_binary(obj)?;
+                    let binary = self.declaring_owner(&binary, text, true).unwrap_or(binary);
                     return Some(LibraryTarget {
                         binary,
                         member: Some(LibraryMember {
@@ -1757,11 +1763,73 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
         }
 
         // Otherwise a TYPE reference (a `type_identifier`, or a bare name used as a type / scope).
-        let binary = self.library_binary(source, text)?;
-        Some(LibraryTarget {
-            binary,
-            member: None,
-        })
+        if let Some(binary) = self.library_binary(source, text) {
+            return Some(LibraryTarget { binary, member: None });
+        }
+        // Not a type: a bare name in a library body is most often a field of the enclosing class
+        // (`size`, `elementData`). A local or parameter of that name is not one, so the hierarchy
+        // has to actually declare it — otherwise the caller falls through.
+        if node.kind() == "identifier" {
+            return self.enclosing_member_target(source, offset, text, true);
+        }
+        None
+    }
+
+    /// The first type in `start`'s hierarchy — itself, then its superclass and interfaces breadth
+    /// first — that declares a member called `name` (a field when `is_field`, else a method).
+    /// Go-to must land where the member is *written*: `list.stream()` is declared on `Collection`,
+    /// not on the `ArrayList` the receiver is typed as.
+    fn declaring_owner(&self, start: &str, name: &str, is_field: bool) -> Option<String> {
+        /// A hierarchy this deep is a cycle in a malformed index, not a real one.
+        const MAX_STEPS: usize = 64;
+        let mut queue = std::collections::VecDeque::from([start.to_string()]);
+        let mut seen = std::collections::HashSet::from([start.to_string()]);
+        let mut steps = 0usize;
+        while let Some(binary) = queue.pop_front() {
+            steps += 1;
+            if steps > MAX_STEPS {
+                break;
+            }
+            let Some(cm) = self.members_of(&binary) else { continue };
+            let declares = if is_field {
+                cm.fields.iter().any(|f| f.name == name)
+            } else {
+                cm.methods.iter().any(|m| m.name == name)
+            };
+            if declares {
+                return Some(binary);
+            }
+            for sup in cm.superclass.iter().chain(cm.interfaces.iter()) {
+                if seen.insert(sup.binary_name.clone()) {
+                    queue.push_back(sup.binary_name.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// A member named without a receiver, resolved against the class the caret is inside and the
+    /// classes that enclose it (an inner class calls its outer's methods unqualified). `None` when
+    /// none of them, nor anything they inherit, declares it — a local, a parameter, a lambda name.
+    fn enclosing_member_target(
+        &self,
+        source: &str,
+        offset: usize,
+        name: &str,
+        is_field: bool,
+    ) -> Option<LibraryTarget> {
+        let mut scope = bennu_java::prelude::enclosing_type_binary(source, offset);
+        while let Some(binary) = scope {
+            if let Some(owner) = self.declaring_owner(&binary, name, is_field) {
+                return Some(LibraryTarget {
+                    binary: owner,
+                    member: Some(LibraryMember { name: name.to_string(), is_field }),
+                });
+            }
+            // `pkg/Outer/Inner` → `pkg/Outer`; the package itself has no members and ends the walk.
+            scope = binary.rsplit_once('/').map(|(outer, _)| outer.to_string());
+        }
+        None
     }
 
     /// Validate a Java `source` (AST checks always; the resolver-backed unknown-member check when a

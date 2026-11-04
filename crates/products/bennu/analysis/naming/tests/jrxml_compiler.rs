@@ -87,6 +87,7 @@ public class JSRxmlCompiler {
 /// The whole Java standard convention, switched on.
 fn standard() -> NamingConfig {
     NamingConfig {
+        inherit: true,
         enabled: true,
         ignore: Vec::new(),
         rules: BTreeMap::from([(

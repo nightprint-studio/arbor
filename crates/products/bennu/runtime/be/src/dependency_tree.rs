@@ -46,15 +46,21 @@ pub struct DependencyTree {
 /// dependencies".
 #[arbor_rpc::handler]
 async fn bennu_dependency_tree(ctx: &BennuState, args: DependencyTreeArgs) -> Result<DependencyTree, String> {
+    resolve_tree(ctx, args.root).await
+}
+
+/// The resolve behind [`bennu_dependency_tree`], shared with the tools that analyse the tree
+/// (`bennu_dependency_conflicts`).
+pub(crate) async fn resolve_tree(ctx: &BennuState, root: String) -> Result<DependencyTree, String> {
     // Minutes on a cold repository: it is a row in the Jobs panel for as long as it runs, like every other
     // long resolve, and the panel that asked keeps its own spinner.
     let host = ctx.host_caller();
     let task = Task::start(
         host.as_ref(),
         &ctx.event_sink(),
-        TaskSpec::new("Resolve dependency tree", args.root.clone()).category("Dependencies"),
+        TaskSpec::new("Resolve dependency tree", root.clone()).category("Dependencies"),
     );
-    let result = tokio::task::spawn_blocking(move || tree_of(Path::new(&args.root)))
+    let result = tokio::task::spawn_blocking(move || tree_of(Path::new(&root)))
         .await
         .map_err(|e| format!("dependency tree: {e}"))
         .and_then(|r| r);

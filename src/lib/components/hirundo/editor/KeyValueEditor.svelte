@@ -1,0 +1,126 @@
+<script lang="ts">
+  /**
+   * KeyValueEditor — the rows of params, headers, form fields and variables, as a table or as bulk text.
+   *
+   * The table is the everyday view (a checkbox switches a row off without losing it); the text view takes
+   * `key: value`, `k=v&k2=v2` or a block of headers copied from a browser, one entry per line, and the
+   * backend turns it into rows (`kv_parse`) — the same parser the file format uses, so what you paste is
+   * what a diff will show. A last, empty row is always there to type into.
+   */
+  import { untrack } from 'svelte';
+  import { Trash2, Lock } from 'lucide-svelte';
+  import Checkbox from '$lib/components/shared/ui/Checkbox.svelte';
+  import Input from '$lib/components/shared/ui/Input.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
+  import Textarea from '$lib/components/shared/ui/Textarea.svelte';
+  import { kvFormat, kvParse } from '$lib/ipc/hirundo';
+  import type { KeyValue } from '$lib/types/hirundo';
+  import { SECRET_MARK } from '$lib/types/hirundo';
+  import { blankRow } from '../request-model';
+
+  interface Props {
+    rows: KeyValue[];
+    onchange: (rows: KeyValue[]) => void;
+    /** Show the bulk-edit text instead of the table. */
+    bulk?: boolean;
+    keyPlaceholder?: string;
+    valuePlaceholder?: string;
+    /** Rows may be marked `@secret` (variables only). */
+    allowSecret?: boolean;
+    /** The description column (params and variables have one; form fields need not). */
+    describe?: boolean;
+  }
+
+  let { rows, onchange, bulk = false, keyPlaceholder = 'Key', valuePlaceholder = 'Value', allowSecret = false, describe = true }: Props = $props();
+
+  // Always one empty row at the end to type into; it is not part of the saved rows until it has a key.
+  const shown = $derived([...rows, blankRow()]);
+
+  function commit(next: KeyValue[]) {
+    onchange(next.filter((r) => r.key !== '' || r.value !== '' || r.description !== ''));
+  }
+
+  function patch(i: number, change: Partial<KeyValue>) {
+    const next = shown.map((r, at) => (at === i ? { ...r, ...change } : r));
+    commit(next);
+  }
+
+  function remove(i: number) {
+    commit(shown.filter((_, at) => at !== i));
+  }
+
+  // ── bulk text ──────────────────────────────────────────────────────────────────────────────────
+  let text = $state('');
+  let seeded = $state(false);
+  /** The text last handed to the parser (or produced by the formatter): typing is only parsed when it differs. */
+  let settled = '';
+
+  // Seed the text once per entry into bulk mode; while typing, the text is the source of truth.
+  $effect(() => {
+    if (bulk && !seeded) {
+      seeded = true;
+      void kvFormat(untrack(() => rows)).then((t) => { settled = t; text = t; });
+    } else if (!bulk) {
+      seeded = false;
+    }
+  });
+
+  $effect(() => {
+    const current = text;
+    if (!bulk || current === settled) return;
+    settled = current;
+    void kvParse(current).then(onchange).catch(() => { /* a half-typed line is not an error */ });
+  });
+</script>
+
+{#if bulk}
+  <div class="kv-bulk">
+    <p class="kv-hint">One entry per line: <code>key: value</code>, <code>k=v&amp;k2=v2</code>, or paste a block of headers. Start a line with <code>//</code> to switch it off.</p>
+    <Textarea bind:value={text} minRows={10} maxRows={26} framed ariaLabel="Bulk edit" />
+  </div>
+{:else}
+  <div class="kv" role="table">
+    {#each shown as row, i (i)}
+      {@const last = i === shown.length - 1}
+      <div class="kv-row" class:off={!row.enabled && !last} role="row">
+        <span class="kv-check">
+          {#if !last}<Checkbox checked={row.enabled} ariaLabel="Enabled" onchange={(v) => patch(i, { enabled: v })} />{/if}
+        </span>
+        <div class="kv-cell"><Input value={row.key} placeholder={keyPlaceholder} size="sm" quiet oninput={(v) => patch(i, { key: v })} /></div>
+        <div class="kv-cell">
+          {#if allowSecret && row.value === SECRET_MARK}
+            <span class="kv-secret"><Lock size={12} /> Secret — kept in the keyring</span>
+          {:else}
+            <Input value={row.value} placeholder={valuePlaceholder} size="sm" quiet oninput={(v) => patch(i, { value: v })} />
+          {/if}
+        </div>
+        {#if describe}
+          <div class="kv-cell kv-desc"><Input value={row.description} placeholder="Description" size="sm" quiet oninput={(v) => patch(i, { description: v })} /></div>
+        {/if}
+        <span class="kv-actions">
+          {#if allowSecret && !last}
+            <IconButton tooltip={row.value === SECRET_MARK ? 'Stop being a secret' : 'Make it a secret (kept in the keyring, never in a file)'} size={22} active={row.value === SECRET_MARK} onclick={() => patch(i, { value: row.value === SECRET_MARK ? '' : SECRET_MARK })}><Lock size={12} /></IconButton>
+          {/if}
+          {#if !last}<IconButton tooltip="Remove" size={22} variant="danger" onclick={() => remove(i)}><Trash2 size={12} /></IconButton>{/if}
+        </span>
+      </div>
+    {/each}
+  </div>
+{/if}
+
+<style>
+  .kv { display: flex; flex-direction: column; padding: 4px 8px 12px; }
+  .kv-row {
+    display: grid; align-items: center; gap: 6px; padding: 1px 0;
+    grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr) 48px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .kv-row.off .kv-cell { opacity: 0.5; }
+  .kv-check { display: grid; place-items: center; }
+  .kv-cell { min-width: 0; }
+  .kv-actions { display: flex; justify-content: flex-end; gap: 2px; }
+  .kv-secret { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; font-size: var(--font-size-xs); color: var(--warning); }
+  .kv-bulk { padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .kv-hint { margin: 0; font-size: var(--font-size-xs); color: var(--text-muted); }
+  .kv-hint code { font-family: var(--font-mono); }
+</style>

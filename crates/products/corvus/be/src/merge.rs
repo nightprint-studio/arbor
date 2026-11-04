@@ -94,7 +94,7 @@ fn abort_merge(state: &CorvusState, tab_id: String) -> Result<(), String> {
 }
 
 #[arbor_rpc::handler]
-fn merge_branch(
+pub(crate) fn merge_branch(
     state: &CorvusState,
     tab_id: String,
     branch_name: String,
