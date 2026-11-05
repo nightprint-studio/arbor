@@ -105,7 +105,7 @@ pub(crate) fn names_a_declared_object(node: Node, bytes: &[u8]) -> bool {
         });
         found
     };
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(n) = cur {
         match n.kind() {
             "block" => {
@@ -133,7 +133,7 @@ pub(crate) fn names_a_declared_object(node: Node, bytes: &[u8]) -> bool {
             "class_body" => return false,
             _ => {}
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     false
 }

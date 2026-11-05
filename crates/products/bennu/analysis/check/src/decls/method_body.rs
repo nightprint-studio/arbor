@@ -86,12 +86,12 @@ fn check_method(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
 
 /// The nearest enclosing type declaration of `node`, if any (mirrors `declarations::enclosing_type`).
 fn enclosing_type(node: Node) -> Option<Node> {
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(n) = cur {
         if TYPE_DECLS.contains(&n.kind()) {
             return Some(n);
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     None
 }

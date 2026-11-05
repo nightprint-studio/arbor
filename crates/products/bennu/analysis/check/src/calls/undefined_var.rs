@@ -201,6 +201,7 @@ pub fn undefined_var_errors_in(
 
     let bare_types_known = classpath_complete;
     let mut out = Vec::new();
+    let mut bound_names: std::collections::HashMap<&str, bool> = std::collections::HashMap::new();
     for &n in nodes {
         if n.kind() != "identifier" {
             continue;
@@ -247,35 +248,30 @@ pub fn undefined_var_errors_in(
         if resolves_as_local_lexically(n, top.node, bytes) {
             continue;
         }
-        // RESOLUTION 2: a field of the enclosing type or a known supertype.
-        if field_names.contains(name) {
-            continue;
-        }
-        // RESOLUTION 4: an enum constant of the enclosing enum.
-        if enum_constants.contains(name) {
-            continue;
-        }
-        // RESOLUTION 3: a resolvable TYPE name — a bare `Foo` legally heads `Foo.BAR` (static field /
-        // nested-type access). If the resolver knows the simple name as a type, it's not undefined.
-        if resolver.resolve_simple_name(name, &symbols.imports).is_some() {
-            continue;
-        }
-        // A type declared in THIS file is also a valid bare head (`Helper.CONST`). `type_binary`
-        // consults same-file `symbols.types` before the resolver, so this covers same-file types too.
-        if type_binary(name, symbols, resolver).is_some() {
-            continue;
-        }
-        // …and so is a nested type INHERITED from a supertype (JLS §8.1.5): a subclass writes
-        // `Inner.CONST` for `Base.Inner.CONST`, with no import, because the name is in scope by
-        // inheritance. Neither the resolver's simple-name index nor `type_binary` can see that —
-        // they don't know which type the name was written inside — so it is asked here, where
-        // the enclosing type's binary name is already established.
-        if crate::support::resolve::inherited_member_type(&top_binary, name, resolver).is_some() {
-            continue;
-        }
-        // RESOLUTION 6: a bare name brought in by an `import static …` (a specific member, or a member
-        // of a fully-known wildcard owner). Precomputed in `static_import_names`.
-        if static_import_names.contains(name) {
+        // RESOLUTIONS 2–6 depend on the NAME alone — the position was settled by 1 above — so each distinct name
+        // is asked once per file. A class that writes the same few names hundreds of times (a Lombok-generated
+        // `Fields` constants class used in every annotation) paid the full walk — the supertype chain, the
+        // resolver's global lookup — for each use, which was most of the check.
+        let bound = *bound_names.entry(name).or_insert_with(|| {
+            // 2: a field of the enclosing type or a known supertype.
+            field_names.contains(name)
+                // 4: an enum constant of the enclosing enum.
+                || enum_constants.contains(name)
+                // 3: a resolvable TYPE name — a bare `Foo` legally heads `Foo.BAR` (static field /
+                // nested-type access). A type declared in THIS file is also a valid bare head
+                // (`Helper.CONST`): `type_binary` consults same-file `symbols.types` before the resolver.
+                || resolver.resolve_simple_name(name, &symbols.imports).is_some()
+                || type_binary(name, symbols, resolver).is_some()
+                // …and so is a nested type INHERITED from a supertype (JLS §8.1.5): a subclass writes
+                // `Inner.CONST` for `Base.Inner.CONST`, with no import, because the name is in scope by
+                // inheritance — which neither lookup above can see, since they do not know which type the
+                // name was written inside.
+                || crate::support::resolve::inherited_member_type(&top_binary, name, resolver).is_some()
+                // 6: a bare name brought in by an `import static …` (a specific member, or a member of a
+                // fully-known wildcard owner). Precomputed in `static_import_names`.
+                || static_import_names.contains(name)
+        });
+        if bound {
             continue;
         }
 
@@ -293,7 +289,7 @@ pub fn undefined_var_errors_in(
 /// segment (and `b` a lowercase type), which nothing here can rule out. A call's result is never a
 /// package, so `profile.x().y()` keeps `profile` a whole receiver.
 fn is_whole_receiver(ident: Node) -> bool {
-    let Some(parent) = ident.parent() else { return false };
+    let Some(parent) = bennu_java::prelude::parent_of(ident) else { return false };
     if child_field_name(parent, ident).as_deref() != Some("object") {
         return false;
     }
@@ -309,7 +305,7 @@ fn is_whole_receiver(ident: Node) -> bool {
                 return false;
             }
             // `a.b` heading a further `.c` / `.c()` / `::m` → `a` may be a package.
-            !parent.parent().is_some_and(|gp| {
+            !bennu_java::prelude::parent_of(parent).is_some_and(|gp| {
                 matches!(gp.kind(), "field_access" | "method_invocation" | "method_reference")
             })
         }

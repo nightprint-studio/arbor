@@ -95,9 +95,10 @@ pub use crate::spell::{
 // no facade re-export).
 pub use crate::java_index::{
     background_workers, build_project_index, build_project_index_from_sources, collect_java,
-    file_records_from_source, parallel_map, parallel_map_capped, project_type_map,
-    read_java_sources, read_source_for_index, set_background_workers, set_excluded_dirs, ClassDecl,
-    NonCompliantSource, ProjectBuild, ProjectSources,
+    file_records_from_source, file_records_from_symbols, is_indexed_source, parallel_map,
+    parallel_map_capped, project_type_map, read_java_sources, read_source_for_index, set_background_workers,
+    set_excluded_dirs, type_decl_line, ClassDecl, NonCompliantSource, ProjectBuild,
+    ProjectSources,
 };
 
 // A field is also known by the accessors nobody wrote — what a rename must carry, and what

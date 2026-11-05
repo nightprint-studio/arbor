@@ -134,7 +134,7 @@ fn is_certainly_a_value(obj: Node, bytes: &[u8]) -> bool {
 
 /// The type declaration enclosing `n` — the boundary the scope walk stops at.
 fn enclosing_type(n: Node) -> Option<Node> {
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         if matches!(
             p.kind(),
@@ -146,7 +146,7 @@ fn enclosing_type(n: Node) -> Option<Node> {
         ) {
             return Some(p);
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     None
 }

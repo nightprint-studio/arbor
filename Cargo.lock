@@ -977,6 +977,7 @@ dependencies = [
  "bennu-complete",
  "bennu-core",
  "bennu-dap",
+ "bennu-debug-expr",
  "bennu-deps",
  "bennu-dtolab",
  "bennu-ext",
@@ -1111,6 +1112,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "bennu-debug-expr"
+version = "0.3.0"
 
 [[package]]
 name = "bennu-deps"

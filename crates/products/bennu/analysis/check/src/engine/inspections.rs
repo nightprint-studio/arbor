@@ -290,7 +290,7 @@ fn string_literals_in(node: tree_sitter::Node, bytes: &[u8]) -> Vec<String> {
 /// climb is at most two steps — but it is a climb rather than a fixed `parent().parent()` because a
 /// package annotation and a parameter annotation are shaped differently and neither should crash it.
 fn annotated_declaration(annotation: tree_sitter::Node) -> Option<tree_sitter::Node> {
-    let mut cur = annotation.parent();
+    let mut cur = bennu_java::prelude::parent_of(annotation);
     while let Some(n) = cur {
         if n.kind().ends_with("_declaration") || n.kind() == "field_declaration" {
             return Some(n);
@@ -298,7 +298,7 @@ fn annotated_declaration(annotation: tree_sitter::Node) -> Option<tree_sitter::N
         if n.kind() == "program" {
             return None;
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     None
 }

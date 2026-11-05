@@ -78,7 +78,7 @@ fn bare_read_of<'t>(value: Node<'t>, name: &str, bytes: &[u8]) -> Option<Node<'t
 /// first is someone else's field, but neither is the unqualified read that is illegal — so one
 /// test excludes both. A method call's name sits in `name`, and is not a read of the field at all.
 fn is_bare(id: Node) -> bool {
-    let Some(parent) = id.parent() else { return true };
+    let Some(parent) = bennu_java::prelude::parent_of(id) else { return true };
     match parent.kind() {
         "field_access" | "scoped_identifier" | "method_invocation" | "scoped_type_identifier" => {
             parent.child_by_field_name("object").map(|o| o.id()) == Some(id.id())

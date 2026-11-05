@@ -194,20 +194,25 @@
 </Callout>
 
 <h3>What a Java condition may say</h3>
-<p>A <strong>path compared with a literal</strong> — the paths a watch takes — joined with <code>&amp;&amp;</code>, <code>||</code>, <code>!</code> and parentheses:</p>
+<p>A <strong>boolean expression</strong> over the paths a watch takes — comparisons, arithmetic, <code>&amp;&amp;</code>, <code>||</code>, <code>!</code>, <code>? :</code> and parentheses. Strings compare by their text, other objects by identity, and a boxed <code>Integer</code> or <code>Boolean</code> reads as its primitive:</p>
 <table>
   <thead><tr><th>Condition</th><th>Note</th></tr></thead>
   <tbody>
     <tr><td><code>i &gt; 5</code>, <code>count == 0</code>, <code>ratio &lt; 0.5</code></td><td>—</td></tr>
     <tr><td><code>order.customer.name == "acme"</code>, <code>items[2].price &gt; 0</code></td><td>Fields and subscripts</td></tr>
-    <tr><td><code>order != null &amp;&amp; order.total &gt; 100</code></td><td><code>&amp;&amp;</code> short-circuits, so the left guards the right</td></tr>
+    <tr><td><code>items[i].price &gt; 0</code>, <code>items.length &gt; 3</code></td><td>A subscript may itself be an expression; an array has <code>length</code></td></tr>
+    <tr><td><code>i + 1 == n</code>, <code>total % 100 == 0</code>, <code>price * qty &gt; 1000</code></td><td>Arithmetic as Java computes it: <code>int</code> and <code>long</code> wrap around, integer division truncates, a <code>char</code> is a number, and dividing by zero is an error that stops the program</td></tr>
+    <tr><td><code>label + "!" == "ok!"</code></td><td><code>+</code> joins strings; an object is not joined, because that is <code>toString()</code></td></tr>
+    <tr><td><code>order != null &amp;&amp; order.total &gt; 100</code></td><td><code>&amp;&amp;</code> and <code>||</code> short-circuit, so the left guards the right</td></tr>
     <tr><td><code>done</code>, <code>!order.paid</code></td><td>A path alone must be a boolean</td></tr>
-    <tr><td><code>status.name == "ACTIVE"</code></td><td>An enum: every constant carries its <code>name</code></td></tr>
+    <tr><td><code>status == Status.ACTIVE</code>, <code>limit &lt; Limits.MAX</code></td><td>Enum constants and static fields, named as the source file names them: its imports, its package and the classes around it are consulted, and a fully qualified name works too. The class has to be loaded and initialized — not yet, and the condition says so</td></tr>
+    <tr><td><code>status.name == "ACTIVE"</code></td><td>Also fine: every enum constant carries its <code>name</code></td></tr>
   </tbody>
 </table>
 <Callout variant="info" title="Deliberately not Java">
   A condition quietly answering something adjacent to what you typed swallows the stop, with nothing on screen. So <strong>method calls</strong> — <code>list.size() &gt; 3</code> runs
-  application code inside a paused program — and <strong>arithmetic</strong> — <code>i + 1 == n</code> — are refused by name as you type, not approximated.
+  application code inside a paused program — along with casts, <code>instanceof</code>, <code>new</code>, lambdas, assignments, <code>++</code> and the bitwise operators are refused by name as you
+  type, not approximated. So are a condition that reads nothing from the program (<code>true</code>, <code>1 == 1</code>) and one that is a number rather than a yes or no (<code>i + 1</code>).
 </Callout>
 <p>
   When a condition cannot be answered at a hit — a null halfway down the path, a field missing on this subclass — the program <strong>stops anyway</strong> and the breakpoint says why. A bug in

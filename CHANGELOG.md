@@ -8,6 +8,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Changed
+- **Bennu: first validation after opening a project** no longer waits for the framework models (Spring, JPA, validation…): they are built in the background as the project opens. On a 1,000-file project the first file went from about 6 s to under 1 s.
+- **Bennu: faster validation of annotation-heavy classes** — a 1,500-line Lombok/Jackson class validates in about a third of the time (660 ms → 235 ms measured on a real project).
+- **Bennu: editor context menu** — one **Refactor** submenu (rename, extract, inline, move, add parameter, convert case; greyed with the reason when not applicable) and one **Generate** submenu (the former *Generate…* is now *Members…*); every entry is coloured.
+- **Bennu: index follows the disk** — after a `git checkout` or an edit made outside Bennu, completion and find-usages pick up the changed files on their own; a slow re-index of an older keystroke can no longer overwrite a newer one. Opening a large project builds and writes its index on all cores, and each keystroke re-parses the file once instead of several times.
+- **Bennu: smoother editing in big projects** — changing a declaration no longer blocks go-to, hover and find-usages while dependent files are re-indexed; rename and find-usages setup on large projects is faster.
+- **Bennu: fewer re-parses** — completion, hover, go-to and validation of the same file now share one parse across the backend's worker threads.
+- **Garrulus: Search is a real find window** — Ctrl+Shift+F (or the Search rail item) opens Bennu's Find-in-files layout for the vault: the query box with its filter chips, hits grouped per note with their excerpt, a preview of the note, Enter opens it. The Tags and Note types sections bring it forward with their filter applied. The layout is one shared widget used by both products.
+- **Bennu: module selector** (Dependencies, Maven, Cargo, Node…) — each row wears its ecosystem's mark and says which manifest it is, and the root module is named after the project instead of "root".
+- **Garrulus: vault switcher** — the vault chip in the title bar is a dropdown: switch between known vaults, open, create or close one.
+- **Hirundo: params/headers tables** sit on a rounded raised card with column labels; the method picker has the field fill of the URL bar, and the URL text starts at the field's own inset.
+- **Title bar** — a little more room after the last button (the gear) in every app; the Merula tab is capitalised like the others.
 - **One table picker everywhere** — the size grid from Bennu (hover to choose columns × rows, arrows + Enter) is now the markdown toolbar's table button in Garrulus and Bennu alike, and inserts at the caret. The markdown toolbar's buttons are coloured and swell on hover too.
 - **Bennu: one toolbar on markdown** — the formatting strip takes the place of the breadcrumb instead of adding a second row.
 - **Distraction-free mode** (Bennu, Alt+Z) — hides the rails, tool windows, bottom dock and status bar without closing anything; the pointer on a side edge brings the rail back, and opening a tool window leaves the mode.
@@ -48,6 +59,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu › Live validation re-checks less while you type** — a half-typed line no longer makes the next pause re-check every method of the file, overlapping runs on the same file wait for each other instead of starting from cold, and a run the editor has already moved past is skipped; a ghost-text suggestion being vetted no longer disturbs the editor's cache.
 
 ### Added
+- **Bennu: collapsible import block** — the imports fold to `import …`, collapsed when a file opens (Settings → Editor → Folding); what you change stays until the tab is closed. Folding and unfolding are animated, and fold markers no longer disappear on nested blocks.
+- **Bennu debugger: watches and Java conditions share one expression language** — arithmetic, `?:`, `items[i]`, `arr.length`, string `+`, and enum constants / static fields (`status == Status.ACTIVE`) join paths and comparisons; Rust watches evaluate `v[0] + 1` the same way (checked 64-bit), and method calls, casts and lambdas are still refused by name.
 - **Hirundo: responses are decoded by their charset** (ISO-8859-1, windows-1252, UTF-8, BOM, meta charset); HTML has a sandboxed Preview, and real binaries can be saved with Save as….
 - **Bennu › Convert Case** — rewrite the selection or the name at the caret (every cursor) as camelCase, PascalCase, snake_case, SCREAMING_SNAKE_CASE, kebab-case, lowercase, UPPERCASE or Title Case, from the palette or the editor menu; Ctrl+Shift+W cycles through them.
 - **Window controls › Crescenti** — a third title-bar style next to Mac-inspired and Windows: the Mac-inspired trio with its glyphs always visible.
@@ -81,6 +94,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu › Imber plans before it changes things, and answers a question without editing** — a task that edits files starts with a step plan (unless you say to just do it), and a question about an exception or a piece of code gets an explanation, not an unrequested fix.
 
 ### Fixed
+- **Bennu › Validation of long builder chains** (`.a(x.y().a()).b(x.y().b())…`) no longer grows with the cube of the chain — a chain of 80 setters validates about 2.5 times faster than before, and the longer the chain the bigger the gain.
+- **Bennu › Generated code follows the Format settings** — every generator (SOAP call, builders, mappers, converters…) is laid out by the project's formatter style instead of a fixed four-space style.
+- **Hirundo: Environments sidebar** crashed when the project had no environments yet; the project name in the title bar is the folder name on Windows paths too.
 - **Bennu › `.http` / `.rest` files carry Hirundo's mark** — the H with two opposite arrows, in the project tree and the tabs, like `.merula` has Merula's.
 - **Bennu › An unknown class before `::` is reported** — `.map(GComuni::getCodistat)` with no such class now says "cannot resolve" (with the import quick-fix); `list::add`, `this::run`, constants and arrays stay silent.
 - **Bennu › Accepting a type name imports it more often, and undoes with it** — a name shared by several packages is imported when one is a clear winner and the file reaches none of them; one Ctrl+Z takes back the name and its import.

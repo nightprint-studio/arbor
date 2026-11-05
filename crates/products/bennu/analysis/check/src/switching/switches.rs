@@ -264,14 +264,14 @@ fn group_can_complete_normally(group: Node, bytes: &[u8]) -> bool {
 /// a statement, a label. An arrow arm's `expression_statement` is the arm's value when its own switch
 /// is an expression, and a statement when its own switch is one.
 pub(crate) fn is_statement_position(switch: Node) -> bool {
-    let Some(p) = switch.parent() else { return false };
+    let Some(p) = bennu_java::prelude::parent_of(switch) else { return false };
     match p.kind() {
         "block" | "switch_block_statement_group" | "labeled_statement" | "if_statement" | "while_statement"
         | "for_statement" | "enhanced_for_statement" | "do_statement" => true,
-        "expression_statement" => match p.parent() {
+        "expression_statement" => match bennu_java::prelude::parent_of(p) {
             Some(rule) if rule.kind() == "switch_rule" => rule
                 .parent()
-                .and_then(|block| block.parent())
+                .and_then(|block| bennu_java::prelude::parent_of(block))
                 .is_some_and(is_statement_position),
             Some(_) => true,
             None => false,
@@ -330,7 +330,7 @@ fn is_literal_label(n: Node) -> bool {
 /// Whether `switch` sits where a value is required (its result is used). Kept to unmistakable
 /// expression positions so a plain statement `switch` is never mistaken for one.
 pub(crate) fn is_value_context(switch: Node) -> bool {
-    let Some(p) = switch.parent() else { return false };
+    let Some(p) = bennu_java::prelude::parent_of(switch) else { return false };
     match p.kind() {
         "variable_declarator" => p.child_by_field_name("value") == Some(switch),
         "return_statement" => true,

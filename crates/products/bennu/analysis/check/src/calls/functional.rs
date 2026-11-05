@@ -166,7 +166,7 @@ fn single_abstract_method(
 /// The written target type of a lambda or method reference + the node to anchor a diagnostic on, for the contexts where
 /// the target type is explicit: `T x = <lambda>`, `return <lambda>`, `(T) <lambda>`.
 pub(crate) fn target_type<'t>(lambda: Node<'t>, bytes: &[u8]) -> Option<(String, Node<'t>)> {
-    let parent = lambda.parent()?;
+    let parent = bennu_java::prelude::parent_of(lambda)?;
     match parent.kind() {
         // `(T) <lambda>`
         "cast_expression" => {
@@ -175,7 +175,7 @@ pub(crate) fn target_type<'t>(lambda: Node<'t>, bytes: &[u8]) -> Option<(String,
         }
         // `T x = <lambda>` (local var or field) — parent is the declarator, grandparent the decl.
         "variable_declarator" => {
-            let decl = parent.parent()?;
+            let decl = bennu_java::prelude::parent_of(parent)?;
             if !matches!(decl.kind(), "local_variable_declaration" | "field_declaration") {
                 return None;
             }
@@ -195,13 +195,13 @@ pub(crate) fn target_type<'t>(lambda: Node<'t>, bytes: &[u8]) -> Option<(String,
 /// The nearest enclosing `method_declaration` (stopping at another lambda — a `return` there targets
 /// that lambda, not the method).
 fn enclosing_method(n: Node) -> Option<Node> {
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         match p.kind() {
             "method_declaration" => return Some(p),
             // The lambda itself is the start; a *different* enclosing lambda means the return isn't ours.
             "lambda_expression" if p.id() != n.id() => return None,
-            _ => cur = p.parent(),
+            _ => cur = bennu_java::prelude::parent_of(p),
         }
     }
     None

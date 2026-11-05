@@ -43,6 +43,97 @@ pub fn type_binary_in(
     if text.trim().is_empty() {
         return None;
     }
+    // One answer per (name, scope) while a file is being checked — see `TypeMemo`.
+    if let Some(known) = TYPES.with(|m| m.borrow().as_ref().and_then(|map| map.get(&(text.to_string(), scope.clone())).cloned())) {
+        return known;
+    }
+    let found = type_binary_uncached(text, scope.clone(), symbols, resolver);
+    TYPES.with(|m| {
+        if let Some(map) = m.borrow_mut().as_mut() {
+            map.insert((text.to_string(), scope), found.clone());
+        }
+    });
+    found
+}
+
+thread_local! {
+    /// `(written name, scope)` → the binary it resolved to. Live only between a [`TypeMemo::begin`] and its
+    /// drop: the answer depends on the file's imports and on the resolver as it is for that one pass.
+    static TYPES: std::cell::RefCell<Option<std::collections::HashMap<(String, crate::support::type_scope::TypeScope), Option<String>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// While alive, [`type_binary_in`] remembers what each written name resolved to.
+///
+/// A class heavy in annotations writes the same few names hundreds of times — sixty-one `@Schema`, forty-four
+/// `@JsonProperty` in one file — and every use was resolved from scratch, through the imports and the resolver,
+/// by each of the checks that reads annotations. Same name, same scope, same file, same answer: one resolution.
+///
+/// Held by the driver for a file's checks; a nested guard joins the outer one rather than clearing it.
+pub struct TypeMemo {
+    owner: bool,
+}
+
+impl TypeMemo {
+    pub fn begin() -> Self {
+        TYPES.with(|m| {
+            let mut slot = m.borrow_mut();
+            if slot.is_none() {
+                *slot = Some(std::collections::HashMap::new());
+                TypeMemo { owner: true }
+            } else {
+                TypeMemo { owner: false }
+            }
+        })
+    }
+}
+
+impl Drop for TypeMemo {
+    fn drop(&mut self) {
+        if self.owner {
+            TYPES.with(|m| *m.borrow_mut() = None);
+            // The other per-file memos share this guard's lifetime: they describe the file being checked.
+            crate::annotation::annotation_constants::forget_field_initializers();
+            CLASS_ANNOTATIONS.with(|m| m.borrow_mut().clear());
+        }
+    }
+}
+
+thread_local! {
+    /// binary name → the annotations written on that type. Same lifetime as [`TYPES`].
+    static CLASS_ANNOTATIONS: std::cell::RefCell<std::collections::HashMap<String, std::rc::Rc<Vec<bennu_java::prelude::Annotation>>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// `resolver.class_annotations(binary)`, read once per type while a file's checks run.
+///
+/// The resolver builds that list on each call — for a library annotation it is decoded from the class file —
+/// and two checks ask it of every annotation in the file: three hundred annotations, three hundred decodings of
+/// the same handful of types. Outside a file's checks (no guard alive) it asks every time, as before.
+pub(crate) fn class_annotations_of(resolver: &dyn TypeResolver, binary: &str) -> std::rc::Rc<Vec<bennu_java::prelude::Annotation>> {
+    if !file_memo_active() {
+        return std::rc::Rc::new(resolver.class_annotations(binary));
+    }
+    if let Some(known) = CLASS_ANNOTATIONS.with(|m| m.borrow().get(binary).cloned()) {
+        return known;
+    }
+    let read = std::rc::Rc::new(resolver.class_annotations(binary));
+    CLASS_ANNOTATIONS.with(|m| m.borrow_mut().insert(binary.to_string(), std::rc::Rc::clone(&read)));
+    read
+}
+
+/// Whether a file's checks are running, so per-file memos may be kept — they are valid exactly until the
+/// guard that opened them is dropped, and a caller outside one must not leave anything behind.
+pub(crate) fn file_memo_active() -> bool {
+    TYPES.with(|m| m.borrow().is_some())
+}
+
+fn type_binary_uncached(
+    text: &str,
+    scope: crate::support::type_scope::TypeScope,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<String> {
     // The full written text, NOT its prefix before the first `<`. Truncating there throws away a
     // nested type named through a parameterised qualifier — guava writes
     // `extends AbstractMultiset<E>.EntrySet`, which came out as `AbstractMultiset`, an abstract
@@ -150,8 +241,8 @@ fn leftmost_identifier(mut node: tree_sitter::Node) -> Option<tree_sitter::Node>
 /// The top-level declaration `node` sits in — the node whose body ends a locals search.
 fn outermost_type(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
     let mut cur = node;
-    while let Some(parent) = cur.parent() {
-        if parent.parent().is_none() {
+    while let Some(parent) = bennu_java::prelude::parent_of(cur) {
+        if bennu_java::prelude::parent_of(parent).is_none() {
             return Some(cur);
         }
         cur = parent;

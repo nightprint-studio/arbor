@@ -80,7 +80,7 @@ pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
             }
             _ => continue,
         };
-        let Some(body) = n.parent() else { continue };
+        let Some(body) = bennu_java::prelude::parent_of(n) else { continue };
         let params = param_types(n, bytes, &type_var_erasures(n, bytes));
         // `f(int[])` beside `f(int...)`: one signature after erasure, but javac names it for what it is.
         let array_form: Vec<String> = params

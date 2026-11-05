@@ -152,6 +152,10 @@ mod node_deps;
 // The Project tree's filesystem watcher — what makes a `git checkout` or an `npm install` show up
 // without reopening the project.
 mod tree_watch;
+// What the same watcher hears about `.java` files, batched and fed into the symbol/reference index; and
+// the per-file ordering of live-edit patches it shares with `bennu_did_change`.
+mod external_sync;
+mod edit_order;
 // Its pure half: what a raw event means to the tree — classification, rename pairing, coalescing.
 mod tree_changes;
 // Code-intel: `bennu_completion` / `bennu_diagnostics` — completion serves from the
@@ -421,10 +425,15 @@ mod debug_known;
 // `*head` — and a refusal by name for anything else. The walk differs per protocol, the shape of
 // what the user typed does not.
 mod debug_path;
-// What a Java breakpoint CONDITION is: paths (the watch grammar) compared with literals, and a
-// refusal by name for everything else. Java-only — a native condition is the adapter's own
-// expression and is forwarded untouched.
+// What a Java breakpoint CONDITION is: an expression of the shared `bennu-debug-expr` language that
+// reads the program and is boolean, with a refusal by name for everything outside it. Java-only — a
+// native condition is the adapter's own expression and is forwarded untouched.
 mod debug_cond;
+// The Java side of the shared expression language: a stopped JVM (locals, fields, array elements,
+// static fields and enum constants, strings, boxes) read over JDWP as a `DebugTarget`.
+mod debug_jdwp_target;
+// The Rust side of the same: the DAP variables tree read as a `DebugTarget`.
+mod debug_dap_target;
 // A breakpoint with a message instead of a stop: `{path}` placeholders read from the frame, printed
 // to the run console while the program goes on.
 mod debug_logpoint;

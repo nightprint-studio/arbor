@@ -70,8 +70,8 @@ pub fn invalid_statements_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
         }
         // An arrow switch arm's body: the "statement" is the arm's VALUE — unless its switch is
         // itself a statement. See the module doc.
-        if let Some(rule) = n.parent().filter(|p| p.kind() == "switch_rule") {
-            let switch = rule.parent().and_then(|block| block.parent());
+        if let Some(rule) = bennu_java::prelude::parent_of(n).filter(|p| p.kind() == "switch_rule") {
+            let switch = bennu_java::prelude::parent_of(rule).and_then(|block| bennu_java::prelude::parent_of(block));
             if !switch.is_some_and(crate::switching::switches::is_statement_position) {
                 continue;
             }

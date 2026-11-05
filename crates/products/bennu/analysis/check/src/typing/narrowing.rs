@@ -324,12 +324,12 @@ fn first_value_child(ret: Node) -> Option<Node> {
 /// The nearest enclosing `method_declaration`, stopping at a `lambda_expression` (a `return` inside a
 /// lambda targets the lambda, not the method — nothing to check). Mirrors `casts::enclosing_method`.
 fn enclosing_method(n: Node) -> Option<Node> {
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         match p.kind() {
             "lambda_expression" => return None,
             "method_declaration" => return Some(p),
-            _ => cur = p.parent(),
+            _ => cur = bennu_java::prelude::parent_of(p),
         }
     }
     None

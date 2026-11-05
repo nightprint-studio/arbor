@@ -1137,6 +1137,27 @@ pub fn register_root(root: &str) {
     }
 }
 
+/// Build `root`'s extension slot now, on a thread of its own.
+///
+/// The slot — the Spring, JPA, JSP, i18n and validation models, read from a walk of the whole project — is built
+/// by whoever asks first, and the first to ask is the first file validated: on a real project that was several
+/// seconds (4.8 s to 13 s measured on a 1,000-file Maven project, depending on what else was running) added to
+/// that one answer, after which every file answered in tens of milliseconds. Starting it when the project opens
+/// moves the same work to where nobody is waiting; a validation that arrives while it runs queues on the build
+/// gate (see `FrameworkService::slot`) and waits for what is already underway rather than starting its own.
+pub fn warm_in_background(root: &str) {
+    let root = root.to_string();
+    let started = std::thread::Builder::new().name("framework-warm".into()).spawn(move || {
+        let t = std::time::Instant::now();
+        if FrameworkService::global().slot(&root).is_some() && std::env::var_os("BENNU_PROFILE").is_some() {
+            eprintln!("bennu-profile framework slot warmed in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+        }
+    });
+    if let Err(e) = started {
+        eprintln!("bennu-be: framework warm-up thread did not start ({e}); the first question builds the slot");
+    }
+}
+
 /// The fulcrum i18n extension owning `file`, when the project has one.
 ///
 /// Same exception the `Slot` doc describes: the i18n editor panel asks a question in fulcrum's own

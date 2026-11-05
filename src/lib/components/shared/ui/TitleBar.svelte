@@ -335,11 +335,13 @@
   .tb-right {
     height: 100%;
     flex-shrink: 0;
+    /* A few px of air after the last button (the gear), so it does not touch the window controls' divider. */
+    padding-right: 6px;
   }
   /* macOS: the native traffic lights replace our controls, so the settings gear
      is the last element — give it a touch more room from the rounded corner. */
   .tb-right-mac {
-    padding-right: 8px;
+    padding-right: 12px;
   }
 
   /* A frameless macOS window has no traffic lights, so no gutter to clear. */

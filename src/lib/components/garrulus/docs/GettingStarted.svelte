@@ -103,7 +103,8 @@
   <li><b>Title bar</b> — the vault you are in, and the sync button.</li>
   <li><b>Activity bar</b> — Notes, Search, Tags and fields, Note types
     (<kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>Ctrl</kbd>+<kbd>4</kbd>), then the views that
-    take the whole centre: the table and the link graph.</li>
+    take the whole centre: the table and the link graph. Search is the odd one out: it
+    opens the search window rather than a sidebar panel.</li>
   <li><b>Sidebar</b> — the active section. In Notes: what you pinned, what you touched
     recently, then the tree.</li>
   <li><b>Centre</b> — note tabs and the note.</li>
@@ -128,7 +129,9 @@
   vault, full text and typed filters in one query, so
   <code>type:bug status:open profile</code> is a valid thing to type. Because the fields
   are declared by the note type, the filter half can be checked and completed as you
-  write it.
+  write it. The window lists the matching notes with an excerpt each and previews the
+  highlighted one beside them: <kbd>Enter</kbd> runs the query, then opens the note;
+  <kbd>↑</kbd>/<kbd>↓</kbd> walk the results without leaving the box.
 </p>
 <p>
   This documentation can leave the window: the button beside the title exports it as a

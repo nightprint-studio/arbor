@@ -105,6 +105,9 @@ members = [
     # Live runs: managed processes, recipes, localhost HTTP, the unified timeline and scenarios.
     # Std-only (threads, TcpStream) — the assistant tools and the Live panel are thin glue over it.
     "crates/products/bennu/runtime/live",
+    # The expression language the Java (JDWP) and Rust (DAP) debuggers share for watches and
+    # breakpoint conditions: lexer, parser, AST and an evaluator generic over a `DebugTarget`. Pure.
+    "crates/products/bennu/runtime/debug-expr",
     "crates/products/bennu/build/project",
     "crates/products/bennu/analysis/classpath",
     "crates/products/bennu/analysis/index",

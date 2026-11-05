@@ -19,6 +19,7 @@ use bennu_generate::prelude::{
     all, annotation_insert, find, path_of, source_roots, type_names, ClassInfo, EndpointInfo, EndpointParam, Extra, FieldInfo, GenContext, Generator,
     GeneratorMeta, MemberTarget, Output, ProjectInfo,
 };
+use bennu_intentions::prelude::{format_source, FormatStyle};
 use bennu_java::prelude::TypeRef;
 use bennu_templates::prelude::{class_at, insert_members, ClassModel, FieldModel};
 use serde::{Deserialize, Serialize};
@@ -428,8 +429,54 @@ pub struct Preview {
 fn bennu_generate_preview(_ctx: &BennuState, args: PreviewArgs) -> Result<Preview, String> {
     let generator = find(&args.id).ok_or_else(|| format!("There is no generator `{}`", args.id))?;
     let built = build(&args.site, generator, Some(&args.options), args.id == "http-client");
-    let output = generator.generate(&args.options, &built.ctx)?;
+    let mut output = generator.generate(&args.options, &built.ctx)?;
+    in_project_style(&args.site, &mut output);
     Ok(plan(&args.site, &built, output))
+}
+
+/// Lay the generated Java out the way the project's formatter would.
+///
+/// Every generator writes one fixed house style (four spaces, braces on the same line), so each of them
+/// would otherwise have to learn the settings — indent width, tabs, brace placement, wrapping, line
+/// endings — and a new generator would start out ignoring them. Doing it once, here, on the way out, means
+/// no generator can forget: whatever the Format settings say (global, detected, `.editorconfig`, the
+/// project's override) is what the proposal looks like. Non-Java files are left alone.
+fn in_project_style(site: &Site, output: &mut Output) {
+    let legacy = crate::format_style::legacy_layer(None, None);
+    let at = site.file.as_deref().or(site.directory.as_deref());
+    let style = crate::format_style::resolve(Some(&site.root), at, &legacy);
+    for file in output.files.iter_mut().filter(|f| f.language == "java") {
+        file.text = format_source(&file.text, &style);
+    }
+    if let Some(members) = output.members.as_mut() {
+        if site.file.as_deref().is_some_and(is_java) {
+            members.text = format_members(&members.text, &style);
+        }
+    }
+}
+
+/// Members have no file around them, so they are formatted inside a throwaway class and taken back out —
+/// indented one level, as they will sit in the real one. Returned untouched when the wrapper does not come
+/// back in the shape it went in (a fragment the formatter could not make sense of).
+fn format_members(text: &str, style: &FormatStyle) -> String {
+    let formatted = format_source(&format!("class G {{\n{text}\n}}\n"), style);
+    let lines: Vec<&str> = formatted.lines().collect();
+    // The opening line is `class G {`, or `class G` then `{` alone under an Allman brace style.
+    let Some(open) = lines.iter().position(|l| l.trim_end().ends_with('{')) else { return text.to_string() };
+    let Some(close) = lines.iter().rposition(|l| l.trim() == "}") else { return text.to_string() };
+    if close <= open || !lines[0].trim_start().starts_with("class G") {
+        return text.to_string();
+    }
+    // The wrapper adds a newline before its closing brace; whether the text ended with one is the caller's.
+    let mut inside = &lines[open + 1..close];
+    while let [rest @ .., last] = inside {
+        if !last.trim().is_empty() {
+            break;
+        }
+        inside = rest;
+    }
+    let body = inside.join("\n");
+    if text.ends_with('\n') { format!("{body}\n") } else { body }
 }
 
 fn plan(site: &Site, built: &Built, output: Output) -> Preview {
@@ -504,4 +551,31 @@ fn edits_for(site: &Site, built: &Built, output: &Output, notes: &mut Vec<String
         edits.extend(import_edits(source, &imports));
     }
     (edits, members_preview, wiring_lines)
+}
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+
+    fn style(layers: &[serde_json::Value]) -> FormatStyle {
+        let maps: Vec<serde_json::Map<String, Value>> = layers.iter().filter_map(|v| v.as_object().cloned()).collect();
+        let refs: Vec<&serde_json::Map<String, Value>> = maps.iter().collect();
+        FormatStyle::layered(&refs)
+    }
+
+    #[test]
+    fn members_come_back_in_the_projects_indent_not_the_generators() {
+        let generated = "    public void f() {\n        int x = 1;\n    }\n";
+        let two = format_members(generated, &style(&[serde_json::json!({ "indent_width": 2, "use_tabs": false })]));
+        assert!(two.contains("\n    int x = 1;\n"), "{two:?}");
+        assert!(two.starts_with("  public void f() {"), "{two:?}");
+        let tabs = format_members(generated, &style(&[serde_json::json!({ "use_tabs": true })]));
+        assert!(tabs.contains("\t\tint x = 1;"), "{tabs:?}");
+    }
+
+    #[test]
+    fn a_fragment_that_does_not_come_back_as_a_class_body_is_left_alone() {
+        let broken = "    public void f( {\n";
+        assert_eq!(format_members(broken, &style(&[])), broken);
+    }
 }

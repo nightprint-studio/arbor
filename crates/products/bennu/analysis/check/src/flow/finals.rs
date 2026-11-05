@@ -133,12 +133,12 @@ fn reused_variable_is_not_effectively_final(stmt: Node, resource: Node, bytes: &
     }
     let Some(name) = text(only, bytes) else { return };
     // The body this local lives in: the nearest method, constructor or lambda around the statement.
-    let mut scope = stmt.parent();
+    let mut scope = bennu_java::prelude::parent_of(stmt);
     while let Some(p) = scope {
         if matches!(p.kind(), "method_declaration" | "constructor_declaration" | "lambda_expression") {
             break;
         }
-        scope = p.parent();
+        scope = bennu_java::prelude::parent_of(p);
     }
     let Some(scope) = scope.and_then(|s| s.child_by_field_name("body")) else { return };
     // Exactly one declaration of the name in the body: with two, a write may be to either.

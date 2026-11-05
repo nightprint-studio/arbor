@@ -490,7 +490,7 @@ fn collect_type(
     let is_final = has_modifier(node, bytes, "final");
     let is_sealed = has_modifier(node, bytes, "sealed");
     // A top-level type with no `public`: visible only inside its own package.
-    let is_package_private = node.parent().is_some_and(|p| p.kind() == "program") && !has_modifier(node, bytes, "public");
+    let is_package_private = crate::parents::parent_of(node).is_some_and(|p| p.kind() == "program") && !has_modifier(node, bytes, "public");
 
     let mut extends = None;
     let mut implements = Vec::new();
@@ -767,13 +767,13 @@ pub fn anonymous_supertype_name(body: &Node, bytes: &[u8]) -> Option<String> {
     if !is_anonymous_body(body) {
         return None;
     }
-    let creation = body.parent()?;
+    let creation = crate::parents::parent_of(body)?;
     // An ENUM CONSTANT with a body is an anonymous subclass of its own enum — `enum State { OPEN {
     // … } }` overrides the enum's abstract methods inside that body. There is no `new` to read the
     // type from: the supertype is the enclosing enum, and without this those overrides were left
     // behind by a rename of the method they override.
     if creation.kind() == "enum_constant" {
-        let mut cur = creation.parent();
+        let mut cur = crate::parents::parent_of(creation);
         while let Some(n) = cur {
             if n.kind() == "enum_declaration" {
                 return n
@@ -782,7 +782,7 @@ pub fn anonymous_supertype_name(body: &Node, bytes: &[u8]) -> Option<String> {
                     .ok()
                     .map(str::to_string);
             }
-            cur = n.parent();
+            cur = crate::parents::parent_of(n);
         }
         return None;
     }
@@ -820,7 +820,7 @@ pub fn anonymous_type_name(body: &Node, bytes: &[u8]) -> Option<String> {
 
 /// The nearest type DECLARATION above `node` — the scope anonymous classes are numbered within.
 fn enclosing_named_type<'a>(node: &Node<'a>) -> Option<Node<'a>> {
-    let mut cur = node.parent();
+    let mut cur = crate::parents::parent_of(node);
     while let Some(n) = cur {
         if matches!(
             n.kind(),
@@ -832,7 +832,7 @@ fn enclosing_named_type<'a>(node: &Node<'a>) -> Option<Node<'a>> {
         ) {
             return Some(n);
         }
-        cur = n.parent();
+        cur = crate::parents::parent_of(n);
     }
     None
 }
@@ -884,7 +884,7 @@ fn collect_anonymous_type(
     // answer, and the member walk follows both links — so it goes in `implements`, where being
     // wrong costs nothing. Putting it in `extends` would instead feed the "extends a final class"
     // and "must implement abstract" checks a supertype relationship they'd judge on its own terms.
-    let implements = match body.parent() {
+    let implements = match crate::parents::parent_of(body) {
         Some(p) if p.kind() == "object_creation_expression" => p
             .child_by_field_name("type")
             .and_then(|t| node_text(&t, bytes))

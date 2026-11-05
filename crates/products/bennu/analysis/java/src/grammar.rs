@@ -11,6 +11,8 @@
 //! build failure — so the pin lives in one Cargo.toml and the rest ask for it here.
 
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use tree_sitter::{Language, Parser, Tree};
 
@@ -23,17 +25,68 @@ pub fn language() -> Language {
     tree_sitter_java::LANGUAGE.into()
 }
 
-/// How many distinct sources a thread keeps parsed.
+/// How many distinct sources the process keeps parsed.
 ///
 /// One is not enough, and that is the whole reason this is a number. A single query alternates
 /// between buffers — the file the caret is in, then the file that declares what it resolved to,
-/// then back — and a one-entry cache misses on every switch, re-parsing both each time. Four
-/// covers that interleaving with room to spare while holding only a handful of trees per thread.
-const PARSE_CACHE_SIZE: usize = 4;
+/// then back — and a one-entry cache misses on every switch, re-parsing both each time. Eight
+/// covers that interleaving across the few buffers an editing session touches at once.
+const PARSE_CACHE_SIZE: usize = 8;
+
+/// Upper bound on the summed source length of the cached entries (a tree is a small multiple of
+/// its source). A single huge file may still be cached alone; it just evicts everything else.
+const PARSE_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// One cached parse: `(content hash, byte length, tree)`.
+type CacheEntry = (u64, usize, Tree);
+
+/// Process-wide parse cache, newest first.
+///
+/// Process-wide rather than per-thread because the IPC dispatch pool hands each request to an
+/// arbitrary idle worker: with a per-thread cache, completion, hover, go-to and validation of the
+/// same buffer mostly landed on different threads and re-parsed. `Tree` is `Send + Sync` and its
+/// `clone` is a cheap reference-count bump, so every caller gets its own handle — `Tree::edit` on a
+/// clone never touches the cached one. The lock is held only for the scan and the clone, never
+/// across a parse.
+static PARSE_CACHE: Mutex<Vec<CacheEntry>> = Mutex::new(Vec::new());
+
+static CACHE_HITS: AtomicU64 = AtomicU64::new(0);
+static CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
+
+/// `(hits, misses)` of [`parse_java`] since process start — for `ARBOR_BE_PERF`-style diagnostics.
+pub fn parse_cache_stats() -> (u64, u64) {
+    (CACHE_HITS.load(Ordering::Relaxed), CACHE_MISSES.load(Ordering::Relaxed))
+}
+
+fn cache_lookup(key: u64, len: usize) -> Option<Tree> {
+    // A poisoned lock only means another thread panicked mid-scan; the Vec is still consistent.
+    let cache = PARSE_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    cache
+        .iter()
+        .find(|(k, l, _)| *k == key && *l == len)
+        .map(|(_, _, tree)| tree.clone())
+}
+
+fn cache_insert(cache: &mut Vec<CacheEntry>, key: u64, len: usize, tree: Tree) {
+    // A concurrent miss on the same text may have inserted it already — keep one copy.
+    cache.retain(|(k, l, _)| !(*k == key && *l == len));
+    // Newest first, oldest dropped: the buffer just asked about is the one most likely to be
+    // asked about again.
+    cache.insert(0, (key, len, tree));
+    cache.truncate(PARSE_CACHE_SIZE);
+    let mut total = 0usize;
+    let mut keep = cache.len();
+    for (i, (_, l, _)) in cache.iter().enumerate() {
+        total += *l;
+        if total > PARSE_CACHE_MAX_BYTES && i > 0 {
+            keep = i;
+            break;
+        }
+    }
+    cache.truncate(keep);
+}
 
 thread_local! {
-    /// Recently parsed sources on this thread: `(content hash, byte length, tree)`.
-    static PARSE_CACHE: RefCell<Vec<(u64, usize, Tree)>> = const { RefCell::new(Vec::new()) };
     /// One `Parser` per thread, reused.
     ///
     /// Creating one and setting its language is not free, and a caller that walks a whole project
@@ -76,15 +129,11 @@ fn with_parser<T>(f: impl FnOnce(&mut Parser) -> Option<T>) -> Option<T> {
 pub fn parse_java(source: &str) -> Option<Tree> {
     let key = source_fingerprint(source);
     let len = source.len();
-    let hit = PARSE_CACHE.with(|cell| {
-        cell.borrow()
-            .iter()
-            .find(|(k, l, _)| *k == key && *l == len)
-            .map(|(_, _, tree)| tree.clone())
-    });
-    if let Some(tree) = hit {
+    if let Some(tree) = cache_lookup(key, len) {
+        CACHE_HITS.fetch_add(1, Ordering::Relaxed);
         return Some(tree);
     }
+    CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
     let tree = with_parser(|parser| {
         let mut tree = parser.parse(source, None)?;
         // A failed parse is not always the source's fault. Retry once on a masked copy — see
@@ -103,13 +152,10 @@ pub fn parse_java(source: &str) -> Option<Tree> {
         }
         Some(tree)
     })?;
-    PARSE_CACHE.with(|cell| {
-        let mut cache = cell.borrow_mut();
-        // Newest first, oldest dropped: the buffer just asked about is the one most likely to be
-        // asked about again.
-        cache.insert(0, (key, len, tree.clone()));
-        cache.truncate(PARSE_CACHE_SIZE);
-    });
+    {
+        let mut cache = PARSE_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        cache_insert(&mut cache, key, len, tree.clone());
+    }
     Some(tree)
 }
 
@@ -345,6 +391,63 @@ mod tests {
     fn a_nul_outside_a_literal_is_still_an_error() {
         let tree = parse_java("class A { int \0x; }").expect("a parse");
         assert!(tree.root_node().has_error());
+    }
+
+    #[test]
+    fn the_cache_is_shared_across_threads_and_counts_hits() {
+        // Unique text so parallel tests cannot have cached it already.
+        let src = "class SharedAcrossThreadsProbe { int unique_probe_field_91137; }";
+        let first = parse_java(src).expect("a parse");
+        let (h0, _) = parse_cache_stats();
+        let second = std::thread::spawn(move || parse_java(src).expect("a parse"))
+            .join()
+            .unwrap();
+        let (h1, _) = parse_cache_stats();
+        assert!(h1 > h0, "the other thread must hit the shared cache");
+        assert_eq!(first.root_node().to_sexp(), second.root_node().to_sexp());
+    }
+
+    #[test]
+    fn editing_a_returned_tree_does_not_touch_the_cached_one() {
+        let src = "class EditIsolationProbe { int a_unique_field_44021; }";
+        let mut mine = parse_java(src).expect("a parse");
+        let before = mine.root_node().end_byte();
+        mine.edit(&tree_sitter::InputEdit {
+            start_byte: 0,
+            old_end_byte: 0,
+            new_end_byte: 4,
+            start_position: tree_sitter::Point::new(0, 0),
+            old_end_position: tree_sitter::Point::new(0, 0),
+            new_end_position: tree_sitter::Point::new(0, 4),
+        });
+        let again = parse_java(src).expect("a parse");
+        assert_eq!(again.root_node().end_byte(), before);
+    }
+
+    #[test]
+    fn the_cache_is_bounded_by_slot_count() {
+        let mut cache: Vec<CacheEntry> = Vec::new();
+        let tree = parse_java("class Bound {}").expect("a parse");
+        let total = PARSE_CACHE_SIZE as u64 * 3;
+        for i in 0..total {
+            cache_insert(&mut cache, i, 10, tree.clone());
+        }
+        assert_eq!(cache.len(), PARSE_CACHE_SIZE);
+        // Re-inserting a known key keeps one copy, newest first.
+        cache_insert(&mut cache, total - 2, 10, tree.clone());
+        assert_eq!(cache.len(), PARSE_CACHE_SIZE);
+        assert_eq!(cache[0].0, total - 2);
+    }
+
+    #[test]
+    fn the_cache_is_bounded_by_total_bytes() {
+        let mut cache: Vec<CacheEntry> = Vec::new();
+        let tree = parse_java("class Bytes {}").expect("a parse");
+        let big = PARSE_CACHE_MAX_BYTES / 2 + 1;
+        cache_insert(&mut cache, 1, big, tree.clone());
+        cache_insert(&mut cache, 2, big, tree.clone());
+        assert_eq!(cache.len(), 1, "two entries over the byte budget cannot both stay");
+        assert_eq!(cache[0].0, 2);
     }
 
     #[test]

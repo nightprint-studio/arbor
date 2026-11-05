@@ -98,10 +98,10 @@ fn uncovered_checked(method: &Member, sam: &Member, resolver: &dyn TypeResolver)
 /// The binary name of the functional interface a method reference initialises: the written type of the
 /// local or field declaration around it. Nothing else — an argument or a return is not read.
 fn declared_target(reference: Node, bytes: &[u8], symbols: &FileSymbols, resolver: &dyn TypeResolver) -> Option<String> {
-    let declarator = reference.parent().filter(|p| {
+    let declarator = bennu_java::prelude::parent_of(reference).filter(|p| {
         p.kind() == "variable_declarator" && p.child_by_field_name("value").is_some_and(|v| v.id() == reference.id())
     })?;
-    let declaration = declarator.parent().filter(|d| matches!(d.kind(), "local_variable_declaration" | "field_declaration"))?;
+    let declaration = bennu_java::prelude::parent_of(declarator).filter(|d| matches!(d.kind(), "local_variable_declaration" | "field_declaration"))?;
     let ty = declaration.child_by_field_name("type")?;
     if !matches!(ty.kind(), "type_identifier" | "generic_type" | "scoped_type_identifier") {
         return None;

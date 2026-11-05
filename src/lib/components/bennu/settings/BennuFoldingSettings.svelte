@@ -21,4 +21,8 @@
     <Toggle checked={s.foldBlockComments} disabled={!s.foldingEnabled}
             onchange={(v) => s.setFoldBlockComments(v)} ariaLabel="Fold block comments by default" />
   </FormRow>
+  <FormRow label="Fold imports by default" description="Collapse the import block to import … when a file opens. What you change stays until you close the tab.">
+    <Toggle checked={s.foldImports} disabled={!s.foldingEnabled}
+            onchange={(v) => s.setFoldImports(v)} ariaLabel="Fold imports by default" />
+  </FormRow>
 </div>

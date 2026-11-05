@@ -73,11 +73,11 @@ fn check_qualified_constructor_call(call: Node, bytes: &[u8], declared: &Declare
 /// Whether a class is an inner (non-static member) class — the only kind that has an enclosing instance
 /// to qualify. A local class is judged inner: it may capture one.
 fn is_inner_class(class: Node) -> bool {
-    let Some(parent) = class.parent() else { return false };
+    let Some(parent) = bennu_java::prelude::parent_of(class) else { return false };
     match parent.kind() {
         "program" => false,
         "class_body" => {
-            let outer_is_class = parent.parent().is_some_and(|p| matches!(p.kind(), "class_declaration" | "enum_declaration" | "record_declaration"));
+            let outer_is_class = bennu_java::prelude::parent_of(parent).is_some_and(|p| matches!(p.kind(), "class_declaration" | "enum_declaration" | "record_declaration"));
             outer_is_class && !has_modifier(class, "static")
         }
         // A member of an interface or annotation is implicitly static.
@@ -175,13 +175,13 @@ fn extends_and_declares(iface: Node, parent: &str, method: &str, bytes: &[u8]) -
 
 /// The nearest enclosing `class_declaration`, or `None` when an anonymous class body comes first.
 fn enclosing_class(node: Node) -> Option<Node> {
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(p) = cur {
         match p.kind() {
             "class_declaration" => return Some(p),
-            "class_body" if p.parent().is_some_and(|g| g.kind() == "object_creation_expression") => return None,
+            "class_body" if bennu_java::prelude::parent_of(p).is_some_and(|g| g.kind() == "object_creation_expression") => return None,
             "interface_declaration" | "enum_declaration" | "record_declaration" => return None,
-            _ => cur = p.parent(),
+            _ => cur = bennu_java::prelude::parent_of(p),
         }
     }
     None
@@ -189,14 +189,14 @@ fn enclosing_class(node: Node) -> Option<Node> {
 
 /// Whether a type called `name` encloses `node` (then `name.super` may name that enclosing type instead).
 fn encloses(node: Node, name: &str, bytes: &[u8]) -> bool {
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(p) = cur {
         if TYPE_KINDS.contains(&p.kind())
             && p.child_by_field_name("name").and_then(|id| id.utf8_text(bytes).ok()) == Some(name)
         {
             return true;
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     false
 }

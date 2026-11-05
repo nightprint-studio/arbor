@@ -271,7 +271,7 @@ fn converted_mismatch(
     resolver: &dyn TypeResolver,
 ) -> Option<Mismatch> {
     // `int values[] = …` — the old spelling puts the depth on the name, not on the type.
-    if val.parent().is_some_and(|d| d.child_by_field_name("dimensions").is_some()) {
+    if bennu_java::prelude::parent_of(val).is_some_and(|d| d.child_by_field_name("dimensions").is_some()) {
         return None;
     }
     let target = written_type(target_text, symbols, resolver)?;
@@ -469,12 +469,12 @@ fn passes_a_function(val: &Node) -> bool {
 /// The nearest enclosing `method_declaration`, stopping at a `lambda_expression` (a `return` inside a
 /// lambda targets the lambda, not the method) — in which case there's nothing to check here.
 fn enclosing_method(n: Node) -> Option<Node> {
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         match p.kind() {
             "lambda_expression" => return None,
             "method_declaration" => return Some(p),
-            _ => cur = p.parent(),
+            _ => cur = bennu_java::prelude::parent_of(p),
         }
     }
     None

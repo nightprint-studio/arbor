@@ -65,7 +65,7 @@ pub fn erasure_clash_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
         }
         let Some(name_node) = n.child_by_field_name("name") else { continue };
         let Ok(name) = name_node.utf8_text(bytes) else { continue };
-        let Some(body) = n.parent() else { continue };
+        let Some(body) = bennu_java::prelude::parent_of(n) else { continue };
 
         let (raw, erased) = param_signatures(n, bytes);
         let key = (body.id(), name.to_string());

@@ -222,7 +222,7 @@ pub(crate) fn handler_of<'t>(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
 ) -> Option<Handler<'t>> {
-    let mut cur = site.parent();
+    let mut cur = bennu_java::prelude::parent_of(site);
     while let Some(n) = cur {
         match n.kind() {
             "method_declaration" | "constructor_declaration" => {
@@ -231,7 +231,7 @@ pub(crate) fn handler_of<'t>(
             "lambda_expression" => return lambda_handler(n, bytes, symbols, resolver),
             "static_initializer" => return Some(Handler::StaticInitializer(n)),
             "field_declaration" => {
-                let body = n.parent()?;
+                let body = bennu_java::prelude::parent_of(n)?;
                 let constructors = named_class_constructors(body)?;
                 let is_static =
                     crate::support::nodes::modifier_keywords(n, bytes).contains(&"static");
@@ -241,13 +241,13 @@ pub(crate) fn handler_of<'t>(
                 });
             }
             // `{ … }` directly in a class body is an instance initializer.
-            "block" if n.parent().is_some_and(|p| p.kind() == "class_body") => {
-                let constructors = named_class_constructors(n.parent()?)?;
+            "block" if bennu_java::prelude::parent_of(n).is_some_and(|p| p.kind() == "class_body") => {
+                let constructors = named_class_constructors(bennu_java::prelude::parent_of(n)?)?;
                 return Some(Handler::InstanceInitializer { boundary: n, constructors });
             }
             "class_body" | "interface_body" | "enum_body" | "enum_body_declarations"
             | "annotation_type_body" | "record_declaration" => return None,
-            _ => cur = n.parent(),
+            _ => cur = bennu_java::prelude::parent_of(n),
         }
     }
     None
@@ -256,7 +256,7 @@ pub(crate) fn handler_of<'t>(
 /// The constructors a NAMED class's body declares — `None` for any other body (an anonymous class,
 /// whose initializers may throw anything, an enum, a record).
 fn named_class_constructors(body: Node) -> Option<Vec<Node>> {
-    if body.kind() != "class_body" || body.parent()?.kind() != "class_declaration" {
+    if body.kind() != "class_body" || bennu_java::prelude::parent_of(body)?.kind() != "class_declaration" {
         return None;
     }
     let mut c = body.walk();
@@ -335,7 +335,7 @@ pub(crate) fn caught_by_enclosing_try(
     // Walk ancestors; remember the child we came UP through so we can tell whether we entered a
     // `try_statement` via its BLOCK (protected) vs its catch/finally (not protected).
     let mut child = throw;
-    let mut cur = throw.parent();
+    let mut cur = bennu_java::prelude::parent_of(throw);
     while let Some(n) = cur {
         if matches!(n.kind(), "try_statement" | "try_with_resources_statement") {
             // Only protected if `child` is the try's BLOCK (field `body`), not a catch/finally clause.
@@ -357,7 +357,7 @@ pub(crate) fn caught_by_enclosing_try(
             return false;
         }
         child = n;
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     false
 }

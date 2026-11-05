@@ -20,14 +20,30 @@
 //!
 //! Same semantics as the Java watch, which is the consistency the panel implicitly promises.
 //!
-//! ## 2. Anything else goes to the adapter, in a named dialect
+//! ## 2. What the shared language understands is evaluated here too
+//!
+//! `v[0] + 1`, `a * 2 > b`, `items[i]`, `-x`, `done && n % 2 == 0` are parsed by `bennu-debug-expr` and
+//! evaluated over [`crate::debug_dap_target`] — the same variables-tree reads as a path, with the
+//! operators applied by the shared evaluator (checked `i64` arithmetic, no mixing integers and
+//! floats, no string `+`). **The policy**: an expression that *parses* in the shared language is
+//! answered by it, and a failure is reported as its own — never silently retried on the adapter,
+//! because then the user could not tell which evaluator produced a number. What does not parse (a cast
+//! with `as`, `&x`, `Enum::Variant`, a closure, a `?:`) goes to the adapter as before, and a `/nat`,
+//! `/se` or `/py` prefix always does.
+//!
+//! **Conditions are not part of this.** A native breakpoint condition is the adapter's own
+//! expression, evaluated inside the adapter *before* the program stops. Evaluating it here would
+//! mean stopping at every hit, fetching variables over the protocol, and resuming — orders of
+//! magnitude slower on a hot line — and the adapter's language is the richer one.
+//!
+//! ## 3. Anything else goes to the adapter, in a named dialect
 //!
 //! CodeLLDB has three evaluators and a prefix to pick one (`/se`, `/nat`, `/py` — see
 //! [`bennu_dap::prelude::Evaluator`]); the other two adapters have one. A prefix the adapter does not
 //! have is refused **by name** rather than sent, because sending it produces a syntax error about a
 //! stray `/` that tells the user nothing.
 //!
-//! ## 3. What Rust cannot evaluate at all is said, not forwarded
+//! ## 4. What Rust cannot evaluate at all is said, not forwarded
 //!
 //! Ask LLDB about `v.len()` and it answers *no member named 'len' in 'alloc::vec::Vec<i32>'* — C++
 //! prose about a Rust type, which reads as a broken debugger rather than as an unsupported operation.
@@ -39,9 +55,11 @@
 //! answer.
 
 use bennu_dap::prelude::{evaluators, split_dialect, AdapterSpec, Evaluator, Variable};
+use bennu_debug_expr::prelude::{eval, parse_expr, Expr};
 use bennu_proto::prelude::DebugValue;
 
 use crate::debug_dap::{value_dto, DapSession};
+use crate::debug_dap_target::{row_of, DapTarget};
 use crate::debug_path::{self, Step, RUST};
 
 /// How many children to fetch when following one step of a path.
@@ -57,10 +75,13 @@ const MAX_SUGGESTIONS: usize = 8;
 // ── routing ─────────────────────────────────────────────────────────────────────
 
 /// What to do with what the user typed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Route {
     /// A path: walk the variables tree.
     Walk(Vec<Step>),
+    /// Wider than a path but inside the shared language (arithmetic, comparisons, `v[i]`): evaluate
+    /// it here, over the same variables tree.
+    Eval(Expr),
     /// Not a path: hand this text to the adapter's evaluator.
     Ask {
         /// Exactly what to send — including the dialect prefix when the adapter is the one that
@@ -106,7 +127,14 @@ pub(crate) fn route(expression: &str, spec: &AdapterSpec) -> Result<Route, Strin
     if let Ok(steps) = debug_path::parse(body, RUST) {
         return Ok(Route::Walk(steps));
     }
-    // Not a path. The adapter's default dialect: CodeLLDB's own reader, or the only one the others
+    // Not a path, but maybe something the shared language does. A parse error is not reported: it
+    // is the signal that this is the adapter's to answer (`x as u64`, `&x`, `Enum::Variant`).
+    if let Ok(expr) = parse_expr(body, RUST) {
+        if expr.refusal(RUST).is_none() {
+            return Ok(Route::Eval(expr));
+        }
+    }
+    // The adapter's default dialect: CodeLLDB's own reader, or the only one the others
     // have.
     let dialect = *evaluators(spec).first().unwrap_or(&Evaluator::Native);
     Ok(Route::Ask { text: body.to_string(), dialect })
@@ -125,6 +153,11 @@ pub(crate) fn watch(
         Route::Walk(steps) => {
             let value = walk(session, frame, &steps)?;
             Ok(DebugValue { name: expression.to_string(), ..value_dto(session, &value, "watch") })
+        }
+        Route::Eval(expr) => {
+            let target = DapTarget::new(session, session.frame_id(frame)?);
+            let value = eval(&expr, &target, RUST)?;
+            Ok(row_of(session, expression, value))
         }
         Route::Ask { text, dialect } => {
             let frame_id = session.frame_id(frame).ok();
@@ -174,7 +207,7 @@ fn walk(session: &DapSession, frame: usize, steps: &[Step]) -> Result<Variable, 
 /// how you refer to a field inside an instance method. Rust has no implicit receiver, so `count` and
 /// `self.count` are different things in the source file and a watch that conflated them would be
 /// lying about which one it read.
-fn root(session: &DapSession, frame_id: i64, name: &str) -> Result<Variable, String> {
+pub(crate) fn root(session: &DapSession, frame_id: i64, name: &str) -> Result<Variable, String> {
     let scopes = session.with(|s| s.scopes(frame_id))?;
     let mut seen: Vec<String> = Vec::new();
     for scope in &scopes {
@@ -193,7 +226,7 @@ fn root(session: &DapSession, frame_id: i64, name: &str) -> Result<Variable, Str
 }
 
 /// One hop.
-fn follow(
+pub(crate) fn follow(
     session: &DapSession,
     value: &Variable,
     step: &Step,
@@ -466,14 +499,44 @@ mod tests {
     fn anything_else_goes_to_the_adapters_own_default_dialect() {
         // CodeLLDB's default is its simple reader, not the native parser — it follows the formatters
         // and runs nothing in the debuggee, which is what a watch wants.
-        assert_eq!(
-            route("a + b", codelldb()).unwrap(),
-            Route::Ask { text: "a + b".into(), dialect: Evaluator::Simple }
-        );
-        assert_eq!(
-            route("a + b", lldb()).unwrap(),
-            Route::Ask { text: "a + b".into(), dialect: Evaluator::Native }
-        );
+        for (expression, spec, dialect) in [
+            // A call, a cast, an address, a `Enum::Variant` — nothing the shared language does.
+            ("v.len()", codelldb(), Evaluator::Simple),
+            ("v.len()", lldb(), Evaluator::Native),
+            ("x as u64", codelldb(), Evaluator::Simple),
+            ("&x", lldb(), Evaluator::Native),
+            ("Color::Red", lldb(), Evaluator::Native),
+        ] {
+            assert_eq!(
+                route(expression, spec).unwrap(),
+                Route::Ask { text: expression.into(), dialect },
+                "{expression}"
+            );
+        }
+    }
+
+    /// What the shared language understands is evaluated by it on every adapter, so `a + b` means
+    /// the same thing whichever debugger is behind the panel.
+    #[test]
+    fn what_the_shared_language_understands_is_evaluated_here_on_every_adapter() {
+        for spec in [codelldb(), lldb(), spec_by_id("gdb").unwrap()] {
+            for expression in ["a + b", "v[i] * 2 > n", "!done && n % 2 == 0", "-x", "*p + 1"] {
+                assert!(
+                    matches!(route(expression, spec).unwrap(), Route::Eval(_)),
+                    "{expression} on {}",
+                    spec.label
+                );
+            }
+        }
+        // …but a dialect prefix is always the adapter's, whatever follows it.
+        assert!(matches!(route("/nat a + b", codelldb()).unwrap(), Route::Ask { .. }));
+    }
+
+    /// A path is still walked, not evaluated: the row keeps the adapter's own rendering.
+    #[test]
+    fn a_plain_path_is_walked_even_though_the_shared_language_could_read_it() {
+        assert!(matches!(route("order.total", lldb()).unwrap(), Route::Walk(_)));
+        assert!(matches!(route("v[3]", lldb()).unwrap(), Route::Walk(_)));
     }
 
     /// CodeLLDB parses the prefix; the others have never heard of it and would report a syntax error

@@ -54,6 +54,9 @@ function createGarrulusUiStore() {
   let paletteOpen = $state(false);
   let switcherOpen = $state(false);
   let noteDialog = $state<NoteDialog | null>(null);
+  /** The find-in-vault modal. Search is an overlay, not a sidebar section: it carries a
+   *  preview beside its results, which a 260px panel could not hold. */
+  let findOpen = $state(false);
   let docsOpen = $state(false);
   /** Topic the docs panel lands on; `''` means "wherever it opens by default". */
   let docsSection = $state('');
@@ -74,6 +77,7 @@ function createGarrulusUiStore() {
       vaultPickerOpen ||
       paletteOpen ||
       switcherOpen ||
+      findOpen ||
       noteDialog != null,
   );
 
@@ -87,6 +91,7 @@ function createGarrulusUiStore() {
     get paletteOpen() { return paletteOpen; },
     get switcherOpen() { return switcherOpen; },
     get noteDialog() { return noteDialog; },
+    get findOpen() { return findOpen; },
     get docsOpen() { return docsOpen; },
     get docsSection() { return docsSection; },
     get anyModalOpen() { return anyModalOpen; },
@@ -97,6 +102,10 @@ function createGarrulusUiStore() {
      * its own panel, not a radio that can only ever open something.
      */
     showSection(section: SidebarSection) {
+      if (section === 'search') {
+        findOpen = true;
+        return;
+      }
       if (sidebarOpen && sidebarSection === section) {
         sidebarOpen = false;
         return;
@@ -112,6 +121,10 @@ function createGarrulusUiStore() {
      * shortcut is not — "Search the vault" must open Search, never close it.
      */
     selectSection(section: SidebarSection) {
+      if (section === 'search') {
+        findOpen = true;
+        return;
+      }
       sidebarSection = section;
       sidebarOpen = true;
     },
@@ -148,6 +161,11 @@ function createGarrulusUiStore() {
       vaultPickerOpen = true;
     },
     closeVaultPicker() { vaultPickerOpen = false; },
+
+    /** Open the find-in-vault modal — the rail item, `Ctrl+Shift+F`, the palette and the Tags /
+     *  Types rows all land here. */
+    openFind() { findOpen = true; },
+    closeFind() { findOpen = false; },
 
     openSwitcher() { switcherOpen = true; },
     closeSwitcher() { switcherOpen = false; },

@@ -19,13 +19,11 @@
   import { tokenPrefix } from './query-tokens';
 
   interface Props {
-    /** Focus the input on mount — the search view is opened to be typed into. */
+    /** Focus the input on mount — the search modal is opened to be typed into. */
     autofocus?: boolean;
-    /** The Down arrow left the input: hand the keyboard to the result list. */
-    onLeaveDown?: () => void;
   }
 
-  let { autofocus = false, onLeaveDown }: Props = $props();
+  let { autofocus = false }: Props = $props();
 
   let inputEl = $state<HTMLInputElement | null>(null);
 
@@ -41,8 +39,12 @@
 
   function onKeyDown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
-      e.preventDefault();
-      void garrulusSearchStore.run();
+      // Enter searches while the box says something the results do not answer yet; once they
+      // do, it is left alone so the results widget around the box opens the highlighted note.
+      if (!garrulusSearchStore.hasRun || garrulusSearchStore.stale || garrulusSearchStore.error) {
+        e.preventDefault();
+        void garrulusSearchStore.run();
+      }
       return;
     }
     if (e.key === 'Backspace' && garrulusSearchStore.text.length === 0) {
@@ -51,11 +53,6 @@
       if (garrulusSearchStore.tokens.length === 0) return;
       e.preventDefault();
       garrulusSearchStore.dropLastToken();
-      return;
-    }
-    if (e.key === 'ArrowDown' && onLeaveDown) {
-      e.preventDefault();
-      onLeaveDown();
     }
   }
 
@@ -90,6 +87,7 @@
     spellcheck="false"
     autocomplete="off"
     aria-label="Search the vault"
+    data-modal-autofocus
     placeholder={garrulusSearchStore.tokens.length > 0
       ? 'and these words…'
       : 'words to find — or field: to filter, Enter to search'}

@@ -73,8 +73,8 @@ pub fn annotation_target_errors_in(
 /// The `ElementType`s an annotation type's `@Target` lists — `None` when its own annotations were not
 /// read, when it has no `@Target` (applicable everywhere), or when the target names nothing known.
 fn target_of(resolver: &dyn TypeResolver, binary: &str) -> Option<Vec<&'static str>> {
-    let own = resolver.class_annotations(binary);
-    let target = own.into_iter().find(|a| a.name == "Target")?;
+    let own = crate::support::resolve::class_annotations_of(resolver, binary);
+    let target = own.iter().find(|a| a.name == "Target")?;
     let text = target
         .positional
         .first()
@@ -87,8 +87,8 @@ fn target_of(resolver: &dyn TypeResolver, binary: &str) -> Option<Vec<&'static s
 
 /// What the annotation `n` is attached to: the `ElementType`s that admit it there, and how to say it.
 fn declaration_context(n: Node) -> Option<(&'static [&'static str], &'static str)> {
-    let modifiers = n.parent().filter(|p| p.kind() == "modifiers")?;
-    let decl = modifiers.parent()?;
+    let modifiers = bennu_java::prelude::parent_of(n).filter(|p| p.kind() == "modifiers")?;
+    let decl = bennu_java::prelude::parent_of(modifiers)?;
     Some(match decl.kind() {
         "class_declaration" | "interface_declaration" | "enum_declaration" => (&["TYPE"], "a type"),
         "annotation_type_declaration" => (&["TYPE", "ANNOTATION_TYPE"], "an annotation type"),
@@ -100,7 +100,7 @@ fn declaration_context(n: Node) -> Option<(&'static [&'static str], &'static str
         }
         // A record's header parameter is a component, which several targets reach.
         "formal_parameter" | "spread_parameter"
-            if decl.parent().and_then(|p| p.parent()).is_some_and(|g| g.kind() == "record_declaration") =>
+            if bennu_java::prelude::parent_of(decl).and_then(|p| bennu_java::prelude::parent_of(p)).is_some_and(|g| g.kind() == "record_declaration") =>
         {
             return None
         }

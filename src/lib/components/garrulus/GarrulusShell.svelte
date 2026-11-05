@@ -16,7 +16,7 @@
    * while the catalogue of verbs grows.
    *
    * **The vault, the sync destination and the command palette are live.** The
-   * note tree, the editor, the search view and the bottom dock still arrive with
+   * note tree, the editor and the bottom dock still arrive with
    * the domain that can serve them, and the surfaces that would show them state
    * what they will hold rather than faking content.
    */
@@ -33,7 +33,6 @@
   import GarrulusStartPane from './GarrulusStartPane.svelte';
   import GarrulusOverlays from './GarrulusOverlays.svelte';
   import GarrulusConflictsDock from './panels/GarrulusConflictsDock.svelte';
-  import GarrulusSearchView from './search/GarrulusSearchView.svelte';
   import { garrulusNotesStore } from '$lib/stores/garrulus/notes.svelte';
   import { GARRULUS_SECTIONS } from './garrulus-palette';
   import { noteCommands } from './notes/note-commands';
@@ -70,7 +69,10 @@
       icon: paletteIcon(s.icon),
       tooltip: s.label,
       shortcut: s.shortcut,
-      active: garrulusUiStore.sidebarOpen && garrulusUiStore.sidebarSection === s.id,
+      // Search is a modal, so its rail item is lit while the modal is up rather than by the sidebar.
+      active: s.id === 'search'
+        ? garrulusUiStore.findOpen
+        : garrulusUiStore.sidebarOpen && garrulusUiStore.sidebarSection === s.id,
       onclick: () => garrulusUiStore.showSection(s.id),
     })),
   );
@@ -162,7 +164,7 @@
       else if (!e.shiftKey && key === 'n') noteCommands.newNote();
       else if (e.shiftKey && key === 'n') noteCommands.newTypedNote();
       else if (!e.shiftKey && key === 'd') noteCommands.openDaily();
-      else if (e.shiftKey && key === 'f') garrulusUiStore.selectSection('search');
+      else if (e.shiftKey && key === 'f') garrulusUiStore.openFind();
       else handled = false;
       if (handled) {
         e.preventDefault();
@@ -225,14 +227,7 @@
 
         <div class="main-col">
           <div class="card grow">
-            <!-- Search is a CENTRE view, not a sidebar panel: it carries a preview
-                 pane beside its results, which is what the mockup shows and what a
-                 260px rail could not hold. Selecting its section swaps the body. -->
-            {#if garrulusUiStore.sidebarSection === 'search' && garrulusVaultStore.isOpen}
-              <GarrulusSearchView onOpenNote={(p) => void garrulusNotesStore.openNote(p)} />
-            {:else}
-              <GarrulusStartPane />
-            {/if}
+            <GarrulusStartPane />
           </div>
           {#if garrulusUiStore.dockOpen}
             <!-- `onOpenNote` is not optional in practice: an editor IS mounted in

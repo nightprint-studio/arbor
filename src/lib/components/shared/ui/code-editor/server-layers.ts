@@ -16,7 +16,7 @@
  * them. A fold that follows its text is better than a gutter that empties on each keystroke.
  */
 
-import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
+import { Decoration, EditorView, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { StateEffect, StateField, type Extension, type Range } from '@codemirror/state';
 import { foldService } from '@codemirror/language';
 
@@ -144,6 +144,12 @@ const foldField = StateField.define<FoldRange[]>({
  *
  * The caller must also install `codeFolding()` and a fold gutter; this only supplies the ranges.
  */
+/** Whether the provider's fold ranges changed in this update — what the fold gutter needs to know to redraw its
+ *  arrows when ranges arrive after the text did (they are pushed, not computed from the buffer). */
+export function foldRangesChanged(u: ViewUpdate): boolean {
+  return u.startState.field(foldField, false) !== u.state.field(foldField, false);
+}
+
 export function serverFolding(): Extension {
   return [
     foldField,

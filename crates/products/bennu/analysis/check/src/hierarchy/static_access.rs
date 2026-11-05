@@ -250,7 +250,7 @@ fn in_static_context_of_top(ref_node: Node, top: Node) -> bool {
     // `top`'s own body node id — the one class/enum body we're allowed to cross on the way up.
     let top_body_id = top.child_by_field_name("body").map(|b| b.id());
 
-    let mut cur = ref_node.parent();
+    let mut cur = bennu_java::prelude::parent_of(ref_node);
     while let Some(p) = cur {
         // Reached the top type itself without hitting a static method / static initializer → the
         // reference is in an instance-init / field-init / unknown context → SKIP.
@@ -283,7 +283,7 @@ fn in_static_context_of_top(ref_node: Node, top: Node) -> bool {
             "static_initializer" => return true,
             _ => {}
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     false
 }

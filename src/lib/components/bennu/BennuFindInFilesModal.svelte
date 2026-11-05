@@ -9,6 +9,12 @@
    * and walking the list with ↑/↓ re-reads it as you go. Nothing is opened until you press
    * Enter, which is what makes browsing a hundred hits cheap.
    *
+   * Presentation and keyboard — the field, the windowed grouped list, the preview column,
+   * ↑/↓/PageUp/PageDown/Enter — live in the shared `FindResults`. This modal keeps everything
+   * that is Bennu's: the streaming buffer, the per-project prefs, the mask / module narrowing,
+   * jar entries and the workspace scope. Enter opens the hit and closes, Esc cancels (Modal
+   * owns Esc). Replace is intentionally out of scope (no affordance).
+   *
    * Runs the backend recursive grep (`bennu_find_in_files`) **progressively**: each search
    * gets a fresh `searchId`, and results stream back as `arbor://bennu/find-progress` events.
    * A `done` event ends the spinner. Events tagged with a superseded id are ignored, so a newer
@@ -22,25 +28,20 @@
    *   * batches land in a non-reactive buffer and reach the list on a timer (~12 renders a
    *     second however fast they arrive), instead of re-assigning `hits` — a copy of everything
    *     so far — on each one;
-   *   * the list is **windowed** (`VirtualList`), so five thousand matches are ~40 rows of DOM.
-   *     That is what the grouping is flattened for: a window is `scrollTop / rowHeight`, which
-   *     needs one array with one height, and a file header is just another row kind.
+   *   * the list is **windowed** (inside `FindResults`), so five thousand matches are ~40 rows
+   *     of DOM.
    *
-   * The header row carries everything that decides **what is searched**: how many projects (the
-   * pills, present only when there is a workspace), **whose text** (the source picker — the
-   * project, its dependency jars, or both), and the two narrowings, the **module** and the
-   * **file mask** (`*.java`, `*.jsp,*.tag`). The narrowings filter what the scan returned rather
-   * than what it scans — the BE takes neither, and re-running the walk for a test this side
-   * answers instantly would be slower AND less responsive — and both are remembered per project.
+   * The header row carries everything that decides **what is searched**: **whose text** (the
+   * source picker — the project, its dependency jars, or both), and the two narrowings, the
+   * **module** and the **file mask** (`*.java`, `*.jsp,*.tag`). The narrowings filter what the
+   * scan returned rather than what it scans — the BE takes neither, and re-running the walk for
+   * a test this side answers instantly would be slower AND less responsive — and both are
+   * remembered per project.
    *
    * A hit inside a jar names its **artifact** and is **tinted**, because a result you can only
    * read is not the same kind of answer as one you can go and change.
-   *
-   * Keyboard-first: the query field auto-focuses and keeps focus; ↑/↓ move the highlighted
-   * hit (flattened across groups), PageUp/PageDown jump, Enter opens it and closes, Esc
-   * cancels (Modal owns Esc). Replace is intentionally out of scope (no affordance).
    */
-  import { Search, CornerDownLeft, Filter, FolderTree } from 'lucide-svelte';
+  import { Filter, FolderTree } from 'lucide-svelte';
   import BennuFileIcon from './BennuFileIcon.svelte';
   import { untrack } from 'svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -48,20 +49,18 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
   import ToggleButton from '$lib/components/shared/ui/ToggleButton.svelte';
-  import VirtualList from '$lib/components/shared/ui/VirtualList.svelte';
-  import CodePreview from '$lib/components/shared/ui/CodePreview.svelte';
+  import FindResults from '$lib/components/shared/ui/find/FindResults.svelte';
+  import FindPreview from '$lib/components/shared/ui/find/FindPreview.svelte';
+  import type { FindGroup, FindNotice, FindSegment } from '$lib/components/shared/ui/find/find-types';
+  import FindFooter from '$lib/components/shared/internal/FindFooter.svelte';
   import { languageForPath } from './languages';
   import { moduleIndex } from './modules';
-  import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
-  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
-  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { findInFiles, getFindPrefs, readFile, setFindPrefs, type FindSources } from '$lib/ipc/bennu';
   import { isJarEntry, openLibraryFile } from '$lib/ipc/bennu/library';
   import type { FindHit } from '$lib/types/bennu';
-  import { tooltip } from '$lib/actions/tooltip';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -133,17 +132,8 @@
   let loading = $state(false);
   let errored = $state(false);
   let capped = $state(false);
+  /** The highlighted hit, as the flat index `FindResults` reports. */
   let sel = $state(0);
-  // The field keeps the focus throughout: refining a query after looking at the results is the
-  // normal case, so the arrows drive the list without ever leaving the input.
-  //
-  // `data-modal-autofocus` on the input is what makes it focused *on opening* — and it is not
-  // belt-and-braces for the effect below. `Modal` runs its own initial-focus pass in a microtask,
-  // which is after the child effects, so it wins any race with them; its guess is "the first
-  // focusable that is not in the header", and this modal's body opens with the source picker and the
-  // file mask. Without the attribute the caret landed on a dropdown and the query had to be clicked.
-  let field = $state<HTMLInputElement | null>(null);
-  $effect(() => { field?.focus(); });
 
   function baseName(p: string): string { return p.split(/[\\/]/).pop() ?? p; }
 
@@ -330,31 +320,7 @@
     return bits.join(' and ');
   });
 
-  // ── Rows: grouping by file, flattened so the list can be windowed ────────────
-  /**
-   * One entry per rendered line — a file header or one of its hits.
-   *
-   * Flat rather than nested because the list is **virtualized**: a window is
-   * `scrollTop / rowHeight`, which needs one array with one height. Grouping survives as a row
-   * kind, so the result reads exactly as before while only the ~40 lines on screen exist in the
-   * DOM. A legacy project answering with five thousand hits used to build five thousand nodes
-   * and re-lay them out on every batch that landed.
-   */
-  type Row =
-    | {
-        kind: 'file';
-        key: string;
-        name: string;
-        dir: string;
-        file: string;
-        /** Where the file is from: the module on a reactor, the artifact for a jar entry. */
-        origin: string;
-        /** Inside a dependency — read-only, and drawn as such. */
-        external: boolean;
-        count: number;
-      }
-    | { kind: 'hit'; key: string; hit: FindHit; idx: number; external: boolean };
-
+  // ── Groups: one per file, handed to the shared results widget ────────────────
   /**
    * A jar hit's path split into the artifact and the entry inside it.
    *
@@ -369,52 +335,44 @@
     return { artifact: baseName(file.slice(0, cut)), entry: file.slice(cut + 2) };
   }
 
-  const rows = $derived.by<Row[]>(() => {
-    const out: Row[] = [];
+  /**
+   * The hits as `FindGroup`s — consecutive hits of one file share a header. The widget reports
+   * the flat hit index, which is the position in `shown`, so `shown[i]` is always hit `i`'s
+   * record. A group's `tooltip` is the hit's own file id: the header hover, and what the icon
+   * is drawn from.
+   */
+  const groups = $derived.by<FindGroup[]>(() => {
+    const out: FindGroup[] = [];
     let openFile: string | null = null;
-    let header: Extract<Row, { kind: 'file' }> | null = null;
+    let group: FindGroup | null = null;
     shown.forEach((hit, idx) => {
-      const jar = jarParts(hit.file);
-      if (hit.file !== openFile) {
+      if (!group || hit.file !== openFile) {
+        const jar = jarParts(hit.file);
         const rel = jar ? jar.entry : relPath(hit.file);
         const cut = rel.lastIndexOf('/');
-        header = {
-          kind: 'file',
-          key: `f:${hit.file}`,
-          file: hit.file,
-          name: baseName(rel),
-          dir: cut < 0 ? '' : rel.slice(0, cut),
-          origin: jar ? jar.artifact : (modules.moduleOf(hit.file) ?? ''),
+        group = {
+          key: `${out.length}:${hit.file}`,
+          label: baseName(rel),
+          detail: cut < 0 ? '' : rel.slice(0, cut),
+          // Where the file is from — the module on a reactor, the artifact for a jar entry: the
+          // answer to "is this mine" in the one place your eye already goes for the count.
+          badge: jar ? jar.artifact : (modules.moduleOf(hit.file) ?? ''),
+          tooltip: hit.file,
           external: !!jar,
-          count: 0,
+          hits: [],
         };
-        out.push(header);
+        out.push(group);
         openFile = hit.file;
       }
-      if (header) header.count += 1;
-      out.push({
-        kind: 'hit',
-        key: `h:${hit.file}:${hit.line}:${hit.col}:${idx}`,
-        hit,
-        idx,
-        external: !!jar,
+      group.hits.push({
+        key: `${hit.file}:${hit.line}:${hit.col}:${idx}`,
+        location: `${hit.line}:${hit.col}`,
+        text: hit.preview,
       });
     });
+    for (const g of out) g.count = g.hits.length;
     return out;
   });
-
-  /** How many files the hits fall in — the header count, without a second pass. */
-  const fileCount = $derived(rows.reduce((n, r) => (r.kind === 'file' ? n + 1 : n), 0));
-
-  /** Where the selected hit sits among the ROWS — headers shift it, and the window scrolls by
-   *  row index, not by hit index. */
-  const selRow = $derived(rows.findIndex((r) => r.kind === 'hit' && r.idx === sel));
-
-  /** Both kinds are laid out to this height; see `VirtualList`. */
-  const ROW_H = 22;
-
-  // Keep the selection in-range as results (or the mask) change.
-  $effect(() => { if (sel >= shown.length) sel = Math.max(0, shown.length - 1); });
 
   const current = $derived<FindHit | undefined>(shown[sel]);
   /** The selected hit's identity. The preview keys off **this**, not off `current`: every batch
@@ -476,7 +434,6 @@
   // Split a line around the first match of the query so it can be emphasised. For regex we
   // do a lenient case-insensitive first-match; a bad pattern just yields no highlight (the
   // row still renders plainly).
-  interface Segment { text: string; hit: boolean; }
   const matcher = $derived.by<RegExp | null>(() => {
     const q = query.trim();
     if (!q) return null;
@@ -490,7 +447,7 @@
     }
   });
 
-  function segments(text: string): Segment[] {
+  function segments(text: string): FindSegment[] {
     const re = matcher;
     if (!re) return [{ text, hit: false }];
     const m = re.exec(text);
@@ -529,356 +486,159 @@
     }
   }
 
-  function move(delta: number) {
-    if (!shown.length) return;
-    // No scrolling here: the list is windowed and follows `selRow` itself — an off-screen row
-    // has no element to scroll to, which is precisely the case that needs scrolling.
-    sel = Math.min(Math.max(sel + delta, 0), shown.length - 1);
-  }
-
-  function onKey(e: KeyboardEvent) {
-    switch (e.key) {
-      case 'ArrowDown': e.preventDefault(); move(1); break;
-      case 'ArrowUp': e.preventDefault(); move(-1); break;
-      case 'PageDown': e.preventDefault(); move(8); break;
-      case 'PageUp': e.preventDefault(); move(-8); break;
-      case 'Enter': {
-        e.preventDefault();
-        if (current) void openHit(current);
-        break;
-      }
-      default: break;
-    }
-  }
-
   const hasQuery = $derived(query.trim().length >= 2);
+
+  // ── What the widget shows around the list ────────────────────────────────────
+  /** Blocks the list: nothing to search in, or nothing asked yet. */
+  const notice = $derived<FindNotice | null>(
+    !projectStore.project
+      ? { message: 'Open a project to search its files.' }
+      : !hasQuery
+        ? { message: 'Type at least 2 characters to search.' }
+        : null,
+  );
+
+  const empty = $derived<FindNotice>(
+    hits.length && narrowing
+      ? { message: `${hits.length} match(es), none in ${narrowing}.` }
+      : { message: errored ? 'Search is unavailable for this project.' : `No matches for “${query.trim()}”.` },
+  );
+
+  const fileCount = $derived(groups.length);
+  const summary = $derived(
+    hasQuery && shown.length
+      ? `${shown.length} match${shown.length === 1 ? '' : 'es'} in ${fileCount} file${fileCount === 1 ? '' : 's'}`
+      : '',
+  );
+  const summaryNote = $derived(hasQuery && shown.length && shown.length !== hits.length ? `of ${hits.length}` : '');
+
+  // ── The preview column's body ────────────────────────────────────────────────
+  const previewNote = $derived<string | null>(
+    previewError ? 'This file can’t be previewed.' : previewText && current ? null : 'Reading…',
+  );
+  const previewLanguage = $derived(previewFile ? languageForPath(previewFile) : undefined);
 </script>
 
 <!-- No title bar, like the go-to modals: the field is focused the moment it opens and its
      placeholder already says what this is. A chrome row whose only job is to repeat that costs
      a row of the results. -->
 <Modal {onClose} width="1000px" height="620px" padBody={false} ariaLabel="Find in project">
-  <div class="ff" onkeydown={onKey} role="presentation">
-    <!--
-      The header row, the go-to modals' one: everything that decides WHAT IS SEARCHED, and
-      nothing that decides how. The pills say how many projects, the source picker says whose
-      text, the module and the mask narrow what comes back, and the count in between is the
-      answer to all four. None of it belongs beside the field, which is for the query and for
-      how the query is read.
-    -->
-    <div class="ff-bar">
-      <span class="ff-sub-spacer"></span>
-      {#if capped}<span class="ff-cap">capped</span>{/if}
-      {#if hasQuery && shown.length}
-        <span class="ff-count">
-          {shown.length} match{shown.length === 1 ? '' : 'es'} in {fileCount} file{fileCount === 1 ? '' : 's'}
-          {#if shown.length !== hits.length}<span class="ff-count-mask">of {hits.length}</span>{/if}
-        </span>
-      {/if}
-      <Select
-        value={sources}
-        options={SOURCES}
-        size="sm"
-        highlight={sources !== 'project'}
-        ariaLabel="Source"
-        onchange={(v) => (sources = v)}
-      />
-      {#if modules.sorted.length}
-        <Select
-          value={moduleFilter}
-          options={[{ value: '', label: 'All modules' }, ...modules.sorted.map((m) => ({ value: m, label: m }))]}
-          size="sm"
-          highlight={!!moduleFilter}
-          searchable={modules.sorted.length > 12}
-          searchPlaceholder="Filter modules…"
-          ariaLabel="Module"
-          onchange={(v) => (moduleFilter = v)}
-        />
-      {/if}
-      <span class="ff-mask">
-        <Filter size={12} />
-        <Input bind:value={mask} placeholder="*.java, *.jsp" ariaLabel="File mask" />
-      </span>
-    </div>
-
-    <div class="ff-search">
-      <Search size={15} />
-      <input
-        bind:this={field}
-        bind:value={query}
-        class="ff-field"
-        type="text"
-        spellcheck="false"
-        autocomplete="off"
-        placeholder="Find in project…"
-        aria-label="Find in project"
-        data-modal-autofocus
-      />
-      {#if loading}<Spinner size={13} />{/if}
-      <!-- The keys of a search bar: how a match is judged, and how far out of this project it
-           looks. All four are one bit each and all four re-run the search on the spot, which is
-           what a pressed key says and a dropdown does not. -->
-      <div class="ff-toggles">
-        <ToggleButton
-          pressed={caseSensitive}
-          label="Aa"
-          title="Match case"
-          onclick={() => (caseSensitive = !caseSensitive)}
-        />
-        <ToggleButton
-          pressed={wholeWord}
-          label="W"
-          title="Whole word"
-          onclick={() => (wholeWord = !wholeWord)}
-        />
-        <ToggleButton
-          pressed={regex}
-          label=".*"
-          title="Regular expression"
-          onclick={() => (regex = !regex)}
-        />
-        {#if workspaceApplies}
-          <ToggleButton
-            pressed={searchWorkspace}
-            icon={FolderTree}
-            ariaLabel="Search the whole workspace"
-            title={searchWorkspace
-              ? 'Searching every project in the workspace — click for this project only'
-              : 'Search every project in the workspace'}
-            onclick={() => (workspace = !workspace)}
-          />
-        {/if}
-      </div>
-    </div>
-
-    {#if !projectStore.project}
-      <EmptyState message="Open a project to search its files." />
-    {:else if !hasQuery}
-      <EmptyState message="Type at least 2 characters to search." />
-    {:else if shown.length === 0}
-      {#if loading}
-        <div class="ff-loading"><Spinner size="sm" label="Searching…" /></div>
-      {:else if hits.length && narrowing}
-        <EmptyState message={`${hits.length} match(es), none in ${narrowing}.`} />
-      {:else}
-        <EmptyState message={errored ? 'Search is unavailable for this project.' : `No matches for “${query.trim()}”.`} />
-      {/if}
-    {:else}
-      <div class="ff-split">
-        <VirtualList
-          items={rows}
-          rowHeight={ROW_H}
-          getKey={(r) => r.key}
-          scrollTo={selRow}
-          class="ff-list"
-          ariaLabel="Matches"
-        >
-          {#snippet row({ item }: { item: Row })}
-            {#if item.kind === 'file'}
-              <div class="ff-group-head" class:ext={item.external} use:tooltip={item.file}>
-                <!-- The tree's own icon rule, not a stand-in for it: a `.java` wears the kind it
-                     declares and everything else its file type, exactly as in the project tree
-                     and the go-to modals. One generic document glyph for every result was the
-                     last place in Bennu still answering "what kind of file is this" with a
-                     shrug. -->
-                <BennuFileIcon size={13} path={item.file} />
-                <span class="ff-group-name">{item.name}</span>
-                {#if item.dir}<span class="ff-group-dir">{item.dir}</span>{/if}
-                <!-- Which module, or which artifact — the answer to "is this mine" in the one
-                     place your eye already goes for the count. -->
-                {#if item.origin}<span class="ff-group-origin">{item.origin}</span>{/if}
-                <span class="ff-group-count">{item.count}</span>
-              </div>
-            {:else}
-              <button
-                class="ff-hit"
-                class:ext={item.external}
-                class:sel={item.idx === sel}
-                onclick={() => openHit(item.hit)}
-                onmousemove={() => (sel = item.idx)}
-              >
-                <span class="ff-loc">{item.hit.line}:{item.hit.col}</span>
-                <span class="ff-line-text">{#each segments(item.hit.preview) as s, i (i)}{#if s.hit}<mark class="ff-mark">{s.text}</mark>{:else}{s.text}{/if}{/each}</span>
-              </button>
-            {/if}
-          {/snippet}
-        </VirtualList>
-
-        <div class="ff-preview">
-          {#if previewError}
-            <p class="ff-pv-note">This file can’t be previewed.</p>
-          {:else if previewText && current}
-            <div class="ff-pv-head" use:tooltip={previewFile}>{previewLabel}</div>
-            <div class="ff-pv-body">
-              <!-- The real editor, so the context is coloured exactly as the buffer is — the
-                   same grammar, not a second highlighter that agrees with it on Java and not on
-                   XML. The whole file, so the line numbers are the file's own. -->
-              <CodePreview
-                text={previewText}
-                language={languageForPath(previewFile)}
-                activeLine={current.line}
-              />
-            </div>
-          {:else}
-            <p class="ff-pv-note">Reading…</p>
-          {/if}
-        </div>
-      </div>
-
-      <div class="ff-foot">
-        <Kbd keys={["↑"]} size="sm" /><Kbd keys={["↓"]} size="sm" /><span>move</span>
-        <span class="ff-foot-open"><CornerDownLeft size={11} /> open</span>
-        <span class="ff-sub-spacer"></span>
-        <Kbd keys={["Esc"]} size="sm" /><span>close</span>
-      </div>
-    {/if}
-  </div>
+  <FindResults
+    bind:query
+    bind:selected={sel}
+    {groups}
+    {loading}
+    {capped}
+    {notice}
+    {empty}
+    {summary}
+    {summaryNote}
+    placeholder="Find in project…"
+    ariaLabel="Find in project"
+    segmentsOf={(h) => segments(h.text)}
+    onOpen={(i) => { const h = shown[i]; if (h) void openHit(h); }}
+    {controls}
+    {toggles}
+    {groupLead}
+    {preview}
+    {footer}
+  />
 </Modal>
 
+<!--
+  The header row, the go-to modals' one: everything that decides WHAT IS SEARCHED, and nothing
+  that decides how. The source picker says whose text, the module and the mask narrow what comes
+  back, and the count beside them is the answer to all three. None of it belongs beside the
+  field, which is for the query and for how the query is read.
+-->
+{#snippet controls()}
+  <Select
+    value={sources}
+    options={SOURCES}
+    size="sm"
+    highlight={sources !== 'project'}
+    ariaLabel="Source"
+    onchange={(v) => (sources = v)}
+  />
+  {#if modules.sorted.length}
+    <Select
+      value={moduleFilter}
+      options={[{ value: '', label: 'All modules' }, ...modules.sorted.map((m) => ({ value: m, label: m }))]}
+      size="sm"
+      highlight={!!moduleFilter}
+      searchable={modules.sorted.length > 12}
+      searchPlaceholder="Filter modules…"
+      ariaLabel="Module"
+      onchange={(v) => (moduleFilter = v)}
+    />
+  {/if}
+  <span class="ff-mask">
+    <Filter size={12} />
+    <Input bind:value={mask} placeholder="*.java, *.jsp" ariaLabel="File mask" />
+  </span>
+{/snippet}
+
+<!-- The keys of a search bar: how a match is judged, and how far out of this project it looks.
+     All of them are one bit each and all re-run the search on the spot, which is what a pressed
+     key says and a dropdown does not. -->
+{#snippet toggles()}
+  <ToggleButton
+    pressed={caseSensitive}
+    label="Aa"
+    title="Match case"
+    onclick={() => (caseSensitive = !caseSensitive)}
+  />
+  <ToggleButton
+    pressed={wholeWord}
+    label="W"
+    title="Whole word"
+    onclick={() => (wholeWord = !wholeWord)}
+  />
+  <ToggleButton
+    pressed={regex}
+    label=".*"
+    title="Regular expression"
+    onclick={() => (regex = !regex)}
+  />
+  {#if workspaceApplies}
+    <ToggleButton
+      pressed={searchWorkspace}
+      icon={FolderTree}
+      ariaLabel="Search the whole workspace"
+      title={searchWorkspace
+        ? 'Searching every project in the workspace — click for this project only'
+        : 'Search every project in the workspace'}
+      onclick={() => (workspace = !workspace)}
+    />
+  {/if}
+{/snippet}
+
+<!-- The tree's own icon rule, not a stand-in for it: a `.java` wears the kind it declares and
+     everything else its file type, exactly as in the project tree and the go-to modals. -->
+{#snippet groupLead(group: FindGroup)}
+  <BennuFileIcon size={13} path={group.tooltip ?? group.label} />
+{/snippet}
+
+<!-- The real editor, so the context is coloured exactly as the buffer is — the same grammar,
+     not a second highlighter that agrees with it on Java and not on XML. -->
+{#snippet preview()}
+  <FindPreview
+    label={previewNote ? '' : previewLabel}
+    labelTooltip={previewFile}
+    note={previewNote}
+    text={previewText}
+    language={previewLanguage}
+    activeLine={current?.line}
+  />
+{/snippet}
+
+{#snippet footer()}
+  <FindFooter />
+{/snippet}
+
 <style>
-  .ff { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-
-  /* The header row, the go-to modals' one: the scope pills on the left, the count and the two
-     narrowings on the right. It is the topmost row — the title bar is gone, the way it is on the
-     go-to modals. */
-  .ff-bar {
-    display: flex; align-items: center; gap: 8px;
-    padding: 7px 12px; flex-shrink: 0;
-    background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border-subtle);
-    font-size: var(--font-size-2xs); color: var(--text-muted);
-  }
-
-  .ff-search {
-    display: flex; align-items: center; gap: 8px;
-    padding: 11px 14px; flex-shrink: 0;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .ff-search > :global(svg) { color: var(--text-disabled); flex-shrink: 0; }
-  .ff-field {
-    flex: 1; min-width: 0;
-    background: none; border: none; outline: none;
-    color: var(--text-primary); font-size: var(--font-size-lg);
-  }
-  .ff-field::placeholder { color: var(--text-disabled); }
-
-  .ff-toggles { display: flex; gap: 4px; flex-shrink: 0; }
-
   /* Sized like the module picker beside it: wide enough for a couple of globs, never wide enough
      to compete with the query field below. */
   .ff-mask { display: flex; align-items: center; gap: 6px; min-width: 0; width: 190px; flex-shrink: 0; }
   .ff-mask :global(svg) { color: var(--text-disabled); flex-shrink: 0; }
-  .ff-sub-spacer { flex: 1; }
-  /* The count sits between the pills and the two narrowings and must not wrap or be squeezed —
-     it is the sentence that says what all three of them produced. */
-  .ff-count { white-space: nowrap; flex-shrink: 0; }
-  .ff-count-mask { color: var(--text-disabled); margin-left: 4px; }
-  .ff-cap { color: var(--warning); }
-
-  .ff-loading { display: flex; align-items: center; justify-content: center; padding: 24px; }
-
-  /* Results left, the selected hit in context right — the split is the point. */
-  .ff-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  /* `:global` because the class rides a prop onto VirtualList's own element — the last resort
-     CLAUDE.md allows, and the alternative (a wrapper div) would break the grid row sizing. */
-  :global(.ff-list) { border-right: 1px solid var(--border-subtle); }
-
-  /* Both row kinds are laid out to the SAME height (`ROW_H`), which is what lets one windowed
-     list hold a grouped result. Padding is vertical-centred rather than asymmetric so the two
-     read as different rows without measuring differently. */
-  .ff-group-head {
-    display: flex; align-items: center; gap: 6px; height: 100%;
-    padding: 0 14px; color: var(--text-secondary);
-    font-size: var(--font-size-xs); font-weight: 600;
-  }
-  .ff-group-head :global(svg) { align-self: center; color: var(--text-muted); flex-shrink: 0; }
-  .ff-group-name { flex-shrink: 0; }
-  .ff-group-dir {
-    flex: 1; min-width: 0;
-    font-family: var(--font-code); font-size: var(--font-size-3xs); font-weight: 400;
-    color: var(--text-disabled);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
-  }
-  .ff-group-count {
-    margin-left: auto; font-size: var(--font-size-3xs); font-weight: 500;
-    color: var(--text-disabled);
-    background: var(--bg-elevated); border-radius: 99px; padding: 0 6px;
-  }
-  /* `margin-left: auto` on the count would push this to the left edge if it came after it, so
-     the origin sits before it and both stay right-aligned. */
-  .ff-group-origin {
-    flex-shrink: 0; max-width: 200px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    margin-left: auto;
-    font-size: var(--font-size-3xs); font-weight: 400;
-    color: var(--text-muted);
-    background: var(--bg-elevated); border-radius: var(--radius-sm); padding: 0 5px;
-  }
-  .ff-group-origin + .ff-group-count { margin-left: 0; }
-
-  /* Not the user's own — a hit inside a dependency, which you can read and cannot change. Same
-     hue and same reasoning as the editor's external tabs and the go-to overlay's library rows:
-     not an error, but not one of your files either. The bar on the left edge is what makes a
-     run of them legible as a block while scrolling past. */
-  .ff-group-head.ext, .ff-hit.ext {
-    background: color-mix(in srgb, var(--warning) 7%, transparent);
-    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--warning) 45%, transparent);
-  }
-  .ff-hit.ext:hover { background: color-mix(in srgb, var(--warning) 12%, transparent); }
-  /* The selection has to win over the tint, and equal specificity would leave that to source
-     order — the kind of thing that breaks the day a rule moves. */
-  .ff-hit.ext.sel, .ff-hit.ext.sel:hover {
-    background: var(--bg-selected);
-    box-shadow: inset 2px 0 0 var(--warning);
-  }
-
-  .ff-hit {
-    display: flex; align-items: center; gap: 10px; height: 100%;
-    width: 100%; text-align: left;
-    padding: 0 14px 0 30px; background: transparent; border: none; cursor: pointer;
-  }
-  .ff-hit.sel { background: var(--bg-selected); }
-  .ff-hit:hover { background: var(--bg-hover); }
-  .ff-hit.sel:hover { background: var(--bg-selected); }
-  .ff-loc {
-    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-disabled);
-    flex-shrink: 0; min-width: 44px;
-  }
-  .ff-line-text {
-    font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
-  }
-  /* A search hit has to be findable at a glance in a wall of monospace, which `--accent-subtle`
-     (15% alpha) is not — it reads as a faint tint you have to already know is there. This is the
-     one place in the modal that earns a solid fill: it is the answer to the question asked. */
-  .ff-mark {
-    background: var(--accent);
-    color: var(--bg-base);
-    border-radius: 2px;
-    padding: 0 2px;
-    font-weight: 600;
-  }
-  /* On the selected row the fill would fight the selection band, so the hit inverts instead. */
-  .ff-hit.sel .ff-mark { background: var(--accent-hover); }
-
-  .ff-preview { min-height: 0; display: flex; flex-direction: column; background: var(--bg-base); }
-  .ff-pv-head {
-    flex-shrink: 0; padding: 6px 12px;
-    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted);
-    border-bottom: 1px solid var(--border-subtle);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
-  }
-  /* The preview is a read-only editor (`CodePreview`), which owns its own gutter, colouring and
-     scrolling — so this is only the box it fills. */
-  .ff-pv-body { flex: 1; min-height: 0; }
-  .ff-pv-note { padding: 14px; font-size: var(--font-size-sm); color: var(--text-muted); }
-
-  .ff-foot {
-    display: flex; align-items: center; gap: 6px;
-    padding: 7px 12px; flex-shrink: 0;
-    border-top: 1px solid var(--border-subtle);
-    background: var(--bg-elevated);
-    font-size: var(--font-size-2xs); color: var(--text-disabled);
-  }
-  .ff-foot-open { display: inline-flex; align-items: center; gap: 4px; }
 </style>

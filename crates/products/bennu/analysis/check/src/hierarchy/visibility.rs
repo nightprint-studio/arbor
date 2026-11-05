@@ -258,10 +258,10 @@ fn may_be_subclass_context(
     resolver: &dyn TypeResolver,
     declaring: &str,
 ) -> bool {
-    let mut cur = access.parent();
+    let mut cur = bennu_java::prelude::parent_of(access);
     while let Some(p) = cur {
         match p.kind() {
-            "class_body" if p.parent().is_some_and(|o| o.kind() == "object_creation_expression") => return true,
+            "class_body" if bennu_java::prelude::parent_of(p).is_some_and(|o| o.kind() == "object_creation_expression") => return true,
             "class_declaration" | "enum_declaration" | "record_declaration" | "interface_declaration" => {
                 let Some(name) = p.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()) else {
                     return true;
@@ -274,7 +274,7 @@ fn may_be_subclass_context(
             }
             _ => {}
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     false
 }
@@ -435,7 +435,7 @@ fn package_of_binary(binary: &str) -> Option<String> {
 /// prefixes the accessing file's package. `None` when `n` isn't inside any named type declaration.
 fn enclosing_top_level_binary(n: Node, bytes: &[u8], symbols: &FileSymbols) -> Option<String> {
     let mut top_name: Option<String> = None;
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         if matches!(
             p.kind(),
@@ -449,7 +449,7 @@ fn enclosing_top_level_binary(n: Node, bytes: &[u8], symbols: &FileSymbols) -> O
                 top_name = Some(name.to_string()); // keep overwriting → the LAST (outermost) wins
             }
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     let name = top_name?;
     // Prefer the extracted TypeDecl's FQN (authoritative for this file); else compose package + name.

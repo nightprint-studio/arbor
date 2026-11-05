@@ -39,7 +39,7 @@ pub(crate) fn constant_names<'t>(at: Node<'t>, bytes: &[u8]) -> ConstantNames<'t
             }
         }
     };
-    let mut cur = at.parent();
+    let mut cur = bennu_java::prelude::parent_of(at);
     while let Some(n) = cur {
         match n.kind() {
             "block" => {
@@ -82,7 +82,7 @@ pub(crate) fn constant_names<'t>(at: Node<'t>, bytes: &[u8]) -> ConstantNames<'t
             }
             _ => {}
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     names
 }

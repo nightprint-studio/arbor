@@ -123,7 +123,7 @@ fn is_stray_between_members(node: &Node<'_>) -> bool {
     if !node.is_error() {
         return false;
     }
-    let Some(parent) = node.parent() else { return false };
+    let Some(parent) = bennu_java::prelude::parent_of(node) else { return false };
     if !BODIES.contains(&parent.kind()) {
         return false;
     }
@@ -137,12 +137,12 @@ fn is_stray_between_members(node: &Node<'_>) -> bool {
 
 /// The smallest member declaration containing `node`, or `None` when none does.
 fn enclosing_member<'t>(node: &Node<'t>) -> Option<Node<'t>> {
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(n) = cur {
         if MEMBERS.contains(&n.kind()) {
             return Some(n);
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     None
 }

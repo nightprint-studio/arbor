@@ -85,7 +85,7 @@ pub fn unresolved_types_in(
                 // Qualified name segment (`a.b.C`) or a *declared* type-parameter name → not a use
                 // we judge.
                 if matches!(
-                    n.parent().map(|p| p.kind()),
+                    bennu_java::prelude::parent_of(n).map(|p| p.kind()),
                     Some("scoped_type_identifier") | Some("type_parameter")
                 ) {
                     continue;
@@ -98,15 +98,15 @@ pub fn unresolved_types_in(
                 // somewhere, which leaves out a `CONSTANT::get`) and not a name this file uses as
                 // a value anywhere. `GComuni::getCodistat` with no such class is javac's
                 // "cannot find symbol", the same as `new GComuni()`; `list::add` stays unjudged.
-                if n.parent().map(|p| p.kind()) == Some("method_reference") {
+                if bennu_java::prelude::parent_of(n).map(|p| p.kind()) == Some("method_reference") {
                     let Ok(text) = n.utf8_text(bytes) else { continue };
                     if !looks_like_class_name(text) || is_used_as_value(nodes, text, bytes) {
                         continue;
                     }
                 }
                 // `outer.new Inner()` names a member type of `outer`'s type, not a type in scope.
-                let creation = match n.parent() {
-                    Some(p) if p.kind() == "generic_type" => p.parent(),
+                let creation = match bennu_java::prelude::parent_of(n) {
+                    Some(p) if p.kind() == "generic_type" => bennu_java::prelude::parent_of(p),
                     other => other,
                 };
                 if creation.is_some_and(crate::support::nodes::is_qualified_creation) {
@@ -159,7 +159,7 @@ pub fn unresolved_types_in(
                     // Not a type: a package, or a type we cannot read. Only the WHOLE name is
                     // judged — in `java.util.Absent` the inner `java.util` is a package prefix,
                     // not a type use of its own.
-                    let outermost = n.parent().map(|p| p.kind()) != Some("scoped_type_identifier");
+                    let outermost = bennu_java::prelude::parent_of(n).map(|p| p.kind()) != Some("scoped_type_identifier");
                     if outermost {
                         let head = qtext.split('.').next().unwrap_or(qtext).trim();
                         let written = QualifiedName { qualifier, last, qtext, simple };
@@ -209,7 +209,7 @@ pub fn unresolved_types_in(
         // "Cannot resolve symbol `val`". Without the import, `val` isn't Lombok's and IS a real
         // unresolved type, so it stays flagged.
         if name == "val"
-            && n.parent().map(|p| p.kind()) == Some("local_variable_declaration")
+            && bennu_java::prelude::parent_of(n).map(|p| p.kind()) == Some("local_variable_declaration")
             && imports_lombok_val(symbols)
         {
             continue;
@@ -396,7 +396,7 @@ fn supertype_roots(symbols: &FileSymbols, resolver: &dyn TypeResolver) -> Vec<St
 /// `onConstructor` or `onParam` element, whose Java-8 spellings end in `_`.
 fn lombok_on_x_value(name_node: Node, bytes: &[u8]) -> bool {
     // `identifier(__)` → `annotation` / `marker_annotation` → `element_value_pair(key = onMethod_)`.
-    let Some(pair) = name_node.parent().and_then(|a| a.parent()) else { return false };
+    let Some(pair) = bennu_java::prelude::parent_of(name_node).and_then(|a| bennu_java::prelude::parent_of(a)) else { return false };
     if pair.kind() != "element_value_pair" {
         return false;
     }

@@ -44,7 +44,7 @@ pub fn local_class_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
         if !matches!(n.kind(), "class_declaration" | "record_declaration") {
             continue;
         }
-        if n.parent().is_none_or(|p| p.kind() != "block") {
+        if bennu_java::prelude::parent_of(n).is_none_or(|p| p.kind() != "block") {
             continue;
         }
         check_local(n, bytes, &mut out);
@@ -121,7 +121,7 @@ fn captures_enclosing(local: Node, body: Node, bytes: &[u8]) -> bool {
             // `there` in `there.hashCode()` is a read of `there` — excluding everything under a
             // `method_invocation`, as a first cut did, threw away exactly the capture being looked
             // for. What is not a read is the `name` of the call and the `field` after the dot.
-            let read = match n.parent() {
+            let read = match bennu_java::prelude::parent_of(n) {
                 None => true,
                 Some(p) if matches!(p.kind(), "field_access" | "method_invocation") => {
                     child_field_name(p, n).as_deref() == Some("object")
@@ -145,7 +145,7 @@ fn captures_enclosing(local: Node, body: Node, bytes: &[u8]) -> bool {
 
 /// The type declaration around `n` — where the scope walk stops.
 fn enclosing_type(n: Node) -> Option<Node> {
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         if matches!(
             p.kind(),
@@ -157,7 +157,7 @@ fn enclosing_type(n: Node) -> Option<Node> {
         ) {
             return Some(p);
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     None
 }

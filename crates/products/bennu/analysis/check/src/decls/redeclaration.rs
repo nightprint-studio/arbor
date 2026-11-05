@@ -90,7 +90,7 @@ fn check_local_dups(block: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
 /// (and including) the method or constructor, stopping at any type body.
 fn enclosing_param_names(block: Node, bytes: &[u8]) -> HashSet<String> {
     let mut names: HashSet<String> = HashSet::new();
-    let mut cur = block.parent();
+    let mut cur = bennu_java::prelude::parent_of(block);
     while let Some(n) = cur {
         match n.kind() {
             "class_declaration"
@@ -111,7 +111,7 @@ fn enclosing_param_names(block: Node, bytes: &[u8]) -> HashSet<String> {
             }
             _ => {}
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     names
 }
@@ -182,7 +182,7 @@ fn check_lambda_shadowing(lambda: Node, bytes: &[u8], out: &mut Vec<Diagnostic>)
         return;
     }
     let mut outer: HashSet<String> = HashSet::new();
-    let mut cur = lambda.parent();
+    let mut cur = bennu_java::prelude::parent_of(lambda);
     while let Some(n) = cur {
         if matches!(
             n.kind(),
@@ -198,7 +198,7 @@ fn check_lambda_shadowing(lambda: Node, bytes: &[u8], out: &mut Vec<Diagnostic>)
         if matches!(n.kind(), "method_declaration" | "constructor_declaration") {
             break; // the outermost executable scope
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     for (name, node) in params {
         if outer.contains(&name) {

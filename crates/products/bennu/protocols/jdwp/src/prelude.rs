@@ -14,7 +14,7 @@ pub use crate::command::{
     dispose, fields, frame_this, frame_values, frames, id_sizes, line_table, location_of_line,
     method_bytecodes, methods, nested_types, object_type, object_values, request_class_prepare, request_exception, request_method_exit,
     request_step,
-    resume_thread, resume_vm, set_breakpoint, string_value, superclass, suspend_vm, thread_name,
+    resume_thread, resume_vm, set_breakpoint, static_values, string_value, superclass, suspend_vm, thread_name,
     type_signature, variable_table, version, ClassRef, Field, Frame, LineEntry, Local, Method,
     StepDepth, MOD_STATIC,
 };

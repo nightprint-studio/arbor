@@ -154,14 +154,14 @@ fn declares(symbols: &FileSymbols, binary: &str) -> bool {
 
 /// The type declaration a constructor body sits in; `None` inside an anonymous class.
 fn enclosing_type_declaration(n: Node) -> Option<Node> {
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         match p.kind() {
             "class_declaration" | "enum_declaration" | "record_declaration" | "interface_declaration" => {
                 return Some(p)
             }
             "object_creation_expression" => return None,
-            _ => cur = p.parent(),
+            _ => cur = bennu_java::prelude::parent_of(p),
         }
     }
     None

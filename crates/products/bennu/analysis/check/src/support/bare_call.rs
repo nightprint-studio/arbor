@@ -231,16 +231,16 @@ impl<'t> BareCalls<'t> {
         let has_method = |binary: &str| {
             crate::support::walk::hierarchy_has(resolver, binary, &|cm| cm.methods.iter().any(|m| m.name == name))
         };
-        let mut cur = call.parent();
+        let mut cur = bennu_java::prelude::parent_of(call);
         while let Some(p) = cur {
             if p.id() == self.top_node.id() {
                 return Some(MemberOwner::Top);
             }
             match p.kind() {
                 "class_body" | "enum_body" if Some(p.id()) == top_body => {}
-                "enum_body_declarations" if p.parent().map(|b| b.id()) == top_body => {}
+                "enum_body_declarations" if bennu_java::prelude::parent_of(p).map(|b| b.id()) == top_body => {}
                 "class_body" | "interface_body" | "enum_body" => {
-                    let owner = p.parent()?;
+                    let owner = bennu_java::prelude::parent_of(p)?;
                     let binary = match owner.kind() {
                         "object_creation_expression" => {
                             if body_declares_method(p, name, bytes) {
@@ -250,7 +250,7 @@ impl<'t> BareCalls<'t> {
                             crate::support::resolve::type_binary_at(written, owner, bytes, symbols, resolver)?
                         }
                         "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration"
-                            if owner.parent().is_some_and(|q| q.kind() != "block") =>
+                            if bennu_java::prelude::parent_of(owner).is_some_and(|q| q.kind() != "block") =>
                         {
                             bennu_java::prelude::type_decl_at(&owner, symbols)?.fqn.replace('.', "/")
                         }
@@ -266,7 +266,7 @@ impl<'t> BareCalls<'t> {
                 "enum_body_declarations" => return None,
                 _ => {}
             }
-            cur = p.parent();
+            cur = bennu_java::prelude::parent_of(p);
         }
         None
     }

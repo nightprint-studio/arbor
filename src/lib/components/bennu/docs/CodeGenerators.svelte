@@ -20,7 +20,7 @@
 <h2>Opening one</h2>
 <ul>
   <li>The <strong>command palette</strong> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>): every generator the open file can take is listed as «Generate …».</li>
-  <li>The editor's <strong>context menu › Generate code</strong>, for the same list.</li>
+  <li>The editor's <strong>context menu › Generate</strong>: one submenu with <em>Members…</em> (the dialog <kbd>Alt</kbd>+<kbd>Insert</kbd> opens), <em>From a template…</em>, the configuration-properties flows where they apply, and then the same list.</li>
   <li>A folder's <strong>context menu › Generate</strong> in the project tree: the classes are written into that folder's package.</li>
 </ul>
 

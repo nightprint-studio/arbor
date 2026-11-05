@@ -877,7 +877,7 @@ fn check_repeats(
         if !members.flags.is_annotation {
             continue;
         }
-        let own = resolver.class_annotations(&binary);
+        let own = crate::support::resolve::class_annotations_of(resolver, &binary);
         if own.is_empty() {
             // Cannot tell whether it is `@Repeatable`. Record it so a THIRD occurrence is not
             // reported either, and move on.

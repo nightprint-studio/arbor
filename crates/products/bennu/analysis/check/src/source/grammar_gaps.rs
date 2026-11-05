@@ -85,7 +85,7 @@ fn local_modifier(local: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
 
 /// A member or statement written directly in the file, outside any type.
 fn stray_at_top_level(n: Node, out: &mut Vec<Diagnostic>) {
-    if n.parent().is_some_and(|p| p.kind() == "program") {
+    if bennu_java::prelude::parent_of(n).is_some_and(|p| p.kind() == "program") {
         out.push(CheckId::SyntaxError.at(n, "Class, interface, enum, or record expected"));
     }
 }
@@ -109,7 +109,7 @@ fn constructor_named_wrongly(ctor: Node, bytes: &[u8], out: &mut Vec<Diagnostic>
     let owner = ctor
         .parent()
         .filter(|p| p.kind() == "class_body")
-        .and_then(|b| b.parent())
+        .and_then(|b| bennu_java::prelude::parent_of(b))
         .filter(|o| matches!(o.kind(), "class_declaration" | "enum_declaration" | "record_declaration"))
         .and_then(|o| o.child_by_field_name("name"))
         .and_then(|n| text(n, bytes));

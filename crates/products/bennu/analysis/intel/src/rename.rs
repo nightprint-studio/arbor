@@ -27,7 +27,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use bennu_java::prelude::{Member, TypeResolver};
+use bennu_java::prelude::{parent_of, Member, TypeResolver};
 use bennu_query::prelude::PlanFile;
 use bennu_web::prelude::bean_class_value_spans;
 use tree_sitter::Node;
@@ -259,13 +259,20 @@ pub fn rename_plan(
                 } else {
                     &[]
                 };
-                let mut scanned: Vec<&str> = Vec::new();
+                // A hash set and a path map built once: `Vec::contains` plus a linear
+                // `project_source` per host file made this loop quadratic in the project, which is
+                // where the 65s → 300s above came from.
+                let mut scanned: HashSet<&str> = HashSet::new();
+                let sources_by_path: HashMap<&str, &str> = if anon_hosts.is_empty() {
+                    HashMap::new()
+                } else {
+                    source_lookup(java_files)
+                };
                 for u in anon_hosts {
-                    if u.file == decl_file || scanned.contains(&u.file.as_str()) {
+                    if u.file == decl_file || !scanned.insert(u.file.as_str()) {
                         continue;
                     }
-                    scanned.push(u.file.as_str());
-                    let Some(src) = project_source(java_files, &u.file) else {
+                    let Some(src) = sources_by_path.get(u.file.as_str()).copied() else {
                         continue;
                     };
                     for (ds, de) in find_member_name_spans(src, &member) {
@@ -629,6 +636,12 @@ pub(crate) fn project_source<'a>(java_files: &'a [PlanFile], file: &str) -> Opti
         .map(|f| f.source.as_str())
 }
 
+/// Every project java file's text by path, for a caller that looks up MANY files: one pass here, then
+/// O(1) per lookup, instead of [`project_source`]'s scan of the whole list for each one.
+pub(crate) fn source_lookup(java_files: &[PlanFile]) -> HashMap<&str, &str> {
+    java_files.iter().map(|f| (f.path.as_str(), f.source.as_str())).collect()
+}
+
 /// The byte offset where the *declaration* of `key` begins in `source` (the start of the
 /// `class`/`interface`/`enum`/method/field declaration node, NOT just its name token — so
 /// a preceding Javadoc comment can be found immediately above it). `None` when `source`
@@ -689,7 +702,7 @@ fn member_declaration_start(root: &Node, start: usize, end: usize) -> Option<usi
             kind if kind.ends_with("_body") || bennu_java::prelude::is_type_declaration(&n) => {
                 return None
             }
-            _ => cur = n.parent(),
+            _ => cur = parent_of(n),
         }
     }
     None
@@ -714,8 +727,7 @@ fn find_decl_node_start(
         }
         if kinds.contains(&n.kind()) {
             if want_field {
-                let is_field = n
-                    .parent()
+                let is_field = parent_of(n)
                     .map(|p| p.kind() == "field_declaration")
                     .unwrap_or(false);
                 if !is_field {
@@ -727,7 +739,7 @@ fn find_decl_node_start(
                     // For a field, anchor on the enclosing `field_declaration` so the doc
                     // above `private int x;` (not above the bare declarator) is captured.
                     let anchor = if want_field {
-                        n.parent().unwrap_or(n)
+                        parent_of(n).unwrap_or(n)
                     } else {
                         n
                     };
@@ -1051,7 +1063,7 @@ fn plan_local(
 /// the callable's own name. Java allows `void foo(int foo)`, and renaming the parameter there must
 /// not rename the method with it.
 fn is_callable_own_name(node: &Node) -> bool {
-    node.parent()
+    parent_of(node)
         .filter(|p| matches!(p.kind(), "method_declaration" | "constructor_declaration"))
         .and_then(|p| p.child_by_field_name("name"))
         .map(|name| name.id() == node.id())
@@ -1059,7 +1071,7 @@ fn is_callable_own_name(node: &Node) -> bool {
 }
 
 fn enclosing_scope<'t>(node: &Node<'t>) -> Option<Node<'t>> {
-    let mut cur = node.parent();
+    let mut cur = parent_of(node);
     while let Some(n) = cur {
         match n.kind() {
             // The WHOLE declaration, header included — not just the body.
@@ -1075,7 +1087,7 @@ fn enclosing_scope<'t>(node: &Node<'t>) -> Option<Node<'t>> {
             }
             _ => {}
         }
-        cur = n.parent();
+        cur = parent_of(n);
     }
     None
 }
@@ -1345,8 +1357,8 @@ fn record_declares_component(decl: &Node, bytes: &[u8], name: &str) -> bool {
 /// Whether this `formal_parameter` is a record component rather than a method parameter — the
 /// grammar spells both the same way, and only the grandparent tells them apart.
 fn is_record_component(node: &Node) -> bool {
-    node.parent()
-        .and_then(|params| params.parent())
+    parent_of(node)
+        .and_then(|params| parent_of(params))
         .map(|owner| owner.kind() == "record_declaration")
         .unwrap_or(false)
 }
@@ -1457,8 +1469,7 @@ pub fn find_member_name_spans(source: &str, key: &DeclKey) -> Vec<(usize, usize)
             "variable_declarator" if want_field => {
                 // A declarator under a `field_declaration` (a class field) OR a
                 // `constant_declaration` (an interface's `int MAX = …;`) is the field decl.
-                let is_field = n
-                    .parent()
+                let is_field = parent_of(n)
                     .map(|p| matches!(p.kind(), "field_declaration" | "constant_declaration"))
                     .unwrap_or(false);
                 if is_field {
@@ -1512,7 +1523,7 @@ fn declared_in_type(
     supertypes: &HashMap<String, Vec<String>>,
 ) -> bool {
     let owner_simple = owner.simple.as_str();
-    let mut cur = node.parent();
+    let mut cur = parent_of(node);
     while let Some(n) = cur {
         // An anonymous body is the enclosing type, and the first one going up. Climbing past it
         // would compare the member against the name of the class the `new` sits in — which never
@@ -1557,7 +1568,7 @@ fn declared_in_type(
                 None => true,
             };
         }
-        cur = n.parent();
+        cur = parent_of(n);
     }
     true
 }
@@ -1716,12 +1727,29 @@ pub fn plan_types(
 
     // (2) the declaration name + import statements. ONE parse per file, matched against the
     // whole batch — this is the loop the batching exists for, and the one worth reporting on.
+    //
+    // Chunked so the (non-`Sync`) `on_file` callback only ever runs on THIS thread, between chunks:
+    // each chunk is parsed in parallel, and a cancel lands at the next chunk boundary. Files that do
+    // not contain any target's simple name are not parsed at all — see [`mentions_any_target`].
     let total = java_files.len();
-    for (done, f) in java_files.iter().enumerate() {
-        if !on_file(done, total) {
+    for (chunk_no, chunk) in java_files.chunks(DECL_PASS_CHUNK).enumerate() {
+        if !on_file(chunk_no * DECL_PASS_CHUNK, total) {
             return (out, false);
         }
-        collect_type_decls_and_imports(&f.source, &f.path, &targets, &mut out);
+        let per_file: Vec<Vec<Vec<Edit>>> = crate::java_index::parallel_map(chunk, |f| {
+            let mut found: Vec<Vec<Edit>> = Vec::new();
+            if mentions_any_target(&f.source, &targets) {
+                found.resize_with(targets.len(), Vec::new);
+                collect_type_decls_and_imports(&f.source, &f.path, &targets, &mut found);
+            }
+            found
+        });
+        // Input order is preserved by `parallel_map`, so the buckets fill exactly as the serial loop did.
+        for found in per_file {
+            for (bucket, edits) in out.iter_mut().zip(found) {
+                bucket.extend(edits);
+            }
+        }
     }
     on_file(total, total);
 
@@ -2082,6 +2110,22 @@ fn plan_type(
     buckets.into_iter().next().unwrap_or_default()
 }
 
+/// How many files the declaration/import pass parses between two progress/cancel checks.
+const DECL_PASS_CHUNK: usize = 256;
+
+/// Whether `source` could possibly need an edit for any rename in the batch.
+///
+/// Every edit [`collect_type_decls_and_imports`] makes is gated on a node whose text EQUALS a target's
+/// simple name (a declared name, a constructor name) or whose text equals its dotted FQCN, which ends
+/// in that simple name. So a file whose bytes do not contain any target's simple name has nothing to
+/// rewrite, whatever its package or imports say — a wildcard import or same-package use produces no
+/// `Import` edit, and its uses are the index's business, not this pass's. Unicode escapes cannot make
+/// a match this misses: an escaped spelling never compared equal to the plain name in the first place.
+/// An empty name never appears in a plan, but would match everything, so it is not skipped.
+fn mentions_any_target(source: &str, targets: &[TypeTarget]) -> bool {
+    targets.iter().any(|t| t.old_simple.is_empty() || source.contains(t.old_simple.as_str()))
+}
+
 #[allow(clippy::too_many_arguments)]
 /// One file, every rename in the batch. Parses once and pushes into each rename's bucket.
 fn collect_type_decls_and_imports(
@@ -2215,7 +2259,7 @@ fn collect_type_decls_and_imports(
 /// declaration, compared by whole binary name, so the constructor of a nested namesake in another
 /// outer type stays put.
 fn constructor_of(ctor: &Node, bytes: &[u8], package: Option<&str>, binary: &str) -> bool {
-    let mut cur = ctor.parent();
+    let mut cur = parent_of(ctor);
     while let Some(n) = cur {
         if bennu_java::prelude::is_anonymous_body(&n) {
             return false;
@@ -2224,7 +2268,7 @@ fn constructor_of(ctor: &Node, bytes: &[u8], package: Option<&str>, binary: &str
             return bennu_java::prelude::declared_type_binary(&n, bytes, package)
                 .is_none_or(|d| bennu_java::prelude::same_binary_type(&d, binary));
         }
-        cur = n.parent();
+        cur = parent_of(n);
     }
     false
 }
@@ -2754,6 +2798,66 @@ pub(crate) mod tests {
         assert_eq!(bean.new_text, "com.acme.Gadget");
         // rename_apply flattens the same set.
         assert_eq!(rename_apply(&p).len(), p.total_edits());
+    }
+
+    fn target_of(binary: &str, new_name: &str) -> TypeTarget {
+        TypeTarget::of(&TypeRename { binary: binary.into(), new_name: new_name.into() })
+    }
+
+    /// The skip rule is exactly "the simple name does not occur": a file that needs a rewrite is
+    /// never dropped, and one that cannot need one is.
+    #[test]
+    fn the_parse_skip_never_drops_a_file_that_needs_an_edit() {
+        let targets = [target_of("com/acme/Widget", "Gadget")];
+        let declares = "package com.acme; public class Widget { Widget() {} }";
+        let imports = "package q; import com.acme.Widget; class U { }";
+        let nested_mention = "class V { /* Widget */ }";
+        let unrelated = "package q; class W { Wid get; }";
+        assert!(mentions_any_target(declares, &targets));
+        assert!(mentions_any_target(imports, &targets));
+        assert!(mentions_any_target(nested_mention, &targets), "a superset is fine; only misses are bugs");
+        assert!(!mentions_any_target(unrelated, &targets));
+        assert!(!mentions_any_target("", &targets));
+    }
+
+    /// End to end over enough files to take the chunked parallel path: the declaration and the exact
+    /// import are rewritten, and a wildcard importer and the filler files get no declaration/import edit.
+    #[test]
+    fn the_declaration_pass_matches_across_many_files() {
+        let widget = ("Widget.java".to_string(), "package com.acme; public class Widget { }".to_string());
+        let exact = (
+            "Exact.java".to_string(),
+            "package com.app; import com.acme.Widget; class Exact { Widget w; }".to_string(),
+        );
+        let wild = (
+            "Wild.java".to_string(),
+            "package com.app; import com.acme.*; class Wild { Widget w; }".to_string(),
+        );
+        let mut files = vec![widget, exact, wild];
+        for i in 0..300 {
+            files.push((format!("Filler{i}.java"), format!("package f; class Filler{i} {{ int x{i}; }}")));
+        }
+        let borrowed: Vec<(&str, &str)> = files.iter().map(|(p, s)| (p.as_str(), s.as_str())).collect();
+        let (resolver, project_types) = build_resolver(&borrowed);
+        let src: Vec<SourceFile> = files
+            .iter()
+            .map(|(p, s)| SourceFile { path: p.clone(), source: s.clone() })
+            .collect();
+        let index = build_reference_index(&src, &resolver, &project_types);
+        let java_files: Vec<PlanFile> = files
+            .iter()
+            .map(|(p, s)| PlanFile { path: p.clone(), source: s.clone() })
+            .collect();
+
+        let renames = [TypeRename { binary: "com/acme/Widget".into(), new_name: "Gadget".into() }];
+        let (buckets, completed) = plan_types(&index, &renames, &java_files, &[], &|_, _| true);
+        assert!(completed);
+        let edits = &buckets[0];
+        let of = |r: EditReason| -> Vec<&str> {
+            edits.iter().filter(|e| e.reason == r).map(|e| e.file.as_str()).collect()
+        };
+        assert_eq!(of(EditReason::Declaration), vec!["Widget.java"]);
+        assert_eq!(of(EditReason::Import), vec!["Exact.java"]);
     }
 
     #[test]

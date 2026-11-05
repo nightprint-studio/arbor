@@ -54,14 +54,14 @@ impl Ctx<'_> {
 
     /// `case |`: the type of what the enclosing `switch` is over.
     pub(super) fn expected_from_case(&self, label: &Node) -> Option<TypeRef> {
-        let mut up = label.parent();
+        let mut up = crate::parents::parent_of(label);
         while let Some(n) = up {
             if matches!(n.kind(), "switch_expression" | "switch_statement") {
                 let selector = n.child_by_field_name("condition")?;
                 let inner = if selector.kind() == "parenthesized_expression" { selector.named_child(0)? } else { selector };
                 return self.type_of_operand(&inner);
             }
-            up = n.parent();
+            up = crate::parents::parent_of(n);
         }
         None
     }
@@ -84,10 +84,10 @@ impl Ctx<'_> {
 
     /// `Foo[] xs = { | }` and `new Foo[] { | }`: the element of the array.
     pub(super) fn expected_from_array_initializer(&self, init: &Node) -> Option<TypeRef> {
-        let parent = init.parent()?;
+        let parent = crate::parents::parent_of(init)?;
         let array = match parent.kind() {
             "variable_declarator" => {
-                let text = node_text(&parent.parent()?.child_by_field_name("type")?, self.bytes)?;
+                let text = node_text(&crate::parents::parent_of(parent)?.child_by_field_name("type")?, self.bytes)?;
                 self.resolve_type_text(&text)?
             }
             "array_creation_expression" => {
@@ -104,7 +104,7 @@ impl Ctx<'_> {
     /// An argument whose slot needs no overload resolution: `a.equals(|)`, and the elements of a collection factory.
     /// `None` for every other call.
     pub(super) fn expected_from_argument(&self, args: &Node) -> Option<TypeRef> {
-        let call = args.parent()?;
+        let call = crate::parents::parent_of(args)?;
         if call.kind() != "method_invocation" {
             return None;
         }

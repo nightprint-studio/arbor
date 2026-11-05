@@ -131,7 +131,7 @@ fn feature_at(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
         // and only its text says it is the unnamed one.
         "identifier"
             if n.utf8_text(bytes) == Ok("_")
-                && n.parent().is_some_and(|p| {
+                && bennu_java::prelude::parent_of(n).is_some_and(|p| {
                     p.kind() == "inferred_parameters" || (p.kind() == "lambda_expression" && p.child_by_field_name("parameters") == Some(n))
                 }) =>
         {
@@ -153,7 +153,7 @@ fn feature_at(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
         }
         // `x instanceof Point(int a, int b)` (JEP 440). One inside a `case` label is dated by the label
         // already; a nested one by the outermost.
-        "record_pattern" if n.parent().is_some_and(|p| p.kind() == "instanceof_expression") => {
+        "record_pattern" if bennu_java::prelude::parent_of(n).is_some_and(|p| p.kind() == "instanceof_expression") => {
             Some(("Record patterns", 21))
         }
         // Java 25 (JEP 511).
@@ -248,12 +248,12 @@ fn widest_label_feature(label: Node) -> Option<(&'static str, u32)> {
 /// Whether `n` sits anywhere inside a `switch` — the guard that tells a `switch` `yield` from a call
 /// to a method a pre-14 project happened to name `yield`.
 fn inside_switch(n: Node) -> bool {
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         if p.kind() == "switch_expression" {
             return true;
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     false
 }
@@ -315,7 +315,7 @@ fn type_alternatives(catch_type: Node) -> usize {
 /// Interface-method version features: a body → 8, `private` → 9. `None` outside an interface.
 fn interface_method_feature(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
     // Only interface methods.
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     let in_interface = loop {
         match cur {
             Some(p) if p.kind() == "interface_declaration" => break true,
@@ -327,7 +327,7 @@ fn interface_method_feature(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)
             {
                 break false
             }
-            Some(p) => cur = p.parent(),
+            Some(p) => cur = bennu_java::prelude::parent_of(p),
             None => break false,
         }
     };

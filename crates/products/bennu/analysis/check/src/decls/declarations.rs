@@ -62,24 +62,24 @@ pub fn declaration_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
 /// type the member belongs to: a method of an anonymous class written inside an interface is a class
 /// method, and holding it to the interface's rules reported legal code.
 fn enclosing_type(node: Node) -> Option<Node> {
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(n) = cur {
         if TYPE_DECLS.contains(&n.kind()) {
             return Some(n);
         }
         if n.kind() == "class_body"
-            && n.parent().is_some_and(|p| matches!(p.kind(), "object_creation_expression" | "enum_constant"))
+            && bennu_java::prelude::parent_of(n).is_some_and(|p| matches!(p.kind(), "object_creation_expression" | "enum_constant"))
         {
             return None;
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     None
 }
 
 /// Whether a type declaration sits directly in the compilation unit (not nested in another type).
 fn is_top_level(n: Node) -> bool {
-    n.parent().is_some_and(|p| p.kind() == "program")
+    bennu_java::prelude::parent_of(n).is_some_and(|p| p.kind() == "program")
 }
 
 /// Modifiers JLS §8.1.1 / §9.1.1 do not allow on a TOP-LEVEL type: they only make sense for a member.

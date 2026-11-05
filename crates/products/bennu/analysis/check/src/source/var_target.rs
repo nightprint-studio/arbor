@@ -46,7 +46,7 @@ pub fn var_position_errors_nodes(nodes: &[Node], source: &str, java_major: Optio
             "formal_parameter" => n
                 .parent()
                 .filter(|p| p.kind() == "formal_parameters")
-                .and_then(|p| p.parent())
+                .and_then(|p| bennu_java::prelude::parent_of(p))
                 .filter(|owner| matches!(owner.kind(), "method_declaration" | "constructor_declaration"))
                 .and_then(|_| n.child_by_field_name("type")),
             _ => None,

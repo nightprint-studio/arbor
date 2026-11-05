@@ -59,7 +59,15 @@ pub struct IndexBuilder {
     /// Which module each source directory belongs to — kept across persists, because a patch
     /// persists again and the pom layout does not change under it.
     modules: ModuleCache,
+    /// How many threads [`persist`](Self::persist) may serialize records on. `0` = automatic.
+    persist_workers: usize,
 }
+
+/// Files serialized per round of [`IndexBuilder::persist`]. A round's bytes are appended and dropped
+/// before the next starts, so the peak extra memory is one round of records, not the whole index.
+const PERSIST_ROUND_FILES: usize = 256;
+/// Below this many files in a round the thread start-up costs more than it saves.
+const PERSIST_PARALLEL_MIN_FILES: usize = 16;
 
 impl IndexBuilder {
     /// Start a builder writing `<index_dir>/symbols.blob` + `<index_dir>/names.fst`.
@@ -69,7 +77,14 @@ impl IndexBuilder {
             blob_path: index_dir.join("symbols.blob"),
             fst_path: index_dir.join("names.fst"),
             modules: ModuleCache::default(),
+            persist_workers: 0,
         }
+    }
+
+    /// Cap the threads [`persist`](Self::persist) serializes on (`0` = automatic, `1` = serial). The
+    /// host passes its background-work budget so a persist respects the same CPU setting the parse does.
+    pub fn set_persist_workers(&mut self, workers: usize) {
+        self.persist_workers = workers;
     }
 
     /// Set (or replace) the records contributed by one source `file`. Replacing is how
@@ -117,19 +132,25 @@ impl IndexBuilder {
     pub fn persist(&self) -> Result<(), StoreError> {
         let duplicated = self.types_declared_in_several_modules();
         let mut writer = BlobWriter::new();
-        for (file, recs) in &self.files {
-            // Looked up only when something is duplicated: a project without duplicates pays nothing.
-            let module = (!duplicated.is_empty()).then(|| self.modules.module_of(file)).flatten();
-            for rec in recs {
-                let bytes = serialize_symbol(&rec.symbol).map_err(StoreError::Io)?;
-                let primary = rec.keys.first().map(String::as_str).unwrap_or("");
-                let off = writer.append(primary, &bytes);
-                for extra in rec.keys.iter().skip(1) {
-                    writer.append_alias(extra, off);
-                }
-                if let Some(module) = &module {
-                    if duplicated.contains(rec.symbol.fqn.as_str()) && is_type_record(&rec.symbol) {
-                        writer.append_alias(&module_alias_key(module, &rec.symbol.fqn), off);
+        let entries: Vec<(&PathBuf, &Vec<IndexRecord>)> = self.files.iter().collect();
+        // The rkyv encoding of each record is independent of every other, and it is the bulk of a
+        // persist, so a round of files is encoded on several threads and then appended in file order —
+        // the blob is byte-identical to the serial one, offsets and all.
+        for round in entries.chunks(PERSIST_ROUND_FILES) {
+            let encoded = encode_round(round, self.persist_workers)?;
+            for ((file, recs), bytes_of_file) in round.iter().zip(encoded) {
+                // Looked up only when something is duplicated: a project without duplicates pays nothing.
+                let module = (!duplicated.is_empty()).then(|| self.modules.module_of(file)).flatten();
+                for (rec, bytes) in recs.iter().zip(bytes_of_file) {
+                    let primary = rec.keys.first().map(String::as_str).unwrap_or("");
+                    let off = writer.append(primary, &bytes);
+                    for extra in rec.keys.iter().skip(1) {
+                        writer.append_alias(extra, off);
+                    }
+                    if let Some(module) = &module {
+                        if duplicated.contains(rec.symbol.fqn.as_str()) && is_type_record(&rec.symbol) {
+                            writer.append_alias(&module_alias_key(module, &rec.symbol.fqn), off);
+                        }
                     }
                 }
             }
@@ -172,6 +193,61 @@ impl IndexBuilder {
     pub fn fst_path(&self) -> &Path {
         &self.fst_path
     }
+}
+
+/// The rkyv bytes of every record of every file in `round`, `[file][record]`, in input order.
+///
+/// Work-stealing over files (one huge file cannot strand the rest of a static split behind it) on
+/// scoped threads, so nothing outlives the call and no dependency is added. Serial for a small
+/// round or a one-worker budget.
+fn encode_round(
+    round: &[(&PathBuf, &Vec<IndexRecord>)],
+    max_workers: usize,
+) -> Result<Vec<Vec<Vec<u8>>>, StoreError> {
+    let encode_file = |recs: &Vec<IndexRecord>| -> Result<Vec<Vec<u8>>, String> {
+        recs.iter().map(|rec| serialize_symbol(&rec.symbol)).collect()
+    };
+    let cores = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
+    let workers = if max_workers == 0 { cores.saturating_sub(2).max(1) } else { max_workers.min(cores).max(1) };
+    if workers <= 1 || round.len() < PERSIST_PARALLEL_MIN_FILES {
+        return round.iter().map(|(_, recs)| encode_file(*recs)).collect::<Result<_, _>>().map_err(StoreError::Io);
+    }
+
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let (next, encode_file) = (&next, &encode_file);
+    let mut slots: Vec<Option<Result<Vec<Vec<u8>>, String>>> = (0..round.len()).map(|_| None).collect();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers.min(round.len()))
+            .map(|_| {
+                scope.spawn(move || {
+                    let mut done = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some((_, recs)) = round.get(i) else { break };
+                        done.push((i, encode_file(*recs)));
+                    }
+                    done
+                })
+            })
+            .collect();
+        for handle in handles {
+            // A worker only panics if rkyv does; surface it as the error it is instead of aborting.
+            match handle.join() {
+                Ok(done) => {
+                    for (i, result) in done {
+                        slots[i] = Some(result);
+                    }
+                }
+                Err(_) => return Err(StoreError::Io("index record encoder panicked".to_string())),
+            }
+        }
+        Ok(())
+    })?;
+    slots
+        .into_iter()
+        .map(|slot| slot.unwrap_or_else(|| Err("index record encoder skipped a file".to_string())))
+        .collect::<Result<_, _>>()
+        .map_err(StoreError::Io)
 }
 
 /// Whether `symbol` is a type record — the only kind that carries members and is looked up by its
@@ -341,6 +417,30 @@ mod tests {
         assert!(!read.contains(&module_alias_key(&key(&a), "p/Only")));
         drop(read);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parallel_persist_writes_the_same_bytes_as_serial() {
+        let build = |sub: &str, workers: usize| {
+            let dir = tmp().join(sub);
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut b = IndexBuilder::new(&dir);
+            b.set_persist_workers(workers);
+            for i in 0..60u32 {
+                let name = format!("C{i}");
+                let rec = IndexRecord::new(
+                    class_sym(i, &name, &format!("p/{name}"), &format!("{{\"n\":{i}}}"), "f"),
+                    name.clone(),
+                )
+                .with_key(format!("p/{name}"));
+                b.set_file(PathBuf::from(format!("/proj/{name}.java")), vec![rec]);
+            }
+            b.persist().unwrap();
+            let bytes = (std::fs::read(b.blob_path()).unwrap(), std::fs::read(b.fst_path()).unwrap());
+            let _ = std::fs::remove_dir_all(&dir);
+            bytes
+        };
+        assert_eq!(build("serial", 1), build("parallel", 4));
     }
 
     #[test]

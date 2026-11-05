@@ -18,6 +18,8 @@
     id: string;
     label: string;
     icon: any;
+    /** Optional CSS colour for the icon, like {@link MenuItem.iconColor}. */
+    iconColor?: string;
     shortcut?: string;
     disabled?: boolean;
     danger?: boolean;
@@ -332,7 +334,7 @@
           aria-label={action.label}
           use:tooltip={action.shortcut ? { content: action.label, shortcut: action.shortcut } : { content: action.label }}
         >
-          <ActionIcon size={16} />
+          <span class="quick-icon" style={action.iconColor ? `color:${action.iconColor}` : undefined}><ActionIcon size={16} /></span>
         </button>
       {/each}
     </div>
@@ -457,6 +459,7 @@
   }
 
   /* Windows-11-style horizontal icon bar pinned to the top of the menu. */
+  .quick-icon { display: inline-flex; }
   .quick-actions {
     display: flex;
     align-items: center;

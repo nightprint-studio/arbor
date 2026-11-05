@@ -87,7 +87,15 @@
   same whichever adapter resolved, and know which variant an enum actually holds — which no static type can. A subscript is fetched alone, so <code>v[400000]</code> on a million-element
   <code>Vec</code> is a fair question with an exact answer. Watches are saved with the breakpoints.
 </p>
-<p>Anything not a path goes to the debugger's own evaluator, and Bennu says which and what it can do:</p>
+<p>
+  A watch may also be a <strong>small expression</strong> over paths, in the language Java breakpoint conditions use: <code>i + 1</code>, <code>order.total * 2 &gt; limit</code>, <code>items[i]</code>,
+  <code>done &amp;&amp; n % 2 == 0</code>, <code>-x</code>; on Java also <code>Status.ACTIVE</code> and other static fields, and <code>+</code> joining strings. Numbers behave as the language does —
+  Java's <code>int</code> and <code>long</code> wrap around; on a native session every integer is a checked 64-bit number, overflow and dividing by zero are errors, integers and floats are never
+  mixed, a <code>u64</code> above the signed range is refused rather than wrapped, and two structs are compared field by field, not with <code>==</code>.
+  A <strong>method call is refused by name</strong>: it would run application code inside a stopped program. An expression this language understands is answered by it, and a failure is its own,
+  not quietly retried on the debugger; what it does not parse (<code>x as u64</code>, <code>&amp;x</code>, <code>Enum::Variant</code>, closures) goes to the debugger's evaluator below.
+</p>
+<p>Anything not a path or such an expression goes to the debugger's own evaluator, and Bennu says which and what it can do:</p>
 <table>
   <thead><tr><th>CodeLLDB prefix</th><th>Evaluator</th></tr></thead>
   <tbody>

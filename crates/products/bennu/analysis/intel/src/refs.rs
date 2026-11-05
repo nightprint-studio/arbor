@@ -21,10 +21,13 @@
 use std::collections::{HashMap, HashSet};
 
 use bennu_java::prelude::{
-    extract_symbols_from_root, infer_receiver_type_at, infer_receiver_type_cached, FileSymbols, InferCache,
+    extract_symbols_from_root, infer_receiver_type_at, infer_receiver_type_cached, parent_of, FileSymbols,
+    InferCache, ParentTable,
     TypeRef as JTypeRef,
     TypeResolver,
 };
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
@@ -140,6 +143,8 @@ pub struct ReferenceIndex {
     unresolved_by_name: HashMap<String, Vec<UsageLocation>>,
     /// Which buckets each file put something in — see [`FileFootprint`].
     footprints: HashMap<String, FileFootprint>,
+    /// Reverse lookups over the two per-file tables above — see [`FileLookups`].
+    lookups: FileLookups,
 }
 
 impl DeclKey {
@@ -204,6 +209,89 @@ struct FileFootprint {
     resolved: usize,
 }
 
+/// Two reverse lookups over the per-file tables, so the questions "which file declares this type" and
+/// "which files resolve against these types" are a hash probe instead of a scan of every file.
+///
+/// Both used to walk the whole project per call — `file_declaring` once per classified caret and per
+/// hover, `dependents_of` on every edit that moves a declaration fingerprint. Maintained by the same
+/// two places that maintain `file_symbols` / `footprints` (absorb and withdraw), so they cannot drift.
+#[derive(Default)]
+struct FileLookups {
+    /// Dotted FQN → the files declaring it (normally one; a vec because a duplicate class across two
+    /// source roots must not make withdrawing one of them forget the other).
+    declarers: HashMap<String, Vec<Arc<str>>>,
+    /// Owner binary → the files with at least one edge resolving to it.
+    owner_files: HashMap<String, HashSet<Arc<str>>>,
+}
+
+impl FileLookups {
+    fn add_declarations(&mut self, path: &Arc<str>, symbols: &FileSymbols) {
+        for t in &symbols.types {
+            self.declarers.entry(t.fqn.clone()).or_default().push(Arc::clone(path));
+        }
+    }
+
+    fn remove_declarations(&mut self, path: &str, symbols: &FileSymbols) {
+        for t in &symbols.types {
+            if let Some(files) = self.declarers.get_mut(t.fqn.as_str()) {
+                files.retain(|f| &**f != path);
+                if files.is_empty() {
+                    self.declarers.remove(t.fqn.as_str());
+                }
+            }
+        }
+    }
+
+    fn add_dependencies(&mut self, path: &Arc<str>, keys: &[DeclKey]) {
+        for key in keys {
+            let owner = key.owner_binary();
+            match self.owner_files.get_mut(owner) {
+                Some(files) => {
+                    files.insert(Arc::clone(path));
+                }
+                None => {
+                    self.owner_files
+                        .insert(owner.to_string(), HashSet::from([Arc::clone(path)]));
+                }
+            }
+        }
+    }
+
+    fn remove_dependencies(&mut self, path: &str, keys: &[DeclKey]) {
+        for key in keys {
+            let owner = key.owner_binary();
+            if let Some(files) = self.owner_files.get_mut(owner) {
+                files.remove(path);
+                if files.is_empty() {
+                    self.owner_files.remove(owner);
+                }
+            }
+        }
+    }
+}
+
+/// Pour one file's `(bucket key, use site)` pairs into the shared buckets and record each distinct
+/// key once in `touched`.
+///
+/// A hash set decides "seen already": the `Vec::contains` this replaced was O(edges × distinct keys)
+/// per file, and it runs on every edit through [`ReferenceIndex::refresh_file`]. Each distinct key is
+/// cloned exactly once (into the set); `touched` ends up holding the same keys, in arbitrary order —
+/// nothing reads the order, only membership.
+fn pour_edges<K: Eq + std::hash::Hash + Clone>(
+    buckets: &mut HashMap<K, Vec<UsageLocation>>,
+    touched: &mut Vec<K>,
+    edges: Vec<(K, UsageLocation)>,
+) {
+    let mut seen: HashSet<K> = HashSet::new();
+    for (key, usage) in edges {
+        if !seen.contains(&key) {
+            seen.insert(key.clone());
+        }
+        buckets.entry(key).or_default().push(usage);
+    }
+    touched.extend(seen);
+}
+
 impl ReferenceIndex {
     /// Every usage of a declaration key (empty when none / unknown key).
     pub fn usages_of(&self, key: &DeclKey) -> &[UsageLocation] {
@@ -235,10 +323,22 @@ impl ReferenceIndex {
         self.absorb(path, walk_file(path, src, resolver, project_types));
     }
 
+    /// [`refresh_file`](Self::refresh_file) for a file that was already walked elsewhere (see
+    /// [`walk_file`]): withdraw the old contribution and pour the new one in. Splitting the walk (pure,
+    /// expensive, needs no index) from the swap (cheap, needs `&mut self`) is what lets a caller run
+    /// many walks in parallel and hold the index's write lock only for the swaps.
+    pub(crate) fn replace_file(&mut self, path: &str, walked: FileContribution) {
+        self.withdraw_file(path);
+        self.absorb(path, walked);
+    }
+
     /// Take a file's entries back out of every bucket it is in, and un-count its stats.
     fn withdraw_file(&mut self, path: &str) {
-        self.file_symbols.remove(path);
+        if let Some(old) = self.file_symbols.remove(path) {
+            self.lookups.remove_declarations(path, &old);
+        }
         let Some(fp) = self.footprints.remove(path) else { return };
+        self.lookups.remove_dependencies(path, &fp.keys);
         self.attempted = self.attempted.saturating_sub(fp.attempted);
         self.resolved = self.resolved.saturating_sub(fp.resolved);
         for key in &fp.keys {
@@ -265,18 +365,11 @@ impl ReferenceIndex {
         self.resolved += c.resolved;
         let mut fp =
             FileFootprint { attempted: c.attempted, resolved: c.resolved, ..FileFootprint::default() };
-        for (key, usage) in c.edges {
-            if !fp.keys.contains(&key) {
-                fp.keys.push(key.clone());
-            }
-            self.by_decl.entry(key).or_default().push(usage);
-        }
-        for (name, usage) in c.unresolved {
-            if !fp.names.iter().any(|n| *n == name) {
-                fp.names.push(name.clone());
-            }
-            self.unresolved_by_name.entry(name).or_default().push(usage);
-        }
+        pour_edges(&mut self.by_decl, &mut fp.keys, c.edges);
+        pour_edges(&mut self.unresolved_by_name, &mut fp.names, c.unresolved);
+        let shared_path: Arc<str> = Arc::from(path);
+        self.lookups.add_declarations(&shared_path, &c.symbols);
+        self.lookups.add_dependencies(&shared_path, &fp.keys);
         self.file_symbols.insert(path.to_string(), c.symbols);
         self.footprints.insert(path.to_string(), fp);
     }
@@ -338,15 +431,16 @@ impl ReferenceIndex {
     /// `exclude` is the file that changed: it has already been refreshed and re-walking it a second
     /// time would be pure cost.
     pub fn dependents_of(&self, owners: &HashSet<String>, exclude: &str) -> Vec<String> {
-        let mut out = Vec::new();
-        for (path, fp) in &self.footprints {
-            if path == exclude {
-                continue;
-            }
-            if fp.keys.iter().any(|k| owners.contains(k.owner_binary())) {
-                out.push(path.clone());
+        let mut found: HashSet<&str> = HashSet::new();
+        for owner in owners {
+            if let Some(files) = self.lookups.owner_files.get(owner.as_str()) {
+                found.extend(files.iter().map(|f| &**f));
             }
         }
+        found.remove(exclude);
+        // Sorted so the re-walk order (and any log of it) is the same run to run.
+        let mut out: Vec<String> = found.into_iter().map(str::to_string).collect();
+        out.sort_unstable();
         out
     }
 
@@ -423,10 +517,7 @@ impl ReferenceIndex {
     }
 
     fn declaring_fqn(&self, fqn: &str) -> Option<&str> {
-        self.file_symbols
-            .iter()
-            .find(|(_, fs)| fs.types.iter().any(|t| t.fqn == fqn))
-            .map(|(path, _)| path.as_str())
+        self.lookups.declarers.get(fqn).and_then(|files| files.first()).map(|f| &**f)
     }
 
     /// Iterate every `(declaration, usages)` bucket (for ranking / reporting).
@@ -475,7 +566,7 @@ pub struct IncrementalBuild {
 
 /// One file's contribution to the reference index: its resolved edges + parsed symbols + the
 /// resolve stats. The unit the incremental cache stores and reuses.
-struct FileContribution {
+pub(crate) struct FileContribution {
     symbols: FileSymbols,
     edges: Vec<(DeclKey, UsageLocation)>,
     attempted: usize,
@@ -493,7 +584,7 @@ struct FileContribution {
 
 /// Parse + walk ONE file (parse once, reuse the tree for both the symbol map and the walk —
 /// see [`FileWalker::walk`]).
-fn walk_file(
+pub(crate) fn walk_file(
     path: &str,
     source: &str,
     resolver: &dyn TypeResolver,
@@ -507,6 +598,9 @@ fn walk_file(
     let symbols = match bennu_java::prelude::parse_java(source) {
         Some(tree) => {
             let root = tree.root_node();
+            // Every ancestor climb below answers from this table instead of re-descending from the
+            // root. Declared after the tree so it drops first.
+            let _parents = ParentTable::arm(root);
             let symbols = extract_symbols_from_root(&root, source);
             walker.walk(&root, &symbols);
             symbols
@@ -522,59 +616,51 @@ fn walk_file(
     }
 }
 
-/// Fold the per-file cache map into the queryable [`ReferenceIndex`], and hand back the cache
-/// (same data) to persist. The clone is cheap next to the walk, and keeps the two owners
-/// independent (the index is queried live; the cache is written to disk).
+/// Fold the per-file cache map into the queryable [`ReferenceIndex`].
+///
+/// With `keep_cache` the map is also handed back as the [`RefCache`](crate::refcache::RefCache) to
+/// persist, which means the index is built from CLONES (the two owners stay independent: the index is
+/// queried live, the cache is written to disk). Without it nothing will be saved, so the entries are
+/// MOVED into the index instead — no second copy of every file's edges and symbols is ever made.
 fn assemble(
     files_map: HashMap<String, crate::refcache::CachedFile>,
     tm_hash: u64,
-) -> (ReferenceIndex, crate::refcache::RefCache) {
-    let mut by_decl: HashMap<DeclKey, Vec<UsageLocation>> = HashMap::new();
-    let mut file_symbols: HashMap<String, FileSymbols> = HashMap::new();
-    let mut attempted = 0usize;
-    let mut resolved = 0usize;
-    let mut unresolved_by_name: HashMap<String, Vec<UsageLocation>> = HashMap::new();
-    let mut footprints: HashMap<String, FileFootprint> = HashMap::new();
-    for (path, cf) in &files_map {
-        attempted += cf.attempted;
-        resolved += cf.resolved;
-        file_symbols.insert(path.clone(), cf.symbols.clone());
-        let mut fp = FileFootprint {
+    keep_cache: bool,
+) -> (ReferenceIndex, Option<crate::refcache::RefCache>) {
+    fn contribution(cf: crate::refcache::CachedFile) -> FileContribution {
+        FileContribution {
+            symbols: cf.symbols,
+            edges: cf.edges,
             attempted: cf.attempted,
             resolved: cf.resolved,
-            ..FileFootprint::default()
-        };
-        for (key, usage) in &cf.edges {
-            by_decl.entry(key.clone()).or_default().push(usage.clone());
-            if !fp.keys.contains(key) {
-                fp.keys.push(key.clone());
-            }
+            unresolved: cf.unresolved,
         }
-        for (name, usage) in &cf.unresolved {
-            unresolved_by_name
-                .entry(name.clone())
-                .or_default()
-                .push(usage.clone());
-            if !fp.names.iter().any(|n| n == name) {
-                fp.names.push(name.clone());
-            }
-        }
-        footprints.insert(path.clone(), fp);
     }
-    let index = ReferenceIndex {
-        by_decl,
-        file_symbols,
-        attempted,
-        resolved,
-        unresolved_by_name,
-        footprints,
+    let mut index = ReferenceIndex {
+        by_decl: HashMap::new(),
+        file_symbols: HashMap::with_capacity(files_map.len()),
+        attempted: 0,
+        resolved: 0,
+        unresolved_by_name: HashMap::new(),
+        footprints: HashMap::with_capacity(files_map.len()),
+        lookups: FileLookups::default(),
     };
-    let cache = crate::refcache::RefCache {
-        version: crate::refcache::CACHE_VERSION,
-        type_map_hash: tm_hash,
-        files: files_map,
-    };
-    (index, cache)
+    if keep_cache {
+        for (path, cf) in &files_map {
+            index.absorb(path, contribution(cf.clone()));
+        }
+        let cache = crate::refcache::RefCache {
+            version: crate::refcache::CACHE_VERSION,
+            type_map_hash: tm_hash,
+            files: files_map,
+        };
+        (index, Some(cache))
+    } else {
+        for (path, cf) in files_map {
+            index.absorb(&path, contribution(cf));
+        }
+        (index, None)
+    }
 }
 
 /// Build the reference index, REUSING a prior on-disk cache where valid: walk only the files
@@ -598,10 +684,9 @@ pub fn build_reference_index_incremental(
         prior.filter(|c| c.version == crate::refcache::CACHE_VERSION && c.type_map_hash == tm_hash);
     let prior_valid = prior.is_some();
 
-    let hashes: Vec<u64> = files
-        .iter()
-        .map(|f| crate::refcache::content_hash(&f.source))
-        .collect();
+    // A pure per-file map over the whole project's text — parallel, like the walk it feeds.
+    let hashes: Vec<u64> =
+        crate::java_index::parallel_map(files, |f| crate::refcache::content_hash(&f.source));
     let cur_paths: HashSet<&str> = files.iter().map(|f| f.path.as_str()).collect();
 
     // Which files must be (re)walked?
@@ -692,7 +777,9 @@ pub fn build_reference_index_incremental(
         );
     }
 
-    let (index, cache) = assemble(files_map, tm_hash);
+    // Nothing re-walked and the prior cache was valid → the on-disk copy is already current;
+    // don't rewrite it (it can be tens of MB), and don't keep a second copy to avoid doing so.
+    let (index, cache_to_save) = assemble(files_map, tm_hash, !(prior_valid && total == 0));
     eprintln!(
         "bennu-be: reference walk done in {:?} — {} decls, {} attempted, {} resolved ({total} walked, {reused} reused)",
         walk_start.elapsed(),
@@ -700,13 +787,6 @@ pub fn build_reference_index_incremental(
         index.attempted,
         index.resolved
     );
-    // Nothing re-walked and the prior cache was valid → the on-disk copy is already current;
-    // don't rewrite it (it can be tens of MB).
-    let cache_to_save = if prior_valid && total == 0 {
-        None
-    } else {
-        Some(cache)
-    };
     IncrementalBuild {
         index,
         cache_to_save,
@@ -1077,7 +1157,7 @@ impl<'a> FileWalker<'a> {
 
     /// The binary name of the annotation type whose argument list `node` sits in.
     fn enclosing_annotation_binary(&self, node: &Node) -> Option<String> {
-        let mut cur = node.parent();
+        let mut cur = parent_of(node);
         while let Some(n) = cur {
             if n.kind() == "annotation" {
                 let name = n.child_by_field_name("name")?;
@@ -1086,7 +1166,7 @@ impl<'a> FileWalker<'a> {
                 let simple = text.rsplit('.').next().unwrap_or(&text).to_string();
                 return self.resolve_type_simple(&simple);
             }
-            cur = n.parent();
+            cur = parent_of(n);
         }
         None
     }
@@ -1578,7 +1658,7 @@ impl<'a> FileWalker<'a> {
     }
 
     fn is_declaration_name(&self, node: &Node) -> bool {
-        let Some(parent) = node.parent() else {
+        let Some(parent) = parent_of(node) else {
             return false;
         };
         // Must list EVERY kind that declares a type. A kind missing here is indexed as a *use* of
@@ -1722,7 +1802,7 @@ fn classify_caret_at(
         return Some(key);
     }
 
-    let parent = ident.parent()?;
+    let parent = parent_of(ident)?;
     match parent.kind() {
         "method_invocation" => {
             let name_node = parent.child_by_field_name("name")?;
@@ -1892,7 +1972,7 @@ fn classify_caret_at(
             // `scoped_identifier` whose parent is the annotation. The whole dotted name is what
             // resolves, exactly as it is for a qualified type expression above.
             if parent.kind() == "scoped_identifier" {
-                if let Some(gp) = parent.parent() {
+                if let Some(gp) = parent_of(parent) {
                     if matches!(gp.kind(), "marker_annotation" | "annotation") {
                         let text = parent.utf8_text(bytes).unwrap_or(&ident_text).to_string();
                         let symbols = extract_symbols_from_root(root, source);
@@ -1937,7 +2017,7 @@ fn decl_name_key(
     index: &ReferenceIndex,
     project_types: &HashMap<String, String>,
 ) -> Option<DeclKey> {
-    let parent = node.parent()?;
+    let parent = parent_of(node)?;
     let name = node.utf8_text(bytes).ok()?.to_string();
     match parent.kind() {
         "class_declaration"
@@ -1982,7 +2062,7 @@ fn decl_name_key(
             Some(DeclKey::Method { owner, name })
         }
         "variable_declarator" => {
-            let gp = parent.parent()?;
+            let gp = parent_of(parent)?;
             if gp.kind() != "field_declaration" {
                 return None;
             }
@@ -2246,7 +2326,7 @@ fn type_scope_of<'t>(node: &Node<'t>) -> Option<Node<'t>> {
         if bennu_java::prelude::is_anonymous_body(&n) || declares_type(n.kind()) {
             return Some(n);
         }
-        cur = n.parent();
+        cur = parent_of(n);
     }
     None
 }
@@ -2274,8 +2354,7 @@ fn enclosing_type_binary(
         // that class's own `run()` reported a method nobody had called.
         if bennu_java::prelude::is_anonymous_body(&n) {
             if let Some(name) = bennu_java::prelude::anonymous_type_name(&n, bytes) {
-                let outer = n
-                    .parent()
+                let outer = parent_of(n)
                     .and_then(|p| enclosing_type_binary(&p, bytes, project_types));
                 if let Some(outer) = outer {
                     return Some(join_binary(&outer, &name, &chain));
@@ -2290,7 +2369,7 @@ fn enclosing_type_binary(
                 .to_string();
             chain.push(name);
         }
-        cur = n.parent();
+        cur = parent_of(n);
     }
     let innermost = chain.first()?.clone();
     // The buffer's own package + the chain it declares. Also the only thing that can work inside a
@@ -2433,7 +2512,7 @@ pub fn classify_target(
 /// The two member-selector shapes (`x.f`, `f()`) also carry a `name` field; they are filtered
 /// ahead of this by [`is_member_selector_node`].
 fn is_bound_name(node: &Node) -> bool {
-    let Some(parent) = node.parent() else {
+    let Some(parent) = parent_of(node) else {
         return false;
     };
     match parent.kind() {
@@ -2475,7 +2554,7 @@ fn enclosing_type_simple_str<'b>(node: &Node, bytes: &'b [u8]) -> Option<&'b str
         ) {
             return n.child_by_field_name("name")?.utf8_text(bytes).ok();
         }
-        cur = n.parent();
+        cur = parent_of(n);
     }
     None
 }
@@ -2499,7 +2578,7 @@ fn collect_bound_names(root: &Node, bytes: &[u8]) -> std::collections::HashSet<S
         }
         let bound = match n.kind() {
             // A declarator under a `field_declaration` is a field, not a local.
-            "variable_declarator" => match n.parent().map(|p| p.kind()) {
+            "variable_declarator" => match parent_of(n).map(|p| p.kind()) {
                 Some("field_declaration") => None,
                 _ => n.child_by_field_name("name"),
             },
@@ -2540,7 +2619,7 @@ fn collect_bound_names(root: &Node, bytes: &[u8]) -> std::collections::HashSet<S
 /// Whether an `identifier` is a member selector (`x.name`, `foo.bar()`) — a local rename
 /// must not treat these as the variable.
 pub(crate) fn is_member_selector_node(node: &Node) -> bool {
-    let Some(parent) = node.parent() else {
+    let Some(parent) = parent_of(node) else {
         return false;
     };
     match parent.kind() {
@@ -2638,7 +2717,7 @@ fn record_component_owner(ident: &Node, source: &str, name: &str) -> Option<Stri
     // Walk out to the nearest type. A `record` on the way means `ident` is either the component's
     // own declaration or an unqualified reference to it from the record's body — the two places a
     // component's name appears without a receiver.
-    let mut cur = ident.parent();
+    let mut cur = parent_of(ident);
     while let Some(n) = cur {
         if n.kind() == "record_declaration" {
             return has_component(&n, source.as_bytes(), name)
@@ -2655,7 +2734,7 @@ fn record_component_owner(ident: &Node, source: &str, name: &str) -> Option<Stri
         ) {
             return None;
         }
-        cur = n.parent();
+        cur = parent_of(n);
     }
     None
 }
@@ -2698,7 +2777,7 @@ fn find_local_binding_with(
     level: LangLevel,
     decl_in: &dyn Fn(&Node) -> Option<(usize, usize)>,
 ) -> Option<(usize, usize)> {
-    let mut cur = ident.parent();
+    let mut cur = parent_of(ident);
     while let Some(n) = cur {
         if matches!(
             n.kind(),
@@ -2747,7 +2826,7 @@ fn find_local_binding_with(
         ) {
             break;
         }
-        cur = n.parent();
+        cur = parent_of(n);
     }
     None
 }
@@ -2847,7 +2926,7 @@ fn visit_local_decls(
         // gated — an `instanceof` / `switch` pattern variable (`o instanceof String s`).
         let bound = match n.kind() {
             "variable_declarator" => {
-                if n.parent().map(|p| p.kind()) == Some("field_declaration") {
+                if parent_of(n).map(|p| p.kind()) == Some("field_declaration") {
                     None
                 } else {
                     n.child_by_field_name("name")
@@ -3687,5 +3766,81 @@ mod incremental_tests {
         index.refresh_file("A.java", Some(a2), &resolver, &project_types);
         let types = index.types_declared_in("A.java");
         assert!(types.contains(&"p/Extra".to_string()), "{types:?}");
+    }
+
+    fn site(file: &str, start: usize) -> UsageLocation {
+        UsageLocation { file: file.into(), start, end: start + 1, line: 1, col: 1, preview: String::new() }
+    }
+
+    /// The hash-set dedupe must record every distinct bucket key exactly once, and still pour every
+    /// use site — the `Vec::contains` it replaced did the same, only slower.
+    #[test]
+    fn pouring_edges_records_each_key_once_and_keeps_every_site() {
+        let mut buckets: HashMap<String, Vec<UsageLocation>> = HashMap::new();
+        let mut touched: Vec<String> = Vec::new();
+        let edges = vec![
+            ("a".to_string(), site("F", 1)),
+            ("b".to_string(), site("F", 2)),
+            ("a".to_string(), site("F", 3)),
+            ("a".to_string(), site("F", 4)),
+        ];
+        pour_edges(&mut buckets, &mut touched, edges);
+        touched.sort();
+        assert_eq!(touched, vec!["a".to_string(), "b".to_string()]);
+        let starts: Vec<usize> = buckets["a"].iter().map(|u| u.start).collect();
+        assert_eq!(starts, vec![1, 3, 4], "sites keep the order the walk produced them in");
+        assert_eq!(buckets["b"].len(), 1);
+    }
+
+    /// The reverse lookups follow the tables they mirror through a refresh and a delete.
+    #[test]
+    fn the_reverse_lookups_follow_refreshes_and_deletes() {
+        let a = "package p; public class A { public int val() { return 1; } }";
+        let b = "package p; public class B { public int u(A a) { return a.val(); } }";
+        let c = "package p; public class C { public int u(A a) { return a.val(); } }";
+        let (mut index, resolver, project_types) =
+            index_of(&[("A.java", a), ("B.java", b), ("C.java", c)]);
+        let owners: HashSet<String> = ["p/A".to_string()].into_iter().collect();
+
+        assert_eq!(index.file_declaring("p/A"), Some("A.java"));
+        assert_eq!(
+            index.dependents_of(&owners, "A.java"),
+            vec!["B.java".to_string(), "C.java".to_string()],
+            "sorted, so a sweep runs in the same order every time"
+        );
+
+        // B stops using A: it leaves the dependents. C stays.
+        let b2 = "package p; public class B { public int u() { return 0; } }";
+        index.refresh_file("B.java", Some(b2), &resolver, &project_types);
+        assert_eq!(index.dependents_of(&owners, "A.java"), vec!["C.java".to_string()]);
+
+        // A grows a second type, then is deleted: both declarations are found, then neither.
+        let a2 = "package p; public class A { public int val() { return 1; } } class Extra { }";
+        index.refresh_file("A.java", Some(a2), &resolver, &project_types);
+        assert_eq!(index.file_declaring("p/Extra"), Some("A.java"));
+        index.refresh_file("A.java", None, &resolver, &project_types);
+        assert_eq!(index.file_declaring("p/A"), None);
+        assert_eq!(index.file_declaring("p/Extra"), None);
+    }
+
+    /// Walking apart from the index and swapping the result in is the same as refreshing in place —
+    /// that equivalence is what lets the engine walk dependents outside its lock.
+    #[test]
+    fn a_walk_swapped_in_equals_an_in_place_refresh() {
+        let a = "package p; public class A { public int val() { return 1; } }";
+        let b = "package p; public class B { public int u(A a) { return a.val(); } }";
+        let b2 = "package p; public class B { public int u(A a) { return a.val() + a.val(); } }";
+        let (mut in_place, resolver, project_types) = index_of(&[("A.java", a), ("B.java", b)]);
+        let (mut swapped, _r, _pt) = index_of(&[("A.java", a), ("B.java", b)]);
+
+        in_place.refresh_file("B.java", Some(b2), &resolver, &project_types);
+        let walked = walk_file("B.java", b2, &resolver, &project_types);
+        swapped.replace_file("B.java", walked);
+
+        let key = method_key("p/A", "val");
+        let starts = |i: &ReferenceIndex| -> Vec<usize> { i.usages_of(&key).iter().map(|u| u.start).collect() };
+        assert_eq!(starts(&swapped), starts(&in_place));
+        assert_eq!(starts(&swapped).len(), 2);
+        assert_eq!(swapped.declaration_fingerprint("B.java"), in_place.declaration_fingerprint("B.java"));
     }
 }

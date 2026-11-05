@@ -66,7 +66,7 @@ shell hit going out-of-process. Handle events on a worker.
 | Methods | `Method.LineTable`, `Method.VariableTable` |
 | Stopping | `EventRequest.Set` (breakpoint · class-prepare · step · exception), `EventRequest.Clear` |
 | Threads | `ThreadReference.Name` / `.Frames` / `.Resume` |
-| Values | `StackFrame.GetValues` / `.ThisObject`, `ObjectReference.ReferenceType` / `.GetValues`, `ArrayReference.Length` / `.GetValues`, `StringReference.Value` |
+| Values | `StackFrame.GetValues` / `.ThisObject`, `ObjectReference.ReferenceType` / `.GetValues`, `ReferenceType.GetValues` (static fields), `ArrayReference.Length` / `.GetValues`, `StringReference.Value` |
 
 Plus `location_of_line`, which is the piece every debugger writes: the first line-table entry
 at or after the line you clicked, across every method of the class — because a lambda body and

@@ -141,7 +141,7 @@ fn call_named_at<'t>(root: &Node<'t>, offset: usize) -> Option<Node<'t>> {
                 }
             }
         }
-        cur = n.parent();
+        cur = crate::parents::parent_of(n);
     }
     None
 }

@@ -33,7 +33,7 @@ pub(crate) fn resolves_as_local(ident: Node, top: Node, bytes: &[u8]) -> bool {
 
     // Walk ancestors from the identifier upward, checking each executable scope for a binding of
     // `name`. Stop at `top`'s body / `top` itself — beyond the enclosing method, only fields apply.
-    let mut cur = ident.parent();
+    let mut cur = bennu_java::prelude::parent_of(ident);
     while let Some(p) = cur {
         if p.id() == top.id() || Some(p.id()) == top_body_id {
             break; // reached the type / its body — not a locals scope
@@ -41,7 +41,7 @@ pub(crate) fn resolves_as_local(ident: Node, top: Node, bytes: &[u8]) -> bool {
         if declares_name_in_scope(p, name, bytes) {
             return true;
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     false
 }
@@ -103,6 +103,7 @@ impl ScopeMemo {
 impl Drop for ScopeMemo {
     fn drop(&mut self) {
         if self.owner {
+            DECLARED.with(|d| d.borrow_mut().clear());
             BINDINGS.with(|b| *b.borrow_mut() = None);
         }
     }
@@ -217,23 +218,111 @@ fn binds_directly(scope: Node, name: &str, bytes: &[u8]) -> bool {
 pub(crate) fn resolves_as_local_lexically(ident: Node, top: Node, bytes: &[u8]) -> bool {
     let Ok(name) = referenced_name(ident, bytes) else { return true }; // unreadable → treat as bound
     let top_body_id = top.child_by_field_name("body").map(|b| b.id());
-    let mut enclosing: Vec<usize> = Vec::new();
-    let mut cur = ident.parent();
-    while let Some(p) = cur {
-        enclosing.push(p.id());
-        cur = p.parent();
-    }
-    let mut cur = ident.parent();
-    while let Some(p) = cur {
+    // One descent for the whole chain of ancestors (see `ancestors_up_to`); the fallback is the
+    // node-by-node climb, for a node that is not under `top`.
+    let climbed;
+    let ancestors: &[Node] = match ancestors_up_to(top, ident) {
+        Some(a) => {
+            climbed = a;
+            &climbed
+        }
+        None => {
+            climbed = std::iter::successors(bennu_java::prelude::parent_of(ident), |p| bennu_java::prelude::parent_of(p)).collect();
+            &climbed
+        }
+    };
+    let enclosing: Vec<usize> = ancestors.iter().map(|p| p.id()).collect();
+    // The subtree scan runs ONCE, on the outermost ancestor. What an ancestor's scan finds is a subset of
+    // what its parent's finds (every node on the way up is in `enclosing`, so none of them narrows the
+    // scan), and the answer is "any ancestor declares it" — so scanning each one only repeated work.
+    // That repetition is what made a builder chain cubic: `.a(..).b(..).c(..)` makes every call an
+    // ancestor of the identifiers inside the calls before it, each ancestor's subtree is the chain so
+    // far, and every identifier paid for all of them.
+    let mut outermost = None;
+    for &p in ancestors {
         if p.id() == top.id() || Some(p.id()) == top_body_id {
             break;
         }
-        if binds_directly(p, name, bytes) || declared_lexically_within(p, name, bytes, &enclosing) {
+        if binds_directly(p, name, bytes) {
             return true;
         }
-        cur = p.parent();
+        outermost = Some(p);
     }
-    false
+    // A name the subtree never declares anywhere cannot be declared where this reference can see it, so the
+    // (precise, per-reference) scan only runs for names the scope declares SOMEWHERE — see `declared_names`.
+    outermost.is_some_and(|p| declared_names(p, bytes, |names| names.contains(name)) && declared_lexically_within(p, name, bytes, &enclosing))
+}
+
+thread_local! {
+    /// scope node id → every name a binding in its subtree declares. Kept only while a [`ScopeMemo`] is alive,
+    /// like the other per-file answers: a node id means something inside one tree only.
+    static DECLARED: std::cell::RefCell<std::collections::HashMap<usize, std::collections::HashSet<String>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Ask `question` of the set of names declared anywhere under `scope` — locals, parameters, patterns, resources,
+/// loop variables. Built by one walk and remembered while a file's checks run (outside them it is rebuilt for
+/// each ask, which is the old cost and no worse).
+fn declared_names<R>(scope: Node, bytes: &[u8], question: impl FnOnce(&std::collections::HashSet<String>) -> R) -> R {
+    let memo_on = BINDINGS.with(|b| b.borrow().is_some());
+    if memo_on {
+        let known = DECLARED.with(|d| d.borrow().contains_key(&scope.id()));
+        if !known {
+            let names = collect_declared_names(scope, bytes);
+            DECLARED.with(|d| d.borrow_mut().insert(scope.id(), names));
+        }
+        return DECLARED.with(|d| question(&d.borrow()[&scope.id()]));
+    }
+    question(&collect_declared_names(scope, bytes))
+}
+
+fn collect_declared_names(scope: Node, bytes: &[u8]) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    let mut stack = vec![scope];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "variable_declarator" | "catch_formal_parameter" | "formal_parameter" | "spread_parameter" | "resource"
+            | "enhanced_for_statement" | "instanceof_expression" | "pattern" | "type_pattern" | "record_pattern_component" => {
+                if let Some(Ok(text)) = n.child_by_field_name("name").map(|nm| nm.utf8_text(bytes)) {
+                    names.insert(text.to_string());
+                }
+                // A pattern's binding can be a bare identifier child instead of a `name` field.
+                if matches!(n.kind(), "pattern" | "type_pattern" | "record_pattern_component") {
+                    let mut cc = n.walk();
+                    for ch in n.named_children(&mut cc) {
+                        if ch.kind() == "identifier" {
+                            if let Ok(text) = ch.utf8_text(bytes) {
+                                names.insert(text.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        let mut c = n.walk();
+        stack.extend(n.named_children(&mut c));
+    }
+    names
+}
+
+/// `node`'s ancestors, nearest first, up to and including `top` — or `None` when `node` is not inside `top`.
+///
+/// Found by ONE descent from `top`. `Node::parent()` is not a pointer read: tree-sitter re-descends from the
+/// root of the tree to find a node's parent, so it costs the depth of the node, and climbing every ancestor
+/// of a node that way costs the depth squared. A builder chain nests one call per link, so a name inside the
+/// hundredth link paid that for each of its hundred ancestors — and every name in the chain paid it.
+pub(crate) fn ancestors_up_to<'t>(top: Node<'t>, node: Node<'t>) -> Option<Vec<Node<'t>>> {
+    let mut down = Vec::new();
+    let mut cur = top;
+    while cur.id() != node.id() {
+        down.push(cur);
+        // The child that holds `node`, found in the library — not by walking every sibling here: a class body has
+        // hundreds of members, and every name inside one paid that scan at each level of its way down.
+        cur = cur.child_with_descendant(node)?;
+    }
+    down.reverse();
+    Some(down)
 }
 
 /// Whether `scope`'s subtree declares `name` where a reference inside the `enclosing` nodes can see
@@ -306,7 +395,7 @@ fn binding_names(n: Node, name: &str, bytes: &[u8], patterns_only: bool) -> bool
 /// contracts, and they carried one name — merging them would have been a silent behaviour change in
 /// whichever check lost.
 pub(crate) fn enclosing_executable_scope(node: Node) -> Option<Node> {
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(n) = cur {
         match n.kind() {
             "method_declaration" | "constructor_declaration" | "lambda_expression" => return Some(n),
@@ -314,7 +403,7 @@ pub(crate) fn enclosing_executable_scope(node: Node) -> Option<Node> {
             | "record_declaration" => return None,
             _ => {}
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     None
 }
@@ -383,7 +472,7 @@ fn referenced_name<'a>(node: Node, bytes: &'a [u8]) -> Result<&'a str, std::str:
 pub(crate) fn is_value_position(ident: Node) -> bool {
     // POSITION: the parent node kind + the field this identifier occupies determine whether it's a
     // value. Reject every non-value slot explicitly.
-    let Some(parent) = ident.parent() else { return false };
+    let Some(parent) = bennu_java::prelude::parent_of(ident) else { return false };
     let pkind = parent.kind();
 
     // The field this identifier fills in its parent, if any — the reliable slot discriminator.
@@ -527,8 +616,11 @@ pub(crate) fn scope_is_top_across_lambdas(node: Node, top: Node) -> bool {
     // `top`'s own body node id — the one body we're allowed to cross.
     let top_body_id = top.child_by_field_name("body").map(|b| b.id());
 
-    let mut cur = node.parent();
-    while let Some(p) = cur {
+    let climbed: Vec<Node> = match ancestors_up_to(top, node) {
+        Some(a) => a,
+        None => std::iter::successors(bennu_java::prelude::parent_of(node), |p| bennu_java::prelude::parent_of(p)).collect(),
+    };
+    for p in climbed {
         // Reached the top type without crossing a disallowed scope → good.
         if p.id() == top.id() {
             return true;
@@ -550,7 +642,6 @@ pub(crate) fn scope_is_top_across_lambdas(node: Node, top: Node) -> bool {
             }
             _ => {}
         }
-        cur = p.parent();
     }
     false
 }
@@ -563,7 +654,7 @@ pub(crate) fn scope_is_top_across_lambdas(node: Node, top: Node) -> bool {
 /// inherits is then never answered with a local of some outer scope that happens to share it.
 pub(crate) fn declared_type_text(use_node: Node, name: &str, bytes: &[u8], fields: bool) -> Option<String> {
     let use_start = use_node.start_byte();
-    let mut scope = use_node.parent();
+    let mut scope = bennu_java::prelude::parent_of(use_node);
     while let Some(s) = scope {
         if !fields && s.kind() == "class_body" {
             return None;
@@ -598,7 +689,7 @@ pub(crate) fn declared_type_text(use_node: Node, name: &str, bytes: &[u8], field
                 }
             }
         }
-        scope = s.parent();
+        scope = bennu_java::prelude::parent_of(s);
     }
     None
 }

@@ -1,0 +1,12 @@
+[package]
+name         = "bennu-debug-expr"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The small expression language Bennu's debuggers share for watches and breakpoint conditions: a lexer, a precedence parser, an AST and an evaluator generic over a `DebugTarget` (JDWP for Java, DAP for Rust). Level 1 — paths, literals and operators; a call parses but is refused by name. Pure: no protocol, no process, no I/O."
+
+[dependencies]
+# None, deliberately. The grammar and the numeric semantics are plain Rust; the two debuggers that
+# supply values (JDWP, DAP) live in `bennu-be` and implement `DebugTarget` there.

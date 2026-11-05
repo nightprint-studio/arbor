@@ -31,7 +31,7 @@ pub fn local_record_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
-        if n.kind() == "record_declaration" && n.parent().is_some_and(|p| p.kind() == "block") {
+        if n.kind() == "record_declaration" && bennu_java::prelude::parent_of(n).is_some_and(|p| p.kind() == "block") {
             check_local_record(n, bytes, &mut out);
         }
     }
@@ -71,12 +71,12 @@ fn check_local_record(record: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
 
 /// The class around `node`, when the nearest type declaration is a plain class.
 fn enclosing_class(node: Node) -> Option<Node> {
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(p) = cur {
         match p.kind() {
             "class_declaration" => return Some(p),
             "interface_declaration" | "enum_declaration" | "record_declaration" | "annotation_type_declaration" => return None,
-            _ => cur = p.parent(),
+            _ => cur = bennu_java::prelude::parent_of(p),
         }
     }
     None
@@ -109,7 +109,7 @@ pub(crate) fn local_declared_before(record: Node, method: Node, name: &str, byte
     if params_declare(method, name, bytes) {
         return true;
     }
-    let mut cur = record.parent();
+    let mut cur = bennu_java::prelude::parent_of(record);
     while let Some(p) = cur {
         if p.id() == method.id() {
             break;
@@ -124,7 +124,7 @@ pub(crate) fn local_declared_before(record: Node, method: Node, name: &str, byte
                 return true;
             }
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     false
 }

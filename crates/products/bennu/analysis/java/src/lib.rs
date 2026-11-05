@@ -39,6 +39,7 @@ pub mod javadoc;
 // The name a variable of a written type reads as — `List<Order>` is `orders`. Built on the postfix
 // templates' word rules, so both features propose the same names.
 pub mod names;
+pub mod parents;
 // A declared parameter list in the form that compares with a resolved member's — the one matcher
 // that picks an overload's declaration out of a file.
 pub mod param_shape;

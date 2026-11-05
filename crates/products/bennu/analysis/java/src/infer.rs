@@ -226,14 +226,14 @@ pub(crate) fn expected_at(
     // identity rather than a range test — `x = x.foo()` has the caret in a subtree of `right`,
     // and a range test on `left` would have to guess which side an overlapping span belongs to.
     let mut child = node;
-    let mut cur = node.parent();
+    let mut cur = crate::parents::parent_of(node);
     while let Some(n) = cur {
         match n.kind() {
             // `Foo f = <caret>` — the declared type, and nothing when it was written `var`: an
             // inferred declaration wants whatever it is given, which is not a constraint.
             "variable_declarator" => {
                 if n.child_by_field_name("value").map(|v| v.id()) == Some(child.id()) {
-                    let decl = n.parent()?;
+                    let decl = crate::parents::parent_of(n)?;
                     let t = decl.child_by_field_name("type")?;
                     let text = node_text(&t, bytes)?;
                     if is_inferred_type(&text) {
@@ -254,7 +254,7 @@ pub(crate) fn expected_at(
             // body, what the lambda's functional interface returns. A constructor stops the walk:
             // it declares nothing to read.
             "return_statement" => {
-                let mut up = n.parent();
+                let mut up = crate::parents::parent_of(n);
                 while let Some(m) = up {
                     match m.kind() {
                         "method_declaration" => {
@@ -279,7 +279,7 @@ pub(crate) fn expected_at(
                         "constructor_declaration" => return None,
                         _ => {}
                     }
-                    up = m.parent();
+                    up = crate::parents::parent_of(m);
                 }
                 return None;
             }
@@ -317,7 +317,7 @@ pub(crate) fn expected_at(
             _ => {}
         }
         child = n;
-        cur = n.parent();
+        cur = crate::parents::parent_of(n);
     }
     None
 }
@@ -366,7 +366,7 @@ pub(crate) fn bindings_at(
                 found = Some(n.start_byte());
                 break;
             }
-            cur = n.parent();
+            cur = crate::parents::parent_of(n);
         }
         found
     };
@@ -424,7 +424,7 @@ pub(crate) fn bindings_at(
                 ty: ctx.resolve_local_ty(&decl.ty),
             });
         }
-        scope = s.parent();
+        scope = crate::parents::parent_of(s);
         depth += 1;
     }
     out
@@ -1333,7 +1333,7 @@ impl Ctx<'_> {
     /// unknown type) yields [`LambdaParam::Untyped`] (shadow the field, but leave the type unknown so
     /// nothing is falsely flagged), never a guess.
     fn lambda_param(&self, use_node: &Node, name: &str, enclosing: Option<&str>) -> LambdaParam {
-        let mut scope = use_node.parent();
+        let mut scope = crate::parents::parent_of(use_node);
         while let Some(s) = scope {
             if s.kind() == "lambda_expression" {
                 if let Some(params) = s.child_by_field_name("parameters") {
@@ -1355,7 +1355,7 @@ impl Ctx<'_> {
             if matches!(s.kind(), "method_declaration" | "constructor_declaration") {
                 break;
             }
-            scope = s.parent();
+            scope = crate::parents::parent_of(s);
         }
         LambdaParam::NotParam
     }
@@ -1408,11 +1408,11 @@ impl Ctx<'_> {
     /// longer exists. On a real project the argument position alone accounted for ~57 broken call
     /// sites, all on one record read inside a lambda.
     fn lambda_target_type(&self, lambda: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
-        let arg_list = lambda.parent()?;
+        let arg_list = crate::parents::parent_of(lambda)?;
         if arg_list.kind() != "argument_list" {
             return self.lambda_target_from_context(lambda, enclosing);
         }
-        let call = arg_list.parent()?;
+        let call = crate::parents::parent_of(arg_list)?;
         // The lambda's index among the REAL arguments — the same list overload selection counts.
         let args = self.call_arg_nodes(&call);
         let idx = args.iter().position(|a| a.id() == lambda.id())?;
@@ -1557,11 +1557,11 @@ impl Ctx<'_> {
         lambda: &Node,
         _enclosing: Option<&str>,
     ) -> Option<TypeRef> {
-        let parent = lambda.parent()?;
+        let parent = crate::parents::parent_of(lambda)?;
         match parent.kind() {
             // `Creator c = confirm -> …;`, and the field form of the same thing.
             "variable_declarator" => {
-                let decl = parent.parent()?;
+                let decl = crate::parents::parent_of(parent)?;
                 if !matches!(
                     decl.kind(),
                     "local_variable_declaration" | "field_declaration"
@@ -1575,7 +1575,7 @@ impl Ctx<'_> {
             // intervening lambda: a `return` inside a lambda BODY answers to that lambda's
             // interface, not to the method, and guessing the method's type there would be wrong.
             "return_statement" => {
-                let mut cur = parent.parent();
+                let mut cur = crate::parents::parent_of(parent);
                 while let Some(n) = cur {
                     match n.kind() {
                         "lambda_expression" => return None,
@@ -1586,7 +1586,7 @@ impl Ctx<'_> {
                         }
                         _ => {}
                     }
-                    cur = n.parent();
+                    cur = crate::parents::parent_of(n);
                 }
                 None
             }
@@ -1838,11 +1838,11 @@ impl Ctx<'_> {
         if !self.mentions_type_variable(&result) {
             return result;
         }
-        let Some(declarator) = call.parent().filter(|p| p.kind() == "variable_declarator") else {
+        let Some(declarator) = crate::parents::parent_of(call).filter(|p| p.kind() == "variable_declarator") else {
             return result;
         };
         let is_value = declarator.child_by_field_name("value").is_some_and(|v| v.id() == call.id());
-        let Some(declaration) = declarator.parent().filter(|d| {
+        let Some(declaration) = crate::parents::parent_of(declarator).filter(|d| {
             is_value && matches!(d.kind(), "local_variable_declaration" | "field_declaration")
         }) else {
             return result;
@@ -2426,7 +2426,7 @@ impl Ctx<'_> {
             if declared {
                 return true;
             }
-            cur = n.parent();
+            cur = crate::parents::parent_of(n);
         }
         false
     }
@@ -2883,7 +2883,7 @@ impl Ctx<'_> {
     /// that precedes the use.
     fn resolve_local(&self, use_node: &Node, name: &str) -> LocalLookup {
         let use_start = use_node.start_byte();
-        let mut scope = use_node.parent();
+        let mut scope = crate::parents::parent_of(use_node);
         while let Some(s) = scope {
             // method / lambda / constructor parameters. Only these scopes HAVE a `parameters` field;
             // gating here avoids an O(children) `child_by_field_name` scan on every block / if / try /
@@ -2907,7 +2907,7 @@ impl Ctx<'_> {
                     };
                 }
             }
-            scope = s.parent();
+            scope = crate::parents::parent_of(s);
         }
         LocalLookup::NotLocal
     }
@@ -2925,7 +2925,7 @@ impl Ctx<'_> {
         let (type_node, varargs) = found??;
         let text = node_text(&type_node, self.bytes)?;
         // `String names[]`: the brackets sit on the parameter, after the name.
-        let text = match type_node.parent() {
+        let text = match crate::parents::parent_of(type_node) {
             Some(parameter) => crate::symbols::with_declarator_dims(&text, &parameter, self.bytes),
             None => text,
         };
@@ -3093,7 +3093,7 @@ impl Ctx<'_> {
         let mut binds = Vec::new();
 
         // The body governed by a positive test — the binding holds throughout it.
-        if let Some(p) = scope.parent() {
+        if let Some(p) = crate::parents::parent_of(scope) {
             let governing = match p.kind() {
                 "if_statement" | "ternary_expression" => {
                     (field_is(&p, "consequence", scope)).then(|| p.child_by_field_name("condition"))
@@ -3438,7 +3438,7 @@ fn find_receiver<'t>(root: &Node<'t>, byte_offset: usize) -> Option<Node<'t>> {
             }
             _ => {}
         }
-        cur = n.parent();
+        cur = crate::parents::parent_of(n);
     }
     None
 }
@@ -3484,7 +3484,7 @@ pub fn type_decl_at<'s>(node: &Node, symbols: &'s FileSymbols) -> Option<&'s cra
 }
 
 pub fn enclosing_type_fqn(node: &Node, bytes: &[u8], symbols: &FileSymbols) -> Option<String> {
-    let mut cur = node.parent();
+    let mut cur = crate::parents::parent_of(node);
     while let Some(n) = cur {
         // An anonymous class body — see the doc above. Must be tested BEFORE the declaration arm,
         // which is automatic walking bottom-up: the body is always crossed first.
@@ -3517,7 +3517,7 @@ pub fn enclosing_type_fqn(node: &Node, bytes: &[u8], symbols: &FileSymbols) -> O
                 .and_then(|x| node_text(&x, bytes))?;
             return Some(name);
         }
-        cur = n.parent();
+        cur = crate::parents::parent_of(n);
     }
     None
 }

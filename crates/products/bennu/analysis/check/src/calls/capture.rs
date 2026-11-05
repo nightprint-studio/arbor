@@ -290,7 +290,7 @@ fn collect_free_names<'t>(closure: Node<'t>, bytes: &[u8], into: &mut HashMap<St
 /// method-invocation name (`foo` in `foo(x)`) or a member selector. We keep it simple: exclude the
 /// `name` field of a `method_invocation`; everything else that is a bare `identifier` counts.
 fn is_value_reference(id: Node) -> bool {
-    let Some(parent) = id.parent() else { return true };
+    let Some(parent) = bennu_java::prelude::parent_of(id) else { return true };
     let slot = crate::support::nodes::child_field_name(parent, id);
     match (parent.kind(), slot.as_deref()) {
         // The invoked method's own name is not a captured variable; its receiver / arguments are.
@@ -317,7 +317,7 @@ fn closure_capture_root(n: Node) -> Option<Node> {
         // A LOCAL class captures like an anonymous one. Only one that extends and implements nothing:
         // a supertype could declare a field of the captured name, which the body would then mean.
         "class_declaration"
-            if n.parent().is_some_and(|p| p.kind() == "block")
+            if bennu_java::prelude::parent_of(n).is_some_and(|p| p.kind() == "block")
                 && n.child_by_field_name("superclass").is_none()
                 && n.child_by_field_name("interfaces").is_none() =>
         {

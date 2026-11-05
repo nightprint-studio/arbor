@@ -561,6 +561,10 @@ pub(crate) struct Cache {
     fields: HashMap<Id, Vec<Field>>,
     /// Whether a method is a record's accessor, so its code is read once.
     accessors: HashMap<(Id, Id), bool>,
+    /// The loaded class a `Type.CONSTANT` in an expression resolved to, keyed by the class the frame
+    /// is in and the name as typed. Only successes are kept: a class that is not loaded yet may be
+    /// at the next hit, and a condition that cannot be resolved stops the program anyway.
+    pub(crate) resolved_types: HashMap<String, bennu_jdwp::prelude::ClassRef>,
 }
 
 pub(crate) struct Session {
@@ -619,6 +623,18 @@ impl Session {
             state: Mutex::new(state),
             cache: Mutex::new(Cache::default()),
         }
+    }
+
+    /// The source file declaring a top-level project class — where the imports an expression's
+    /// `Status.ACTIVE` is resolved against are read from. `None` for a library class.
+    pub(crate) fn declaring_file(&self, fqcn: &str) -> Option<&str> {
+        self.classes.get(fqcn).map(String::as_str)
+    }
+
+    /// Every class the project declares (fully qualified, nested ones included) — the last place an
+    /// expression looks for a type it could not place through the file's imports.
+    pub(crate) fn project_class_names(&self) -> impl Iterator<Item = &String> {
+        self.classes.keys()
     }
 
     /// The exclusion patterns as the protocol wants them.
@@ -1744,8 +1760,9 @@ pub struct WatchArgs {
     pub expression: String,
 }
 
-/// Evaluate a watch against a frame. See [`crate::debug_value::watch`] for what an expression
-/// is allowed to be, and why it is a path rather than Java.
+/// Evaluate a watch against a frame. See [`crate::debug_value::watch`] (Java) and
+/// [`crate::debug_expr`] (Rust) for what an expression may be: a path is walked, the rest of the
+/// shared `bennu-debug-expr` language is evaluated, and anything outside it is refused by name.
 #[arbor_rpc::handler]
 fn bennu_debug_watch(_ctx: &BennuState, args: WatchArgs) -> Result<DebugValue, String> {
     crate::debug_backend::get(&args.session_id)?.watch(args.frame, &args.expression)

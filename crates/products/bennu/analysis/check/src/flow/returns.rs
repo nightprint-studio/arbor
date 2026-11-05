@@ -371,7 +371,7 @@ fn continues_in(target: Node, bytes: &[u8]) -> bool {
     if has_unlabeled_exit(target, "continue_statement", is_loop) {
         return true;
     }
-    let labeled = target.parent().filter(|p| p.kind() == "labeled_statement");
+    let labeled = bennu_java::prelude::parent_of(target).filter(|p| p.kind() == "labeled_statement");
     labeled
         .and_then(|l| label_name(l, bytes))
         .is_some_and(|name| has_labeled_exit(target, "continue_statement", name, bytes))
@@ -467,7 +467,7 @@ pub(crate) fn unwrap_parens(mut n: Node) -> Node {
 /// enclosing block — neither of which can ever be a constant variable.
 fn names_a_variable(id: Node, bytes: &[u8]) -> bool {
     let Ok(name) = id.utf8_text(bytes) else { return false };
-    let mut cur = id.parent();
+    let mut cur = bennu_java::prelude::parent_of(id);
     while let Some(n) = cur {
         match n.kind() {
             "block" => {
@@ -493,7 +493,7 @@ fn names_a_variable(id: Node, bytes: &[u8]) -> bool {
             "class_body" => return false,
             _ => {}
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     false
 }

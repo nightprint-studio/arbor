@@ -80,7 +80,7 @@ fn too_large(n: Node, is_long: bool) -> Diagnostic {
 
 /// Whether the literal is the operand of a unary minus.
 fn under_minus(n: Node) -> bool {
-    n.parent().is_some_and(|p| {
+    bennu_java::prelude::parent_of(n).is_some_and(|p| {
         p.kind() == "unary_expression" && p.child(0).is_some_and(|op| op.kind() == "-")
     })
 }

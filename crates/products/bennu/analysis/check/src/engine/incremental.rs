@@ -130,6 +130,9 @@ pub fn check_file_resolved_incremental(
         return check_file(source, ctx);
     };
     let root = tree.root_node();
+    let _parents = bennu_java::prelude::ParentTable::arm(root);
+    // One resolution per written type name across the declaration pass and every body — see `TypeMemo`.
+    let _types = crate::support::resolve::TypeMemo::begin();
     let nodes = collect_nodes(root);
     stats.parse_us = lap(&mut since);
 

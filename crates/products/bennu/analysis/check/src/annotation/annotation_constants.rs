@@ -187,31 +187,64 @@ pub(crate) fn check_enum_constant(
 /// that can never be constant.
 fn initializer_computed_at_run_time(site: Node, owner: &str, name: &str, bytes: &[u8]) -> bool {
     let mut root = site;
-    while let Some(parent) = root.parent() {
+    while let Some(parent) = bennu_java::prelude::parent_of(root) {
         root = parent;
     }
     let simple = owner.rsplit(['/', '$']).next().unwrap_or(owner);
+    // While a file is being checked the answers come from one index of its fields, built by ONE walk of the
+    // tree. Every constant an annotation names used to walk the whole file to find its declaration: a class
+    // with forty `@JsonProperty(NAME)` read a 1,500-line tree forty times, and that was most of a validation.
+    if crate::support::resolve::file_memo_active() {
+        return FIELD_INITS.with(|m| {
+            let mut slot = m.borrow_mut();
+            let index = slot.get_or_insert_with(|| field_initializer_index(root, bytes));
+            index.get(&(simple.to_string(), name.to_string())).copied().unwrap_or(false)
+        });
+    }
+    field_initializer_index(root, bytes).get(&(simple.to_string(), name.to_string())).copied().unwrap_or(false)
+}
+
+thread_local! {
+    /// `(owner's simple name, field name)` → whether the field's initializer is provably computed at run
+    /// time. Built on first use inside a file's checks and dropped with them (see [`forget_field_initializers`]).
+    static FIELD_INITS: std::cell::RefCell<Option<std::collections::HashMap<(String, String), bool>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Drop the field index — called when the pass that built it ends, so it never describes another file.
+pub(crate) fn forget_field_initializers() {
+    FIELD_INITS.with(|m| *m.borrow_mut() = None);
+}
+
+/// Every field declared in the tree under `root`, with whether its initializer can never be constant.
+/// Walked in the order the single-name search used (last child first), the first declaration of a
+/// `(type, name)` pair wins — so the answer is the one that search would have given.
+fn field_initializer_index(root: Node, bytes: &[u8]) -> std::collections::HashMap<(String, String), bool> {
+    let mut index = std::collections::HashMap::new();
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
-        if n.kind() == "variable_declarator"
-            && n.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()) == Some(name)
-            && declared_in_type(n, simple, bytes)
-        {
-            return n.child_by_field_name("value").is_some_and(never_constant);
+        if n.kind() == "variable_declarator" {
+            if let (Some(name), Some(owner)) = (
+                n.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()),
+                field_owner_name(n, bytes),
+            ) {
+                index
+                    .entry((owner.to_string(), name.to_string()))
+                    .or_insert_with(|| n.child_by_field_name("value").is_some_and(never_constant));
+            }
         }
         let mut c = n.walk();
         stack.extend(n.named_children(&mut c));
     }
-    false
+    index
 }
 
-/// Whether a declarator is a FIELD of the type named `simple`.
-fn declared_in_type(declarator: Node, simple: &str, bytes: &[u8]) -> bool {
-    let Some(field) = declarator.parent().filter(|p| matches!(p.kind(), "field_declaration" | "constant_declaration")) else {
-        return false;
-    };
-    let owner = field.parent().and_then(|body| body.parent());
-    owner.is_some_and(|t| t.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()) == Some(simple))
+/// The simple name of the type a declarator is a FIELD of, or `None` when it is a local or something else.
+fn field_owner_name<'b>(declarator: Node, bytes: &'b [u8]) -> Option<&'b str> {
+    let field = bennu_java::prelude::parent_of(declarator)
+        .filter(|p| matches!(p.kind(), "field_declaration" | "constant_declaration"))?;
+    let owner = bennu_java::prelude::parent_of(field).and_then(|body| bennu_java::prelude::parent_of(body))?;
+    owner.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok())
 }
 
 /// Whether an expression contains something a constant expression (JLS §15.29) never does.
@@ -234,12 +267,12 @@ fn never_constant(expr: Node) -> bool {
 
 /// Whether `node` sits somewhere a local or a parameter could shadow a field of the same name.
 fn shadowable_position(node: Node) -> bool {
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(n) = cur {
         if matches!(n.kind(), "block" | "formal_parameters" | "lambda_expression") {
             return true;
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     false
 }

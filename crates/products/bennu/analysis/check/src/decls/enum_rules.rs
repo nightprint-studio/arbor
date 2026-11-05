@@ -191,7 +191,7 @@ pub(crate) fn declared_names(scope: Node, bytes: &[u8]) -> HashSet<String> {
 /// A bare identifier used as a value: not the field of `a.b`, not the name of a call, not a declared
 /// name.
 pub(crate) fn is_bare_read_or_write(id: Node) -> bool {
-    let Some(parent) = id.parent() else { return false };
+    let Some(parent) = bennu_java::prelude::parent_of(id) else { return false };
     match parent.kind() {
         "field_access" => parent.child_by_field_name("object").is_some_and(|o| o.id() == id.id()),
         "method_invocation" => parent.child_by_field_name("name").is_none_or(|n| n.id() != id.id()),

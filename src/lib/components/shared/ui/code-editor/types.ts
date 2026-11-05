@@ -133,6 +133,14 @@ export interface EditorViewSnapshot {
    * Arbor was closed) would have the history's changes land on the wrong text.
    */
   historyHash?: number;
+  /**
+   * The folded regions, as offsets — present once the user (or an opening fold) has touched the folds of this
+   * document, absent before. A host that hands the snapshot back gets exactly the folds the tab was left with,
+   * and the opening folds (comments, imports) stay out of it: they would collapse again what was unfolded.
+   */
+  folds?: { from: number; to: number }[];
+  /** Length of the document {@link folds} were taken from; they are restored only to a document of the same length. */
+  foldsLength?: number;
 }
 
 /**

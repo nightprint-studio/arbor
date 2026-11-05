@@ -130,7 +130,7 @@ impl<'a, 't> FileImports<'a, 't> {
     // ── types ────────────────────────────────────────────────────────────────
 
     fn ambiguous_type(&self, n: Node<'t>) -> Option<(Node<'t>, String)> {
-        let parent = n.parent()?;
+        let parent = bennu_java::prelude::parent_of(n)?;
         if matches!(parent.kind(), "scoped_type_identifier" | "type_parameter" | "method_reference") {
             return None;
         }

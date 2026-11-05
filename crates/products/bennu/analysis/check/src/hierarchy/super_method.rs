@@ -231,12 +231,12 @@ fn super_roots(
 /// The nearest ancestor `class_declaration` of `n` (its enclosing class). `None` for a `super.` that
 /// isn't inside any class declaration (e.g. a malformed buffer).
 fn enclosing_class(n: Node) -> Option<Node> {
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         if p.kind() == "class_declaration" {
             return Some(p);
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     None
 }
@@ -245,7 +245,7 @@ fn enclosing_class(n: Node) -> Option<Node> {
 /// the *type* that owns the `super.` is the anonymous class (whose supertype we don't resolve here),
 /// so the caller SKIPs rather than resolving against the wrong (outer) class.
 fn inside_anonymous_class_below(n: Node, class: Node) -> bool {
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         if p.id() == class.id() {
             return false; // reached the enclosing class with no anon body in between
@@ -262,7 +262,7 @@ fn inside_anonymous_class_below(n: Node, class: Node) -> bool {
                 return true;
             }
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     false
 }

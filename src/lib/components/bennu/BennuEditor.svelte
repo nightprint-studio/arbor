@@ -5273,7 +5273,62 @@
    *  the context menu AND their shortcuts no-op — not offered where they can't resolve. */
   const supportsNav = $derived(supportsCodeNav(activePath));
 
-  function onEditorContextMenu(e: MouseEvent) {
+  /** What each row of the Refactor submenu does, by id — rebuilt every time the menu opens. */
+  const refactorRuns = new Map<string, () => void>();
+
+  /**
+   * The rows of the "Refactor" submenu: everything that can reshape the code under the caret or the selection.
+   *
+   * The Java rows are the backend's own list — extract, inline, move, each with the reason it cannot be done
+   * where the caret is, so a refactoring that does not apply is greyed with its reason instead of absent (the
+   * same rows Alt+Enter shows, see `openIntentions`). Rename, Add parameter and Convert Case are not in that
+   * list, so they are added here. The backend is given a quarter of a second: a menu that waits for a slow
+   * answer is worse than one that opens without the extract rows.
+   */
+  async function refactorMenuChildren(path: string): Promise<MenuItem[]> {
+    refactorRuns.clear();
+    const rows: MenuItem[] = [];
+    const add = (item: MenuItem, run: () => void) => {
+      refactorRuns.set(item.id, run);
+      rows.push(item);
+    };
+    if (supportsNav) {
+      add({ id: 'rf-rename', label: 'Rename…', icon: PenLine, iconColor: 'var(--accent)', shortcut: 'Shift+F6' }, openRename);
+    }
+    if (isJavaFileOf(path) && editorComp) {
+      const src = editorComp.getValue();
+      const sel = editorComp.selectionByteRange();
+      const offers = await Promise.race([
+        refactorings(path, src, sel.start, sel.end).catch(() => []),
+        new Promise<never[]>((resolve) => setTimeout(() => resolve([]), 250)),
+      ]);
+      for (const offer of offers) {
+        add(
+          {
+            id: `rf:${offer.id}`,
+            label: offer.reason ? `${offer.label} — ${offer.reason}` : offer.label,
+            icon: Wand2,
+            iconColor: 'var(--warning)',
+            disabled: !!offer.reason,
+          },
+          offer.picks_target ? () => void pickMoveTarget(path, offer) : () => void runRefactoring(path, offer.id),
+        );
+      }
+      add({ id: 'rf-add-parameter', label: 'Add parameter…', icon: Wand2, iconColor: 'var(--warning)' }, openAddParameter);
+    }
+    if (rows.length) rows.push({ id: 'sep-rf-case', label: '', separator: true });
+    rows.push({
+      id: 'convert-case', label: 'Convert Case', icon: CaseSensitive, iconColor: 'var(--info)',
+      children: [
+        { id: 'case-cycle', label: 'Next case', shortcut: 'Ctrl+Shift+W' },
+        { id: 'sep-case', label: '', separator: true },
+        ...CASE_MENU_STYLES.map((s) => ({ id: `case:${s}`, label: CASE_LABELS[s] }) as MenuItem),
+      ],
+    });
+    return rows;
+  }
+
+  async function onEditorContextMenu(e: MouseEvent) {
     if (!activePath) return;
     e.preventDefault();
     // Move the caret to the click position first — the semantic actions below (go to
@@ -5281,6 +5336,8 @@
     // right-click doesn't move it on its own, so without this they'd target wherever the
     // caret happened to be instead of the symbol under the pointer.
     editorComp?.setCaretAtCoords(e.clientX, e.clientY);
+    const refactorRows = await refactorMenuChildren(activePath);
+    if (!activePath) return;
     // The menu reads as groups — edit · navigate · generate · save · history — each behind a
     // separator, and each icon carries the colour of what it does, the way Corvus's commit menu
     // does. A group with nothing in it contributes no separator, so a plain-text file's menu is
@@ -5289,11 +5346,11 @@
     // The verbs everyone reaches for sit in the icon bar at the top, as in the file tree's menu: cut, copy, paste,
     // rename (where it can resolve) and Imber, whose icon opens its actions as a menu with submenus.
     const quick: MenuAction[] = [
-      { id: 'cut', label: 'Cut', icon: Scissors, shortcut: 'Ctrl+X' },
-      { id: 'copy', label: 'Copy', icon: Copy, shortcut: 'Ctrl+C' },
-      { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V' },
-      ...(supportsNav ? [{ id: 'rename', label: 'Rename…', icon: PenLine, shortcut: 'Shift+F6' } as MenuAction] : []),
-      { id: 'imber', label: 'Ask Imber…', icon: Sparkles },
+      { id: 'cut', label: 'Cut', icon: Scissors, iconColor: 'var(--warning)', shortcut: 'Ctrl+X' },
+      { id: 'copy', label: 'Copy', icon: Copy, iconColor: 'var(--info)', shortcut: 'Ctrl+C' },
+      { id: 'paste', label: 'Paste', icon: ClipboardPaste, iconColor: 'var(--success)', shortcut: 'Ctrl+V' },
+      ...(supportsNav ? [{ id: 'rename', label: 'Rename…', icon: PenLine, iconColor: 'var(--accent)', shortcut: 'Shift+F6' } as MenuAction] : []),
+      { id: 'imber', label: 'Ask Imber…', icon: Sparkles, iconColor: 'var(--color-tag)' },
     ];
     editorMenuAt = { x: e.clientX, y: e.clientY };
     // Navigation actions (go-to / usages) only where they can resolve.
@@ -5309,24 +5366,31 @@
     const env: MenuItem[] = isSpringPropertyFile(activePath)
       ? [{ id: 'envvar', label: 'Show as environment variable…', icon: Variable, iconColor: 'var(--info)' }]
       : [];
-    // Generate only on Java.
-    const generate: MenuItem[] = [
+    // ONE "Generate" submenu with every way to write code: the member dialog, a template, the
+    // configuration-properties flows, then each generator of the backend's registry. They used to be five
+    // entries and a second submenu, which made "where is it" a question; now it is one place.
+    const generateRows: MenuItem[] = [
       ...(isJavaFile
         ? [
-            { id: 'generate', label: 'Generate…', icon: Wand2, iconColor: 'var(--success)', shortcut: 'Alt+Insert' } as MenuItem,
-            { id: 'generate-template', label: 'Generate from a template…', icon: Wand2, iconColor: 'var(--success)' } as MenuItem,
+            { id: 'generate', label: 'Members…', icon: Wand2, iconColor: 'var(--success)', shortcut: 'Alt+Insert' } as MenuItem,
+            { id: 'generate-template', label: 'From a template…', icon: Wand2, iconColor: 'var(--success)' } as MenuItem,
           ]
         : []),
       // Offered on the class that has something to write out: the keys it binds.
       ...(isJavaFile && activePath && projectStore.sourceOf(activePath).includes('@ConfigurationProperties')
-        ? [{ id: 'config-properties', label: 'Generate configuration properties…', icon: Wand2, iconColor: 'var(--success)' } as MenuItem]
+        ? [{ id: 'config-properties', label: 'Configuration properties…', icon: Wand2, iconColor: 'var(--success)' } as MenuItem]
         : []),
       // And the other way round, on the file the keys are written in.
       ...(isSpringConfigTab
-        ? [{ id: 'config-class', label: 'Generate @ConfigurationProperties class…', icon: Wand2, iconColor: 'var(--success)' } as MenuItem]
+        ? [{ id: 'config-class', label: '@ConfigurationProperties class…', icon: Wand2, iconColor: 'var(--success)' } as MenuItem]
         : []),
       // The code generators this file can take — one entry per generator in the backend's registry.
-      ...codeGeneratorMenu(),
+      ...generatorRows(),
+    ];
+    const generate: MenuItem[] = [
+      ...(generateRows.length
+        ? [{ id: 'generate-menu', label: 'Generate', icon: Wand2, iconColor: 'var(--success)', children: generateRows } as MenuItem]
+        : []),
       // A string literal is a pattern worth trying: opened in the tester, edits go back with the literal's own escaping.
       ...(editorComp && literalUnderCaret(regexAccess())
         ? [{ id: 'regex', label: 'Open in Regex Tester…', icon: RegexIcon, iconColor: 'var(--accent)', shortcut: 'Ctrl+Shift+X' } as MenuItem]
@@ -5373,15 +5437,10 @@
         ],
       },
     ];
-    const caseMenu: MenuItem[] = [{
-      id: 'convert-case', label: 'Convert Case', icon: CaseSensitive,
-      children: [
-        { id: 'case-cycle', label: 'Next case', shortcut: 'Ctrl+Shift+W' },
-        sep('sep-case'),
-        ...CASE_MENU_STYLES.map((s) => ({ id: `case:${s}`, label: CASE_LABELS[s] }) as MenuItem),
-      ],
+    const refactor: MenuItem[] = [{
+      id: 'refactor-menu', label: 'Refactor', icon: Wand2, iconColor: 'var(--warning)', children: refactorRows,
     }];
-    const items: MenuItem[] = [navigate, env, generate, caseMenu, save, past]
+    const items: MenuItem[] = [navigate, env, refactor, generate, save, past]
       .filter((group) => group.length > 0)
       .flatMap((group, i) => (i === 0 ? group : [sep('sep' + i), ...group]));
     bennuContextMenuStore.show(e.clientX, e.clientY, items, onEditorMenuSelect, { actions: quick });
@@ -5410,21 +5469,23 @@
     bennuHistoryStore.showSelection(root, activePath, lines.start, lines.end);
   }
 
-  /** "Generate code ▸" with the generators the open file can take, or nothing when none fit. */
-  function codeGeneratorMenu(): MenuItem[] {
+  /** The generators of the backend's registry the open file can take, as rows of the Generate submenu. */
+  function generatorRows(): MenuItem[] {
     const kind = isJavaFile ? 'java' : activePath?.toLowerCase().endsWith('.rs') ? 'rust' : 'none';
     const offered = generatorsStore.offeredFor(kind);
     if (offered.length === 0) return [];
-    return [{
-      id: 'code-generators',
-      label: 'Generate code',
-      icon: Wand2,
-      iconColor: 'var(--success)',
-      children: offered.map((g) => ({ id: `gen:${g.id}`, label: g.title.replace(/^Generate /, ''), icon: paletteIcon(g.icon) })),
-    }];
+    return [
+      { id: 'sep-generators', label: '', separator: true },
+      ...offered.map((g) => ({ id: `gen:${g.id}`, label: g.title.replace(/^Generate /, ''), icon: paletteIcon(g.icon), iconColor: 'var(--success)' }) as MenuItem),
+    ];
   }
 
   function onEditorMenuSelect(id: string) {
+    const refactorRun = refactorRuns.get(id);
+    if (refactorRun) {
+      refactorRun();
+      return;
+    }
     if (id.startsWith('case:')) {
       convertCase(id.slice(5) as CaseStyle);
       return;
@@ -5911,6 +5972,7 @@
           caret={bennuSettingsStore.caret}
           folding={bennuSettingsStore.foldingEnabled}
           foldBlockComments={bennuSettingsStore.foldBlockComments}
+          foldImports={bennuSettingsStore.foldImports}
           completion={{
             autoPopup: bennuSettingsStore.autoPopup,
             delayMs: bennuSettingsStore.popupDelayMs,

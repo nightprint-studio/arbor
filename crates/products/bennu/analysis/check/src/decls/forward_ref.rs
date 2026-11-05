@@ -26,7 +26,7 @@ pub fn forward_ref_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
-        if n.kind() != "class_body" || n.parent().is_some_and(|p| p.kind() == "object_creation_expression") {
+        if n.kind() != "class_body" || bennu_java::prelude::parent_of(n).is_some_and(|p| p.kind() == "object_creation_expression") {
             continue;
         }
         check_body(n, bytes, &mut out);
@@ -101,7 +101,7 @@ fn declared_names_in_initializers(scope: Node, bytes: &[u8]) -> std::collections
 
 /// The left side of `x = …` (a plain assignment is the one write JLS 8.3.3 allows).
 fn is_assignment_target(id: Node) -> bool {
-    id.parent().is_some_and(|p| {
+    bennu_java::prelude::parent_of(id).is_some_and(|p| {
         p.kind() == "assignment_expression"
             && p.child_by_field_name("left").is_some_and(|l| l.id() == id.id())
             && p.child(1).is_some_and(|op| op.kind() == "=")

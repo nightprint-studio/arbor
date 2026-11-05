@@ -41,13 +41,15 @@ const CONFIG_REBUILD_COALESCE_MS: u64 = 300;
 use arbor_feedback::prelude::{JobSpec, JobStatus};
 use arbor_ipc::prelude::{EventSink, HostCaller};
 use bennu_index::prelude::Symbol;
+use bennu_java::prelude::FileSymbols;
 
+use crate::edit_order::EditOrder;
 use crate::jobs::JobHandle;
 use crate::task::{Task, TaskSpec};
 use bennu_complete::prelude::MatchCase;
 use bennu_proto::prelude::SourceEdit;
 use bennu_intel::prelude::{
-    build_project_index_from_sources, collect_annotation_beans, file_records_from_source,
+    build_project_index_from_sources, collect_annotation_beans, file_records_from_symbols,
     ingest_config_graph, read_java_sources, ActionVerdict, AnnotationBean, CompletionItem,
     CompletionOptions, ConfigResolver,
     DeclarationLocation, HoverInfo as IntelHoverInfo, IntelProvider, NativeJavaProvider,
@@ -1362,7 +1364,14 @@ impl IndexService {
                 non_compliant.iter().map(encoding_issue_of).collect();
             // What the index is about to be built from — the baseline every later "has this file
             // changed behind our back?" check compares against. See `ProjectSlot::indexed_hashes`.
-            record_indexed_hashes(&slot, &sources);
+            //
+            // Hashed ONCE, in parallel, and shared with the warm-up stamp below: the same FNV pass over
+            // every byte of the project used to run serially three times in this thread.
+            let source_hashes = hash_sources(&sources);
+            record_indexed_hashes(&slot, &source_hashes);
+            // One copy of the text for every consumer that outlives this statement (the config thread
+            // below), instead of a clone of the whole project's source for it.
+            let sources = Arc::new(sources);
             let built = build_project_index_from_sources(&sources, &index_dir);
             if let Err(e) = built.builder.persist() {
                 // A persist failure is logged ONCE and the build thread exits cleanly,
@@ -1490,9 +1499,9 @@ impl IndexService {
                 let sink = sink.clone();
                 let root_str = root_str.clone();
                 // Share the already-read `.java` sources with the config build so the
-                // annotation-bean collection reuses them (no third disk walk). Cloned because
+                // annotation-bean collection reuses them (no third disk walk). Shared, not copied:
                 // the rename-engine build below also borrows `sources` concurrently.
-                let sources = sources.clone();
+                let sources = Arc::clone(&sources);
                 std::thread::spawn(move || {
                     build_config_graph(&slot, &root_path, &index_dir, &sources, &sink, &root_str);
                 })
@@ -1560,7 +1569,7 @@ impl IndexService {
             // is the hook for a future non-blocking "analyzing project…" chip.
             if bennu_core::config::load().validate_on_open
                 && !svc.superseded(&root_path, my_gen)
-                && !svc.warmup_up_to_date(&root_str, &sources)
+                && !svc.warmup_up_to_date(&root_str, &source_hashes)
             {
                 // Track the warm-up as a JOB in the shell registry so it shows in the bennu Jobs
                 // overlay (a background citizen, self-purged shortly after it completes). `None` when
@@ -1574,7 +1583,7 @@ impl IndexService {
                 // Nor one the person cancelled: a pass that stopped part-way has not warmed everything.
                 let cancelled = task.is_cancelled();
                 if !svc.superseded(&root_path, my_gen) && !cancelled {
-                    svc.record_warmup_stamp(&root_str, &sources);
+                    svc.record_warmup_stamp(&root_str, &source_hashes);
                 }
                 emit_progress(&sink, &root_str, "validation", "end");
                 if svc.superseded(&root_path, my_gen) {
@@ -2509,14 +2518,11 @@ impl IndexService {
     /// classpath — so the warm-up can be skipped entirely (no re-validation, no progress card) rather
     /// than re-serving the persisted cache file-by-file on every startup. Any edit (content), added /
     /// removed file, or JDK/dependency change flips it, so a real change still re-warms.
-    fn warmup_stamp(&self, root: &str, sources: &[(PathBuf, String)]) -> u64 {
-        let mut entries: Vec<(String, u64)> = sources
-            .iter()
-            .map(|(p, s)| (norm_path(p), bennu_intel::prelude::source_hash(s)))
-            .collect();
+    fn warmup_stamp(&self, root: &str, hashes: &[(String, u64)]) -> u64 {
+        let mut entries: Vec<&(String, u64)> = hashes.iter().collect();
         entries.sort_unstable();
         let mut seed = format!("{}\0", self.diag_epoch(root));
-        for (p, h) in &entries {
+        for (p, h) in entries {
             seed.push_str(p);
             seed.push('\0');
             seed.push_str(&h.to_string());
@@ -2533,8 +2539,8 @@ impl IndexService {
     /// Whether the warm-up for `root` can be SKIPPED: the current project stamp equals the one
     /// recorded after the last successful warm-up. `false` (→ warm up) on any mismatch / missing
     /// stamp / read error.
-    pub fn warmup_up_to_date(&self, root: &str, sources: &[(PathBuf, String)]) -> bool {
-        let stamp = self.warmup_stamp(root, sources);
+    pub fn warmup_up_to_date(&self, root: &str, hashes: &[(String, u64)]) -> bool {
+        let stamp = self.warmup_stamp(root, hashes);
         std::fs::read_to_string(self.warmup_stamp_path(root))
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok())
@@ -2543,12 +2549,12 @@ impl IndexService {
 
     /// Record the current project stamp after a successful warm-up (best-effort), so the next open
     /// with an unchanged project skips the warm-up.
-    pub fn record_warmup_stamp(&self, root: &str, sources: &[(PathBuf, String)]) {
+    pub fn record_warmup_stamp(&self, root: &str, hashes: &[(String, u64)]) {
         let path = self.warmup_stamp_path(root);
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let _ = std::fs::write(path, self.warmup_stamp(root, sources).to_string());
+        let _ = std::fs::write(path, self.warmup_stamp(root, hashes).to_string());
     }
 
     /// The classpath/JDK epoch for the project at `root` — a hash of the JDK level it was opened at
@@ -4394,44 +4400,60 @@ impl IndexService {
             }
         }
 
-        // Update the project-wide simple→binary map from the patched files' OWN type decls
-        // (a renamed/added/removed type in one of them), without re-scanning the project.
-        // Cross-file type references still resolve — every other file's types are already
-        // in the map from the last full build. Merge the whole batch, then snapshot ONCE.
-        let simple = {
-            let mut guard = slot.simple_names.lock().unwrap_or_else(|p| p.into_inner());
-            for (path, source) in files {
-                merge_file_types(&mut guard, path, *source);
-            }
-            guard.clone()
-        };
+        // Each file is parsed and its symbols extracted ONCE; the type map, the provider overlay and
+        // the class navigator below all read that one `FileSymbols` (they used to extract it again
+        // apiece). A batch is extracted in parallel — `parallel_map` is serial for a handful of files,
+        // so a single edited buffer pays no thread start-up.
+        let extracted: Vec<Option<FileSymbols>> =
+            bennu_intel::prelude::parallel_map(files, |(_, source)| source.map(bennu_java::prelude::extract_symbols));
 
-        // Re-extract each file's records (its `Symbol`s carry the resolved members) and apply them
-        // to the live provider's in-memory overlay — no disk, no rebuild. A delete
-        // (`source == None`) applies an empty record set, which drops the file's prior overlay
-        // entries. Keyed by the normalized path, which is also the FE `file` string, so the
-        // overlay's per-file rename/remove bookkeeping matches on the next edit.
         let provider = {
             let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
             Arc::clone(&g)
         };
-        // Resolve a wildcard-imported supertype/return/param to the exact package via the live
-        // resolver's project view (the merged `simple` map is lossy on same-name collisions).
-        let is_project = |b: &str| provider.is_project_type(b);
-        for (path, source) in files {
-            let symbols: Vec<Symbol> = source
-                .map(|src| {
-                    file_records_from_source(path, src, &simple, u32::MAX / 2, &is_project)
+
+        // Update the project-wide simple→binary map from the patched files' OWN type decls
+        // (a renamed/added/removed type in one of them), without re-scanning the project.
+        // Cross-file type references still resolve — every other file's types are already
+        // in the map from the last full build.
+        //
+        // The map is read through the lock while the records are built, not cloned out of it: a
+        // clone is O(every type in the project) per keystroke, and the lock has no other reader than
+        // the build, which has long finished, and other patches, which this serializes harmlessly.
+        //
+        // Each file's records (its `Symbol`s carry the resolved members) are what the live provider's
+        // in-memory overlay is patched with — no disk, no rebuild. A delete (`source == None`) applies
+        // an empty record set, which drops the file's prior overlay entries.
+        let patches: Vec<Vec<Symbol>> = {
+            let mut simple = slot.simple_names.lock().unwrap_or_else(|p| p.into_inner());
+            for fs in extracted.iter().flatten() {
+                merge_symbol_types(&mut simple, fs);
+            }
+            let simple: &BTreeMap<String, String> = &simple;
+            let work: Vec<(&PathBuf, Option<&FileSymbols>)> =
+                files.iter().map(|(path, _)| path).zip(extracted.iter().map(Option::as_ref)).collect();
+            bennu_intel::prelude::parallel_map(&work, |&(path, fs)| {
+                // Resolve a wildcard-imported supertype/return/param to the exact package via the live
+                // resolver's project view (the merged `simple` map is lossy on same-name collisions).
+                // Built per call because `&dyn Fn` is not `Sync` and the workers share `provider`.
+                let is_project = |b: &str| provider.is_project_type(b);
+                fs.map(|fs| {
+                    file_records_from_symbols(path, fs, simple, u32::MAX / 2, &is_project)
                         .into_iter()
                         .map(|r| r.symbol)
                         .collect()
                 })
-                .unwrap_or_default();
-            provider.apply_file_patch(&norm_path(path), &symbols);
+                .unwrap_or_default()
+            })
+        };
+        // Keyed by the normalized path, which is also the FE `file` string, so the overlay's
+        // per-file rename/remove bookkeeping matches on the next edit.
+        for ((path, _), symbols) in files.iter().zip(&patches) {
+            provider.apply_file_patch(&norm_path(path), symbols);
         }
 
         // Go-to-Class reflects a rename without a full rebuild.
-        refresh_class_cache_for_files(slot, files);
+        refresh_class_cache_for_files(slot, files, &extracted);
 
         // Find-usages and rename reflect the edit too. Their reference index used to be a pure
         // build artefact — walked when the project opened and left alone until something rebuilt
@@ -4479,9 +4501,8 @@ impl IndexService {
     /// types' member signatures change, so every file whose recorded dependencies name them
     /// re-validates instead of being served from cache.
     ///
-    /// NOTE: this refreshes what VALIDATION and completion resolve against. The semantic engine's
-    /// reference index is a full-build cost and is not rebuilt here, so find-usages over externally
-    /// changed files still wants a rebuild.
+    /// This runs at validation time; between validations the filesystem watcher feeds the same
+    /// batch path ([`Self::sync_disk_changes`]), reference index included.
     fn sync_external_changes(&self, sources: &[(PathBuf, String)]) -> usize {
         let Some((first, _)) = sources.first() else { return 0 };
         let Some(slot) = self.slot_for_file(&norm_path(first)) else { return 0 };
@@ -4505,6 +4526,103 @@ impl IndexService {
         );
         self.patch_java_files(&slot, &stale);
         stale.len()
+    }
+
+    /// Bring the index in line with paths the filesystem watcher saw change behind the editor — a
+    /// `git checkout`, another IDE, a code generator — in ONE batch, off the watcher thread (see
+    /// [`crate::external_sync`], which debounces and calls this).
+    ///
+    /// Without it nothing fed such changes into the index between validations, so after a checkout
+    /// completion and find-usages answered about the files as they were.
+    ///
+    /// Each path is either a `.java` file or a directory that appeared, vanished or moved (its files
+    /// come with it). Only files whose content differs from what the index was last given are
+    /// re-indexed, so the echo of the editor's own save is a no-op by content, and a file the editor
+    /// edited moments ago is left alone entirely: the buffer is newer than the disk there.
+    ///
+    /// A project whose build is still running is handed back in `deferred`: the build reads the disk
+    /// itself, but it may have read a file before the change, and the caller retries once it is ready.
+    pub fn sync_disk_changes(&self, paths: Vec<PathBuf>) -> DiskSync {
+        let mut by_slot: Vec<(Arc<ProjectSlot>, Vec<PathBuf>)> = Vec::new();
+        for path in paths {
+            let Some(slot) = self.slot_owning(&norm_path(&path)) else { continue };
+            match by_slot.iter_mut().find(|(s, _)| Arc::ptr_eq(s, &slot)) {
+                Some((_, group)) => group.push(path),
+                None => by_slot.push((slot, vec![path])),
+            }
+        }
+        let mut outcome = DiskSync::default();
+        for (slot, group) in by_slot {
+            let one = self.sync_slot_from_disk(&slot, group);
+            outcome.patched += one.patched;
+            outcome.deferred.extend(one.deferred);
+        }
+        outcome
+    }
+
+    /// [`sync_disk_changes`](Self::sync_disk_changes) for the paths of one project.
+    fn sync_slot_from_disk(&self, slot: &Arc<ProjectSlot>, paths: Vec<PathBuf>) -> DiskSync {
+        if !slot.ready.load(Ordering::Relaxed) {
+            return DiskSync { patched: 0, deferred: paths };
+        }
+        let files = changed_java_files(slot, paths);
+        if files.is_empty() {
+            return DiskSync::default();
+        }
+
+        // Read the whole burst in parallel — a checkout can move hundreds of files — and decide
+        // afterwards. Decoded exactly as the full build decodes, or a Cp1252 file would re-index
+        // as mojibake and hash differently from the baseline.
+        let plan = encoding_plan(&norm_path(&slot.root));
+        let root = &slot.root;
+        let echo = EditOrder::global();
+        let read_at = Instant::now();
+        let states = bennu_intel::prelude::parallel_map(&files, |path| {
+            if echo.edited_within(&norm_path(path), read_at, crate::external_sync::EDITOR_ECHO_WINDOW) {
+                return DiskState::Skip;
+            }
+            if !path.exists() {
+                return DiskState::Gone;
+            }
+            if !path.is_file() || !bennu_intel::prelude::is_indexed_source(root, path) {
+                return DiskState::Skip;
+            }
+            match bennu_intel::prelude::read_source_for_index(path, &plan) {
+                Some(decoded) => DiskState::Text(decoded.text),
+                None => DiskState::Skip,
+            }
+        });
+
+        // Checked again now that the (slow) reads are done: an edit that arrived meanwhile makes the
+        // text just read the OLDER one.
+        let decided_at = Instant::now();
+        let stale: Vec<(PathBuf, Option<String>)> = {
+            let known = slot.indexed_hashes.lock().unwrap_or_else(|p| p.into_inner());
+            files
+                .iter()
+                .zip(states)
+                .filter_map(|(path, state)| {
+                    let key = norm_path(path);
+                    if echo.edited_within(&key, decided_at, crate::external_sync::EDITOR_ECHO_WINDOW) {
+                        return None;
+                    }
+                    match state {
+                        DiskState::Skip => None,
+                        DiskState::Gone => known.contains_key(&key).then(|| (PathBuf::from(key), None)),
+                        DiskState::Text(text) => (known.get(&key) != Some(&bennu_intel::prelude::source_hash(&text)))
+                            .then(|| (PathBuf::from(key), Some(text))),
+                    }
+                })
+                .collect()
+        };
+        if stale.is_empty() {
+            return DiskSync::default();
+        }
+        eprintln!("bennu-be: {} file(s) changed on disk — re-indexing", stale.len());
+        let batch: Vec<(PathBuf, Option<&str>)> =
+            stale.iter().map(|(path, text)| (path.clone(), text.as_deref())).collect();
+        self.patch_java_files(slot, &batch);
+        DiskSync { patched: batch.len(), deferred: Vec::new() }
     }
 
     /// Schedule a coalesced, off-request-thread rebuild of the config graph after a `.xml` edit.
@@ -4613,6 +4731,18 @@ impl IndexService {
     }
 
     fn slot_for_file(&self, file: &str) -> Option<Arc<ProjectSlot>> {
+        let best = self.slot_owning(file);
+        // A question about one of its files is a use of the project — see `project_close`.
+        if let Some(slot) = &best {
+            crate::project_close::touch(&slot.root.to_string_lossy());
+        }
+        best
+    }
+
+    /// The slot whose root is the longest prefix of `file`, WITHOUT counting as a use of the project:
+    /// the filesystem watcher asks this about files nobody is looking at, and a `git checkout` in the
+    /// background must not keep an idle project alive.
+    fn slot_owning(&self, file: &str) -> Option<Arc<ProjectSlot>> {
         let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
         let mut best: Option<&Arc<ProjectSlot>> = None;
         for slot in slots.values() {
@@ -4622,10 +4752,6 @@ impl IndexService {
                     _ => best = Some(slot),
                 }
             }
-        }
-        // A question about one of its files is a use of the project — see `project_close`.
-        if let Some(slot) = best {
-            crate::project_close::touch(&slot.root.to_string_lossy());
         }
         best.cloned()
     }
@@ -5414,17 +5540,15 @@ fn class_entry_of(d: &bennu_intel::prelude::ClassDecl) -> ClassEntry {
     }
 }
 
-/// Merge the edited `file`'s OWN current type declarations into the project-wide
+/// Merge an edited file's OWN current type declarations into the project-wide
 /// simple→binary `map`, so an added/renamed type in this file resolves immediately. Avoids
 /// a whole-project re-scan on each keystroke — every OTHER file's types are already in the
 /// map from the last full build. A removed type's stale simple→binary entry (rare) is
 /// corrected on the next full reindex; the common add-member / rename-type edit is exact.
-/// A delete (`source == None`) contributes nothing new.
-fn merge_file_types(map: &mut BTreeMap<String, String>, _file: &Path, source: Option<&str>) {
-    if let Some(src) = source {
-        for td in bennu_java::prelude::extract_symbols(src).types {
-            map.insert(td.name, td.fqn.replace('.', "/"));
-        }
+/// A deleted file has no symbols and so contributes nothing new.
+fn merge_symbol_types(map: &mut BTreeMap<String, String>, symbols: &FileSymbols) {
+    for td in &symbols.types {
+        map.insert(td.name.clone(), td.fqn.replace('.', "/"));
     }
 }
 
@@ -5476,12 +5600,67 @@ fn declaring_supertype(
 
 /// Record the content the index is being built from, replacing whatever was there — the baseline
 /// [`IndexService::sync_external_changes`] compares against. See [`ProjectSlot::indexed_hashes`].
-fn record_indexed_hashes(slot: &Arc<ProjectSlot>, sources: &[(PathBuf, String)]) {
+fn record_indexed_hashes(slot: &Arc<ProjectSlot>, hashes: &[(String, u64)]) {
     let mut g = slot.indexed_hashes.lock().unwrap_or_else(|p| p.into_inner());
     g.clear();
-    for (path, text) in sources {
-        g.insert(norm_path(path), bennu_intel::prelude::source_hash(text));
+    g.extend(hashes.iter().cloned());
+}
+
+/// What [`IndexService::sync_disk_changes`] did with a batch.
+#[derive(Debug, Default)]
+pub struct DiskSync {
+    /// How many files were re-indexed (changed, added or removed).
+    pub patched: usize,
+    /// Paths of a project whose build was still running — the caller offers them again later.
+    pub deferred: Vec<PathBuf>,
+}
+
+/// What the disk says about one changed path.
+enum DiskState {
+    /// Not ours to index: edited in the editor moments ago, outside the indexed set, or unreadable.
+    Skip,
+    /// The file no longer exists.
+    Gone,
+    /// The file's current text, decoded as the build decodes it.
+    Text(String),
+}
+
+/// The `.java` files a batch of changed paths stands for, without duplicates and in a stable order.
+///
+/// A path is a source file, or a directory the watcher saw come, go or move without listing what is
+/// in it: one that still exists is walked, one that vanished stands for every file the index holds
+/// under it.
+fn changed_java_files(slot: &ProjectSlot, paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for path in paths {
+        let key = norm_path(&path);
+        if is_java(&key) {
+            files.insert(key);
+        } else if path.is_dir() {
+            let mut found = Vec::new();
+            bennu_intel::prelude::collect_java(&path, &mut found);
+            files.extend(found.iter().map(|p| norm_path(p)));
+        } else {
+            let known = slot.indexed_hashes.lock().unwrap_or_else(|p| p.into_inner());
+            files.extend(indexed_files_under(&key, known.keys()));
+        }
     }
+    files.into_iter().map(PathBuf::from).collect()
+}
+
+/// The indexed files that live under directory `dir` (both forward-slashed).
+fn indexed_files_under<'a>(dir: &str, known: impl Iterator<Item = &'a String>) -> Vec<String> {
+    let prefix = format!("{}/", dir.trim_end_matches('/'));
+    known.filter(|file| file.starts_with(&prefix)).cloned().collect()
+}
+
+/// `(normalized path, content hash)` of every source — the one hashing pass over the project text,
+/// run across the background worker budget. It feeds both the "changed behind our back?" baseline
+/// ([`record_indexed_hashes`]) and the warm-up stamp, which each used to hash every file themselves.
+fn hash_sources(sources: &[(PathBuf, String)]) -> Vec<(String, u64)> {
+    bennu_intel::prelude::parallel_map(sources, |(path, text)| {
+        (norm_path(path), bennu_intel::prelude::source_hash(text))
+    })
 }
 
 /// Refresh the class-navigator cache for a batch of patched files: drop their prior entries and
@@ -5491,24 +5670,72 @@ fn record_indexed_hashes(slot: &Arc<ProjectSlot>, sources: &[(PathBuf, String)])
 ///
 /// One sweep for the whole batch, not one per file: `retain` walks every entry in the project, so
 /// doing it per file is quadratic once a batch is more than a handful.
-fn refresh_class_cache_for_files(slot: &Arc<ProjectSlot>, files: &[(PathBuf, Option<&str>)]) {
+///
+/// `extracted` is the batch's symbols, parallel to `files` (see `patch_java_files`). The fresh
+/// entries are built before any lock is taken, and the write lock only when they differ from what
+/// is cached: typing inside a method body changes no declaration, so the common keystroke costs a
+/// shared read-lock scan and no mutation.
+fn refresh_class_cache_for_files(
+    slot: &Arc<ProjectSlot>,
+    files: &[(PathBuf, Option<&str>)],
+    extracted: &[Option<FileSymbols>],
+) {
     let keys: HashSet<String> = files.iter().map(|(p, _)| norm_path(p)).collect();
-    let mut cache = slot.classes.write().unwrap_or_else(|p| p.into_inner());
-    cache.retain(|c| !keys.contains(&c.file));
-    for (path, source) in files {
-        let Some(src) = source else { continue };
-        let file_key = norm_path(path);
-        let fs = bennu_java::prelude::extract_symbols(src);
-        for td in &fs.types {
-            cache.push(ClassEntry {
-                fqcn: td.fqn.clone(),
-                simple: td.name.clone(),
-                file: file_key.clone(),
-                line: decl_line_of(src, &td.name),
-                kind: td.kind.slug().to_string(),
-            });
+    let in_batch = batch_matcher(&keys);
+    let mut fresh: Vec<ClassEntry> = Vec::new();
+    for ((path, source), symbols) in files.iter().zip(extracted) {
+        let (Some(src), Some(fs)) = (source, symbols) else { continue };
+        fresh.extend(class_entries_of(&norm_path(path), src, fs));
+    }
+    {
+        let cache = slot.classes.read().unwrap_or_else(|p| p.into_inner());
+        if class_entries_unchanged(&cache, &in_batch, &fresh) {
+            return;
         }
     }
+    let mut cache = slot.classes.write().unwrap_or_else(|p| p.into_inner());
+    cache.retain(|c| !in_batch(&c.file));
+    cache.extend(fresh);
+}
+
+/// A membership test over a batch's file keys. One key — the per-keystroke case — is a plain string
+/// comparison, not a hash of the path for each of the project's thousands of cached entries.
+fn batch_matcher(keys: &HashSet<String>) -> impl Fn(&str) -> bool + '_ {
+    let single = if keys.len() == 1 { keys.iter().next() } else { None };
+    move |file: &str| match single {
+        Some(only) => only == file,
+        None => keys.contains(file),
+    }
+}
+
+/// The navigator entries of one file's named types. An anonymous class is never offered by name,
+/// matching what the full build puts in the cache.
+fn class_entries_of(file_key: &str, source: &str, symbols: &FileSymbols) -> Vec<ClassEntry> {
+    symbols
+        .types
+        .iter()
+        .filter(|td| !td.is_anonymous)
+        .map(|td| ClassEntry {
+            fqcn: td.fqn.clone(),
+            simple: td.name.clone(),
+            file: file_key.to_string(),
+            line: bennu_intel::prelude::type_decl_line(source, td),
+            kind: td.kind.slug().to_string(),
+        })
+        .collect()
+}
+
+/// Whether the cached entries belonging to the batch (`in_batch`) are exactly `fresh`, in which case
+/// the cache needs no write at all.
+fn class_entries_unchanged(cache: &[ClassEntry], in_batch: &dyn Fn(&str) -> bool, fresh: &[ClassEntry]) -> bool {
+    let mut cached = 0usize;
+    for entry in cache.iter().filter(|c| in_batch(&c.file)) {
+        cached += 1;
+        if !fresh.contains(entry) {
+            return false;
+        }
+    }
+    cached == fresh.len()
 }
 
 /// Bring the slot's reference index up to date with a batch of edited (or deleted) files, so
@@ -5524,29 +5751,6 @@ fn refresh_reference_index(slot: &Arc<ProjectSlot>, files: &[(PathBuf, Option<&s
     for (path, source) in files {
         engine.refresh_file(&norm_path(path), *source);
     }
-}
-
-/// The 1-based declaration line of type `name` in `source`, defaulting to 1. Mirrors the
-/// intel navigator's recovery (the extractor carries no offset) — kept minimal here for the
-/// single-file patch refresh.
-fn decl_line_of(source: &str, name: &str) -> usize {
-    for (idx, line) in source.lines().enumerate() {
-        // A standalone `class|interface|enum <name>` token on this line.
-        for kw in ["class", "interface", "enum"] {
-            if let Some(pos) = line.find(kw) {
-                let after = line[pos + kw.len()..].trim_start();
-                if after.starts_with(name) {
-                    let tail = &after[name.len().min(after.len())..];
-                    let bounded =
-                        tail.chars().next().map(|c| !c.is_alphanumeric() && c != '_').unwrap_or(true);
-                    if bounded {
-                        return idx + 1;
-                    }
-                }
-            }
-        }
-    }
-    1
 }
 
 /// Count the dependency jars on the project's classpath **cheaply**, from the
@@ -6481,11 +6685,11 @@ mod tests {
     }
 
     #[test]
-    fn merge_file_types_adds_edited_files_types() {
+    fn merge_symbol_types_adds_edited_files_types() {
         let mut map = BTreeMap::new();
         map.insert("Existing".to_string(), "p/Existing".to_string());
         let src = "package a;\npublic class Order { }\ninterface Repo { }\n";
-        merge_file_types(&mut map, Path::new("/proj/a/Order.java"), Some(src));
+        merge_symbol_types(&mut map, &bennu_java::prelude::extract_symbols(src));
         // The edited file's types are added; the pre-existing (other-file) entry is kept.
         assert_eq!(map.get("Order").map(String::as_str), Some("a/Order"));
         assert_eq!(map.get("Repo").map(String::as_str), Some("a/Repo"));
@@ -6493,21 +6697,74 @@ mod tests {
     }
 
     #[test]
-    fn merge_file_types_delete_is_noop_addition() {
+    fn merge_symbol_types_of_a_deleted_file_is_noop_addition() {
         let mut map = BTreeMap::new();
         map.insert("Keep".to_string(), "p/Keep".to_string());
-        merge_file_types(&mut map, Path::new("/proj/a/Gone.java"), None);
+        merge_symbol_types(&mut map, &FileSymbols::default());
         assert_eq!(map.len(), 1);
         assert_eq!(map.get("Keep").map(String::as_str), Some("p/Keep"));
     }
 
+    fn class_entry(fqcn: &str, file: &str, line: usize) -> ClassEntry {
+        ClassEntry {
+            fqcn: fqcn.to_string(),
+            simple: fqcn.rsplit('.').next().unwrap().to_string(),
+            file: file.to_string(),
+            line,
+            kind: "class".to_string(),
+        }
+    }
+
     #[test]
-    fn decl_line_of_locates_and_bounds() {
-        let src = "package a;\n\npublic class Order {\n}\n";
-        assert_eq!(decl_line_of(src, "Order"), 3);
-        // `Foo` must not match `FooBar`'s declaration — falls back to 1.
-        assert_eq!(decl_line_of("class FooBar {}\n", "Foo"), 1);
-        assert_eq!(decl_line_of("class FooBar {}\n", "FooBar"), 1);
+    fn class_entries_of_locates_the_declaration_and_skips_anonymous_types() {
+        let src = "package a;\n\npublic class Order {\n  Runnable r = new Runnable() { public void run() {} };\n}\n";
+        let entries = class_entries_of("/p/Order.java", src, &bennu_java::prelude::extract_symbols(src));
+        assert_eq!(entries, vec![class_entry("a.Order", "/p/Order.java", 3)]);
+        // `Foo` must not be mistaken for `FooBar`'s declaration.
+        let other = "class FooBar {}\n";
+        let foo = class_entries_of("/p/F.java", other, &bennu_java::prelude::extract_symbols(other));
+        assert_eq!(foo.len(), 1);
+        assert_eq!(foo[0].simple, "FooBar");
+    }
+
+    #[test]
+    fn an_unchanged_class_list_needs_no_cache_write() {
+        let cache = vec![class_entry("a.A", "/p/A.java", 1), class_entry("b.B", "/p/B.java", 1)];
+        let keys: HashSet<String> = ["/p/A.java".to_string()].into_iter().collect();
+        let in_batch = batch_matcher(&keys);
+        assert!(class_entries_unchanged(&cache, &in_batch, &[class_entry("a.A", "/p/A.java", 1)]));
+        // A moved declaration, a renamed type, a new type and a vanished type are all changes.
+        assert!(!class_entries_unchanged(&cache, &in_batch, &[class_entry("a.A", "/p/A.java", 4)]));
+        assert!(!class_entries_unchanged(&cache, &in_batch, &[class_entry("a.Z", "/p/A.java", 1)]));
+        assert!(!class_entries_unchanged(
+            &cache,
+            &in_batch,
+            &[class_entry("a.A", "/p/A.java", 1), class_entry("a.A2", "/p/A.java", 9)],
+        ));
+        assert!(!class_entries_unchanged(&cache, &in_batch, &[]));
+    }
+
+    #[test]
+    fn a_vanished_directory_stands_for_the_indexed_files_under_it() {
+        let known: Vec<String> = ["/p/src/a/A.java", "/p/src/a/sub/B.java", "/p/src/ab/C.java", "/p/src/D.java"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut under = indexed_files_under("/p/src/a", known.iter());
+        under.sort();
+        // `ab` merely shares a prefix with `a`; it is not inside it.
+        assert_eq!(under, vec!["/p/src/a/A.java".to_string(), "/p/src/a/sub/B.java".to_string()]);
+        assert!(indexed_files_under("/p/other", known.iter()).is_empty());
+    }
+
+    #[test]
+    fn the_batch_matcher_handles_one_key_and_many() {
+        let one: HashSet<String> = ["/p/A.java".to_string()].into_iter().collect();
+        let matches_one = batch_matcher(&one);
+        assert!(matches_one("/p/A.java") && !matches_one("/p/B.java"));
+        let two: HashSet<String> = ["/p/A.java".to_string(), "/p/B.java".to_string()].into_iter().collect();
+        let matches_two = batch_matcher(&two);
+        assert!(matches_two("/p/A.java") && matches_two("/p/B.java") && !matches_two("/p/C.java"));
     }
 
     /// Build a small Struts/Spring config graph, ingest it, and prove the beans / actions

@@ -127,6 +127,8 @@ export interface BennuConfig {
   folding_enabled: boolean;
   /** Collapse a file's block comments when it opens (needs `folding_enabled`). */
   fold_block_comments: boolean;
+  /** Collapse a file's import block when it opens (needs `folding_enabled`). */
+  fold_imports: boolean;
   /** Open the completion popup on its own while an identifier is being typed. */
   completion_auto_popup: boolean;
   /** How long typing must pause before that popup opens, in milliseconds. */

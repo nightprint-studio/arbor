@@ -23,18 +23,20 @@
 //! `java.time` classes, enums, boxes, collections (their size): [`crate::debug_known`] computes what
 //! `toString()` would have said from those fields, reading and never calling.
 //!
-//! ## Watches are paths, not Java
+//! ## Watches: paths are walked, the rest is evaluated
 //!
-//! A watch expression is `name`, `name.field.field`, or `name[3]` — resolved here by reading fields
-//! and array slots. The grammar itself is [`crate::debug_path`], shared with the Rust watch: the
-//! walk is what differs between JDWP and DAP, the shape of what the user typed is not. See that
-//! module for why a watch is deliberately not an expression language.
+//! A watch that is a path — `name`, `name.field.field`, `name[3]` — is resolved here by reading
+//! fields and array slots, which keeps the row exact (a `float` stays a `float`, an object stays
+//! expandable). Anything wider — `a + b`, `status == Status.ACTIVE`, `items[i]` — is the shared
+//! expression language (`bennu-debug-expr`) evaluated over [`crate::debug_jdwp_target`], which reads
+//! through the same `root_variable` / `follow` below. What the language refuses it refuses by name:
+//! a method call would run application code inside a paused program.
 
 // Named, not glob: the crate's prelude exports its own one-parameter `Result<T>`, which would
 // shadow `std`'s in a module whose functions all return `Result<T, String>`.
 use bennu_jdwp::prelude::{
     array_length, array_values, class_name, frame_this, frame_values, object_type, object_values,
-    string_value, superclass, Field, Frame, Id, Local, Tag, Value,
+    static_values, string_value, superclass, Field, Frame, Id, Local, Tag, Value,
 };
 use bennu_proto::prelude::DebugValue;
 
@@ -189,7 +191,7 @@ fn field_rows(session: &Session, object: Id, class: Id) -> Result<Vec<DebugValue
 
 // ── watches ─────────────────────────────────────────────────────────────────────
 
-/// Evaluate a watch path against a frame. The result is named by the whole expression, so the
+/// Evaluate a watch against a frame. The result is named by the whole expression, so the
 /// panel row reads as what was asked rather than as its last segment.
 pub(crate) fn watch(
     session: &Session,
@@ -199,9 +201,12 @@ pub(crate) fn watch(
     let Some((thread, at)) = session.frame_at(frame) else {
         return Err("the program is not stopped there".to_string());
     };
-    let steps = debug_path::parse(expression, debug_path::JAVA)?;
-    let value = walk_path(session, thread, &at, &steps)?;
-    Ok(describe(session, expression, "watch", None, value))
+    crate::debug_jdwp_target::watch_row(session, thread, &at, expression)
+}
+
+/// One value as a row, named and typed by what it is at runtime.
+pub(crate) fn row(session: &Session, name: &str, kind: &str, value: Value) -> DebugValue {
+    describe(session, name, kind, None, value)
 }
 
 /// Resolve an already-parsed path against a **named** frame of a thread.
@@ -240,12 +245,6 @@ pub(crate) fn render_path(
     Ok(describe(session, expression, "watch", None, value).value)
 }
 
-/// A parsed path read in a named frame, as the text a row would show.
-pub(crate) fn render_steps(session: &Session, thread: Id, at: &Frame, steps: &[Step]) -> Result<String, String> {
-    let value = walk_path(session, thread, at, steps)?;
-    Ok(describe(session, "", "watch", None, value).value)
-}
-
 /// A value a method returned, as a row.
 pub(crate) fn returned_row(session: &Session, value: Value) -> DebugValue {
     let mut row = describe(session, "return", "return", None, value);
@@ -269,6 +268,21 @@ pub(crate) fn returned_row(session: &Session, value: Value) -> DebugValue {
 /// The first segment: a local of the frame, else a field of its receiver — which is how
 /// watching a bare field name works inside an instance method.
 fn root_value(session: &Session, thread: Id, at: &Frame, name: &str) -> Result<Value, String> {
+    root_variable(session, thread, at, name)?
+        .ok_or_else(|| format!("no variable or field named `{name}` here"))
+}
+
+/// A name in scope in a frame — `Ok(None)` when there is none, so a caller can try it as a type.
+///
+/// In order: a local or argument alive at this bytecode index, `this`, a field of the receiver
+/// (instance or static), and finally a static field of the class the method is declared in — which
+/// is how a bare `MAX` works inside a `static` method, where there is no receiver at all.
+pub(crate) fn root_variable(
+    session: &Session,
+    thread: Id,
+    at: &Frame,
+    name: &str,
+) -> Result<Option<Value>, String> {
     let table = session.variables_of(at.location.class, at.location.method);
     if let Some(local) =
         table.iter().find(|l| l.name == name && l.in_scope(at.location.index))
@@ -276,19 +290,76 @@ fn root_value(session: &Session, thread: Id, at: &Frame, name: &str) -> Result<V
         let slots = [(local.slot, tag_of(&local.signature))];
         let values = frame_values(&session.client, thread, at.id, &slots)
             .map_err(|e| e.to_string())?;
-        return values.into_iter().next().ok_or_else(|| "no value".to_string());
+        return Ok(Some(values.into_iter().next().ok_or_else(|| "no value".to_string())?));
     }
 
     let this = frame_this(&session.client, thread, at.id).map_err(|e| e.to_string())?;
-    if this.is_null() {
-        return Err(format!("no variable named `{name}` here"));
+    if name == "this" {
+        return Ok((!this.is_null()).then_some(this));
     }
-    follow(session, this, &Step::Field(name.to_string()))
-        .map_err(|_| format!("no variable or field named `{name}` here"))
+    if let Value::Object { id, .. } = this {
+        if id != 0 {
+            let class = object_type(&session.client, id).map_err(|e| e.to_string())?;
+            if let Some((declaring, field)) = find_field(session, class.id, name) {
+                return read_field(session, Some(id), declaring, &field).map(Some);
+            }
+        }
+    }
+    match find_field(session, at.location.class, name) {
+        Some((declaring, field)) if field.is_static() => {
+            read_field(session, None, declaring, &field).map(Some)
+        }
+        _ => Ok(None),
+    }
+}
+
+/// A field by name along a class and its superclasses: the class that declares it, and the field.
+fn find_field(session: &Session, class: Id, name: &str) -> Option<(Id, Field)> {
+    let mut current = class;
+    for _ in 0..MAX_SUPERS {
+        if current == 0 {
+            break;
+        }
+        if let Some(field) = session.fields_of(current).into_iter().find(|f| f.name == name) {
+            return Some((current, field));
+        }
+        current = superclass(&session.client, current).unwrap_or(0);
+    }
+    None
+}
+
+/// Read a field the way its kind needs: a static one from its declaring type, an instance one from
+/// the object. (`ObjectReference.GetValues` on a static field id is an error from the VM.)
+pub(crate) fn read_field(
+    session: &Session,
+    object: Option<Id>,
+    declaring: Id,
+    field: &Field,
+) -> Result<Value, String> {
+    let values = match (field.is_static(), object) {
+        (false, Some(object)) => object_values(&session.client, object, &[field.id]),
+        _ => static_values(&session.client, declaring, &[field.id]),
+    }
+    .map_err(|e| e.to_string())?;
+    values.into_iter().next().ok_or_else(|| "no value".to_string())
+}
+
+/// The static field `name` of `class` (or of a superclass), if there is one.
+pub(crate) fn static_field_of(
+    session: &Session,
+    class: Id,
+    name: &str,
+) -> Result<Option<Value>, String> {
+    match find_field(session, class, name) {
+        Some((declaring, field)) if field.is_static() => {
+            read_field(session, None, declaring, &field).map(Some)
+        }
+        _ => Ok(None),
+    }
 }
 
 /// One hop: a field of an object, or an element of an array.
-fn follow(session: &Session, value: Value, step: &Step) -> Result<Value, String> {
+pub(crate) fn follow(session: &Session, value: Value, step: &Step) -> Result<Value, String> {
     let Value::Object { id, .. } = value else {
         return Err("that is a primitive — there is nothing inside it".to_string());
     };
@@ -316,22 +387,21 @@ fn follow(session: &Session, value: Value, step: &Step) -> Result<Value, String>
                 .ok_or_else(|| "no value".to_string())
         }
         Step::Field(name) => {
-            let mut current = class.id;
-            for _ in 0..MAX_SUPERS {
-                if current == 0 {
-                    break;
-                }
-                if let Some(field) = session.fields_of(current).into_iter().find(|f| &f.name == name)
-                {
-                    return object_values(&session.client, id, &[field.id])
-                        .map_err(|e| e.to_string())?
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| "no value".to_string());
-                }
-                current = superclass(&session.client, current).unwrap_or(0);
+            // An array has no declared fields; `length` is the one thing a person means by one.
+            if class.type_tag == 3 {
+                return if name == "length" {
+                    array_length(&session.client, id).map(Value::Int).map_err(|e| e.to_string())
+                } else {
+                    Err(format!("an array has `length` and its elements, not `{name}`"))
+                };
             }
-            Err(format!("no field named `{name}` on {}", simple_name(&session.class_name_of(class.id))))
+            match find_field(session, class.id, name) {
+                Some((declaring, field)) => read_field(session, Some(id), declaring, &field),
+                None => Err(format!(
+                    "no field named `{name}` on {}",
+                    simple_name(&session.class_name_of(class.id))
+                )),
+            }
         }
     }
 }
@@ -475,7 +545,7 @@ impl Heap for SessionHeap<'_> {
 }
 
 /// A string as a literal, cut if it is long.
-fn quote(text: &str) -> String {
+pub(crate) fn quote(text: &str) -> String {
     let escaped: String = text
         .chars()
         .take(MAX_STRING)

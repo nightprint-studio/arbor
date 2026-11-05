@@ -94,7 +94,7 @@ fn describe_error(n: Node, bytes: &[u8]) -> String {
         }
         _ => {}
     }
-    let parent = n.parent().map(|p| p.kind()).unwrap_or("");
+    let parent = bennu_java::prelude::parent_of(n).map(|p| p.kind()).unwrap_or("");
     let at_top_level = parent == "program";
     if at_top_level {
         return "A class, interface, enum or record declaration is expected here".to_string();
@@ -127,12 +127,12 @@ fn snippet(text: &str) -> String {
 
 /// Whether `n` sits inside a node of one of `kinds`.
 fn inside(n: Node, kinds: &[&str]) -> bool {
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         if kinds.contains(&p.kind()) {
             return true;
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     false
 }

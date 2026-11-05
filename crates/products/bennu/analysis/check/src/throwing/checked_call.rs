@@ -264,7 +264,7 @@ fn enclosing_type_parameters(node: Node, bytes: &[u8]) -> std::collections::Hash
                 }
             }
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     out
 }
@@ -295,7 +295,7 @@ fn crosses_a_body_boundary(node: Node, range_root: Node) -> bool {
         {
             return true;
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     false
 }
@@ -304,7 +304,7 @@ fn crosses_a_body_boundary(node: Node, range_root: Node) -> bool {
 /// one of its `catch`/`finally` clauses (JLS §14.20.2).
 fn inside_a_try_within(call: Node, range_root: Node) -> bool {
     let mut child = call;
-    let mut cur = call.parent();
+    let mut cur = bennu_java::prelude::parent_of(call);
     while let Some(n) = cur {
         if matches!(n.kind(), "try_statement" | "try_with_resources_statement")
             && n.child_by_field_name("body").is_some_and(|b| b.id() == child.id())
@@ -315,7 +315,7 @@ fn inside_a_try_within(call: Node, range_root: Node) -> bool {
             return false;
         }
         child = n;
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     false
 }
@@ -438,7 +438,7 @@ fn rethrown_by(
     if caught.is_empty() || caught_param_is_assigned(clause, name, bytes) {
         return caught;
     }
-    let Some(try_node) = clause.parent() else { return Vec::new() };
+    let Some(try_node) = bennu_java::prelude::parent_of(clause) else { return Vec::new() };
     let mut earlier: Vec<String> = Vec::new();
     let mut c = try_node.walk();
     for sibling in try_node.named_children(&mut c) {
@@ -519,7 +519,7 @@ fn raised_in<'t>(
 /// The `catch` clause whose parameter `name` is, walking out from `site` — stopping at the first
 /// method, lambda or class body, which a catch parameter cannot be seen through.
 fn catch_clause_binding<'t>(site: Node<'t>, name: &str, bytes: &[u8]) -> Option<Node<'t>> {
-    let mut cur = site.parent();
+    let mut cur = bennu_java::prelude::parent_of(site);
     while let Some(n) = cur {
         match n.kind() {
             "catch_clause" => {
@@ -534,7 +534,7 @@ fn catch_clause_binding<'t>(site: Node<'t>, name: &str, bytes: &[u8]) -> Option<
             }
             _ => {}
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     None
 }
@@ -685,7 +685,7 @@ fn enclosing_statement(call: Node) -> Option<Node> {
         if matches!(n.kind(), "method_declaration" | "constructor_declaration" | "class_body") {
             return None;
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     None
 }

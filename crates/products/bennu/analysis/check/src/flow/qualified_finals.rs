@@ -104,7 +104,7 @@ fn has_super(n: Node) -> bool {
 /// towards silence.
 fn written_inside(node: Node, owner: &str, bytes: &[u8]) -> bool {
     let simple = owner.rsplit(['/', '$']).next().unwrap_or(owner);
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(n) = cur {
         let is_type = matches!(
             n.kind(),
@@ -113,7 +113,7 @@ fn written_inside(node: Node, owner: &str, bytes: &[u8]) -> bool {
         if is_type && n.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()) == Some(simple) {
             return true;
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     false
 }

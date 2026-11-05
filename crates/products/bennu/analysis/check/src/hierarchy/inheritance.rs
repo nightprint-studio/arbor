@@ -373,7 +373,7 @@ fn generates_methods(decl: Node, bytes: &[u8]) -> bool {
 /// The compilation unit `decl` lives in — where the imports are.
 fn root_of(decl: Node) -> Node {
     let mut n = decl;
-    while let Some(p) = n.parent() {
+    while let Some(p) = bennu_java::prelude::parent_of(n) {
         n = p;
     }
     n

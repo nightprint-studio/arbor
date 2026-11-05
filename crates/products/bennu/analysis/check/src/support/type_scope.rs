@@ -14,7 +14,7 @@ use bennu_java::prelude::{FileSymbols, NameScope, TypeResolver};
 /// `class HashCodeBuilder implements Builder<Integer>` in a class that also declares a nested
 /// `Builder`, and reading the header inside the body bound the interface it implements to that
 /// class.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeScope {
     /// Inside the BODY of this type (a binary name): its member types, and its enclosing types',
     /// are in scope.

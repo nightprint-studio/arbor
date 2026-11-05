@@ -66,7 +66,7 @@ fn out_of_scope_regions(instanceof: Node) -> Vec<Node> {
     let mut regions = Vec::new();
     let mut flow = Introduced { when_true: true, when_false: false };
     let mut cur = instanceof;
-    while let Some(parent) = cur.parent() {
+    while let Some(parent) = bennu_java::prelude::parent_of(cur) {
         match parent.kind() {
             "parenthesized_expression" => {}
             "unary_expression" if is_operator(parent, "!") => {
@@ -92,7 +92,7 @@ fn out_of_scope_regions(instanceof: Node) -> Vec<Node> {
         }
         cur = parent;
     }
-    let Some(statement) = cur.parent().filter(|p| {
+    let Some(statement) = bennu_java::prelude::parent_of(cur).filter(|p| {
         p.kind() == "if_statement" && p.child_by_field_name("condition").is_some_and(|c| c.id() == cur.id())
     }) else {
         return regions;
@@ -106,7 +106,7 @@ fn out_of_scope_regions(instanceof: Node) -> Vec<Node> {
     }
     // After `if (e) S` the variable is in scope only if `e` binds it when false (and `S` cannot complete
     // normally). Without an `else`, a test that does not is followed by statements that cannot see it.
-    if !flow.when_false && alternative.is_none() && statement.parent().is_some_and(|p| p.kind() == "block") {
+    if !flow.when_false && alternative.is_none() && bennu_java::prelude::parent_of(statement).is_some_and(|p| p.kind() == "block") {
         let mut next = statement.next_named_sibling();
         while let Some(following) = next {
             regions.push(following);
@@ -140,7 +140,7 @@ fn report_uses(region: Node, name: &str, bytes: &[u8], out: &mut Vec<Diagnostic>
 /// a variable's (nothing else in the method or its classes is called that, see
 /// [`name_means_only_this_binding`]).
 fn is_receiver(ident: Node) -> bool {
-    ident.parent().is_some_and(|p| {
+    bennu_java::prelude::parent_of(ident).is_some_and(|p| {
         matches!(p.kind(), "method_invocation" | "field_access")
             && child_field_name(p, ident).as_deref() == Some("object")
     })
@@ -153,7 +153,7 @@ fn name_means_only_this_binding(method: Node, binding: Node, name: &str, bytes: 
     if declared_elsewhere(method, binding, name, bytes) {
         return false;
     }
-    let mut cur = method.parent();
+    let mut cur = bennu_java::prelude::parent_of(method);
     let mut nearest = true;
     while let Some(p) = cur {
         if matches!(p.kind(), "class_declaration" | "enum_declaration" | "record_declaration" | "interface_declaration") {
@@ -167,7 +167,7 @@ fn name_means_only_this_binding(method: Node, binding: Node, name: &str, bytes: 
                 }
             }
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     true
 }
@@ -201,7 +201,7 @@ fn declared_elsewhere(method: Node, own: Node, name: &str, bytes: &[u8]) -> bool
 
 /// Whether an identifier stands where a name is introduced rather than used.
 fn declares(ident: Node) -> bool {
-    let Some(parent) = ident.parent() else { return false };
+    let Some(parent) = bennu_java::prelude::parent_of(ident) else { return false };
     match parent.kind() {
         "formal_parameter" | "spread_parameter" | "catch_formal_parameter" | "inferred_parameters" | "type_pattern"
         | "record_pattern_component" | "resource" => true,

@@ -219,6 +219,11 @@ pub(crate) fn open_and_start(
         &args.root,
         std::sync::Arc::new(ProjectClassNames { root: args.root.replace('\\', "/") }),
     );
+    // The extension models are built by the first question, which used to be the first file validated. Built
+    // now instead, off-thread, once per open and only for the project on screen.
+    if warm && first_open {
+        crate::frameworks::warm_in_background(&args.root);
+    }
 
     // Retention, off-thread. Opening a project is the one moment that is already slow for
     // other reasons and happens once per session — which is exactly what a policy that

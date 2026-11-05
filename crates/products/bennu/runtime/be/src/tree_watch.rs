@@ -204,7 +204,9 @@ impl TreeWatch {
                     self.pending[idx].record_content(rel);
                     touched = true;
                 } else if rel.ends_with(".java") {
-                    // not the tree's business, but the completion's log profile counts these files
+                    // not the tree's business, but the completion's log profile counts these files,
+                    // and the symbol index has to hear about an edit made outside the editor
+                    crate::external_sync::java_changed(&self.roots[idx], &rel);
                     crate::flc::java_files_changed(&self.roots[idx], vec![rel]);
                 }
                 continue;
@@ -212,8 +214,10 @@ impl TreeWatch {
             // a `.java` file that came, went or moved is counted again; anything else without an extension is taken
             // for a directory, whose files the watcher may not list one by one
             if rel.ends_with(".java") {
+                crate::external_sync::java_changed(&self.roots[idx], &rel);
                 crate::flc::java_files_changed(&self.roots[idx], vec![rel.clone()]);
             } else if !rel.rsplit('/').next().unwrap_or("").contains('.') {
+                crate::external_sync::dir_changed(&self.roots[idx], &rel);
                 crate::flc::project_changed(&self.roots[idx]);
             }
             let top_level = !rel.contains('/');

@@ -102,7 +102,21 @@ pub fn check_file(source: &str, ctx: &FileContext) -> Vec<Diagnostic> {
         return Vec::new();
     };
     let root = tree.root_node();
+    let _parents = bennu_java::prelude::ParentTable::arm(root);
     check_file_in(root, &collect_nodes(root), source, ctx)
+}
+
+/// Run one pure-AST check and add what it found. With `BENNU_PROFILE` set, a check that took 5 ms or more says
+/// so on stderr: which of these seventy checks a slow "pure-AST" phase is spent in.
+fn timed(out: &mut Vec<Diagnostic>, label: &'static str, check: impl FnOnce() -> Vec<Diagnostic>) {
+    let started = profiling_enabled().then(std::time::Instant::now);
+    out.extend(check());
+    if let Some(started) = started {
+        let took = started.elapsed();
+        if took >= std::time::Duration::from_millis(5) {
+            eprintln!("bennu-profile pure {label}: {:.1} ms", took.as_secs_f64() * 1000.0);
+        }
+    }
 }
 
 /// The pure-AST checks over an ALREADY-parsed `root` + its pre-collected node list — so both tiers
@@ -117,66 +131,66 @@ pub fn check_file_in(
     ctx: &FileContext,
 ) -> Vec<Diagnostic> {
     let mut out = crate::source::syntax::syntax_errors(root, source);
-    out.extend(crate::source::statements::invalid_statements_nodes(nodes, source));
-    out.extend(crate::source::literals::literal_errors_nodes(nodes, source));
-    out.extend(crate::decls::generic_override::generic_override_clash_nodes(nodes, source));
-    out.extend(crate::source::grammar_gaps::grammar_gap_errors_at(nodes, source, ctx.java_major));
-    out.extend(crate::annotation::target_dupes::target_dupe_errors_nodes(nodes, source));
-    out.extend(crate::decls::enum_rules::enum_rule_errors_nodes(nodes, source));
-    out.extend(crate::decls::legacy_nesting::legacy_nesting_errors_nodes(nodes, source, ctx.java_major));
-    out.extend(crate::flow::returns::missing_return_nodes(nodes, source));
-    out.extend(crate::flow::returns::return_statement_errors_nodes(nodes, source));
-    out.extend(crate::flow::returns::lambda_body_errors_nodes(nodes, source));
-    out.extend(crate::flow::definite::definite_assignment_errors_nodes(nodes, source));
-    out.extend(crate::switching::switches::switch_yield_errors_nodes(nodes, source));
-    out.extend(crate::switching::switches::switch_selector_errors_at(nodes, source, ctx.java_major));
-    out.extend(crate::switching::switches::constant_switch_exhaustiveness_nodes(nodes, source));
-    out.extend(crate::decls::duplicates::duplicate_signatures_nodes(nodes, source));
-    out.extend(crate::decls::lombok_ctor::lombok_constructor_clash_nodes(nodes, source));
-    out.extend(crate::decls::redeclaration::redeclaration_errors_nodes(nodes, source));
-    out.extend(crate::flow::finals::final_reassignment_errors_nodes(nodes, source));
-    out.extend(crate::flow::reachable::unreachable_code_nodes(nodes, source));
-    out.extend(crate::decls::declarations::declaration_errors_nodes(nodes, source));
-    out.extend(crate::annotation::annotations::annotation_errors_nodes(nodes, source));
-    out.extend(crate::calls::lambdas::lambda_capture_errors_nodes(nodes, source));
-    out.extend(crate::decls::ctor_checks::ctor_check_errors_nodes(nodes, source));
-    out.extend(crate::flow::branches::branch_errors_nodes(nodes, source));
-    out.extend(crate::decls::self_ref::self_ref_errors_nodes(nodes, source));
-    out.extend(crate::decls::ctor_before::ctor_before_errors_nodes(nodes, source));
-    out.extend(crate::decls::local_class::local_class_errors_nodes(nodes, source));
-    out.extend(crate::annotation::annotations::duplicate_annotation_values_nodes(nodes, source));
-    out.extend(crate::flow::expr_lint::expr_lint_warnings_nodes(nodes, source));
-    out.extend(crate::switching::switch_flow::switch_flow_warnings_nodes(nodes, source));
-    out.extend(crate::source::generics_syntax::generics_syntax_errors_nodes(nodes, source, ctx.java_major));
-    out.extend(crate::decls::erasure_clash::erasure_clash_errors_nodes(nodes, source));
-    out.extend(crate::decls::iface_dup::iface_dup_errors_nodes(nodes, source));
-    out.extend(crate::decls::init_checks::init_check_errors_nodes(nodes, source));
-    out.extend(crate::annotation::func_iface::func_iface_errors_nodes(nodes, source));
-    out.extend(crate::switching::switch_dup::switch_dup_errors_nodes(nodes, source));
-    out.extend(crate::decls::ctor_recursion::ctor_recursion_errors_nodes(nodes, source));
-    out.extend(crate::decls::method_body::method_body_errors_nodes(nodes, source));
-    out.extend(crate::decls::record_ctor::record_ctor_errors_nodes(nodes, source));
-    out.extend(crate::hierarchy::sealed::sealed_errors_nodes(nodes, source));
-    out.extend(crate::hierarchy::default_conflict::default_conflict_errors_nodes(nodes, source));
-    out.extend(crate::switching::literal_labels::literal_label_errors_nodes(nodes, source));
-    out.extend(crate::decls::local_record::local_record_errors_nodes(nodes, source));
-    out.extend(crate::decls::anonymous_interface::anonymous_interface_errors_nodes(nodes, source));
-    out.extend(crate::hierarchy::qualified_super::qualified_super_errors_nodes(nodes, source));
-    out.extend(crate::switching::pattern_labels::pattern_label_errors_nodes(nodes, source));
-    out.extend(crate::calls::pattern_scope::pattern_scope_errors_nodes(nodes, source));
-    out.extend(crate::typing::static_type_var::static_type_var_errors_nodes(nodes, source));
-    out.extend(crate::source::var_target::var_target_errors_nodes(nodes, source));
-    out.extend(crate::source::var_target::var_position_errors_nodes(nodes, source, ctx.java_major));
-    out.extend(crate::decls::forward_ref::forward_ref_errors_nodes(nodes, source));
-    out.extend(crate::calls::capture::capture_errors_nodes(nodes, source));
+    timed(&mut out, "invalid_statements_nodes", || crate::source::statements::invalid_statements_nodes(nodes, source));
+    timed(&mut out, "literal_errors_nodes", || crate::source::literals::literal_errors_nodes(nodes, source));
+    timed(&mut out, "generic_override_clash_nodes", || crate::decls::generic_override::generic_override_clash_nodes(nodes, source));
+    timed(&mut out, "grammar_gap_errors_at", || crate::source::grammar_gaps::grammar_gap_errors_at(nodes, source, ctx.java_major));
+    timed(&mut out, "target_dupe_errors_nodes", || crate::annotation::target_dupes::target_dupe_errors_nodes(nodes, source));
+    timed(&mut out, "enum_rule_errors_nodes", || crate::decls::enum_rules::enum_rule_errors_nodes(nodes, source));
+    timed(&mut out, "legacy_nesting_errors_nodes", || crate::decls::legacy_nesting::legacy_nesting_errors_nodes(nodes, source, ctx.java_major));
+    timed(&mut out, "missing_return_nodes", || crate::flow::returns::missing_return_nodes(nodes, source));
+    timed(&mut out, "return_statement_errors_nodes", || crate::flow::returns::return_statement_errors_nodes(nodes, source));
+    timed(&mut out, "lambda_body_errors_nodes", || crate::flow::returns::lambda_body_errors_nodes(nodes, source));
+    timed(&mut out, "definite_assignment_errors_nodes", || crate::flow::definite::definite_assignment_errors_nodes(nodes, source));
+    timed(&mut out, "switch_yield_errors_nodes", || crate::switching::switches::switch_yield_errors_nodes(nodes, source));
+    timed(&mut out, "switch_selector_errors_at", || crate::switching::switches::switch_selector_errors_at(nodes, source, ctx.java_major));
+    timed(&mut out, "constant_switch_exhaustiveness_nodes", || crate::switching::switches::constant_switch_exhaustiveness_nodes(nodes, source));
+    timed(&mut out, "duplicate_signatures_nodes", || crate::decls::duplicates::duplicate_signatures_nodes(nodes, source));
+    timed(&mut out, "lombok_constructor_clash_nodes", || crate::decls::lombok_ctor::lombok_constructor_clash_nodes(nodes, source));
+    timed(&mut out, "redeclaration_errors_nodes", || crate::decls::redeclaration::redeclaration_errors_nodes(nodes, source));
+    timed(&mut out, "final_reassignment_errors_nodes", || crate::flow::finals::final_reassignment_errors_nodes(nodes, source));
+    timed(&mut out, "unreachable_code_nodes", || crate::flow::reachable::unreachable_code_nodes(nodes, source));
+    timed(&mut out, "declaration_errors_nodes", || crate::decls::declarations::declaration_errors_nodes(nodes, source));
+    timed(&mut out, "annotation_errors_nodes", || crate::annotation::annotations::annotation_errors_nodes(nodes, source));
+    timed(&mut out, "lambda_capture_errors_nodes", || crate::calls::lambdas::lambda_capture_errors_nodes(nodes, source));
+    timed(&mut out, "ctor_check_errors_nodes", || crate::decls::ctor_checks::ctor_check_errors_nodes(nodes, source));
+    timed(&mut out, "branch_errors_nodes", || crate::flow::branches::branch_errors_nodes(nodes, source));
+    timed(&mut out, "self_ref_errors_nodes", || crate::decls::self_ref::self_ref_errors_nodes(nodes, source));
+    timed(&mut out, "ctor_before_errors_nodes", || crate::decls::ctor_before::ctor_before_errors_nodes(nodes, source));
+    timed(&mut out, "local_class_errors_nodes", || crate::decls::local_class::local_class_errors_nodes(nodes, source));
+    timed(&mut out, "duplicate_annotation_values_nodes", || crate::annotation::annotations::duplicate_annotation_values_nodes(nodes, source));
+    timed(&mut out, "expr_lint_warnings_nodes", || crate::flow::expr_lint::expr_lint_warnings_nodes(nodes, source));
+    timed(&mut out, "switch_flow_warnings_nodes", || crate::switching::switch_flow::switch_flow_warnings_nodes(nodes, source));
+    timed(&mut out, "generics_syntax_errors_nodes", || crate::source::generics_syntax::generics_syntax_errors_nodes(nodes, source, ctx.java_major));
+    timed(&mut out, "erasure_clash_errors_nodes", || crate::decls::erasure_clash::erasure_clash_errors_nodes(nodes, source));
+    timed(&mut out, "iface_dup_errors_nodes", || crate::decls::iface_dup::iface_dup_errors_nodes(nodes, source));
+    timed(&mut out, "init_check_errors_nodes", || crate::decls::init_checks::init_check_errors_nodes(nodes, source));
+    timed(&mut out, "func_iface_errors_nodes", || crate::annotation::func_iface::func_iface_errors_nodes(nodes, source));
+    timed(&mut out, "switch_dup_errors_nodes", || crate::switching::switch_dup::switch_dup_errors_nodes(nodes, source));
+    timed(&mut out, "ctor_recursion_errors_nodes", || crate::decls::ctor_recursion::ctor_recursion_errors_nodes(nodes, source));
+    timed(&mut out, "method_body_errors_nodes", || crate::decls::method_body::method_body_errors_nodes(nodes, source));
+    timed(&mut out, "record_ctor_errors_nodes", || crate::decls::record_ctor::record_ctor_errors_nodes(nodes, source));
+    timed(&mut out, "sealed_errors_nodes", || crate::hierarchy::sealed::sealed_errors_nodes(nodes, source));
+    timed(&mut out, "default_conflict_errors_nodes", || crate::hierarchy::default_conflict::default_conflict_errors_nodes(nodes, source));
+    timed(&mut out, "literal_label_errors_nodes", || crate::switching::literal_labels::literal_label_errors_nodes(nodes, source));
+    timed(&mut out, "local_record_errors_nodes", || crate::decls::local_record::local_record_errors_nodes(nodes, source));
+    timed(&mut out, "anonymous_interface_errors_nodes", || crate::decls::anonymous_interface::anonymous_interface_errors_nodes(nodes, source));
+    timed(&mut out, "qualified_super_errors_nodes", || crate::hierarchy::qualified_super::qualified_super_errors_nodes(nodes, source));
+    timed(&mut out, "pattern_label_errors_nodes", || crate::switching::pattern_labels::pattern_label_errors_nodes(nodes, source));
+    timed(&mut out, "pattern_scope_errors_nodes", || crate::calls::pattern_scope::pattern_scope_errors_nodes(nodes, source));
+    timed(&mut out, "static_type_var_errors_nodes", || crate::typing::static_type_var::static_type_var_errors_nodes(nodes, source));
+    timed(&mut out, "var_target_errors_nodes", || crate::source::var_target::var_target_errors_nodes(nodes, source));
+    timed(&mut out, "var_position_errors_nodes", || crate::source::var_target::var_position_errors_nodes(nodes, source, ctx.java_major));
+    timed(&mut out, "forward_ref_errors_nodes", || crate::decls::forward_ref::forward_ref_errors_nodes(nodes, source));
+    timed(&mut out, "capture_errors_nodes", || crate::calls::capture::capture_errors_nodes(nodes, source));
     // Data flow — the checks that follow a value through a method rather than reading a
     // declaration. Pure AST like everything else here: the model is straight-line and forgets at
     // the first branch, which is what keeps it sound without a solver (see `crate::flow::dataflow`).
-    out.extend(crate::flow::dataflow::dataflow_errors_in(root, source));
-    out.extend(crate::source::imports::unused_imports(root, source));
-    out.extend(crate::source::imports::duplicate_imports(root, source));
-    out.extend(crate::source::imports::redundant_imports(root, source));
-    out.extend(crate::source::import_clash::import_clash_errors(root, source));
+    timed(&mut out, "dataflow_errors_in", || crate::flow::dataflow::dataflow_errors_in(root, source));
+    timed(&mut out, "unused_imports", || crate::source::imports::unused_imports(root, source));
+    timed(&mut out, "duplicate_imports", || crate::source::imports::duplicate_imports(root, source));
+    timed(&mut out, "redundant_imports", || crate::source::imports::redundant_imports(root, source));
+    timed(&mut out, "import_clash_errors", || crate::source::import_clash::import_clash_errors(root, source));
     if let Some(stem) = &ctx.file_stem {
         out.extend(crate::source::naming::class_name_matches_file(root, source, stem));
         out.extend(crate::source::special_files::special_file_errors(root, source, stem));
@@ -213,6 +227,10 @@ pub fn check_file_resolved(
         return check_file(source, ctx);
     };
     let root = tree.root_node();
+    // Every check below climbs ancestors; with the table each climb step is a lookup instead of a descent
+    // from the root (see `bennu_java::parents`). Declared after the tree, so it is dropped before it.
+    let _parents = bennu_java::prelude::ParentTable::arm(root);
+    let _types = crate::support::resolve::TypeMemo::begin();
     if let Some(t) = t_parse {
         times.push(("parse", t.elapsed()));
     }

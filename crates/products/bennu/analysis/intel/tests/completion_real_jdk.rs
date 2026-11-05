@@ -601,3 +601,55 @@ fn a_three_hundred_entry_map_literal_does_not_stall_any_stage() {
     assert!(validated_in < ceiling, "validating 300 entries took {validated_in:?}");
     assert!(completed_in < ceiling, "completing inside 300 entries took {completed_in:?}");
 }
+
+// ── A long builder chain whose arguments are accessor chains ─────────────────────────────────────────
+//
+// `Dto.builder().a(x.y().a()).b(x.y().b())…` — the shape of every mapper in a project that maps one
+// record onto another. Reported as 3-4 s of validation on one file. Each call of the chain has the whole
+// chain before it as its receiver, so a stage that types the receiver again for every call (instead of
+// once) is quadratic in the length, and one that does it per argument as well is worse still.
+
+fn builder_chain_source(setters: usize) -> String {
+    let mut s = String::from("package p;\n\npublic class Mapper {\n");
+    s.push_str("    public record Ulteriori(");
+    s.push_str(&(0..setters).map(|i| format!("String f{i}")).collect::<Vec<_>>().join(", "));
+    s.push_str(") {}\n    public record Impresa(Ulteriori ulteriori) {}\n");
+    s.push_str("    public static class Dto {\n");
+    for i in 0..setters {
+        s.push_str(&format!("        String f{i};\n"));
+    }
+    s.push_str("        public static Builder builder() { return new Builder(); }\n        public static class Builder {\n            private final Dto dto = new Dto();\n");
+    for i in 0..setters {
+        s.push_str(&format!("            public Builder f{i}(String v) {{ dto.f{i} = v; return this; }}\n"));
+    }
+    s.push_str("            public Dto build() { return dto; }\n        }\n    }\n\n    public static Dto map(Impresa impresa) {\n        return Dto.builder()\n");
+    for i in 0..setters {
+        s.push_str(&format!("                .f{i}(impresa.ulteriori().f{i}())\n"));
+    }
+    s.push_str("                .build();\n    }\n}\n");
+    s
+}
+
+#[test]
+fn a_long_builder_chain_of_accessor_calls_validates_in_without_cubic_growth() {
+    use std::time::{Duration, Instant};
+    let mut samples = Vec::new();
+    for setters in [20usize, 40, 80] {
+        let src = builder_chain_source(setters);
+        let files = [("Mapper.java", src.as_str())];
+        let p = project_or_skip!(&files);
+        let started = Instant::now();
+        let errors = p.errors("Mapper.java");
+        let took = started.elapsed();
+        eprintln!("builder chain of {setters}: validation {took:?}");
+        assert!(errors.is_empty(), "legal code reported errors: {errors:?}");
+        samples.push((setters, took));
+    }
+    // Doubling the chain must not take more than ~5x as long (it was ~8x, i.e. cubic, before ancestors were
+    // found in one descent; what is left is the quadratic cost of walking up a deep tree). A generous bound: the
+    // absolute numbers vary with the machine and only the growth is the point.
+    let (_, t40) = samples[1];
+    let (_, t80) = samples[2];
+    assert!(t80 < Duration::from_secs(5), "80 setters took {t80:?}");
+    assert!(t80.as_secs_f64() < t40.as_secs_f64() * 5.0 + 0.05, "growth looks quadratic: 40 → {t40:?}, 80 → {t80:?}");
+}

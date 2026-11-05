@@ -141,7 +141,7 @@ fn scan(
             "identifier" => {
                 let Ok(name) = n.utf8_text(bytes) else { continue };
                 // The `name` of a call, or the part after a `.`, is not a bare read.
-                let bare = n.parent().is_none_or(|p| {
+                let bare = bennu_java::prelude::parent_of(n).is_none_or(|p| {
                     !matches!(p.kind(), "field_access" | "method_invocation" | "scoped_identifier")
                 });
                 if bare && fields.contains(name) && !resolves_as_local(n, type_node, bytes) {

@@ -21,6 +21,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use bennu_java::prelude::FileSymbols;
 use serde::{Deserialize, Serialize};
@@ -179,10 +181,104 @@ pub fn save(path: &Path, cache: &RefCache) {
     }
 }
 
+/// Submission counter for [`save_in_background`]: every submission and every [`clear`] takes a
+/// new number, and a queued write only lands if its number is still the latest. That makes a
+/// newer save supersede an older one and keeps a late write from resurrecting a cache the user
+/// just cleared.
+static WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
+/// Serialises the actual disk writes so two background saves never interleave on one path.
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+/// Persist `cache` to `path` on a background thread and return immediately.
+///
+/// The engine can go live as soon as the in-memory index exists; serialising every edge and symbol
+/// to JSON is pure persistence work that no query waits on. Takes the cache by value (the caller
+/// clones — a memcpy next to the JSON encode this avoids on the critical path). Best-effort like
+/// [`save`]; a superseded or cleared write is silently dropped.
+pub fn save_in_background(path: PathBuf, cache: RefCache) {
+    let seq = WRITE_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    let spawned = std::thread::Builder::new()
+        .name("bennu-refcache-save".into())
+        .spawn(move || {
+            if WRITE_SEQ.load(Ordering::SeqCst) != seq {
+                return;
+            }
+            let bytes = match serde_json::to_vec(&cache) {
+                Ok(bytes) => bytes,
+                Err(e) => return eprintln!("bennu-be: ref cache serialize failed: {e}"),
+            };
+            drop(cache);
+            let _guard = WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            // Re-check under the lock: a clear or newer save may have arrived while encoding.
+            if WRITE_SEQ.load(Ordering::SeqCst) != seq {
+                return;
+            }
+            if let Err(e) = bennu_index::prelude::write_atomic(&path, &bytes) {
+                eprintln!("bennu-be: ref cache write failed ({}): {e}", path.display());
+            }
+        });
+    if let Err(e) = spawned {
+        eprintln!("bennu-be: ref cache save thread failed to start: {e}");
+    }
+}
+
 /// Delete the cache at `path` (the manual "Rebuild index" path → force a clean full walk).
-/// Ignores a missing file.
+/// Ignores a missing file. Also cancels any background save still queued or encoding.
 pub fn clear(path: &Path) {
+    WRITE_SEQ.fetch_add(1, Ordering::SeqCst);
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let _ = std::fs::remove_file(path);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("bennu-refcache-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("references-cache.json")
+    }
+
+    fn wait_for(path: &Path) -> bool {
+        for _ in 0..200 {
+            if path.exists() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    }
+
+    #[test]
+    fn content_hash_is_stable_and_discriminating() {
+        assert_eq!(content_hash("abc"), content_hash("abc"));
+        assert_ne!(content_hash("abc"), content_hash("abd"));
+    }
+
+    #[test]
+    fn type_map_hash_ignores_iteration_order_but_not_content() {
+        let a: HashMap<String, String> =
+            [("A".into(), "p/A".into()), ("B".into(), "p/B".into())].into_iter().collect();
+        let b: HashMap<String, String> =
+            [("B".into(), "p/B".into()), ("A".into(), "p/A".into())].into_iter().collect();
+        let c: HashMap<String, String> = [("A".into(), "p/A".into())].into_iter().collect();
+        assert_eq!(type_map_hash(&a), type_map_hash(&b));
+        assert_ne!(type_map_hash(&a), type_map_hash(&c));
+    }
+
+    #[test]
+    fn background_save_round_trips_through_load() {
+        let path = temp_path("roundtrip");
+        let cache = RefCache { version: CACHE_VERSION, type_map_hash: 7, files: HashMap::new() };
+        save_in_background(path.clone(), cache);
+        // `save_in_background` from a parallel test would supersede this one; none exists today.
+        assert!(wait_for(&path), "the background save must land");
+        let loaded = load(&path).expect("a loadable cache");
+        assert_eq!(loaded.version, CACHE_VERSION);
+        assert_eq!(loaded.type_map_hash, 7);
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 /// The canonical cache location for a project — a STABLE path under the index base (not the

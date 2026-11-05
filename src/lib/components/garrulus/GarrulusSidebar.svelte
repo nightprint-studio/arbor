@@ -1,12 +1,13 @@
 <script lang="ts">
   /**
-   * The left panel — whichever of the four sections the rail last selected.
+   * The left panel — whichever of the sections the rail last selected.
    *
    * *Notes* is live: the vault tree, what is pinned and what was opened recently
-   * (`NotesSection`). The other three still state what they will hold rather than
-   * faking rows, and the copy comes from `GARRULUS_SECTIONS` so the palette's
-   * "Show Tags and fields" and this panel's own description can never drift into
-   * two names for one thing.
+   * (`NotesSection`). *Tags and fields* and *Note types* are the search's facets.
+   * *Search* is not a panel at all — its rail item opens the find modal
+   * (`GarrulusFindModal`), so this component never receives it. The copy comes from
+   * `GARRULUS_SECTIONS` so the palette's "Show Tags and fields" and this panel's own
+   * description can never drift into two names for one thing.
    *
    * The header's buttons are this panel's, not the section's, because
    * `PanelShell` owns the header — so *Notes* hands them out through the
@@ -99,10 +100,8 @@
   {:else if section.id === 'tags'}
     <!-- Both facet panels filter the search store, so selecting a row is only
          half an action unless the results come forward with it. -->
-    <TagsPanel onShowResults={() => garrulusUiStore.showSection('search')} />
+    <TagsPanel onShowResults={() => garrulusUiStore.openFind()} />
   {:else if section.id === 'types'}
-    <TypesPanel onShowResults={() => garrulusUiStore.showSection('search')} />
-  {:else}
-    <EmptyState message="Nothing here yet." description={section.description} />
+    <TypesPanel onShowResults={() => garrulusUiStore.openFind()} />
   {/if}
 </PanelShell>

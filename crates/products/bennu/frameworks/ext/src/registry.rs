@@ -226,7 +226,24 @@ impl ExtensionRegistry {
     }
 
     pub fn diagnostics(&self, ctx: &FileCtx<'_>) -> Vec<Diagnostic> {
-        self.active.iter().flat_map(|e| e.diagnostics(ctx)).collect()
+        // Opt-in timing (env `BENNU_PROFILE`, the same switch the Java checks use): which extension a slow
+        // "framework checks" phase is spent in. A model an extension builds lazily on its first question shows up
+        // here as one very large number on the first file and nothing after.
+        let profile = std::env::var_os("BENNU_PROFILE").is_some();
+        self.active
+            .iter()
+            .flat_map(|e| {
+                let started = profile.then(std::time::Instant::now);
+                let found = e.diagnostics(ctx);
+                if let Some(t) = started {
+                    let ms = t.elapsed().as_secs_f64() * 1000.0;
+                    if ms >= 5.0 {
+                        eprintln!("bennu-profile framework {}: {ms:.1} ms", e.id());
+                    }
+                }
+                found
+            })
+            .collect()
     }
 
     pub fn highlights(&self, ctx: &FileCtx<'_>) -> Vec<ExtHighlight> {

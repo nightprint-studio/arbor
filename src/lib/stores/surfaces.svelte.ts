@@ -30,7 +30,7 @@ export const SURFACES: SurfaceDef[] = [
   { id: 'home',   label: 'Welcome' },
   { id: 'corvus', label: 'Corvus' },
   { id: 'bennu',  label: 'Bennu'  },
-  { id: 'merula', label: 'merula' },
+  { id: 'merula', label: 'Merula' },
   { id: 'picus',  label: 'Picus'  },
   { id: 'garrulus', label: 'Garrulus' },
   { id: 'hirundo', label: 'Hirundo' },

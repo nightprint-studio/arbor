@@ -210,6 +210,14 @@
   The other occurrences of a selected word are outlined too, so a variable's uses read at a glance without opening the bar.
 </p>
 
+<h2>The editor's context menu</h2>
+<p>
+  Every entry carries the colour of what it does — navigation, refactoring, generation, history. <strong>Refactor</strong> is one submenu with
+  everything that can reshape the code at the caret or the selection: rename, the extract, inline and move refactorings, add parameter and
+  convert case. A refactoring that cannot be done where the caret is stays in the list, greyed, with the reason — the same rows
+  <kbd>Alt</kbd>+<kbd>Enter</kbd> shows. <strong>Generate</strong> is one submenu with every way to write code.
+</p>
+
 <h2>Folding</h2>
 <p>
   Braced blocks — classes, methods, blocks — and block comments fold from the gutter chevrons, keeping the head line visible.
@@ -221,6 +229,12 @@
   documentation above every method, which on a legacy file can be most of the screen. It is an opening state, not a rule:
   nothing folds again what you unfold. The same section turns the gutter off entirely.
 </Callout>
+<p>
+  The <strong>import block</strong> folds as one region — collapsed it reads <code>import …</code> on the line of the first import — and
+  starts collapsed when a file opens (<strong>Settings → Editor → Folding → Fold imports by default</strong>). Whatever you fold or
+  unfold stays exactly so, per tab, until the tab is closed. Opening a region animates the lines it uncovers, and the chevrons
+  turn; both follow the application's animation setting.
+</p>
 
 <h2>What the surface shows</h2>
 <div class="feature-grid">
@@ -232,7 +246,7 @@
   <div class="feature-card">
     <div class="fc-eyebrow">Palette → Convert Case · <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd></div>
     <div class="fc-title">Convert case</div>
-    <div class="fc-desc">Rewrite the selection, or the name at the caret (each cursor of a multi-cursor selection), as camelCase, PascalCase, snake_case, SCREAMING_SNAKE_CASE, kebab-case, lowercase, UPPERCASE or Title Case — from the palette, the editor's context menu, or the shortcut, which moves it one step round the first five. Words break at separators, humps and the end of an acronym (<code>HTTPServer</code> → <code>http_server</code>); digits stay with their word. The result stays selected, so pressing again goes on. It is a text change, not a rename: use <em>Rename</em> to change a declared name everywhere.</div>
+    <div class="fc-desc">Rewrite the selection, or the name at the caret (each cursor of a multi-cursor selection), as camelCase, PascalCase, snake_case, SCREAMING_SNAKE_CASE, kebab-case, lowercase, UPPERCASE or Title Case — from the palette, the editor's context menu (<strong>Refactor › Convert Case</strong>), or the shortcut, which moves it one step round the first five. Words break at separators, humps and the end of an acronym (<code>HTTPServer</code> → <code>http_server</code>); digits stay with their word. The result stays selected, so pressing again goes on. It is a text change, not a rename: use <em>Rename</em> to change a declared name everywhere.</div>
   </div>
   <div class="feature-card">
     <div class="fc-eyebrow">Settings → Editor → Caret</div>

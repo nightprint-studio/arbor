@@ -39,7 +39,7 @@ pub fn definite_assignment_errors_nodes(nodes: &[Node], source: &str) -> Vec<Dia
             | "lambda_expression" => n.child_by_field_name("body"),
             "static_initializer" => crate::support::nodes::child_of_kind(n, "block"),
             // An instance initializer.
-            "block" if n.parent().is_some_and(|p| p.kind() == "class_body") => Some(n),
+            "block" if bennu_java::prelude::parent_of(n).is_some_and(|p| p.kind() == "class_body") => Some(n),
             _ => None,
         };
         let Some(body) = body.filter(|b| b.kind() == "block" && !b.has_error()) else { continue };
@@ -809,7 +809,7 @@ fn is_read_position(id: Node) -> bool {
     if crate::support::scopes::is_value_position(id) {
         return true;
     }
-    let Some(parent) = id.parent() else { return false };
+    let Some(parent) = bennu_java::prelude::parent_of(id) else { return false };
     matches!(parent.kind(), "field_access" | "method_invocation")
         && parent.child_by_field_name("object").is_some_and(|o| o.id() == id.id())
 }

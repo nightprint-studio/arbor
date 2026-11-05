@@ -556,7 +556,40 @@ pub fn object_values(client: &Client, object: Id, fields: &[Id]) -> Result<Vec<V
         w.field_id(*f);
     }
     let data = client.send(OBJECT_REFERENCE, 2, w.into_bytes(), "ObjectReference.GetValues")?;
-    let mut r = Reader::new(&data, client.sizes());
+    decode_values(&data, client.sizes())
+}
+
+/// `ReferenceType.GetValues` — the **static** fields of one type, in the order asked.
+///
+/// The static twin of [`object_values`]: a static field has no instance to read it from, so the
+/// request names the type that declares it. Asking `ObjectReference.GetValues` for a static field id
+/// is an error from the VM, which is why the two are separate commands rather than one with a flag.
+/// A type that is loaded but not yet initialized answers with defaults, not with an error — callers
+/// check [`ClassRef::status`] first when that distinction matters.
+pub fn static_values(client: &Client, class: Id, fields: &[Id]) -> Result<Vec<Value>> {
+    let data = client.send(
+        REFERENCE_TYPE,
+        6,
+        encode_static_values_request(client.sizes(), class, fields),
+        "ReferenceType.GetValues",
+    )?;
+    decode_values(&data, client.sizes())
+}
+
+/// The request body of [`static_values`]: the type, a count, then each field id.
+fn encode_static_values_request(sizes: IdSizes, class: Id, fields: &[Id]) -> Vec<u8> {
+    let mut w = Writer::new(sizes);
+    w.reference_type_id(class).i32(fields.len() as i32);
+    for f in fields {
+        w.field_id(*f);
+    }
+    w.into_bytes()
+}
+
+/// A reply that is a count followed by that many tagged values — the shape of both `GetValues`
+/// commands.
+fn decode_values(data: &[u8], sizes: IdSizes) -> Result<Vec<Value>> {
+    let mut r = Reader::new(data, sizes);
     let count = r.i32()?.max(0);
     (0..count).map(|_| r.value()).collect()
 }
@@ -722,5 +755,32 @@ mod tests {
             Field { id: 2, name: "COUNT".into(), signature: "I".into(), mod_bits: 0x000A };
         assert!(!instance.is_static());
         assert!(shared.is_static());
+    }
+
+    /// The request names the TYPE (not an object), then a count, then the field ids — each at the
+    /// width the VM negotiated, which is what the default 8-byte sizes make visible here.
+    #[test]
+    fn a_static_read_names_the_type_then_the_fields() {
+        let body = encode_static_values_request(sizes(), 0x11, &[0x21, 0x22]);
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&0x11u64.to_be_bytes());
+        expected.extend_from_slice(&2i32.to_be_bytes());
+        expected.extend_from_slice(&0x21u64.to_be_bytes());
+        expected.extend_from_slice(&0x22u64.to_be_bytes());
+        assert_eq!(body, expected);
+
+        let narrow = IdSizes { field: 4, reference_type: 4, ..IdSizes::default() };
+        assert_eq!(encode_static_values_request(narrow, 1, &[2]).len(), 4 + 4 + 4);
+    }
+
+    #[test]
+    fn a_values_reply_is_a_count_then_tagged_values() {
+        let mut w = Writer::new(sizes());
+        w.i32(2);
+        w.u8(b'I').i32(7);
+        w.u8(b'L').object_id(0);
+        let values = decode_values(&w.into_bytes(), sizes()).unwrap();
+        assert_eq!(values[0], Value::Int(7));
+        assert!(values[1].is_null());
     }
 }

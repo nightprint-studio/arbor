@@ -88,6 +88,7 @@
   td.c.y { color:var(--hi); }
   td.c.p { color:var(--mid); }
   td.c.n { color:var(--lo); opacity:.62; }
+  td.c.q { color:var(--ink-3); font-weight:500; }
   td.n2 { width:78px; text-align:center; font-family:var(--f-mono); font-weight:600;
           font-variant-numeric:tabular-nums; }
   tr.note td { color:var(--ink-3); font-size:12.5px; font-style:italic; background:var(--lo-bg); }
@@ -137,9 +138,9 @@
 
 <header class="masthead">
   <div class="wrap">
-    <div class="eyebrow">Terza stesura · quattro assi · voti rivisti, alcuni al ribasso</div>
+    <div class="eyebrow">Quarta stesura · otto prodotti · quattro assi · voti rivisti, alcuni al ribasso</div>
     <h1>Arbor a confronto</h1>
-    <p class="standfirst">Feature, UI/UX, estensibilità e — l'asse che mancava — se le cose <i>funzionano</i>. Con le correzioni fatte dove l'evidenza le imponeva, in entrambe le direzioni.</p>
+    <p class="standfirst">L'intera suite — Bennu, Corvus, Picus, Sitta, Hirundo, Merula, Tyto, Garrulus — contro i suoi concorrenti naturali, su feature, UI/UX, estensibilità e, soprattutto, se le cose <i>funzionano</i>. Gli ultimi quattro prodotti hanno voti provvisori, dichiarati come tali; i primi quattro sono stati riletti sul CHANGELOG, con le correzioni fatte dove l'evidenza le imponeva, in entrambe le direzioni.</p>
   </div>
 </header>
 
@@ -152,6 +153,10 @@
     <a href="#corvus">Corvus <span>git</span></a>
     <a href="#picus">Picus <span>sql</span></a>
     <a href="#sitta">Sitta <span>file</span></a>
+    <a href="#hirundo">Hirundo <span>http</span></a>
+    <a href="#merula">Merula <span>musica</span></a>
+    <a href="#tyto">Tyto <span>schermo</span></a>
+    <a href="#garrulus">Garrulus <span>note</span></a>
     <a href="#uiux">UI/UX</a>
     <a href="#funziona">Esiste ≠ funziona</a>
   </div>
@@ -179,25 +184,39 @@
       </ul>
     </div>
 
+    <div class="callout blue">
+      <b>Cosa cambia in questa stesura — letta sul CHANGELOG [Unreleased] e sul codice del 5 novembre.</b>
+      <ul>
+        <li><b>Quattro prodotti in più: Hirundo, Merula, Tyto, Garrulus.</b> Ognuno ha la sua sezione con lo stesso formato e i suoi concorrenti naturali. I voti sono provvisori: nascono da codice, documentazione in-app e CHANGELOG, e da frasi del maintainer che tratto come una voce fra le altre, non come evidenza («fa il suo lavoro», «agli inizi ma promettente», «una bozza»). Il numero di UI/UX con la tilde (~) è la mia traduzione di una frase, non un voto suo.</li>
+        <li><b>Un simbolo nuovo, «?» — non verificato.</b> Dove non so cosa faccia la versione corrente di un concorrente lo scrivo, invece di tirare a indovinare una ✓ o una ✗. Con otto prodotti e una trentina di concorrenti è l'unico modo di non far diventare la pagina un elenco di certezze che non ho.</li>
+        <li><b>Due cifre di sfondo erano false e le ho rimisurate:</b> i test frontend (da 0 a 127 file, solo di logica) e la quota di file Rust con test (da 40% a 50%, ora contata con <code>git ls-files</code>).</li>
+        <li><b>Bennu: le righe rosse del refactoring sono quasi tutte rientrate.</b> Extract, inline, safe delete, pull up / push down, multi-caret (che era «cablato e spento»), Gradle letto, profiler, marker di modifica. Le ho corrette dove il CHANGELOG le smentiva, con una nota in testa alla sezione; il confronto vero sta nel documento dedicato.</li>
+        <li><b>Sitta: avevo scritto che non ospita il runtime dei plugin, ed è falso.</b> <code>sitta-be</code> carica plugin Lua «host-pure». Estensibilità 2.0 → 3.0; l'errore stava nella stesura precedente, non nel codice.</li>
+        <li><b>Picus: il generatore è collegato al frontend, l'export dei risultati c'è, le chiavi sono nelle intestazioni.</b> Feature 5.5 → 6.0, Funziona davvero 4.5 → 5.5, e il testo che diceva «handler serviti ma non chiamati» è riscritto.</li>
+        <li><b>Corvus: nessun voto cambia.</b> È arrivato Imber (assistente, piani, undo, schedule) e il grafo si apre più in fretta, ma sono novità senza chilometraggio.</li>
+      </ul>
+    </div>
+
     <p><b>Un limite dichiarato di questa pagina:</b> le matrici non sono esaustive. Sono state costruite leggendo handler RPC e componenti, e alcune funzionalità di Bennu, Corvus e Sitta non hanno ancora una riga — il maintainer lo ha fatto notare. Le righe presenti sono corrette; l'assenza di una riga non è un giudizio, è una lacuna di questa analisi.</p>
 
     <p>Il resto dei voti nasce da due fonti dichiarate: il codice di questo repository, letto crate per crate, e le metriche qui sotto, che sono comandi ripetibili e non giudizi. Dove il giudizio è mio e non deriva da nessuna delle due, lo dico nella riga.</p>
 
     <div class="facts">
-      <div><b>4 mesi</b><small>7 mag → 2 set 2026, 400 commit</small></div>
+      <div><b>6 mesi</b><small>7 mag → 5 nov 2026, 469 commit</small></div>
       <div><b>1</b><small>autore reale (3 identità git)</small></div>
-      <div><b>691/1727</b><small>file Rust con <code>#[cfg(test)]</code></small></div>
-      <div><b>104</b><small>file di test d'integrazione</small></div>
-      <div><b style="color:var(--mid)">0 / 833</b><small>test <i>automatici</i> frontend — la verifica è manuale</small></div>
+      <div><b>1372/2719</b><small>file Rust con <code>#[cfg(test)]</code> (<code>git ls-files</code>)</small></div>
+      <div><b>163</b><small>file di test d'integrazione (<code>tests/*.rs</code>)</small></div>
+      <div><b style="color:var(--mid)">127 / 1286</b><small>file di test frontend (solo logica TS) / componenti Svelte — nessun test di rendering</small></div>
       <div><b>0</b><small>utenti esterni, quindi 0 bug report</small></div>
     </div>
 
-    <p style="margin-top:18px">A queste va aggiunto il dato che manca da ogni confronto commerciale — <b>quattro backend che sommati stanno sotto il mezzo giga e condividono una webview sola</b>: <a href="#peso">sezione dedicata</a>. Queste sei cifre sono invece lo sfondo di ogni voto che segue, e la quinta va letta per quello che dice davvero. <b>La disciplina di test del backend è alta</b> — il 40% dei file Rust ha una suite propria, che molti progetti commerciali non hanno. <b>Il frontend è verificato a mano</b>, dall'autore, ogni giorno, su tutti e quattro i prodotti: per un'interfaccia è la forma di verifica più pertinente che esista, ed è come è stato collaudato tutto il software desktop per trent'anni. Quello che il collaudo manuale <i>non</i> dà è un'altra cosa: la <b>rete sulle regressioni</b>. Un test a mano certifica un momento; un test automatico certifica ogni commit successivo. Con 400 commit in quattro mesi il rischio non è «era giusto?», è «si è rotto tre settimane dopo e nessuno l'ha visto». È questa la distanza che separa Arbor dai prodotti con dieci anni di CI alle spalle — non la cura con cui è stato provato.</p>
+    <p style="margin-top:18px">A queste va aggiunto il dato che manca da ogni confronto commerciale — <b>quattro backend (i primi quattro prodotti, gli unici con una misura) che sommati stanno sotto il mezzo giga e condividono una webview sola</b>: <a href="#peso">sezione dedicata</a>. Queste sei cifre sono invece lo sfondo di ogni voto che segue, e la quinta va letta per quello che dice davvero. <b>La disciplina di test del backend è alta</b> — il 50% dei file Rust ha una suite propria, che molti progetti commerciali non hanno. <b>Il frontend è verificato soprattutto a mano</b>, dall'autore, ogni giorno, sui prodotti che usa (per i quattro più recenti l'uso quotidiano non è documentato qui): per un'interfaccia è la forma di verifica più pertinente che esista, ed è come è stato collaudato tutto il software desktop per trent'anni. Quello che il collaudo manuale <i>non</i> dà è un'altra cosa: la <b>rete sulle regressioni</b>. Un test a mano certifica un momento; un test automatico certifica ogni commit successivo. Con 469 commit in sei mesi il rischio non è «era giusto?», è «si è rotto tre settimane dopo e nessuno l'ha visto». È questa la distanza che separa Arbor dai prodotti con dieci anni di CI alle spalle — non la cura con cui è stato provato. Rispetto alla stesura in cui scrivevo «zero test frontend» la cifra è falsa: sono comparsi 127 file di test (vitest, 78 su Bennu), ma testano logica TypeScript — nessuno monta un componente — quindi la rete sulle regressioni esiste e copre una frazione.</p>
 
     <div class="legend">
       <span><b style="color:var(--hi)">✓</b>&nbsp; c'è e regge</span>
       <span><b style="color:var(--mid)">◐</b>&nbsp; c'è a metà, o dietro un plugin, o è fragile</span>
       <span><b style="color:var(--lo)">✗</b>&nbsp; non c'è</span>
+      <span><b style="color:var(--ink-3)">?</b>&nbsp; non verificato: non so cosa faccia la versione corrente</span>
     </div>
   </section>
 
@@ -211,37 +230,65 @@
       <thead><tr><th>Prodotto</th><th class="own">Feature</th><th class="own">UI/UX</th><th class="own">Estensibilità</th><th class="own">Funziona davvero</th><th>Nota</th></tr></thead>
       <tbody>
         <tr class="grp"><td colspan="6">Editor</td></tr>
-        <tr><td><b>Bennu</b></td><td class="n2 own">7.5</td><td class="n2 own">7.5</td><td class="n2 own">8.0</td><td class="n2 own">5.5</td><td class="note-cell">Legacy <i>e</i> Spring Boot. Restano cinque righe a zero sul refactoring</td></tr>
+        <tr><td><b>Bennu</b></td><td class="n2 own">8.0</td><td class="n2 own">7.5</td><td class="n2 own">8.0</td><td class="n2 own">6.0</td><td class="note-cell">Legacy <i>e</i> Spring Boot; il refactoring è quasi chiuso (resta Change Signature, coverage, live template)</td></tr>
         <tr><td>IntelliJ IDEA Ultimate</td><td class="n2">9.5</td><td class="n2">8.0</td><td class="n2">9.0</td><td class="n2">9.5</td><td>25 anni, milioni di ore-utente di debug</td></tr>
         <tr><td>VS Code + Java (Red Hat)</td><td class="n2">7.5</td><td class="n2">8.5</td><td class="n2">9.5</td><td class="n2">9.0</td><td>L'ecosistema più grande che esista</td></tr>
         <tr><td>Eclipse</td><td class="n2">8.0</td><td class="n2">6.0</td><td class="n2">8.0</td><td class="n2">9.5</td><td>Refactoring di prim'ordine, UI datata</td></tr>
         <tr><td>RustRover</td><td class="n2">8.5</td><td class="n2">8.0</td><td class="n2">8.5</td><td class="n2">8.0</td><td>Debugger con storia difficile su Windows-MSVC</td></tr>
 
         <tr class="grp"><td colspan="6">Client Git</td></tr>
-        <tr><td><b>Corvus</b></td><td class="n2 own">8.5</td><td class="n2 own">9.0</td><td class="n2 own">9.0</td><td class="n2 own">7.5</td><td>Il più completo del gruppo e il più collaudato della suite</td></tr>
+        <tr><td><b>Corvus</b></td><td class="n2 own">8.5</td><td class="n2 own">9.0</td><td class="n2 own">9.0</td><td class="n2 own">7.5</td><td>Il più completo del gruppo e il più collaudato della suite; Imber ancora senza chilometraggio</td></tr>
         <tr><td>GitKraken</td><td class="n2">8.0</td><td class="n2">7.0</td><td class="n2">2.5</td><td class="n2">9.0</td><td>Electron, pesante, funzioni cloud a pagamento</td></tr>
         <tr><td>Fork</td><td class="n2">7.5</td><td class="n2">8.5</td><td class="n2">1.0</td><td class="n2">9.0</td><td>La UI più curata della categoria</td></tr>
         <tr><td>Sublime Merge</td><td class="n2">6.5</td><td class="n2">9.0</td><td class="n2">1.0</td><td class="n2">9.5</td><td>Meno feature di tutti, e nessuno è più veloce</td></tr>
         <tr><td>Tower</td><td class="n2">7.5</td><td class="n2">8.0</td><td class="n2">1.5</td><td class="n2">9.5</td><td>Undo di qualunque cosa, 15 anni di rodaggio</td></tr>
 
         <tr class="grp"><td colspan="6">Database e SQL</td></tr>
-        <tr><td><b>Picus</b></td><td class="n2 own">5.5</td><td class="n2 own">7.5</td><td class="n2 own">3.0</td><td class="n2 own">4.5</td><td>Metà script 9, metà database 3: la media non esiste</td></tr>
+        <tr><td><b>Picus</b></td><td class="n2 own">6.0</td><td class="n2 own">7.5</td><td class="n2 own">3.0</td><td class="n2 own">5.5</td><td>Metà script 9, metà database ~4: la media non esiste</td></tr>
         <tr><td>DataGrip</td><td class="n2">8.5</td><td class="n2">8.0</td><td class="n2">7.0</td><td class="n2">9.5</td><td>Sulla piattaforma IntelliJ, quindi estendibile</td></tr>
         <tr><td>DBeaver</td><td class="n2">9.0</td><td class="n2">6.0</td><td class="n2">7.5</td><td class="n2">9.0</td><td>Cento driver, UI Eclipse RCP</td></tr>
         <tr><td>SQL Developer</td><td class="n2">7.0</td><td class="n2">5.0</td><td class="n2">4.0</td><td class="n2">9.0</td><td>Insuperato sul debug PL/SQL</td></tr>
 
         <tr class="grp"><td colspan="6">File manager</td></tr>
-        <tr><td><b>Sitta</b></td><td class="n2 own">5.5</td><td class="n2 own">8.5</td><td class="n2 own">2.0</td><td class="n2 own">6.0</td><td>8.0 contro Explorer/Finder, 4.5 contro TC/Opus</td></tr>
+        <tr><td><b>Sitta</b></td><td class="n2 own">5.5</td><td class="n2 own">8.5</td><td class="n2 own">3.0</td><td class="n2 own">6.0</td><td>8.0 contro Explorer/Finder, 4.5 contro TC/Opus; ospita il runtime dei plugin</td></tr>
         <tr><td>Explorer / Finder</td><td class="n2">5.0</td><td class="n2">7.5</td><td class="n2">3.0</td><td class="n2">10</td><td>Il metro che conta: è quello che usa la gente</td></tr>
         <tr><td>Total Commander</td><td class="n2">8.5</td><td class="n2">5.0</td><td class="n2">8.5</td><td class="n2">10</td><td>33 anni. UI del secolo scorso, tastiera perfetta</td></tr>
         <tr><td>Directory Opus</td><td class="n2">9.5</td><td class="n2">7.0</td><td class="n2">9.5</td><td class="n2">9.5</td><td>Configurabile fino all'assurdo</td></tr>
         <tr><td>Marta</td><td class="n2">6.0</td><td class="n2">8.0</td><td class="n2">4.0</td><td class="n2">8.5</td><td>Il più vicino a Sitta per filosofia</td></tr>
+
+        <tr class="grp"><td colspan="6">Client HTTP</td></tr>
+        <tr><td><b>Hirundo</b></td><td class="n2 own">5.0</td><td class="n2 own">~7.0</td><td class="n2 own">2.0</td><td class="n2 own">3.5</td><td class="note-cell">Nato ieri: i voti più provvisori della pagina. Unico con gli endpoint dal codice</td></tr>
+        <tr><td>Postman</td><td class="n2">9.0</td><td class="n2">6.5</td><td class="n2">7.5</td><td class="n2">8.5</td><td>Il più completo; account e cloud al centro</td></tr>
+        <tr><td>Insomnia</td><td class="n2">7.5</td><td class="n2">7.0</td><td class="n2">8.0</td><td class="n2">8.0</td><td>Plugin, protocolli moderni, sync a scelta</td></tr>
+        <tr><td>Bruno</td><td class="n2">7.0</td><td class="n2">7.5</td><td class="n2">5.5</td><td class="n2">8.0</td><td>Il più vicino a Hirundo per filosofia: file nel repository</td></tr>
+        <tr><td>HTTPie</td><td class="n2">5.5</td><td class="n2">8.0</td><td class="n2">3.0</td><td class="n2">8.5</td><td>CLI prima di tutto; il desktop è più giovane</td></tr>
+        <tr><td>IntelliJ HTTP Client</td><td class="n2">6.5</td><td class="n2">7.5</td><td class="n2">5.0</td><td class="n2">9.0</td><td>Il solo a toccare il codice, ma dentro un IDE</td></tr>
+
+        <tr class="grp"><td colspan="6">Live coding musicale</td></tr>
+        <tr><td><b>Merula</b></td><td class="n2 own">6.0</td><td class="n2 own">~7.0</td><td class="n2 own">4.0</td><td class="n2 own">5.0</td><td class="note-cell">6.0 come ambiente di live coding, 2.5 come DAW</td></tr>
+        <tr><td>Strudel</td><td class="n2">8.0</td><td class="n2">7.0</td><td class="n2">8.0</td><td class="n2">8.0</td><td>Nel browser, con la comunità più grande</td></tr>
+        <tr><td>Sonic Pi</td><td class="n2">7.5</td><td class="n2">6.5</td><td class="n2">6.5</td><td class="n2">9.0</td><td>Maturo, didattico, con MIDI e OSC</td></tr>
+        <tr><td>TidalCycles</td><td class="n2">9.0</td><td class="n2">4.5</td><td class="n2">8.0</td><td class="n2">8.5</td><td>L'algebra dei pattern più potente; l'editor è affar tuo</td></tr>
+        <tr><td>DAW (Ableton Live, Reaper)</td><td class="n2">9.5</td><td class="n2">8.0</td><td class="n2">9.0</td><td class="n2">9.5</td><td>Un altro mestiere: registrare e mixare, non scrivere pattern</td></tr>
+
+        <tr class="grp"><td colspan="6">Registratore di schermo</td></tr>
+        <tr><td><b>Tyto</b></td><td class="n2 own">4.0</td><td class="n2 own">~7.0</td><td class="n2 own">3.0</td><td class="n2 own">5.0</td><td class="note-cell">Fa la cattura; manca tutto ciò che viene dopo</td></tr>
+        <tr><td>OBS Studio</td><td class="n2">9.5</td><td class="n2">6.0</td><td class="n2">9.0</td><td class="n2">9.5</td><td>Scene, sorgenti, streaming, plugin</td></tr>
+        <tr><td>ShareX</td><td class="n2">8.5</td><td class="n2">5.0</td><td class="n2">7.5</td><td class="n2">9.0</td><td>Cattura, annotazione, upload; solo Windows</td></tr>
+        <tr><td>Loom e simili</td><td class="n2">6.5</td><td class="n2">9.0</td><td class="n2">2.0</td><td class="n2">8.5</td><td>Cloud, webcam, link da condividere</td></tr>
+
+        <tr class="grp"><td colspan="6">Note</td></tr>
+        <tr><td><b>Garrulus</b></td><td class="n2 own">3.5</td><td class="n2 own">n.v.</td><td class="n2 own">3.0</td><td class="n2 own">3.0</td><td class="note-cell">Una bozza, per dichiarazione del maintainer</td></tr>
+        <tr><td>Obsidian</td><td class="n2">9.0</td><td class="n2">8.0</td><td class="n2">9.5</td><td class="n2">9.0</td><td>Il vault è lo standard che Garrulus vuole leggere</td></tr>
+        <tr><td>Logseq</td><td class="n2">7.5</td><td class="n2">7.0</td><td class="n2">8.0</td><td class="n2">7.5</td><td>A blocchi, orientato all'outliner</td></tr>
+        <tr><td>Joplin</td><td class="n2">6.5</td><td class="n2">6.0</td><td class="n2">7.5</td><td class="n2">8.5</td><td>Sync su molti servizi, cifratura end-to-end</td></tr>
       </tbody>
     </table></div>
 
     <div class="callout">
       <b>Le due cose che questa tabella dice e le altre no.</b>
       <p><b>Uno:</b> sull'estensibilità Arbor non è avanti di poco, è avanti di una categoria — 9.0 contro l'1.0–2.5 di tutti i client Git esistenti. Un client Git programmabile con hook vetoabili non esiste sul mercato. <b>Due:</b> sull'ultimo asse Arbor perde ovunque, e non c'è scorciatoia: quel voto si alza solo con il tempo e con gli utenti, non scrivendo altro codice. Sono i due lati della stessa moneta — un prodotto giovane fatto bene.</p>
+      <p><b>Tre:</b> i quattro prodotti in fondo alla tabella hanno meno di cinque mesi di storia, e Hirundo uno. I loro numeri sono scritti per quel che sono: provvisori, costruiti su codice e CHANGELOG più che su uso altrui, con la tilde dove traduco una frase del maintainer in un voto e <b>n.v.</b> dove ho preferito non votare. I voti dei concorrenti sono miei, dalla documentazione pubblica e dall'uso corrente, e sono meno informati di quelli che ho dato in passato: Postman, Insomnia, HTTPie, Strudel, Logseq e Joplin cambiano in fretta.</p>
     </div>
   </section>
 
@@ -249,7 +296,7 @@
   <section id="peso">
     <h2>Peso e velocità <span class="kicker">il quinto asse, e quello dove non c'è partita</span></h2>
 
-    <p>Questo asse mancava del tutto, ed è un'omissione seria: è l'unico su cui Arbor <b>non ha nulla da recuperare da nessuno</b>. E non è un effetto collaterale fortunato, è la conseguenza diretta dell'architettura — <b>una sola webview per quattro prodotti</b>, con backend headless che parlano JSON su stdio. Ogni prodotto in più non porta con sé un altro runtime grafico: il costo fisso si paga una volta e si divide per quattro.</p>
+    <p>Questo asse mancava del tutto, ed è un'omissione seria: è l'unico su cui Arbor <b>non ha nulla da recuperare da nessuno</b>. E non è un effetto collaterale fortunato, è la conseguenza diretta dell'architettura — <b>una sola webview per otto prodotti</b>, con backend headless che parlano JSON su stdio. Ogni prodotto in più non porta con sé un altro runtime grafico: il costo fisso si paga una volta e si divide per otto.</p>
 
     <div class="tw"><table>
       <thead><tr><th>Backend headless</th><th class="own">RAM residente</th><th>Confronto diretto</th><th>Nota</th></tr></thead>
@@ -258,7 +305,26 @@
         <tr><td><code>sitta-be</code></td><td class="n2 own">10–25&nbsp;MB</td><td>Directory Opus ~100&nbsp;MB</td><td>Backend di 619 righe: quasi tutto è <code>arbor-fs</code> condiviso</td></tr>
         <tr><td><code>corvus-be</code></td><td class="n2 own">~30&nbsp;MB</td><td>GitKraken ~800&nbsp;MB–1.5&nbsp;GB</td><td>Un Electron intero contro 30&nbsp;MB di Rust</td></tr>
         <tr><td><code>bennu-be</code></td><td class="n2 own">200–400&nbsp;MB</td><td>IntelliJ IDEA ~2–3&nbsp;GB</td><td>Su progetti Java medio-grandi: <b>un quarto</b>, webview inclusa</td></tr>
-        <tr class="note"><td colspan="4">Misure del maintainer sulla propria macchina, non un benchmark strumentato — ma gli ordini di grandezza sono coerenti con l'architettura: zero JVM in-process, indice <code>mmap</code>-ato con decode on-demand, e una webview sola invece di quattro.</td></tr>
+        <tr class="note"><td colspan="4">Misure del maintainer sulla propria macchina, non un benchmark strumentato — ma gli ordini di grandezza sono coerenti con l'architettura: zero JVM in-process, indice <code>mmap</code>-ato con decode on-demand, e una webview sola invece di quattro. Per <code>hirundo-be</code>, <code>merula-be</code>, <code>tyto-be</code> e <code>garrulus-be</code> non c'è nessuna misura di RAM: non la invento.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Binari release — quanto pesa su disco la suite intera</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Eseguibile (<code>src-tauri/target/release</code>)</th><th class="own">MiB</th><th>Cosa è</th><th>Nota</th></tr></thead>
+      <tbody>
+        <tr><td><code>arbor.exe</code></td><td class="c own">39.3</td><td class="c">Il guscio: l'unica webview, il router, il broker delle credenziali, il frontend</td><td class="c">La WebView2 è quella del sistema e non è nel conto</td></tr>
+        <tr><td><code>bennu-be.exe</code></td><td class="c own">60.9</td><td class="c">Editor: indice, validazione, refactoring, framework, debugger, profiler</td><td class="c">Da solo è quasi metà dei backend</td></tr>
+        <tr><td><code>picus-be.exe</code></td><td class="c own">17.2</td><td class="c">Client SQL e repository di script</td><td class="c">Un solo driver, PostgreSQL</td></tr>
+        <tr><td><code>corvus-be.exe</code></td><td class="c own">17.0</td><td class="c">Client Git, provider, pipeline, plugin Lua</td><td class="c">Parte al primo uso di Corvus, non all'avvio</td></tr>
+        <tr><td><code>tyto-be.exe</code></td><td class="c own">9.1</td><td class="c">Registratore</td><td class="c">ffmpeg non è incluso: si scarica al primo avvio</td></tr>
+        <tr><td><code>garrulus-be.exe</code></td><td class="c own">8.5</td><td class="c">Note: vault, indice, sync</td><td class="c"></td></tr>
+        <tr><td><code>merula-be.exe</code></td><td class="c own">7.3</td><td class="c">Motore musicale, mixer, render offline</td><td class="c">I sample bank e i modelli ONNX si scaricano a parte</td></tr>
+        <tr><td><code>sitta-be.exe</code></td><td class="c own">7.1</td><td class="c">File manager</td><td class="c"></td></tr>
+        <tr><td><code>hirundo-be.exe</code></td><td class="c own">4.5</td><td class="c">Client HTTP</td><td class="c">Il più piccolo, ed è anche il più recente</td></tr>
+        <tr><td><code>voice-be.exe</code></td><td class="c own">4.7</td><td class="c">Dettatura vocale di Imber</td><td class="c">Di servizio, non un prodotto</td></tr>
+        <tr><td><code>DirectML.dll</code></td><td class="c own">17.7</td><td class="c">Runtime di accelerazione ONNX accanto agli eseguibili</td><td class="c">A quale backend serva non l'ho verificato</td></tr>
+        <tr class="note"><td colspan="4">I otto backend di prodotto sommano <b>131.5&nbsp;MiB</b>; con il guscio <b>170.8</b>; con <code>voice-be</code> e <code>DirectML.dll</code> <b>193.2&nbsp;MiB</b>. Sono dimensioni di file, non di installer, e non contano ciò che si scarica dopo (ffmpeg, sample bank, modelli, Tomcat) né la RAM. Per i concorrenti non ho misurato nulla: un confronto numerico qui sarebbe inventato, e la sola cosa che dico è che otto prodotti stanno in meno di 200&nbsp;MiB su disco con una webview condivisa.</td></tr>
       </tbody>
     </table></div>
 
@@ -272,7 +338,7 @@
         <tr><td>Corvus vs GitKraken — <b>scroll del grafo</b></td><td class="c own">◐</td><td class="c">✓</td><td>L'unica cosa in cui GitKraken è avanti: Canvas contro SVG</td></tr>
         <tr><td>Picus vs DataGrip / DBeaver — peso e reattività</td><td class="c own">✓</td><td class="c">✗</td><td>Nessuna JVM, driver nativo, cursore server-side</td></tr>
         <tr><td>Sitta vs Directory Opus / Explorer — peso</td><td class="c own">✓</td><td class="c">◐</td><td>Superficie piccola, liste virtualizzate</td></tr>
-        <tr><td>Quattro prodotti aperti insieme</td><td class="c own">✓</td><td class="c">✗</td><td>Una webview sola. Gli altri sono quattro applicazioni separate</td></tr>
+        <tr><td>Più prodotti aperti insieme (misurato sui primi quattro)</td><td class="c own">✓</td><td class="c">✗</td><td>Una webview sola. Gli altri sono applicazioni separate</td></tr>
       </tbody>
     </table></div>
 
@@ -281,12 +347,17 @@
       <p>GitKraken vince sullo scroll perché disegna il grafo su Canvas, dove il costo è per pixel invece che per nodo del DOM. Corvus usa SVG e paga lì — ma in cambio ha <code>export_graph_svg</code>, che su Canvas non esisterebbe senza riscrivere un serializzatore. Vale la pena dirlo perché è l'unica riga di tutta l'analisi dove Arbor perde <i>per una scelta</i> anziché per una mancanza, e la scelta è difendibile: lo scroll del grafo si fa mille volte al giorno e l'export quasi mai, quindi se un giorno la fluidità desse fastidio, la strada è un layer Canvas per il rendering tenendo l'SVG per l'export — non buttare l'SVG.</p>
     </div>
 
-    <p>C'è un secondo effetto, meno ovvio, che vale la pena mettere per iscritto: <b>il peso basso è ciò che rende sensata l'idea di quattro prodotti invece di uno</b>. Con quattro applicazioni Electron o quattro JVM, tenere aperti editor, client Git, client SQL ed explorer contemporaneamente è una scelta che si paga in gigabyte, e la gente non la fa. Con quattro backend che sommati stanno sotto i 500&nbsp;MB e condividono la finestra, tenerli aperti è gratis — ed è il presupposto di tutte le integrazioni che rendono la suite più della somma delle parti.</p>
+    <p>C'è un secondo effetto, meno ovvio, che vale la pena mettere per iscritto: <b>il peso basso è ciò che rende sensata l'idea di otto prodotti invece di uno</b>. Con quattro applicazioni Electron o quattro JVM, tenere aperti editor, client Git, client SQL ed explorer contemporaneamente è una scelta che si paga in gigabyte, e la gente non la fa. Con backend che — i primi quattro, per i quali c'è una misura — sommati stanno sotto i 500&nbsp;MB e condividono la finestra, tenerli aperti è gratis — ed è il presupposto di tutte le integrazioni che rendono la suite più della somma delle parti.</p>
   </section>
 
   <!-- ===================== BENNU ===================== -->
   <section id="bennu">
     <h2>Bennu <span class="kicker">vs IntelliJ IDEA Ultimate · VS&nbsp;Code + Java · Eclipse · RustRover</span></h2>
+
+    <div class="callout blue">
+      <b>Aggiornamento del 5 novembre: le tabelle di Bennu qui sotto sono corrette solo dove il CHANGELOG le smentiva.</b>
+      <p>Il confronto completo vive in <code>docs/bennu-a-confronto.html</code>, che si rifà per conto suo. Qui ho cambiato soltanto le righe diventate false: <b>Extract Method, Inline, Safe Delete</b> (✗ → ✓), <b>Introduce</b> (✗ → ◐: variable, constant e field sì, parameter no), <b>Change Signature</b> e <b>Pull Up / Push Down</b> (✗ → ◐: c'è Add Parameter, c'è pull up/push down/move member, non l'intera famiglia), il <b>multi-caret</b> (✗ → ✓: ora c'è <code>multi-cursor.ts</code>), il <b>VCS inline</b> (✗ → ✓: marker di modifica nel gutter e Annotate with Git Blame), <b>Gradle</b> (✗ → ◐: lo legge dagli script, non lo esegue) e il <b>profiler</b> (✗ → ◐: Java con Flight Recorder, Node, Rust; memory view e thread dump non verificati). Il CHANGELOG riporta misure di ricompilazione su Apache Commons Lang: extract method senza nessuna rottura su 15.809 casi, 4.063 spostamenti fra tipi senza rotture, extract variable con 9 rotture su 35.247. È un'evidenza di tipo diverso da «esiste», e più forte; resta un solo utente e un solo corpus. Feature 7.5 → 8.0, Funziona davvero 5.5 → 6.0. L'opinione del maintainer — Bennu fra i due prodotti più rifiniti — è consistente col 7.5 di UI/UX di prima, che non muovo senza un suo numero.</p>
+    </div>
 
     <h3>Navigazione e comprensione del codice</h3>
     <div class="tw"><table>
@@ -329,7 +400,7 @@
       </tbody>
     </table></div>
 
-    <h3>Refactoring — il vero divario, cinque righe consecutive</h3>
+    <h3>Refactoring — il vero divario, ora in gran parte chiuso</h3>
     <div class="tw"><table>
       <thead><tr><th>Refactoring</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
       <tbody>
@@ -337,14 +408,14 @@
         <tr><td>Rename di file e cartelle, sposta in un altro package</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Ottimizza import, genera accessor / override / costruttori</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Genera entità JPA da schema</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">◐</td></tr>
-        <tr><td><b>Extract Method</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
-        <tr><td><b>Introduce Variable / Constant / Field / Parameter</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
-        <tr><td><b>Inline</b> (variabile, metodo)</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
-        <tr><td><b>Change Signature</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
-        <tr><td><b>Safe Delete</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
-        <tr><td>Pull Up / Push Down, estrai interfaccia o superclasse</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td><b>Extract Method</b></td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Introduce Variable / Constant / Field / Parameter</b></td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Inline</b> (variabile, metodo)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Change Signature</b></td><td class="c own">◐</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>Safe Delete</b></td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td>Pull Up / Push Down, estrai interfaccia o superclasse</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
         <tr><td>Quick-fix disponibili al caret</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
-        <tr class="note"><td colspan="5">Sei intention in tutto contro ~70 famiglie di controlli. Non è il numero, è il rapporto: quasi ogni squiggle è una diagnosi senza cura.</td></tr>
+        <tr class="note"><td colspan="5">Sei intention in tutto contro ~70 famiglie di controlli. Non è il numero, è il rapporto: quasi ogni squiggle è una diagnosi senza cura (rapporto della prima stesura, non riverificato).</td></tr>
       </tbody>
     </table></div>
 
@@ -391,7 +462,7 @@
       <thead><tr><th>Feature</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>RustRover</th><th>VS&nbsp;Code</th><th>Eclipse</th></tr></thead>
       <tbody>
         <tr><td>Modello Maven (pom, moduli, classpath, encoding)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
-        <tr><td><b>Modello Gradle</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Modello Gradle</b></td><td class="c own">◐</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Cargo: workspace, run, test, add, toolchain, outdated</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
         <tr><td>Configurazioni di run con variabili d'ambiente</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Debugger Java (JDWP proprio), breakpoint condizionali, watch, eval</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
@@ -405,7 +476,7 @@
         <tr><td>Espansione delle macro Rust, grafo dei moduli</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
         <tr><td><b>WGSL con render di anteprima dello shader, Bevy/fulcrum</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td><td class="c">✗</td></tr>
         <tr><td><b>Coverage</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
-        <tr><td><b>Profiler, memory view, thread dump</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td><b>Profiler, memory view, thread dump</b></td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">◐</td></tr>
         <tr class="note"><td colspan="6">La riga del debugger Rust è l'unica di tutta l'analisi votata su un'esperienza d'uso invece che sul codice: su Windows-MSVC quello di Bennu ti funzionava, quelli di RustRover e VS&nbsp;Code no. È un dato più forte di una lettura del sorgente — con un caveat che vale per entrambi: nessuno dei due sa se nel frattempo li abbiano stabilizzati, quindi il ◐ va riverificato prima di darlo per buono.</td></tr>
       </tbody>
     </table></div>
@@ -417,30 +488,30 @@
         <tr><td>Minimap, sticky scroll, indent guide, rainbow bracket</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
         <tr><td>Inlay hint, code lens, signature help, ghost text</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Postfix template, Emmet, sposta riga, duplica, toggle commento</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
-        <tr><td><b>Multi-caret e selezione a colonna</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Multi-caret e selezione a colonna</b></td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td><b>Live template definibili dall'utente</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Local History con cambi esterni, ripristino di cartelle e cancellati</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
         <tr><td>Terminale integrato, pannello TODO, viewer docx/font/immagini</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
-        <tr><td><b>VCS inline</b>: gutter delle modifiche, annotate, revert di riga</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>VCS inline</b>: gutter delle modifiche, annotate, revert di riga</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td><b>Diff / merge dentro l'editor</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Plugin di terze parti, superficie MCP nativa</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
       </tbody>
     </table></div>
 
     <div class="callout">
-      <b>Il multi-caret è cablato e spento — verificato nel codice.</b>
-      <p><code>shared/ui/code-editor/extensions.ts:418</code> mappa <code>Alt-j</code> su <code>selectNextOccurrence</code>, ma <code>EditorState.allowMultipleSelections</code> non compare in tutto <code>src/lib</code>. Senza quel flag CodeMirror collassa ogni selezione multipla alla principale: il comando esiste e non può funzionare. È il caso da manuale della differenza fra «c'è» e «funziona», e sta dentro casa.</p>
+      <b>Il multi-caret era cablato e spento — ora è acceso.</b>
+      <p>Nella stesura precedente avevo verificato che <code>Alt-j</code> era mappato su <code>selectNextOccurrence</code> mentre <code>allowMultipleSelections</code> non compariva in <code>src/lib</code>: il comando non poteva funzionare. Oggi <code>shared/ui/code-editor/multi-cursor.ts</code> attiva il flag, e il CHANGELOG descrive Alt+click, selezione a colonna con Alt+Maiusc+trascinamento, <code>Alt+J</code> e <code>Ctrl+Maiusc+L</code>, con autocomplete ed Emmet che si fermano quando i cursori sono più d'uno. Resta il caso da manuale della differenza fra «c'è» e «funziona», con l'esito nuovo: il difetto è stato trovato dall'analisi, e sistemato. Se ora regga l'uso reale non l'ho provato.</p>
     </div>
 
     <h3>Da integrare, in ordine di ritorno</h3>
     <ol class="next">
-      <li><b>Abilitare le selezioni multiple</b><span>Due righe in <code>extensions.ts</code>, più <code>rectangularSelection()</code>. Sblocca un tasto che oggi è morto.</span></li>
-      <li><b>Extract Method e Introduce Variable / Constant / Parameter</b><span>Quattro delle cinque righe rosse consecutive. L'indice sa già cosa cattura una selezione.</span></li>
+      <li><b>Provare a fondo il multi-caret appena acceso</b><span>Il flag c'è e il CHANGELOG lo descrive; manca solo che qualcuno lo usi per un'ora di lavoro vero.</span></li>
+      <li><b>Introduce Parameter e un Change Signature completo</b><span>Add Parameter c'è; mancano rimozione, riordino e rinomina dei parametri in un solo gesto. Extract, Inline e Safe Delete sono rientrati, con misure di ricompilazione.</span></li>
       <li><b>Quick-fix registrati per <code>CheckId</code></b><span>Già in <code>docs/bennu-vs-intellij.md</code> §2.1. Sei intention contro ~70 famiglie: ogni check che nasce col suo fix vale il doppio.</span></li>
-      <li><b>Change Signature e Safe Delete</b><span>Poggiano sullo stesso indice di referenze del rename, che già funziona bene.</span></li>
-      <li><b>Gutter VCS e annotate in colonna</b><span>Corvus espone già <code>get_file_blame_streaming</code> e <code>get_file_at_commit</code>: è un ponte, non una feature nuova.</span></li>
+      <li><b>Estrai interfaccia / superclasse</b><span>Pull up, push down e move member ci sono; resta l'altra metà della famiglia.</span></li>
+      <li><b>Diff e merge dentro l'editor</b><span>Marker di modifica e annotate sono arrivati; il diff a due pannelli per il file aperto non l'ho trovato, e Corvus ha già l'editor a tre vie.</span></li>
       <li><b>Live template definibili e bookmark</b><span>Piccole, visibili ogni giorno, zero dipendenze dal motore semantico.</span></li>
-      <li><b>Modello di progetto Gradle</b><span>Il taglio più netto fra «editor per il legacy» ed «editor Java». Costoso: serve il modello, non il file.</span></li>
+      <li><b>Modello Gradle eseguito, non solo letto</b><span>Gli script Groovy e Kotlin sono letti, non eseguiti (lo dichiara il CHANGELOG): copre il caso comune, non i build script programmatici.</span></li>
       <li><b>Import dei report di coverage</b><span>Leggere il <code>jacoco.xml</code> che Maven già produce e dipingerlo nel gutter. Non un motore.</span></li>
     </ol>
   </section>
@@ -449,7 +520,7 @@
   <section id="corvus">
     <h2>Corvus <span class="kicker">vs GitKraken · Fork · Sublime Merge · Tower</span></h2>
 
-    <p><b>Feature 8.5 · UI/UX 9.0 · Estensibilità 9.0 · Funziona davvero 7.5.</b> Sul conteggio delle feature Corvus è il più completo dei cinque. Come client quotidiano vale <b>8.0</b>, non il 9.0 che ti avevo scritto: pesando per frequenza d'uso, il rebase interattivo che manca conta più dei git notes che ha. Ma è anche <b>il prodotto più collaudato della suite</b> — il più vecchio, quello usato ogni giorno, e l'unico per cui <code>docs/status.md</code> elenca una ventina di aree sotto «stabile: coverage ampia, considerato affidabile». Il 6.5 che avevo scritto ignorava un documento che avevo letto.</p>
+    <p><b>Feature 8.5 · UI/UX 9.0 · Estensibilità 9.0 · Funziona davvero 7.5.</b> Sul conteggio delle feature Corvus è il più completo dei cinque. Come client quotidiano vale <b>8.0</b>, non il 9.0 che ti avevo scritto: pesando per frequenza d'uso, il rebase interattivo che manca conta più dei git notes che ha. Ma è anche <b>il prodotto più collaudato della suite</b> — il più vecchio, quello usato ogni giorno, e l'unico per cui <code>docs/status.md</code> elenca una ventina di aree sotto «stabile: coverage ampia, considerato affidabile». Il 6.5 che avevo scritto ignorava un documento che avevo letto. Dall'ultima stesura sono arrivati Imber (l'assistente: commit, branch, merge, MR, piani, undo, schedule), il messaggio di commit generato dallo staged, un grafo che si apre sulla prima schermata e riempie il resto dietro, e un cambio di workspace molto più rapido. Nessun voto si muove: sono novità senza chilometraggio, e il maintainer indica Corvus (con Bennu) come il prodotto più rifinito — un'opinione coerente col 9.0 di UI/UX già assegnato, non un'evidenza nuova. Rebase interattivo, firma dei commit, LFS e tag annotati restano dove <code>docs/status.md</code> li mette: «known gaps» e «not planned».</p>
 
     <div class="callout blue">
       <b>Il dato più pesante di questa sezione non è in nessuna tabella.</b>
@@ -518,6 +589,9 @@
         <tr><td>Grafico dei contributi, notifiche, pannello docs con export HTML/Markdown</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
         <tr><td>GitFlow: init, feature, release, hotfix, support</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
         <tr><td><b>Superficie MCP nativa per agenti</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Assistente integrato che agisce sul repository</b> (commit, branch, merge, MR; log, blame e show in linguaggio naturale), con approvazione carta per carta in modalità Manual</td><td class="c own">✓</td><td class="c">◐</td><td class="c">?</td><td class="c">?</td><td class="c">?</td></tr>
+        <tr><td><b>Piani eseguibili, undo delle azioni dell'assistente, schedule (una tantum, ogni N minuti, cron)</b></td><td class="c own">✓</td><td class="c">?</td><td class="c">?</td><td class="c">?</td><td class="c">?</td></tr>
+        <tr><td>Messaggio di commit generato dallo staged, nello stile dei commit recenti, del template e del ticket del branch</td><td class="c own">✓</td><td class="c">◐</td><td class="c">?</td><td class="c">?</td><td class="c">?</td></tr>
         <tr class="note"><td colspan="6">Nella stesura precedente qui c'era scritto «l'ecosistema è vuoto, architettura 9 ecosistema 1». È falso: il marketplace non spedisce plugin <i>nel binario</i>, ma è popolato da <code>arbor-extensions</code>, e quello che c'è dentro è la tabella qui sotto.</td></tr>
       </tbody>
     </table></div>
@@ -547,6 +621,7 @@
       <li><b>Git LFS</b><span>Almeno lo stato: pattern tracciati, blob mancanti, pull esplicito.</span></li>
       <li><b>Tag annotati con messaggio</b><span>Unica riga del «lavoro quotidiano» dove Corvus è l'unico a zero.</span></li>
       <li><b>Crea e applica patch</b><span>Costo quasi nullo: <code>stage_patch</code> esiste già, il formato è lo stesso.</span></li>
+      <li><b>Portare Imber fuori dal suo solo utente</b><span>Piani, undo e schedule dichiarano limiti onesti (un push, una MR e l'esecuzione di un piano non si annullano, e l'elenco lo dice), ma sono giorni di vita. È un buco di chilometraggio, non di codice.</span></li>
     </ol>
   </section>
 
@@ -554,7 +629,7 @@
   <section id="picus">
     <h2>Picus <span class="kicker">vs DataGrip · DBeaver · SQL&nbsp;Developer · Flyway/Liquibase</span></h2>
 
-    <p><b>Feature 5.5 · UI/UX 7.5 · Estensibilità 3.0 · Funziona davvero 4.5.</b> Il 5.5 è una media che non descrive niente, ed è il punto: come manutentore di repository cross-dialetto vale <b>9</b> e non ha concorrenti; come client di database vale <b>3</b> e ha un driver. Il 4.5 sull'ultimo asse è il più basso della suite perché metà prodotto è atterrato a ondate e alcuni handler sono serviti ma non ancora chiamati dal frontend.</p>
+    <p><b>Feature 6.0 · UI/UX 7.5 · Estensibilità 3.0 · Funziona davvero 5.5.</b> Il 6.0 resta una media che non descrive niente: come manutentore di repository cross-dialetto vale <b>9</b> e non ha concorrenti; come client di database sale da 3 a circa <b>4</b> (export dei risultati, chiavi nelle intestazioni, istruzioni verificate dal server, accesso IAM a Cloud SQL, sessione chiusa dal server rilevata) ma ha ancora un solo driver, PostgreSQL: in <code>db-provider</code> ci sono <code>api</code> e <code>postgres</code> e nient'altro. Il 4.5 sull'ultimo asse sale a <b>5.5</b> per due prove: il generatore, che avevo segnato come «servito dal backend e non chiamato», ora è chiamato dal frontend (<code>picus_emit</code> e <code>picus_validate_rows</code> in <code>db.ts</code> e <code>dml.svelte.ts</code>) e l'export degli INSERT passa dallo stesso emitter; e il maintainer dice che il prodotto fa il suo lavoro, pur potendo avere un aspetto migliore — una frase che lascia il 7.5 di UI/UX dov'è. Che il generatore regga l'uso reale non l'ho visto.</p>
 
     <h3>Metà «client di database» — qui Picus è lo sfidante</h3>
     <div class="tw"><table>
@@ -572,11 +647,13 @@
         <tr><td><b>Cursore server-side a finestre</b> su risultati enormi, cancel a metà query</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td></tr>
         <tr><td>Editing delle celle, piano di esecuzione come grafo</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
         <tr><td>Monitor delle sessioni, transazioni esplicite con guardia, viewer LOB</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td></tr>
-        <tr><td><b>Navigazione per foreign key</b> dalla cella</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
-        <tr><td>Export dei risultati (CSV, INSERT, JSON)</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Navigazione per foreign key</b> dalla cella (oggi: icone di chiave e link nelle intestazioni, tooltip con la colonna referenziata, completamento che privilegia le FK; il salto dalla cella non l'ho trovato)</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Export dei risultati (CSV, JSON, tabella Markdown, INSERT), negli appunti o su file</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Confronto dati e schema fra database</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
         <tr><td>Diagrammi ER, trasferimento dati, cronologia della console</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Debug di stored procedure</td><td class="c own">✗</td><td class="c">◐</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td><b>Istruzioni verificate contro il database mentre si scrive</b> (prepare lato server: tabella o colonna ignota e ambigua dal verdetto del server, non da una cache)</td><td class="c own">✓</td><td class="c">◐</td><td class="c">?</td><td class="c">?</td></tr>
+        <tr><td>Accesso con credenziali Google IAM a Cloud SQL, CA personalizzata per connessione</td><td class="c own">✓</td><td class="c">?</td><td class="c">?</td><td class="c">?</td></tr>
       </tbody>
     </table></div>
 
@@ -603,9 +680,9 @@
     <h3>Da integrare, in ordine di ritorno</h3>
     <ol class="next">
       <li><b>Driver Oracle</b><span>Il prodotto esiste per allineare un ramo Oracle e uno PostgreSQL, e a Oracle non ci si connette. Il trait <code>DbProvider</code> è già lì apposta.</span></li>
-      <li><b>Collegare il generatore al backend</b><span><code>picus_emit</code> e <code>picus_validate_rows</code> sono serviti ma il frontend non li chiama; <code>paste-sql.ts</code> è ancora un lettore a regex.</span></li>
-      <li><b>Export dei risultati</b><span>È quello che si fa cinque minuti dopo aver eseguito una query.</span></li>
-      <li><b>Navigazione per foreign key</b><span>Basso costo, altissima frequenza.</span></li>
+      <li><b>Provare il generatore ora collegato</b><span>Il frontend chiama <code>picus_emit</code> e <code>picus_validate_rows</code> e l'export degli INSERT usa lo stesso emitter: è ciò che dicono CHANGELOG e codice, non l'ho visto girare. <code>paste-sql.ts</code> è ancora in uso; se sia ancora un lettore a regex non l'ho riverificato.</span></li>
+      <li><b>Diagrammi ER e confronto di schema</b><span>Le due assenze rimaste fra le cose che DataGrip e DBeaver offrono e si usano spesso.</span></li>
+      <li><b>Il salto per foreign key dalla cella</b><span>Icone e tooltip ci sono già: manca il click che porta alla riga referenziata. Basso costo, altissima frequenza.</span></li>
       <li><b>Dallo schema live alla patch di script</b><span>Il ponte che il design dichiara come ragione d'essere del prodotto.</span></li>
     </ol>
   </section>
@@ -614,7 +691,7 @@
   <section id="sitta">
     <h2>Sitta <span class="kicker">vs Explorer/Finder · Total Commander · Directory Opus · Marta</span></h2>
 
-    <p><b>Feature 5.5 · UI/UX 8.5 · Estensibilità 2.0 · Funziona davvero 6.0.</b> Il numero delle feature va letto due volte, perché mescola due confronti opposti: <b>contro Explorer e Finder Sitta vale 8.0</b> e vince quasi ovunque; <b>contro Total Commander e Directory Opus vale 4.5</b> e perde su quattro voci nominate. Il metro giusto dipende da cosa stai sostituendo — e il 2.0 di estensibilità resta il voto più basso della suite: mentre Corvus e Bennu hanno un marketplace con dieci plugin veri, Sitta è l'unico prodotto che il runtime non lo ospita affatto.</p>
+    <p><b>Feature 5.5 · UI/UX 8.5 · Estensibilità 3.0 · Funziona davvero 6.0.</b> Il numero delle feature va letto due volte, perché mescola due confronti opposti: <b>contro Explorer e Finder Sitta vale 8.0</b> e vince quasi ovunque; <b>contro Total Commander e Directory Opus vale 4.5</b> e perde su quattro voci nominate. Il metro giusto dipende da cosa stai sostituendo — e l'estensibilità, che avevo a 2.0 scrivendo che Sitta «non ospita il runtime», sale a <b>3.0</b>: <code>sitta-be</code> carica plugin Lua «host-pure» (senza i namespace dei prodotti né gli hook vetoabili), e il CHANGELOG corregge un bug che ne impediva il caricamento fuori da Corvus. Quella frase era sbagliata già nella stesura precedente. Quale plugin del marketplace punti a Sitta non l'ho verificato, e per questo il voto resta basso. Il maintainer dice di preferirlo agli esploratori di Windows e macOS e che ha bisogno di un fix, che non specifica: non lo peso nel voto. Novità funzionali dal CHANGELOG: il trascinamento di file veri verso altre applicazioni e la scorciatoia «cmd» nella barra dell'indirizzo; tutto il resto della sezione è quello di prima.</p>
 
     <div class="tw"><table>
       <thead><tr><th>Feature</th><th class="own">Sitta</th><th>Explorer / Finder</th><th>Total&nbsp;Commander</th><th>Directory&nbsp;Opus</th><th>Marta</th></tr></thead>
@@ -659,7 +736,7 @@
         <tr><td>Anteprima di immagini, audio, video, archivi; pannello ridimensionabile</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Gestione dei link esterni con permessi ricordati</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
         <tr><td><b>Accesso remoto: FTP, SFTP, cloud</b></td><td class="c own">✗</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
-        <tr><td><b>Scripting e plugin</b></td><td class="c own">✗</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td><b>Scripting e plugin</b></td><td class="c own">◐</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
         <tr><td>Tag ed etichette colorate</td><td class="c own">✗</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td><td class="c">◐</td></tr>
       </tbody>
     </table></div>
@@ -668,15 +745,269 @@
     <ol class="next">
       <li><b>Confronto e sincronizzazione di due cartelle</b><span>Il doppio pannello c'è già: manca il verbo che lo rende utile. È la feature che sposta Sitta da «explorer piacevole» a «explorer che sostituisce quello che uso».</span></li>
       <li><b>Ricerca per contenuto</b><span>Bennu ha già <code>bennu_find_in_files</code>: il motore esiste nella suite, va solo raggiunto.</span></li>
-      <li><b>Ospitare i plugin Lua anche in Sitta</b><span>Il 2.0 di estensibilità è il voto più basso della suite, ed è l'unico che si alza riusando qualcosa che esiste già e funziona: Corvus e Bennu hanno dieci plugin nel marketplace, Sitta zero perché non ospita il runtime. Colonne custom e azioni contestuali dai plugin sarebbero quasi gratis.</span></li>
+      <li><b>Dare ai plugin qualcosa da fare in Sitta</b><span>Il runtime «host-pure» c'è già; quello che non ho trovato è una superficie di interfaccia per Sitta (colonne personalizzate, azioni contestuali). Il 3.0 di estensibilità è il più basso della suite insieme a quello di Picus, e si alza dando un punto di aggancio, non un runtime.</span></li>
       <li><b>Checksum e verifica, attributi e timestamp in blocco</b><span>Due lacune intere, entrambe piccole e autonome.</span></li>
       <li><b>Accesso remoto SFTP</b><span>Il più costoso e il meno urgente.</span></li>
     </ol>
 
     <div class="callout">
       <b>Il tetto è strutturale, non di ambizione.</b>
-      <p>Sitta è <b>~6.000 righe</b> in tutto (5.366 di frontend, 619 di backend) contro le 274.000 di Bennu: l'intero prodotto è il 2% del codice della suite, e <code>FileExplorerModal.svelte</code> ne è 4.232 in un file solo — tredici volte la soglia che il <code>CLAUDE.md</code> si dà. Non è un difetto di qualità: la lista è virtualizzata, l'anteprima anche, l'undo c'è. È che ogni feature di quella lista finisce in quel file, e prima del confronto di cartelle conviene estrarre toolbar, anteprima, cestino e griglia — altrimenti la prossima costa il doppio di questa.</p>
+      <p>Sitta è <b>~5.500 righe</b> in tutto (4.854 di frontend, 640 di backend, ricontate il 5 novembre) contro le 458.000 righe Rust del solo Bennu: l'intero prodotto è circa l'1% del codice della suite, e <code>FileExplorerModal.svelte</code> ne è 4.214 in un file solo — quattordici volte la soglia che il <code>CLAUDE.md</code> si dà. Non è un difetto di qualità: la lista è virtualizzata, l'anteprima anche, l'undo c'è. È che ogni feature di quella lista finisce in quel file, e prima del confronto di cartelle conviene estrarre toolbar, anteprima, cestino e griglia — altrimenti la prossima costa il doppio di questa.</p>
     </div>
+  </section>
+
+  <!-- ===================== HIRUNDO ===================== -->
+  <section id="hirundo">
+    <h2>Hirundo <span class="kicker">vs Postman · Insomnia · Bruno · HTTPie · IntelliJ HTTP Client</span></h2>
+
+    <p><b>Feature 5.0 · UI/UX ~7.0 · Estensibilità 2.0 · Funziona davvero 3.5.</b> È il prodotto più giovane della suite — nella storia git compare con il commit del 4 novembre, il giorno prima di questa stesura — e questi sono i voti più provvisori della pagina. Il maintainer lo descrive come agli inizi ma promettente, e dal codice leggo la stessa cosa: l'impianto è serio (tre crate: <code>hirundo-model</code> puro, <code>hirundo-core</code> con lo store, <code>hirundo-be</code> da 4.5&nbsp;MiB; 32 file Rust su 45 hanno test), ma l'elenco di ciò che manca è lungo e il CHANGELOG mostra la UI ancora in riorganizzazione. È il «Postman/Bruno» della suite: non cerca di battere Postman in larghezza, cerca di stare dove sta il codice.</p>
+
+    <h3>Dati, ambienti, segreti</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Hirundo</th><th>Postman</th><th>Insomnia</th><th>Bruno</th><th>HTTPie</th><th>IntelliJ&nbsp;HTTP</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="7">Dove vivono le richieste</td></tr>
+        <tr><td><b>Collezioni come file leggibili nel repository</b> (un file TOML per richiesta, il diff legge come la modifica)</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr><td>Utilizzabile senza account né cloud</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr><td>Segreti nel keychain del sistema, mai in un file</td><td class="c own">✓</td><td class="c">◐</td><td class="c">?</td><td class="c">◐</td><td class="c">?</td><td class="c">◐</td></tr>
+        <tr><td>Auth ereditata collezione → cartella → richiesta (Bearer, Basic, API key)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">?</td><td class="c">✓</td><td class="c">?</td><td class="c">◐</td></tr>
+        <tr class="grp"><td colspan="7">Ambienti</td></tr>
+        <tr><td>Variabili a cascata: collezione, cartelle, tipo, ambiente, locale alla macchina, runtime</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td><b>Tipi di ambiente con colore e conferma prima di POST/PUT/PATCH/DELETE</b> su quelli protetti</td><td class="c own">✓</td><td class="c">✗</td><td class="c">◐</td><td class="c">?</td><td class="c">?</td><td class="c">✗</td></tr>
+        <tr class="note"><td colspan="7">Le celle ◐ di Postman e Insomnia sulle collezioni-come-file dicono «esiste un export o una sincronizzazione Git, ma il modello primario non è il file nel repository». Le celle <b>?</b> sono dichiarate: dove non so cosa faccia la versione corrente di un concorrente lo scrivo, invece di tirare a indovinare.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Protocolli, test, automazione</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Hirundo</th><th>Postman</th><th>Insomnia</th><th>Bruno</th><th>HTTPie</th><th>IntelliJ&nbsp;HTTP</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="7">Cosa sa inviare</td></tr>
+        <tr><td>Multipart, cookie jar (uno per ambiente), cURL in e out</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>SOAP con import di WSDL, WS-Security UsernameToken, Fault estratto</td><td class="c own">✓</td><td class="c">◐</td><td class="c">?</td><td class="c">?</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Server-Sent Events con riconnessione e <code>Last-Event-ID</code></td><td class="c own">✓</td><td class="c">?</td><td class="c">?</td><td class="c">?</td><td class="c">?</td><td class="c">?</td></tr>
+        <tr><td>Risposta decodificata col suo charset, anteprima HTML in sandbox, binari salvabili</td><td class="c own">✓</td><td class="c">?</td><td class="c">?</td><td class="c">?</td><td class="c">?</td><td class="c">?</td></tr>
+        <tr><td><b>OAuth 2 con refresh del token</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr><td><b>GraphQL, WebSocket, gRPC</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr class="grp"><td colspan="7">Test ed esecuzione</td></tr>
+        <tr><td>Asserzioni dichiarative, una per riga (<code>status</code>, <code>header.</code>, <code>body.path</code>, <code>time</code>)</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td><td class="c">?</td><td class="c">◐</td></tr>
+        <tr><td>Scripting pre-richiesta e post-risposta</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr><td>Runner di collezione con report dei test</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">?</td><td class="c">◐</td></tr>
+        <tr><td><b>Esecuzione da riga di comando per la CI</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Schedulazione di una collezione (ricorrenza, cron, run saltati)</td><td class="c own">◐</td><td class="c">◐</td><td class="c">?</td><td class="c">✗</td><td class="c">?</td><td class="c">✗</td></tr>
+        <tr class="note"><td colspan="7">Lo scripting di Hirundo è Lua in sandbox (nessun file, nessun processo, budget di istruzioni) e gira solo dopo la risposta; uno script pre-richiesta non l'ho trovato. Le schedulazioni scattano <b>solo a finestra aperta</b> (<code>docs/hirundo.md</code>): un run senza nessuno davanti non può neanche confermare un ambiente protetto, quindi quelle richieste risultano «non inviate». Di CLI per la CI non c'è traccia, e <code>docs/hirundo.md</code> elenca come non fatto anche l'uso come step di pipeline Corvus.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Import, export e il legame col codice</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Hirundo</th><th>Postman</th><th>Insomnia</th><th>Bruno</th><th>HTTPie</th><th>IntelliJ&nbsp;HTTP</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="7">Import ed export</td></tr>
+        <tr><td>Import cURL</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Import OpenAPI 3 (operazioni per tag, filtro, server → <code>{{baseUrl}}</code>)</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">?</td><td class="c">?</td></tr>
+        <tr><td>Import da Postman, Insomnia, Bruno, HAR</td><td class="c own">✗</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">?</td><td class="c">✗</td></tr>
+        <tr><td>Import ed export di <code>.http</code> / <code>.rest</code> con <code>http-client.env.json</code></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">?</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr><td>Generazione di codice dalla richiesta già risolta</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">?</td></tr>
+        <tr class="grp"><td colspan="7">Il legame col codice — l'unica riga dove Hirundo non ha pari ovunque</td></tr>
+        <tr><td><b>Endpoint rilevati dal codice del progetto come richieste pronte</b> (tipo dei parametri, obbligatorio/opzionale, body dal DTO)</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>File <code>.http</code> eseguibili dall'editor del codice, con ▶ sul metodo del controller</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td>Salto dalla richiesta al controller, alla riga</td><td class="c own">◐</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr class="note"><td colspan="7">L'import OpenAPI è ◐ perché legge solo JSON: lo YAML è rifiutato «a parole». La generazione di codice ha quattro bersagli (cURL, Rust·reqwest, Java·RestClient, JavaScript·fetch). Gli endpoint rilevati sono quelli di Spring: Struts e JAX-RS stanno in altri cataloghi di Bennu, e un progetto che Bennu non ha indicizzato non elenca nulla. Il salto al controller apre oggi l'editor di default del sistema, non Bennu alla riga (<code>docs/hirundo.md</code>, «Not yet»). Per IntelliJ ◐ sugli endpoint: la finestra Endpoints esiste e genera richieste, ma solo Ultimate, e quanto riempia i body non l'ho verificato.</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="callout">
+      <b>Dove sta, davvero.</b>
+      <p>Oggi Hirundo è più vicino a Bruno e al client HTTP di IntelliJ che a Postman: file nel repository, ambienti, <code>.http</code>. Batte tutti su due cose: il <b>legame col codice</b> (l'unico a toccarlo è IntelliJ, solo con Spring e solo dentro un IDE da gigabyte) e i <b>tipi di ambiente con conferma su prod</b>. Perde senza attenuanti su ciò che serve a chi chiama API pubbliche: OAuth 2, GraphQL, WebSocket, gRPC, scripting pre-richiesta, CLI per la CI, import dagli altri client. Per uno stack Spring + SOAP come quello che Bennu serve i vuoti pesano meno; per chiunque altro sono il motivo per non cambiare client.</p>
+    </div>
+
+    <h3>Da integrare, in ordine di ritorno</h3>
+    <ol class="next">
+      <li><b>OAuth 2 e refresh dei token</b><span>È ciò che blocca l'uso su API reali; <code>auth.rs</code> lo dichiara già come mancante, insieme al JWT con refresh.</span></li>
+      <li><b>Esecuzione da riga di comando (e come step di pipeline)</b><span>Il formato a file è la ragione d'essere del prodotto: senza un runner headless non arriva in CI. <code>httprun.rs</code> è già il motore che Bennu prende in prestito.</span></li>
+      <li><b>Import da Postman, Bruno, Insomnia, HAR e OpenAPI YAML</b><span>Il costo di adozione: nessuno riscrive a mano duecento richieste.</span></li>
+      <li><b>Script pre-richiesta</b><span>Il Lua c'è già, in sandbox: manca il punto di aggancio prima dell'invio.</span></li>
+      <li><b>GraphQL, poi WebSocket</b><span>Dopo, non prima: i protocolli non servono finché l'auth non regge.</span></li>
+      <li><b>Schedulazioni con la finestra chiusa</b><span>Serve un processo residente; è l'unico punto dell'elenco che chiede architettura invece di funzioni.</span></li>
+    </ol>
+  </section>
+
+  <!-- ===================== MERULA ===================== -->
+  <section id="merula">
+    <h2>Merula <span class="kicker">vs Strudel · Sonic Pi · TidalCycles · DAW (Ableton Live, Reaper)</span></h2>
+
+    <p><b>Feature 6.0 come ambiente di live coding, 2.5 come DAW · UI/UX ~7.0 · Estensibilità 4.0 · Funziona davvero 5.0.</b> Merula è uno studio di musica live-coding: si scrive un file <code>.merula</code> (il DSL; nel repository e nelle note interne compare anche col vecchio nome «nemus»), il motore lo suona, la vista di arrangiamento lo disegna come timeline, mixer e inspector leggono dallo stesso sorgente. È il secondo prodotto per codice dopo Bennu (35.000 righe Rust in 9 crate, 20.000 di frontend; <code>merula-be</code> 7.3&nbsp;MiB) e il CHANGELOG del crate dichiara chiusa la fase alpha. Il maintainer dice che fa il suo lavoro: è l'opinione di chi lo usa, e coincide con quello che il codice mostra — un prodotto completo per il suo scopo e senza nessun altro utente.</p>
+
+    <p>Il confronto va letto in due modi, come per Sitta. <b>Contro Strudel, Sonic Pi e TidalCycles</b> Merula è competitivo sull'editor e sul mix e perde su comunità, MIDI/OSC e repertorio. <b>Contro un DAW</b> non è nemmeno lo stesso mestiere: la vista di arrangiamento è di sola lettura, non c'è registrazione né plugin di terze parti. Il 6.0 e il 2.5 sono lo stesso prodotto misurato con due metri.</p>
+
+    <h3>Linguaggio e scrittura</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Merula</th><th>Strudel</th><th>Sonic&nbsp;Pi</th><th>TidalCycles</th><th>DAW</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="6">Il linguaggio</td></tr>
+        <tr><td>Mini-notation di pattern ciclici (sequenze, euclidei <code>bd(3,8)</code>, rotazioni)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">—</td></tr>
+        <tr><td>Algebra dei pattern: <code>stack</code>, <code>slow</code>, trasformazioni componibili, humanize, generatori</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">—</td></tr>
+        <tr><td>Il file termina sempre di valutare (nessun loop né ricorsione nel linguaggio ospite)</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">—</td></tr>
+        <tr><td>Ri-valutazione a caldo mentre suona, senza fermare il trasporto</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">—</td></tr>
+        <tr><td>Sezioni, arrangiamento, mappa di tempo a tratti, scale (incluse <code>yo</code> e <code>in</code>)</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>Clip e scene lanciabili da una griglia di sessione</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td>Librerie da GitHub bloccate a un commit (<code>merula.toml</code> + <code>merula.lock</code>)</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">—</td></tr>
+        <tr class="grp"><td colspan="6">L'editor — dove Merula gioca in casa</td></tr>
+        <tr><td>Completamento, go-to, rename, extract / inline, find usages, quick-fix, format</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">—</td></tr>
+        <tr><td>Diagnostica musicale: note fuori scala e livelli a rischio clipping sottolineati mentre si scrive</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">—</td></tr>
+        <tr><td>Visualizzazione dei pattern (piano roll, timeline, minimap)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td>Frammenti valutati ed eseguiti in isolamento (Scratch) senza toccare il brano</td><td class="c own">✓</td><td class="c">?</td><td class="c">?</td><td class="c">?</td><td class="c">—</td></tr>
+        <tr><td><b>Modificare la musica dalla timeline</b> (trascinare note, regioni)</td><td class="c own">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✓</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Suono, mix, import, export</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Merula</th><th>Strudel</th><th>Sonic&nbsp;Pi</th><th>TidalCycles</th><th>DAW</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="6">Suono e mix</td></tr>
+        <tr><td>Synth integrati e sample bank scaricabili (Dirt-Samples, drum machine, General MIDI, VSCO&nbsp;2 orchestrale, VCSL)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Mixer per traccia: EQ parametrico, compressore, mandata reverb, limiter master con gain reduction</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Inviluppi per voce, pitch e velocità con ricampionamento, SFZ per i sampler</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Plugin VST/AU di terze parti</b></td><td class="c own">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>MIDI in e out dal vivo, OSC</b></td><td class="c own">✗</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Registrare audio da un ingresso</b></td><td class="c own">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr class="grp"><td colspan="6">Entrare e uscire</td></tr>
+        <tr><td>Export audio WAV/OGG, regione di loop, stem, «Export all», normalizzazione a un LUFS</td><td class="c own">✓</td><td class="c">?</td><td class="c">◐</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr><td>Export MIDI del brano (una traccia per traccia, batteria come percussioni GM)</td><td class="c own">✓</td><td class="c">?</td><td class="c">?</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr><td><b>Import di MIDI come file modificabile; audio trascritto in note</b> (basic-pitch, separazione stem con Demucs, modelli ONNX scaricati su richiesta)</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr class="grp"><td colspan="6">Intorno al prodotto</td></tr>
+        <tr><td>App nativa che funziona offline, senza browser</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Comunità, repertorio pubblico, documentazione scritta da terzi</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr class="note"><td colspan="6">Le celle DAW sono per Ableton Live e Reaper insieme; «—» dove il confronto non ha senso (un DAW non ha un linguaggio). La riga «il file termina sempre» è un tratto di progetto a doppio taglio: garantisce che il brano si valuti, e impedisce di scrivere in Merula ciò che si scrive in Strudel con un ciclo JavaScript. Su MIDI/OSC ho cercato nei crate audio e engine: c'è uno stream di <i>uscita</i> (<code>cpal</code>), nessun ingresso MIDI. Il peso dell'import audio sta nei modelli, che non sono nel binario.</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="callout">
+      <b>Tre bug del tipo «esiste ≠ funziona», tutti nell'Unreleased — e tutti scoperti dall'uso.</b>
+      <ul>
+        <li><b>L'export audio ignorava i sample bank.</b> Il bounce (singolo, stem, «Export all») suonava sul synth di riserva: quello che si sentiva dal vivo e quello che finiva nel file erano due suoni diversi. Corretto; i file esportati prima vanno rifatti.</li>
+        <li><b>Il clip launcher disegnava la griglia, accettava i click, e il backend scartava la selezione.</b> Il brano base continuava a suonare. Corretto: lanciare una scena ora ri-prepara i clip dal vivo.</li>
+        <li><b>Ogni download di sample bank abortiva dopo esattamente 30 secondi</b>, per un timeout pensato per le chiamate API. Corretto.</li>
+      </ul>
+      <p>Sono la prova che l'asse «funziona davvero» vale: tre cose presenti da tempo nelle tabelle sopra con una ✓ e che non facevano il loro lavoro. Il fatto che siano state trovate e sistemate dice che qualcuno usa il prodotto; quanti altri ce ne siano non lo sa nessuno.</p>
+    </div>
+
+    <h3>Da integrare, in ordine di ritorno</h3>
+    <ol class="next">
+      <li><b>MIDI in e out, poi OSC</b><span>È la porta di uscita verso tutto il resto del mondo musicale: sintetizzatori hardware, altri DAW, controller. Oggi il suono esce solo dallo stream audio.</span></li>
+      <li><b>Modificare dalla timeline</b><span>La vista di arrangiamento mostra bene e non tocca niente: trascinare una regione o una nota e vederla riscritta nel sorgente avvicinerebbe il 2.5 da DAW al 6.0.</span></li>
+      <li><b>Un repertorio pubblico di esempi e libreria</b><span>Il meccanismo <code>[libraries]</code> da GitHub esiste; manca la cosa che lo riempie. Senza brani altrui il prodotto non ha il vantaggio che Strudel ha davvero.</span></li>
+      <li><b>Registrazione da un ingresso audio</b><span>Chiude il giro per chi vuole sovraincidere una voce o uno strumento; costoso, quindi dopo il MIDI.</span></li>
+      <li><b>Plugin VST/AU</b><span>L'ultimo e il più costoso: cambia il mestiere del prodotto.</span></li>
+    </ol>
+  </section>
+
+  <!-- ===================== TYTO ===================== -->
+  <section id="tyto">
+    <h2>Tyto <span class="kicker">vs OBS Studio · ShareX · Loom e simili</span></h2>
+
+    <p><b>Feature 4.0 · UI/UX ~7.0 · Estensibilità 3.0 · Funziona davvero 5.0.</b> Tyto registra lo schermo e fa screenshot: monitor, finestra, regione rettangolare o a mano libera, video H.264 con audio di sistema e microfono, oppure una sequenza di frame senza perdita. È piccolo (6.900 righe Rust, 4.200 di frontend; <code>tyto-be</code> 9.1&nbsp;MiB; 8 file Rust su 32 con test) e fa una cosa sola. Il maintainer dice che fa il suo lavoro, e le due cifre di sopra sono scritte di conseguenza: 4.0 perché mancano tutti i passi <i>dopo</i> la cattura che gli altri hanno, 5.0 perché su Windows regge e su macOS il CHANGELOG ha sette correzioni recenti. Le catture vanno su disco e basta.</p>
+
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Tyto</th><th>OBS&nbsp;Studio</th><th>ShareX</th><th>Loom e simili</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="5">Cosa si cattura</td></tr>
+        <tr><td>Monitor intero, singola finestra, regione rettangolare</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Selezione su un'istantanea congelata dello schermo, con cambio di monitor e annullo da tastiera</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">✗</td></tr>
+        <tr><td><b>Regione a mano libera</b>: lo screenshot è mascherato, trasparente fuori dal tracciato</td><td class="c own">✓</td><td class="c">✗</td><td class="c">?</td><td class="c">✗</td></tr>
+        <tr><td>Modalità «Smart» che aggancia l'elemento di interfaccia sotto il cursore</td><td class="c own">◐</td><td class="c">✗</td><td class="c">?</td><td class="c">✗</td></tr>
+        <tr><td>Video H.264 MP4, audio di sistema (loopback) e microfono mixati in una traccia, 30 o 60&nbsp;fps</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Sequenza di frame senza perdita</b> (PNG/JPG/WebP), un frame solo se lo schermo cambia, con la durata di ognuno</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Export di una sequenza come sprite atlas</b> (pagine PNG + <code>atlas.ron</code>, bordo di guardia per frame)</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Webcam, scene e sorgenti multiple composte</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td>Streaming in diretta</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr class="grp"><td colspan="5">Dopo la cattura — il buco</td></tr>
+        <tr><td>Libreria delle catture con anteprima, player dei frame (velocità, passo-passo), rinomina, rivela</td><td class="c own">✓</td><td class="c">✗</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>Annotazione e blur sugli screenshot</b></td><td class="c own">✗</td><td class="c">✗</td><td class="c">✓</td><td class="c">?</td></tr>
+        <tr><td><b>Taglio e montaggio del video</b></td><td class="c own">✗</td><td class="c">✗</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr><td><b>Upload e link da condividere in un gesto</b></td><td class="c own">✗</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr class="grp"><td colspan="5">Uso e integrazione</td></tr>
+        <tr><td>Scorciatoia di sistema, avvio e stop dalla tray, barra di controllo fuori dall'inquadratura, pausa</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Conto alla rovescia sullo schermo congelato prima di partire</td><td class="c own">✓</td><td class="c">?</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Registrazione comandabile da un agente AI (MCP, secondi e rettangolo scelti)</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Plugin e script</td><td class="c own">◐</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Windows, macOS, Linux</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr class="note"><td colspan="5">Per OBS la riga MCP è ◐ perché ha un controllo remoto via WebSocket, non una superficie pensata per un modello. «Plugin e script» di Tyto è ◐: il backend carica plugin Lua «host-pure» (come Sitta), ma non ne conosco nessuno che lo targetti. Su Linux non ho trovato nulla che dica come vada. Ho scritto <b>?</b> dove non so se il concorrente abbia la funzione. Il peso vero di Tyto è nel download: ffmpeg si scarica al primo avvio, e il CHANGELOG ricorda che cancellare <code>ffprobe</code> e <code>ffplay</code> ne risparmia circa 200&nbsp;MB.</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="callout blue">
+      <b>La riga che spiega il prodotto è la sequenza di frame.</b>
+      <p>Un registratore generalista non ha motivo di scrivere un atlante di sprite con un manifest RON che dice dove sta ogni frame e quanto resta in scena. Tyto lo fa perché dentro la suite c'è un editor che parla di Bevy e di shader: è il registratore di chi sviluppa giochi e vuole una sequenza di fotogrammi esatta, non un video compresso da riprocessare. Che questo sia il suo posto è una mia lettura del formato e della documentazione, non una dichiarazione del maintainer; ma spiega perché le mancanze (annotazione, montaggio, condivisione) non siano state una priorità.</p>
+    </div>
+
+    <h3>Da integrare, in ordine di ritorno</h3>
+    <ol class="next">
+      <li><b>Annotazione degli screenshot</b><span>È il primo passo dopo uno screenshot, quasi sempre. Frecce, riquadri e blur coprono il 90% dell'uso di ShareX.</span></li>
+      <li><b>Taglio di inizio e fine del video</b><span>Ffmpeg c'è già e viene scaricato comunque: un ritaglio senza ricodifica è un comando, non un editor.</span></li>
+      <li><b>Un punto di consegna: copia come file, link, destinazione di un plugin</b><span>Il runtime dei plugin è già caricato in Tyto: una destinazione di upload può essere un plugin, non codice del prodotto.</span></li>
+      <li><b>Webcam in un angolo</b><span>Quello che distingue un registratore da uno strumento da tutorial; dopo le tre sopra.</span></li>
+      <li><b>Chilometraggio su macOS e su Linux</b><span>Sette correzioni macOS in un ciclo dicono che il terreno è nuovo; per Linux non c'è ancora nulla da leggere.</span></li>
+    </ol>
+  </section>
+
+  <!-- ===================== GARRULUS ===================== -->
+  <section id="garrulus">
+    <h2>Garrulus <span class="kicker">vs Obsidian · Logseq · Joplin</span></h2>
+
+    <div class="callout blue">
+      <b>Garrulus è una bozza. Lo dice il maintainer, e questa sezione lo prende alla lettera.</b>
+      <p>Per questo non gli do un voto di UI/UX (<b>n.v.</b>): non ho un'opinione verbale su cui appoggiarmi e un giudizio sul solo codice sarebbe quello che questa pagina ha giurato di non fare. Gli altri tre assi, qui sotto, sono scritti per un prodotto che il suo autore non considera finito.</p>
+    </div>
+
+    <p><b>Feature 3.5 · UI/UX n.v. · Estensibilità 3.0 · Funziona davvero 3.0.</b> Cos'è lo dice <code>docs/garrulus-design.md</code>: un client per note «a forma di Obsidian» la cui ragione d'essere è una sola — la sincronizzazione automatica fra due macchine che Obsidian vende in abbonamento — su un trasporto astratto, git su GitHub per primo. La posizione strategica è dichiarata: <i>non un sostituto di Obsidian, un secondo client migliore sullo stesso vault</i>, cioè una cartella di file <code>.md</code> con frontmatter YAML, <code>[[wikilink]]</code>, <code>#tag</code> e callout nel dialetto di Obsidian. «Bozza» non vuol dire «scheletro»: sono 18.000 righe Rust in sette crate (ast, parse con Tree-sitter, index, vault, sync, core, be), 9.900 di frontend, cinque pagine di documentazione in-app e 48 file Rust su 79 con test; ma il design stesso dice che solo la parte iniziale (<i>M0 + M1</i>) è «l'MVP onesto», e il grafo e la superficie plugin sono in coda.</p>
+
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Garrulus</th><th>Obsidian</th><th>Logseq</th><th>Joplin</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="5">Il vault</td></tr>
+        <tr><td>Cartella di file <code>.md</code>, nessun database di riferimento (l'indice è una cache cancellabile)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td><b>Compatibilità col dialetto di Obsidian</b>: wikilink, embed, callout, frontmatter, e il file non viene mai riformattato al salvataggio</td><td class="c own">◐</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Live preview in-place: la sintassi si rivela sulla riga del caret</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Barra di formattazione con toggle che seguono il caret, accordi <kbd>Alt</kbd></td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Cestino con ripristino, storico delle revisioni di una nota</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr class="grp"><td colspan="5">Collegare e trovare</td></tr>
+        <tr><td>Completamento dei <code>[[</code>, link a note inesistenti che le creano, backlink con la frase, menzioni non collegate</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Tag annidati con completamento dal vocabolario del vault; pannelli Tags, Task, Problemi</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Ricerca nel vault con query a token e anteprima; salto rapido; nota del giorno</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td><b>Vista a grafo</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✗</td></tr>
+        <tr><td><b>Tipi di nota</b> con campi tipizzati, template, layout che apre i pannelli giusti; i campi sbagliati finiscono in Problemi</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Vista tabella e filtri sui campi tipizzati</td><td class="c own">◐</td><td class="c">◐</td><td class="c">✓</td><td class="c">✗</td></tr>
+        <tr class="grp"><td colspan="5">Sincronizzazione — il motivo per cui esiste</td></tr>
+        <tr><td>Sync fra macchine senza abbonamento: remoto git o cartella-specchio, scelto e provato da un modulo solo</td><td class="c own">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>Crea il repository remoto per te, sempre privato</b>, senza opzione pubblica da nessuna parte</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Un solo pulsante che dice lo stato (allineato, da inviare, in arrivo, conflitti, irraggiungibile) ed esegue l'azione che lo stato richiede</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Sync automatico in background</td><td class="c own">✗</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>Conflitti come artefatto visibile</b>: le due versioni affiancate, «tieni la mia / prendi la loro / unisci a mano», nessun marker scritto nella nota</td><td class="c own">✓</td><td class="c">◐</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr><td>Cifratura end-to-end</td><td class="c own">✗</td><td class="c">✓</td><td class="c">?</td><td class="c">✓</td></tr>
+        <tr class="grp"><td colspan="5">Intorno al prodotto</td></tr>
+        <tr><td>App mobile</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Plugin della comunità</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Export HTML / PDF</td><td class="c own">✗</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr class="note"><td colspan="5">La compatibilità con Obsidian è ◐ e non ✓ perché è una promessa del design con test di round-trip nel crate <code>garrulus-ast</code>, ma non ho visto il prodotto aprire un vault Obsidian reale. Nella riga del sync automatico Garrulus è ✗ <i>per scelta</i>: la regola è «nessuna scrittura senza un click», il background controlla e non modifica mai, e la documentazione ne fa un vantaggio (una storia che si legge). È una scelta difendibile e un compromesso: chi dimentica il click ha due macchine disallineate. L'export HTML e PDF il design lo dichiara «di prima classe»; nel codice non l'ho trovato. Per i plugin: l'host Lua carica plugin e spara hook <code>garrulus:note_saved</code> e simili, ma plugin che lo targettino non ne conosco.</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="callout">
+      <b>Quello che il design si dà come test, e che nessuno ha ancora fatto.</b>
+      <p>Il documento scrive che «il flusso dei conflitti è l'intero prodotto»: se perde un testo una volta, l'utente smette di fidarsi e il prodotto è morto. Il codice è disegnato per questo (conflitti per nota, mai merge silenziosi, 48 file con test), ma una prova a <b>due macchine reali, con modifiche concorrenti, per settimane</b> non c'è. È il test che trasforma una bozza in un prodotto, ed è per questo che l'ultima colonna sta a 3.0 e non più su.</p>
+    </div>
+
+    <h3>Da integrare, in ordine di ritorno</h3>
+    <ol class="next">
+      <li><b>La prova a due macchine, con modifiche concorrenti</b><span>Non una feature: un periodo di uso. Tutto il resto dell'elenco dipende dal fatto che il sync regga.</span></li>
+      <li><b>Aprire un vault Obsidian vero e confrontare il diff</b><span>Trasforma il ◐ sulla compatibilità in ✓ o in un bug, e costa un pomeriggio.</span></li>
+      <li><b>Export HTML e PDF</b><span>Il design lo mette fra le cose di prima classe, e il convertitore Markdown condiviso della suite esiste già.</span></li>
+      <li><b>Sync automatico opt-in</b><span>Mantenendo la regola di oggi come predefinita. È la differenza di abitudine più grande con Obsidian Sync.</span></li>
+      <li><b>La vista a grafo</b><span>Per ultima: il design stesso la chiama «per lo più un giocattolo».</span></li>
+    </ol>
   </section>
 
   <!-- ===================== UI/UX ===================== -->
@@ -699,7 +1030,7 @@
         <tr><td>Temi, incluso un editor di temi per l'utente</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
         <tr class="note"><td colspan="6">Sotto questa riga comincia ciò che il codice non può dire.</td></tr>
         <tr><td>Collaudo manuale approfondito e continuo</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
-        <tr><td>Test automatici sull'interfaccia (rete sulle regressioni)</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Test automatici sull'interfaccia (rete sulle regressioni): oggi 127 file di logica TS, nessun test di rendering</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
         <tr><td>Attriti scoperti da utenti <i>diversi dall'autore</i></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
         <tr><td>Nessun componente oltre la soglia che il progetto stesso si dà</td><td class="c own">✗</td><td class="c">—</td><td class="c">—</td><td class="c">—</td><td class="c">—</td></tr>
       </tbody>
@@ -723,6 +1054,25 @@
     <p>Cosa cambia e cosa no. <b>Cambia il polish</b>: la mia stima uniforme era la media di chi non ha visto il prodotto, e la differenziazione fra 9.0 e 7.5 è informazione che avevo perso appiattendola. <b>Non cambia la prova sul campo</b>, che è l'ultimo asse della scorecard e resta dov'era: un design system severo evita la classe di errori che nasce dalla fretta, non quella che nasce dall'uso di gente diversa dall'autore, e quella si scopre solo con qualcuno che si lamenta. Le due cose vanno tenute separate — se il voto di polish assorbisse quello di collaudo, tornerei a produrre il numero medio che non descrive niente.</p>
 
     <p>Con questi numeri <b>Corvus a 9.0 pareggia Sublime Merge</b> ed è sopra Fork, ma su basi diverse: il 9 di Sublime Merge è reattività e densità limate in dieci anni, quello di Corvus è coerenza e modernità di un design system applicato con disciplina dal primo giorno. Sono due modi diversi di arrivare allo stesso voto, e la differenza si vede tutta nell'ultima colonna della scorecard.</p>
+
+    <h3>Parole, non numeri: cosa dice il maintainer degli altri prodotti</h3>
+
+    <p>Per i quattro prodotti nati dopo la tabella qui sopra non ho voti di polish dell'autore, ma ho frasi. Le riporto come <b>una voce fra le altre, non come evidenza</b>: sono giudizi di chi li ha scritti, e il numero con la tilde nella scorecard è la mia traduzione di una frase, da sostituire con un suo voto appena ne dà uno.</p>
+
+    <div class="tw"><table>
+      <thead><tr><th>Prodotto</th><th class="own">Voto in pagina</th><th>Cosa dice il maintainer</th><th>Come l'ho trattato</th></tr></thead>
+      <tbody>
+        <tr><td><b>Corvus</b></td><td class="c own">9.0</td><td class="c">Insieme a Bennu, il più rifinito della suite</td><td class="c">Coerente col voto già dato; nessun cambio</td></tr>
+        <tr><td><b>Bennu</b></td><td class="c own">7.5</td><td class="c">Insieme a Corvus, il più rifinito della suite</td><td class="c">In tensione col 7.5 di autovalutazione: se pesa 8 o più lo dirà lui; non lo muovo senza un numero</td></tr>
+        <tr><td><b>Picus</b></td><td class="c own">7.5</td><td class="c">Potrebbe avere un aspetto migliore, ma fa il suo lavoro</td><td class="c">Resta 7.5: la frase pende verso il basso, ma è dello stesso autore dello stesso voto</td></tr>
+        <tr><td><b>Sitta</b></td><td class="c own">8.5</td><td class="c">Gli piace più degli esploratori di Windows e macOS; ha bisogno di un fix</td><td class="c">Il fix non è specificato, quindi non lo peso; il voto resta</td></tr>
+        <tr><td><b>Merula</b></td><td class="c own">~7.0</td><td class="c">Fa il suo lavoro</td><td class="c">Tilde: mia traduzione, né sopra né sotto la media dei prodotti centrali</td></tr>
+        <tr><td><b>Tyto</b></td><td class="c own">~7.0</td><td class="c">Fa il suo lavoro</td><td class="c">Come Merula</td></tr>
+        <tr><td><b>Hirundo</b></td><td class="c own">~7.0</td><td class="c">Agli inizi ma promettente</td><td class="c">Tilde. Il CHANGELOG mostra la UI ancora riorganizzata (barra dell'URL, tabella dei parametri, tab, importazioni): è un lavoro in movimento</td></tr>
+        <tr><td><b>Garrulus</b></td><td class="c own">n.v.</td><td class="c">Una bozza</td><td class="c">Non voto</td></tr>
+        <tr class="note"><td colspan="4">«Fa il suo lavoro» è un giudizio di funzione, non di forma: lo uso per Funziona davvero (dove entra nel 5.0 di Merula e Tyto) più che per il polish. Dove ho scritto ~7.0 ho dichiarato la lettura che ho fatto del codice e delle schermate in galleria, non una prova.</td></tr>
+      </tbody>
+    </table></div>
   </section>
 
   <!-- ===================== FUNZIONA ===================== -->
@@ -737,34 +1087,42 @@
       <tbody>
         <tr><td>Debugger Rust su Windows-MSVC — Bennu</td><td class="c">✓</td><td class="c">✓</td><td>Uso diretto: funzionava alla perfezione</td></tr>
         <tr><td>Debugger Rust su Windows-MSVC — RustRover, VS&nbsp;Code</td><td class="c">✓</td><td class="c">◐</td><td>Uso diretto: problemi ripetuti. Da riverificare: potrebbero averlo sistemato</td></tr>
-        <tr><td>Multi-caret in Bennu</td><td class="c">◐</td><td class="c">✗</td><td>Scorciatoia mappata, flag CodeMirror mai attivato</td></tr>
-        <tr><td>Generatore di Picus</td><td class="c">✓</td><td class="c">✗</td><td>Handler serviti dal backend, frontend che non li chiama</td></tr>
+        <tr><td>Multi-caret in Bennu</td><td class="c">✓</td><td class="c">?</td><td>Era cablato e spento; oggi <code>multi-cursor.ts</code> attiva <code>allowMultipleSelections</code> e il CHANGELOG descrive Alt+click, colonna, Alt+J. Non l'ho provato</td></tr>
+        <tr><td>Generatore di Picus</td><td class="c">✓</td><td class="c">?</td><td>Prima: handler serviti e non chiamati. Ora il frontend chiama <code>picus_emit</code> e <code>picus_validate_rows</code> e l'export INSERT usa lo stesso emitter; non l'ho visto girare</td></tr>
         <tr><td>Validazione Java di Bennu</td><td class="c">✓</td><td class="c">◐</td><td>Tua segnalazione: escono ancora validazioni e autocomplete non segnati</td></tr>
-        <tr><td>Qualunque componente Svelte, <b>oggi</b></td><td class="c">✓</td><td class="c">✓</td><td>Verificato a mano dall'autore, che usa i quattro prodotti ogni giorno</td></tr>
-        <tr><td>Qualunque componente Svelte, <b>fra tre settimane e cinquanta commit</b></td><td class="c">✓</td><td class="c">◐</td><td>0 test automatici su 833 componenti: nessuno avvisa se si rompe</td></tr>
-        <tr><td>Qualunque crate Rust della suite</td><td class="c">✓</td><td class="c">✓</td><td>691 file su 1727 con test propri, più 104 test d'integrazione</td></tr>
+        <tr><td>Qualunque componente Svelte, <b>oggi</b></td><td class="c">✓</td><td class="c">✓</td><td>Verificato a mano dall'autore, che usa ogni giorno i quattro prodotti storici (degli altri quattro non so quanto)</td></tr>
+        <tr><td>Qualunque componente Svelte, <b>fra tre settimane e cinquanta commit</b></td><td class="c">✓</td><td class="c">◐</td><td>127 file di test su 1286 componenti, tutti di logica TS: nessuno monta un componente, quindi un componente rotto non lo avvisa nessuno</td></tr>
+        <tr><td>Qualunque crate Rust della suite</td><td class="c">✓</td><td class="c">✓</td><td>1372 file su 2719 con test propri, più 163 test d'integrazione (ma Sitta: 0 file su 11)</td></tr>
+        <tr><td>Export audio di Merula con i sample bank installati</td><td class="c">✓</td><td class="c">◐</td><td>Fino a questo Unreleased il bounce suonava sul synth di riserva: dal vivo e nel file erano due suoni diversi. Corretto nel CHANGELOG; da riverificare</td></tr>
+        <tr><td>Clip launcher di Merula</td><td class="c">✓</td><td class="c">◐</td><td>Disegnava la griglia e accettava i click, ma il backend scartava la selezione. Corretto nel CHANGELOG</td></tr>
+        <tr><td>Download dei sample bank di Merula</td><td class="c">✓</td><td class="c">◐</td><td>Ogni trasferimento abortiva a 30 secondi. Corretto nel CHANGELOG</td></tr>
+        <tr><td>Tyto su Windows</td><td class="c">✓</td><td class="c">✓</td><td>Uso diretto del maintainer: fa il suo lavoro. Un'opinione, non un test</td></tr>
+        <tr><td>Tyto su macOS</td><td class="c">✓</td><td class="c">◐</td><td>Sette voci di correzione nell'Unreleased (crash su Esc, ritaglio sbagliato sui display ad alta densità, registrazione che si ferma a schermo fermo): terreno nuovo</td></tr>
+        <tr><td>Schedulazioni di Hirundo</td><td class="c">✓</td><td class="c">◐</td><td>Scattano solo a finestra aperta (<code>docs/hirundo.md</code>); senza nessuno davanti, un ambiente protetto non può essere confermato</td></tr>
+        <tr><td>Hirundo, tutto il resto</td><td class="c">✓</td><td class="c">?</td><td>Nato nell'ultimo giorno di storia git; 32 su 45 file Rust con test e 5 file di test frontend; nessun altro utente</td></tr>
+        <tr><td>Garrulus: sincronizzazione fra due macchine reali</td><td class="c">✓</td><td class="c">?</td><td>Il design chiama il flusso dei conflitti «l'intero prodotto»; 48 file Rust su 79 con test, ma una prova a due macchine con modifiche concorrenti non l'ho vista</td></tr>
       </tbody>
     </table></div>
 
     <div class="callout">
       <b>La conclusione scomoda, e quella incoraggiante.</b>
-      <p><b>Scomoda:</b> su questo asse Arbor perde contro tutti, ma non per la ragione che avevo scritto. Le feature <i>sono</i> state provate, a mano, dall'autore, ogni giorno, su tutti e quattro i prodotti. Quello che manca non è la verifica: è la <b>seconda persona</b> — qualcuno che usi il prodotto in un modo che l'autore non ha previsto — e la <b>rete sulle regressioni</b>, perché un collaudo manuale non si ripete a ogni commit. Le celle verdi vanno lette come «provata a fondo da una persona sola, su una macchina sola», che è molto più di «implementata» e molto meno di «regge in mano a chiunque» — ed è la ragione per cui i voti dell'ultima colonna stanno fra 4.5 e 7.5. Con una gerarchia interna che conta: <b>Corvus in cima a 7.5</b> perché è il più vecchio, quello usato ogni giorno e l'unico con una ventina di aree dichiarate stabili; <b>Picus in fondo a 4.5</b> perché metà prodotto è appena atterrato.</p>
+      <p><b>Scomoda:</b> su questo asse Arbor perde contro tutti, ma non per la ragione che avevo scritto. Le feature <i>sono</i> state provate, a mano, dall'autore, ogni giorno, sui quattro prodotti storici. Quello che manca non è la verifica: è la <b>seconda persona</b> — qualcuno che usi il prodotto in un modo che l'autore non ha previsto — e la <b>rete sulle regressioni</b>, perché un collaudo manuale non si ripete a ogni commit. Le celle verdi vanno lette come «provata a fondo da una persona sola, su una macchina sola», che è molto più di «implementata» e molto meno di «regge in mano a chiunque» — ed è la ragione per cui i voti dell'ultima colonna stanno fra 3.0 e 7.5. Con una gerarchia interna che conta: <b>Corvus in cima a 7.5</b> perché è il più vecchio, quello usato ogni giorno e l'unico con una ventina di aree dichiarate stabili; <b>in fondo i prodotti nati da settimane o giorni</b> (Hirundo 3.5, Garrulus 3.0), poi Merula e Tyto a 5.0 e Picus a 5.5, che ha il generatore appena collegato e un solo driver.</p>
       <p><b>Incoraggiante:</b> la metà del problema è già risolta due volte. Il backend ha una disciplina di test automatici che i prodotti commerciali contro cui lo confronti non necessariamente hanno, ed è la metà dove i bug costano di più; il frontend ha il collaudo manuale di chi lo usa tutti i giorni, che è la forma di verifica giusta per un'interfaccia. Quello che resta scoperto è una fascia stretta e nominabile: <b>le regressioni sul frontend fra un collaudo manuale e il successivo</b>. Il debugger che ti funzionava alla perfezione dice che quando una cosa qui è fatta è fatta bene — il rischio non è la qualità di ciò che scrivi, è che nessuno te lo dica quando smette di funzionare.</p>
     </div>
 
     <h3>La domanda vera: Bennu è un rimpiazzo di IntelliJ?</h3>
-    <p>No, e le tabelle dicono esattamente perché — non è la validazione, che è quasi tutta verde. Sono <b>cinque righe consecutive</b> in cui Bennu è l'unico a zero (extract, introduce, inline, change signature, safe delete), più il multi-caret che è cablato e spento, più le validazioni non segnate che stai già correggendo. <b>Cinque cose e una riga di codice</b>, non cinquanta. Con quelle dentro, su uno stack Struts/JSP/Spring-XML in Cp1252, la conclusione si ribalta: non «un IntelliJ più povero», ma l'unico editor che vede quel progetto per quello che è — con l'avvertenza che l'ultima colonna della scorecard si alza solo col tempo, e quella non la accorci.</p>
+    <p>Ancora no — ma per ragioni diverse da quelle della stesura precedente. Delle <b>cinque righe consecutive</b> a zero, quattro sono entrate nel CHANGELOG con una misura accanto (extract method e variable, inline, safe delete, più introduce field, pull up, push down e move member, ricompilati con javac su migliaia di applicazioni di Apache Commons Lang); Change Signature è a metà, con Add Parameter; il multi-caret è acceso; Gradle è letto ma non eseguito. Restano coverage, live template, il diff dentro l'editor, l'hot-swap Java e le validazioni non segnate che stai ancora correggendo. Su uno stack Struts/JSP/Spring-XML in Cp1252 la conclusione era già ribaltata: non «un IntelliJ più povero», ma l'unico editor che vede quel progetto per quello che è — con l'avvertenza che l'ultima colonna della scorecard si alza solo col tempo, e quella non la accorci.</p>
   </section>
 
 </main>
 
 <footer class="wrap">
-  <p>Fonti: il codice del repository sul ramo <code>feature/bennu</code> (handler RPC dei quattro backend, componenti Svelte, README dei crate, <code>docs/status.md</code>, <code>docs/bennu-vs-intellij.md</code>, <code>docs/picus-design.md</code>); le metriche in testa, ottenute da comandi ripetibili sul repository; e, per le due righe che lo dichiarano, l'esperienza d'uso diretta del maintainer. Per i concorrenti: documentazione pubblica e uso corrente, non un benchmark eseguito — una cella ◐ segna una copertura parziale, dietro plugin di terze parti, o nota per essere fragile.</p>
+  <p>Fonti: il codice del repository sul ramo <code>feature/bennu</code> (handler RPC dei quattro backend, componenti Svelte, README dei crate, <code>docs/status.md</code>, <code>docs/bennu-vs-intellij.md</code>, <code>docs/picus-design.md</code>); le metriche in testa, ottenute da comandi ripetibili sul repository; e, per le righe che lo dichiarano, l'esperienza d'uso diretta del maintainer. Per la stesura del 5 novembre: il <code>CHANGELOG.md</code> alla sezione [Unreleased], <code>docs/hirundo.md</code>, <code>docs/garrulus-design.md</code>, <code>crates/products/merula/CHANGELOG.md</code>, le pagine di documentazione in-app di ogni prodotto (<code>src/lib/components/&lt;prodotto&gt;/docs</code>), le dimensioni dei binari in <code>src-tauri/target/release</code> e conteggi ripetibili con <code>git ls-files</code>. Le celle <b>?</b> sono quelle in cui non so cosa faccia la versione corrente del concorrente; i voti dei concorrenti delle quattro sezioni nuove sono miei, e meno informati di quelli delle sezioni vecchie. Per i concorrenti: documentazione pubblica e uso corrente, non un benchmark eseguito — una cella ◐ segna una copertura parziale, dietro plugin di terze parti, o nota per essere fragile.</p>
 </footer>
 
 <script>
   (function () {
-    const map = { '✓': ['y', 'sì'], '◐': ['p', 'parziale'], '✗': ['n', 'no'], '—': ['', 'non applicabile'] };
+    const map = { '✓': ['y', 'sì'], '◐': ['p', 'parziale'], '✗': ['n', 'no'], '—': ['', 'non applicabile'], '?': ['q', 'non verificato'] };
     for (const td of document.querySelectorAll('td.c')) {
       const g = map[td.textContent.trim()];
       if (!g) continue;

@@ -118,36 +118,35 @@ pub fn build_project_index_from_sources(
     let hierarchy = project_hierarchy(&parsed, &project_types, &is_project);
 
     let mut builder = IndexBuilder::new(index_dir);
-    let mut next_id: u32 = 0;
+    builder.set_persist_workers(background_workers());
     let mut type_count = 0usize;
     let mut member_count = 0usize;
     let mut classes: Vec<ClassDecl> = Vec::new();
 
-    for ((path, fs), (_p2, source)) in parsed.iter().zip(sources.iter()) {
+    // Each file's records are independent of every other file's (they read only the shared,
+    // read-only maps above), so they are built in parallel with ids local to the file, then rebased
+    // onto the running total below — the result is the serial one, id for id.
+    let work: Vec<(&PathBuf, &FileSymbols, &str)> = parsed
+        .iter()
+        .zip(sources.iter())
+        .map(|((path, fs), (_, source))| (path, fs, source.as_str()))
+        .collect();
+    let per_file = parallel_map(&work, |&(path, fs, source)| {
+        // `dyn Fn` is not `Sync`, so the membership test is built per worker call, over the shared set.
+        let is_project = |b: &str| project_binaries.contains(b);
         let (records, ids, types, members) =
-            file_records(path, fs, &project_types, next_id, &is_project, Some(&hierarchy));
-        next_id = ids;
-        type_count += types;
-        member_count += members;
-        // Capture the class navigator entries from the SAME parse (the decl line is
-        // recovered from the source token, mirroring the fresh-scan navigator).
-        let file_key = path.to_string_lossy().replace('\\', "/");
-        for td in &fs.types {
-            // An anonymous class is indexed (its members have to resolve) but never NAVIGATED to
-            // by name: its name is a position, so offering "1" in Go-to-Class is offering
-            // something nobody can look for.
-            if td.is_anonymous {
-                continue;
-            }
-            classes.push(ClassDecl {
-                fqcn: td.fqn.clone(),
-                simple: td.name.clone(),
-                file: file_key.clone(),
-                line: decl_line(source, &td.name).unwrap_or(1),
-                kind: td.kind.slug().to_string(),
-            });
-        }
-        builder.set_file(path.clone(), records);
+            file_records(path, fs, &project_types, 0, &is_project, Some(&hierarchy));
+        FileBuild { records, ids, types, members, classes: class_decls_of(path, fs, source) }
+    });
+
+    let mut next_id: u32 = 0;
+    for ((path, _), mut built_file) in parsed.iter().zip(per_file) {
+        rebase_ids(&mut built_file.records, next_id);
+        next_id += built_file.ids;
+        type_count += built_file.types;
+        member_count += built_file.members;
+        classes.append(&mut built_file.classes);
+        builder.set_file(path.clone(), built_file.records);
     }
 
     ProjectBuild {
@@ -435,9 +434,105 @@ where
         .collect()
 }
 
+/// What one file contributes to a whole-project build, computed on a worker.
+struct FileBuild {
+    /// The file's records, ids LOCAL to the file (`0..ids`) until [`rebase_ids`] moves them.
+    records: Vec<IndexRecord>,
+    /// How many ids the file consumed.
+    ids: u32,
+    types: usize,
+    members: usize,
+    classes: Vec<ClassDecl>,
+}
+
+/// Move a file's local ids (`0..n`) to start at `offset`, so building files independently and
+/// rebasing by a running total yields exactly the ids a serial pass threading `next_id` would.
+/// `owner_id == u32::MAX` means "no owner" and must survive untouched.
+fn rebase_ids(records: &mut [IndexRecord], offset: u32) {
+    if offset == 0 {
+        return;
+    }
+    for record in records {
+        record.symbol.id += offset;
+        if record.symbol.owner_id != u32::MAX {
+            record.symbol.owner_id += offset;
+        }
+    }
+}
+
+/// The Go-to-Class entries of one parsed file. An anonymous class is indexed (its members have to
+/// resolve) but never NAVIGATED to by name: its name is a position, so offering "1" in Go-to-Class is
+/// offering something nobody can look for.
+fn class_decls_of(path: &Path, fs: &FileSymbols, source: &str) -> Vec<ClassDecl> {
+    let file_key = path.to_string_lossy().replace('\\', "/");
+    fs.types
+        .iter()
+        .filter(|td| !td.is_anonymous)
+        .map(|td| ClassDecl {
+            fqcn: td.fqn.clone(),
+            simple: td.name.clone(),
+            file: file_key.clone(),
+            line: type_decl_line(source, td),
+            kind: td.kind.slug().to_string(),
+        })
+        .collect()
+}
+
+/// The 1-based line of the `class`/`interface`/`enum`/`record` keyword that declares `td` in `source`.
+///
+/// Reads the extractor's byte span instead of searching the whole file for the name: it costs the
+/// length of one declaration rather than the length of the file per type, and it lands on the right
+/// declaration when two nested types share a simple name. Lines that are comments are skipped, so a
+/// word in a Javadoc cannot be mistaken for the declaration. A type with no span (a hand-built one)
+/// falls back to the text search, and anything not found is line 1.
+pub fn type_decl_line(source: &str, td: &TypeDecl) -> usize {
+    let Some(span) = td.span else {
+        return decl_line(source, &td.name).unwrap_or(1);
+    };
+    let end = span.end.min(source.len());
+    if span.start > end || !source.is_char_boundary(span.start) || !source.is_char_boundary(end) {
+        return decl_line(source, &td.name).unwrap_or(1);
+    }
+    let first_line = 1 + source.as_bytes()[..span.start].iter().filter(|&&b| b == b'\n').count();
+    for (offset, line) in source[span.start..end].lines().enumerate() {
+        let code = line.split("//").next().unwrap_or(line);
+        let trimmed = code.trim_start();
+        if trimmed.starts_with('*') || trimmed.starts_with("/*") {
+            continue;
+        }
+        if line_declares_type(code, &td.name) || line_declares_record(code, &td.name) {
+            return first_line + offset;
+        }
+    }
+    first_line
+}
+
+/// Whether `line` declares a `record <name>` (the keyword [`line_declares_type`] predates).
+fn line_declares_record(line: &str, name: &str) -> bool {
+    let mut rest = line;
+    while let Some(pos) = rest.find("record") {
+        let after = &rest[pos + "record".len()..];
+        let before_ok = pos == 0
+            || !rest.as_bytes()[pos - 1].is_ascii_alphanumeric() && rest.as_bytes()[pos - 1] != b'_';
+        let name_after = after.trim_start();
+        if before_ok && after.len() != name_after.len() && name_after.starts_with(name) {
+            let bounded = name_after[name.len()..]
+                .chars()
+                .next()
+                .map(|c| !c.is_alphanumeric() && c != '_')
+                .unwrap_or(true);
+            if bounded {
+                return true;
+            }
+        }
+        rest = &rest[pos + "record".len()..];
+    }
+    false
+}
+
 /// Find the 1-based line of a type declaration by locating the first
-/// `class`/`interface`/`enum <name>` token in `source`. Mirrors the fresh-scan navigator's
-/// recovery (the extractor's [`TypeDecl`] carries no offset). `None` → caller defaults to 1.
+/// `class`/`interface`/`enum <name>` token in `source`. The legacy text recovery, kept for a type
+/// that carries no span ([`type_decl_line`] is the one callers use). `None` → caller defaults to 1.
 fn decl_line(source: &str, name: &str) -> Option<usize> {
     for (idx, line) in source.lines().enumerate() {
         if line_declares_type(line, name) {
@@ -511,7 +606,20 @@ pub fn file_records_from_source(
     is_project: &dyn Fn(&str) -> bool,
 ) -> Vec<IndexRecord> {
     let fs = extract_symbols(source);
-    file_records(path, &fs, project_types, start_id, is_project, None).0
+    file_records_from_symbols(path, &fs, project_types, start_id, is_project)
+}
+
+/// [`file_records_from_source`] for a caller that already extracted the file's symbols — the patch
+/// path extracts once and feeds the index, the type map and the navigator from the same
+/// [`FileSymbols`] rather than parsing the file once per consumer.
+pub fn file_records_from_symbols(
+    path: &Path,
+    fs: &FileSymbols,
+    project_types: &BTreeMap<String, String>,
+    start_id: u32,
+    is_project: &dyn Fn(&str) -> bool,
+) -> Vec<IndexRecord> {
+    file_records(path, fs, project_types, start_id, is_project, None).0
 }
 
 /// `binary → direct supertype binaries` for every project type, each supertype name resolved in the
@@ -1031,6 +1139,49 @@ pub fn collect_java(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Whether [`collect_java`] over `root` would reach `file`: a `.java` file under no hidden directory,
+/// no `target` (bar its generated-source roots) and no directory the user excluded.
+///
+/// The question a change notice has to ask before indexing a file the walk never saw — the watcher
+/// reports a new file under `build/` or `.idea/` as readily as one under `src/`, and indexing it
+/// would put a second copy of somebody's types into the index.
+pub fn is_indexed_source(root: &Path, file: &Path) -> bool {
+    if file.extension().and_then(|x| x.to_str()) != Some("java") {
+        return false;
+    }
+    let Ok(relative) = file.strip_prefix(root) else { return false };
+    let names: Vec<&str> = relative
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(name) => name.to_str(),
+            _ => None,
+        })
+        .collect();
+    let Some((_, dirs)) = names.split_last() else { return false };
+    let mut i = 0;
+    while i < dirs.len() {
+        let name = dirs[i];
+        if name.starts_with('.') {
+            return false;
+        }
+        if name == "target" {
+            // Only the two generated-source roots are entered; they are walked as roots themselves.
+            match dirs.get(i + 1) {
+                Some(&"generated-sources") | Some(&"generated-test-sources") => {
+                    i += 2;
+                    continue;
+                }
+                _ => return false,
+            }
+        }
+        if is_excluded_dir(name) {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 /// Maven's build directory, entered **only** for the source roots an annotation processor
 /// writes into.
 ///
@@ -1275,6 +1426,112 @@ mod tests {
             vec!["Wibble".to_string()],
             "unknown stays raw"
         );
+    }
+
+    /// `(id, owner_id, fqn)` of every record, the part rebasing is responsible for.
+    fn id_view(records: &[IndexRecord]) -> Vec<(u32, u32, String)> {
+        records.iter().map(|r| (r.symbol.id, r.symbol.owner_id, r.symbol.fqn.clone())).collect()
+    }
+
+    #[test]
+    fn rebased_local_ids_equal_the_serial_threaded_ids() {
+        let sources = [
+            "package a;\npublic class One { int x; void m() {} }\n",
+            "package a;\npublic interface Two { void a(); void b(); }\n",
+            "package b;\npublic class Three { class Inner { int y; } int z; }\n",
+        ];
+        let parsed: Vec<FileSymbols> = sources.iter().map(|s| extract_symbols(s)).collect();
+        let types = BTreeMap::new();
+        let none = |_: &str| false;
+
+        // Serial: ids threaded through `next_id`.
+        let mut serial = Vec::new();
+        let mut next = 0u32;
+        for (i, fs) in parsed.iter().enumerate() {
+            let (records, ids, _, _) =
+                file_records(Path::new(&format!("/p/{i}.java")), fs, &types, next, &none, None);
+            next = ids;
+            serial.extend(id_view(&records));
+        }
+
+        // Parallel shape: local ids, rebased by prefix sums.
+        let mut rebased = Vec::new();
+        let mut offset = 0u32;
+        for (i, fs) in parsed.iter().enumerate() {
+            let (mut records, ids, _, _) =
+                file_records(Path::new(&format!("/p/{i}.java")), fs, &types, 0, &none, None);
+            rebase_ids(&mut records, offset);
+            offset += ids;
+            rebased.extend(id_view(&records));
+        }
+
+        assert_eq!(serial, rebased);
+        assert!(serial.iter().any(|(_, owner, _)| *owner == u32::MAX), "top-level types keep the sentinel");
+        assert!(serial.iter().any(|(_, owner, _)| *owner != u32::MAX), "members point at their type");
+    }
+
+    #[test]
+    fn a_large_project_build_matches_the_serial_class_list() {
+        // Enough files to take the parallel path on a multi-core machine.
+        let sources: Vec<(PathBuf, String)> = (0..80)
+            .map(|i| {
+                (
+                    PathBuf::from(format!("/proj/src/p/C{i}.java")),
+                    format!("package p;\n\npublic class C{i} {{ int f{i}; void m{i}() {{}} }}\n"),
+                )
+            })
+            .collect();
+        let dir = std::env::temp_dir().join(format!("bennu-jidx-par-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let built = build_project_index_from_sources(&sources, &dir);
+        assert_eq!(built.type_count, 80);
+        assert_eq!(built.member_count, 160);
+        let names: Vec<&str> = built.classes.iter().map(|c| c.simple.as_str()).collect();
+        let expected: Vec<String> = (0..80).map(|i| format!("C{i}")).collect();
+        assert_eq!(names, expected.iter().map(String::as_str).collect::<Vec<_>>(), "input order kept");
+        assert!(built.classes.iter().all(|c| c.line == 3));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn type_decl_line_uses_the_span_and_ignores_comments() {
+        let src = "package a;\n/** A class Order is described here. */\n@Deprecated\npublic class Order {\n  static class Order2 {}\n}\n";
+        let fs = extract_symbols(src);
+        let order = fs.types.iter().find(|t| t.name == "Order").unwrap();
+        assert_eq!(type_decl_line(src, order), 4);
+        let inner = fs.types.iter().find(|t| t.name == "Order2").unwrap();
+        assert_eq!(type_decl_line(src, inner), 5);
+    }
+
+    #[test]
+    fn type_decl_line_tells_same_named_nested_types_apart() {
+        let src = "package a;\nclass A {\n  static class Builder {}\n}\nclass B {\n  static class Builder {}\n}\n";
+        let fs = extract_symbols(src);
+        let mut lines: Vec<usize> =
+            fs.types.iter().filter(|t| t.name == "Builder").map(|t| type_decl_line(src, t)).collect();
+        lines.sort_unstable();
+        assert_eq!(lines, vec![3, 6]);
+    }
+
+    #[test]
+    fn is_indexed_source_mirrors_the_walk() {
+        let root = Path::new("/w/app");
+        assert!(is_indexed_source(root, Path::new("/w/app/src/main/java/a/A.java")));
+        assert!(is_indexed_source(root, Path::new("/w/app/A.java")));
+        assert!(!is_indexed_source(root, Path::new("/w/app/src/a/readme.txt")));
+        assert!(!is_indexed_source(root, Path::new("/w/app/.idea/scratch/A.java")));
+        assert!(!is_indexed_source(root, Path::new("/w/app/target/classes/A.java")));
+        assert!(is_indexed_source(root, Path::new("/w/app/target/generated-sources/annotations/p/A_.java")));
+        assert!(!is_indexed_source(root, Path::new("/w/app/target/site/p/A.java")));
+        assert!(!is_indexed_source(root, Path::new("/elsewhere/A.java")));
+    }
+
+    #[test]
+    fn type_decl_line_finds_a_record() {
+        let src = "package a;\n\npublic record Point(int x, int y) {}\n";
+        let fs = extract_symbols(src);
+        let point = fs.types.iter().find(|t| t.name == "Point").unwrap();
+        assert_eq!(type_decl_line(src, point), 3);
     }
 
     #[test]

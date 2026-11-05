@@ -92,7 +92,7 @@ fn is_switch_expression(n: &Node) -> bool {
 
 /// Whether a `return` sits inside a switch expression of its own body.
 fn crosses_switch_expression(stmt: Node) -> bool {
-    let mut cur = stmt.parent();
+    let mut cur = bennu_java::prelude::parent_of(stmt);
     while let Some(n) = cur {
         if is_body_boundary(&n) {
             return false;
@@ -100,7 +100,7 @@ fn crosses_switch_expression(stmt: Node) -> bool {
         if is_switch_expression(&n) {
             return true;
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     false
 }
@@ -123,7 +123,7 @@ fn label_of(stmt: Node, bytes: &[u8]) -> Option<String> {
 /// Whether an enclosing loop (or, for `break`, a switch statement) contains this statement — before
 /// a switch expression or the end of the body gets in the way.
 fn enclosure(stmt: Node, is_break: bool) -> Enclosure {
-    let mut cur = stmt.parent();
+    let mut cur = bennu_java::prelude::parent_of(stmt);
     while let Some(n) = cur {
         if is_body_boundary(&n) {
             return Enclosure::Nothing;
@@ -136,7 +136,7 @@ fn enclosure(stmt: Node, is_break: bool) -> Enclosure {
             "switch_expression" if is_break => return Enclosure::Target,
             _ => {}
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     Enclosure::Nothing
 }
@@ -147,7 +147,7 @@ fn enclosure(stmt: Node, is_break: bool) -> Enclosure {
 /// statement is not in scope, and accepting one would turn this check into a name search that
 /// approves the very refactor mistake it exists to catch.
 fn label_in_scope(stmt: Node, label: &str, bytes: &[u8]) -> bool {
-    let mut cur = stmt.parent();
+    let mut cur = bennu_java::prelude::parent_of(stmt);
     while let Some(n) = cur {
         if is_body_boundary(&n) {
             return false;
@@ -162,7 +162,7 @@ fn label_in_scope(stmt: Node, label: &str, bytes: &[u8]) -> bool {
                 return true;
             }
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     false
 }
@@ -171,7 +171,7 @@ fn label_in_scope(stmt: Node, label: &str, bytes: &[u8]) -> bool {
 /// found — is a loop, once nested labels (`a: b: while …`) are looked through. `continue` can only
 /// target a loop.
 fn labels_a_loop(stmt: Node, label: &str, bytes: &[u8]) -> bool {
-    let mut cur = stmt.parent();
+    let mut cur = bennu_java::prelude::parent_of(stmt);
     while let Some(n) = cur {
         if n.kind() == "labeled_statement" {
             let mut cw = n.walk();
@@ -192,7 +192,7 @@ fn labels_a_loop(stmt: Node, label: &str, bytes: &[u8]) -> bool {
                 });
             }
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     true
 }

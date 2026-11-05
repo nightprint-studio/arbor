@@ -10,7 +10,7 @@
   import { hirundoUiStore } from '$lib/stores/hirundo/ui.svelte';
   import { wsColor } from '../request-model';
 
-  const base = (p: string) => p.split(/[\/]/).filter(Boolean).pop() ?? p;
+  const base = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
   const items = $derived<WorkspaceManagerItem[]>(
     hirundoStore.workspaces.map((w) => ({ id: w.id, name: w.name, colorIdx: w.color_idx, projects: w.projects.map((root) => ({ root, name: base(root) })) })),
   );

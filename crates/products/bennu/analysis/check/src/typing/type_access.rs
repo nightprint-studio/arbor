@@ -29,7 +29,7 @@ pub fn type_access_errors_in(
     for &n in nodes {
         let binary = match n.kind() {
             // The head of `a.b.C` is a `type_identifier` too; the whole scoped name is judged instead.
-            "type_identifier" if n.parent().is_some_and(|p| p.kind() == "scoped_type_identifier") => continue,
+            "type_identifier" if bennu_java::prelude::parent_of(n).is_some_and(|p| p.kind() == "scoped_type_identifier") => continue,
             "type_identifier" | "scoped_type_identifier" => n
                 .utf8_text(bytes)
                 .ok()

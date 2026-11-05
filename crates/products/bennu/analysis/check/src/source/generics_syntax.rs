@@ -158,12 +158,12 @@ fn check_type_param_instantiation(n: Node, bytes: &[u8], out: &mut Vec<Diagnosti
 /// child directly (rather than a named field) keeps this robust across the declaration kinds.
 pub(crate) fn type_params_in_scope(node: Node, bytes: &[u8]) -> Vec<String> {
     let mut names = Vec::new();
-    let mut cur = node.parent();
+    let mut cur = bennu_java::prelude::parent_of(node);
     while let Some(p) = cur {
         if p.kind().ends_with("_declaration") {
             collect_type_param_names(p, bytes, &mut names);
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     names
 }
@@ -239,7 +239,7 @@ fn is_object_parameter(expr: Node, bytes: &[u8]) -> bool {
         return false;
     }
     let Ok(name) = expr.utf8_text(bytes) else { return false };
-    let mut cur = expr.parent();
+    let mut cur = bennu_java::prelude::parent_of(expr);
     while let Some(p) = cur {
         match p.kind() {
             "class_body" | "interface_body" | "enum_body" => return false,
@@ -253,7 +253,7 @@ fn is_object_parameter(expr: Node, bytes: &[u8]) -> bool {
                 });
                 return found && !file_declares_type_named_object(p, bytes);
             }
-            _ => cur = p.parent(),
+            _ => cur = bennu_java::prelude::parent_of(p),
         }
     }
     false
@@ -262,7 +262,7 @@ fn is_object_parameter(expr: Node, bytes: &[u8]) -> bool {
 /// Whether the file declares its own type called `Object` — then `Object` is not `java.lang.Object`.
 pub(crate) fn file_declares_type_named_object(from: Node, bytes: &[u8]) -> bool {
     let mut root = from;
-    while let Some(p) = root.parent() {
+    while let Some(p) = bennu_java::prelude::parent_of(root) {
         root = p;
     }
     let mut stack = vec![root];
@@ -343,10 +343,10 @@ fn check_catch_generics(n: Node, out: &mut Vec<Diagnostic>) {
 /// determined we SKIP.
 fn check_static_this_super(n: Node, out: &mut Vec<Diagnostic>) {
     // `? super X` — the `super` here is a type-argument token, never an expression.
-    if n.parent().map(|p| p.kind() == "wildcard").unwrap_or(false) {
+    if bennu_java::prelude::parent_of(n).map(|p| p.kind() == "wildcard").unwrap_or(false) {
         return;
     }
-    let mut cur = n.parent();
+    let mut cur = bennu_java::prelude::parent_of(n);
     while let Some(p) = cur {
         match p.kind() {
             // An intervening inner instance context → this/super binds to it, legal → SKIP.
@@ -376,7 +376,7 @@ fn check_static_this_super(n: Node, out: &mut Vec<Diagnostic>) {
             "constructor_declaration" | "compact_constructor_declaration" => return,
             _ => {}
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     // Fell off the top without a decisive enclosing member → SKIP (never assume static).
 }

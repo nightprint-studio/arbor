@@ -16,11 +16,12 @@
  */
 
 import { foldGutter, foldService, codeFolding, foldEffect } from '@codemirror/language';
-import type { Extension } from '@codemirror/state';
+import { StateEffect, type Extension } from '@codemirror/state';
 import type { EditorState } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 
 import type { LanguageDescriptor, Tree, Node } from './types';
+import { foldAnimation } from './fold-animation';
 
 /** Reader handed in from `createHighlightPlugin` — the live tree for a view. */
 type GetTree = (view: EditorView) => Tree | null;
@@ -71,6 +72,7 @@ export function createFoldingExtension(
 
   return [
     codeFolding(),
+    importsService(getTree),
     service,
     foldGutter({
       // Compact chevrons that inherit the themed fold-gutter colours (theme.ts).
@@ -80,11 +82,60 @@ export function createFoldingExtension(
         el.textContent = open ? '▾' : '▸'; // ▾ / ▸
         return el;
       },
+      // Recomputed when the tree has caught up with the text — see `treeCatchUp`.
+      foldingChanged: (u) => u.transactions.some((tr) => tr.effects.some((e) => e.is(treeCaughtUp))),
     }),
+    treeCatchUp(getTree),
+    foldAnimation(),
     // Keep the view registry in sync so the (state-only) fold service can reach
     // the live tree through its view.
     viewRegistry,
   ];
+}
+
+/** "The syntax tree changed under the fold gutter" — the only thing that makes it ask the fold service again. */
+const treeCaughtUp = StateEffect.define<null>();
+
+/**
+ * Ask the fold gutter to recompute once the syntax tree is current.
+ *
+ * The gutter draws its arrows on the update that changed the document, and the tree is re-parsed by a
+ * different plugin on that same update — in whichever order the two happen to run. When the gutter goes
+ * first it asks the fold service about a tree that is the previous text (or null, before the grammar
+ * loads), gets no answer for the blocks that moved or appeared, and never asks again: the arrows of
+ * nested blocks just disappear until something else redraws the gutter. So this notices, after the
+ * update, that the tree is not the one the arrows were drawn from, and sends one effect that makes the
+ * gutter recompute. A microtask, because a view plugin may not dispatch while it is reacting to an update.
+ */
+function treeCatchUp(getTree: GetTree): Extension {
+  return ViewPlugin.fromClass(
+    class {
+      private seen: Tree | null | undefined;
+      private queued = false;
+      private destroyed = false;
+
+      constructor(private readonly view: EditorView) {}
+
+      update(u: ViewUpdate) {
+        // Its own effect is the end of the loop, not a reason to look again.
+        if (u.transactions.some((tr) => tr.effects.some((e) => e.is(treeCaughtUp)))) return;
+        if (this.queued) return;
+        this.queued = true;
+        queueMicrotask(() => {
+          this.queued = false;
+          if (this.destroyed) return;
+          const tree = getTree(this.view);
+          if (tree === this.seen) return;
+          this.seen = tree;
+          this.view.dispatch({ effects: treeCaughtUp.of(null) });
+        });
+      }
+
+      destroy() {
+        this.destroyed = true;
+      }
+    },
+  );
 }
 
 /**
@@ -189,6 +240,88 @@ function smallestFoldableOnLine(
     cur = cur.parent;
   }
   return best;
+}
+
+// ── The import block ────────────────────────────────────────────────────────
+
+/** Node kinds that are one import / use statement, across the grammars that fold. */
+const IMPORT_KINDS = new Set(['import_declaration', 'import_statement', 'use_declaration']);
+/** Kinds that may sit between two imports without ending the block. */
+const IN_BETWEEN_KINDS = new Set(['line_comment', 'block_comment', 'comment']);
+
+/**
+ * The range of the leading import block: from just after the first import's keyword to the end of the last
+ * consecutive one, so a collapsed block reads `import …` on the line of the first import — what IntelliJ
+ * shows. `null` when there is no block, or it is a single line (nothing to hide).
+ *
+ * "Consecutive" means siblings at the top of the file with only comments between them: the first
+ * thing that is neither ends the block, so an import further down (Python, a generated file) does not
+ * stretch the fold over code.
+ */
+export function importBlockRange(state: EditorState, tree: Tree): { from: number; to: number } | null {
+  const root = tree.rootNode;
+  let first: Node | null = null;
+  let last: Node | null = null;
+  for (let i = 0; i < root.childCount; i++) {
+    const child = root.child(i);
+    if (!child) continue;
+    if (IMPORT_KINDS.has(child.type)) {
+      first ??= child;
+      last = child;
+    } else if (first && !IN_BETWEEN_KINDS.has(child.type)) {
+      break;
+    }
+  }
+  if (!first || !last) return null;
+  const keyword = /^w+/.exec(state.doc.sliceString(first.startIndex, Math.min(first.startIndex + 12, state.doc.length)));
+  const from = first.startIndex + (keyword ? keyword[0].length : 0);
+  const to = Math.min(last.endIndex, state.doc.length);
+  if (state.doc.lineAt(from).number >= state.doc.lineAt(to).number) return null;
+  return { from, to };
+}
+
+/** Make the import block foldable: the fold belongs to the line of the first import. */
+function importsService(getTree: GetTree): Extension {
+  return foldService.of((state, lineStart, lineEnd) => {
+    const view = viewForState(state);
+    const tree = view ? getTree(view) : null;
+    if (!tree) return null;
+    const range = importBlockRange(state, tree);
+    return range && range.from >= lineStart && range.from <= lineEnd ? range : null;
+  });
+}
+
+/**
+ * Collapse the import block once, when the file opens.
+ *
+ * The same one-shot shape as {@link foldBlockCommentsOnLoad}: an opening state, not a rule — whatever you
+ * do with the fold afterwards stays done, and the host carries it from tab to tab (see the editor's view
+ * snapshot). It is the host that says a tab already has a remembered state, by not installing this at all.
+ */
+export function foldImportsOnLoad(getTree: GetTree): Extension {
+  return ViewPlugin.fromClass(
+    class {
+      private done = false;
+
+      constructor(view: EditorView) {
+        this.foldOnce(view);
+      }
+
+      update(u: ViewUpdate) {
+        this.foldOnce(u.view);
+      }
+
+      private foldOnce(view: EditorView) {
+        if (this.done) return;
+        const tree = getTree(view);
+        if (!tree) return;
+        this.done = true;
+        const range = importBlockRange(view.state, tree);
+        if (!range) return;
+        queueMicrotask(() => view.dispatch({ effects: foldEffect.of(range) }));
+      }
+    },
+  );
 }
 
 // ── View registry ──────────────────────────────────────────────────────────

@@ -48,7 +48,7 @@ pub fn legacy_nesting_errors_nodes(nodes: &[Node], source: &str, java_major: Opt
 
 /// Declared in a block — a method body, a lambda body, an initializer.
 fn is_local(n: Node) -> bool {
-    n.parent().is_some_and(|p| p.kind() == "block")
+    bennu_java::prelude::parent_of(n).is_some_and(|p| p.kind() == "block")
 }
 
 /// A class that carries an enclosing instance.
@@ -56,7 +56,7 @@ fn is_inner(class: Node, bytes: &[u8]) -> bool {
     if has_keyword(class, bytes, "static") {
         return false;
     }
-    let Some(parent) = class.parent() else { return false };
+    let Some(parent) = bennu_java::prelude::parent_of(class) else { return false };
     match parent.kind() {
         "block" => true,
         "class_body" => parent

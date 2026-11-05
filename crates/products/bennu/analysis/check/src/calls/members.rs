@@ -226,7 +226,7 @@ fn receiver_type_is_unwritten(obj: Node, bytes: &[u8]) -> bool {
         return false;
     }
     let Ok(name) = obj.utf8_text(bytes) else { return false };
-    let mut cur = obj.parent();
+    let mut cur = bennu_java::prelude::parent_of(obj);
     while let Some(n) = cur {
         if n.kind() == "block" {
             let mut c = n.walk();
@@ -249,7 +249,7 @@ fn receiver_type_is_unwritten(obj: Node, bytes: &[u8]) -> bool {
         if matches!(n.kind(), "method_declaration" | "constructor_declaration" | "class_body") {
             break;
         }
-        cur = n.parent();
+        cur = bennu_java::prelude::parent_of(n);
     }
     false
 }

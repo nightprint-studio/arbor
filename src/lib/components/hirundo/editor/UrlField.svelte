@@ -94,4 +94,6 @@
   .uf :global(.cm-editor) { background: transparent; outline: none; height: 100%; }
   .uf :global(.cm-scroller) { overflow: hidden; align-items: center; }
   .uf :global(.cm-content) { padding: 0; }
+  /* The editor theme pads every line by 12px for code; here the field's own 10px is the only inset, so the text starts where the placeholder of any other input would. */
+  .uf :global(.cm-line) { padding: 0; }
 </style>

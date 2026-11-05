@@ -1673,8 +1673,8 @@ pub struct Breakpoint {
     /// produced, and the program is let go again when it does not hold. That is how every
     /// debugger does it, and it is why a condition on a hot line is slow rather than free.
     ///
-    /// The language differs by engine, deliberately: a Java condition is Bennu's own (a watch
-    /// path compared with a literal — see `debug_cond`), a native one is the adapter's, because
+    /// The language differs by engine, deliberately: a Java condition is Bennu's own (the small
+    /// `bennu-debug-expr` language — see `debug_cond`), a native one is the adapter's, because
     /// the adapter can already evaluate it and reimplementing that would be strictly worse.
     #[serde(default)]
     pub condition: String,

@@ -35,7 +35,8 @@ import {
 } from '@codemirror/autocomplete';
 
 import { matchesName } from './name-match';
-import { documentHighlights, serverFolding, unusedDeclarations } from './server-layers';
+import { documentHighlights, foldRangesChanged, serverFolding, unusedDeclarations } from './server-layers';
+import { foldAnimation } from './fold-animation';
 import { inlayHints } from './inlay-hints';
 import { signatureHints } from './signature-hint';
 import { codeLensLayer } from './code-lens';
@@ -43,7 +44,7 @@ import { snippetStops } from './snippet-stops';
 import { completionRowParts, rowClass, type RichOption } from './completion-render';
 import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
-import { createFoldingExtension, foldBlockCommentsOnLoad } from './folding';
+import { createFoldingExtension, foldBlockCommentsOnLoad, foldImportsOnLoad } from './folding';
 import { emmetKeymap } from './emmet';
 import { hasMultipleCursors, multiCursor, multiCursorKeymap, quietWithMultipleCursors } from './multi-cursor';
 import { intellijEditingKeymap } from './intellij-keymap';
@@ -179,6 +180,11 @@ export interface CodeEditorPreferences {
   /** Collapse the block comments of a file when it opens. Needs `folding`, and a language
    *  that both folds and declares its block-comment tokens. */
   foldBlockComments?: boolean;
+  /** Collapse the import block when the file opens. Needs `folding` and a grammar that folds. */
+  foldImports?: boolean;
+  /** The host already holds this tab's folds (it restores them), so the opening folds — comments and imports —
+   *  must not run: they would fold again what the user had unfolded. */
+  skipFoldDefaults?: boolean;
   /** How the completion popup behaves. Ignored by an editor whose language brings no
    *  completion source, and by a read-only one. */
   completion?: CompletionPreferences;
@@ -375,7 +381,7 @@ export function createCodeEditorExtensions(
   // bodies, `lang-json` folds objects). Tree-sitter descriptors fold via `foldNode`
   // above; legacy StreamLanguage modes stay gutter-free (they carry no fold info).
   if (useCm && lang.cmFold) {
-    foldingExts.push(codeFolding(), foldGutter({ markerDOM: foldMarkerDOM }));
+    foldingExts.push(codeFolding(), foldGutter({ markerDOM: foldMarkerDOM }), foldAnimation());
   }
 
   // Folding from a PROVIDER's ranges, for a language whose descriptor says its folds come from
@@ -384,7 +390,7 @@ export function createCodeEditorExtensions(
   // else, where a server folds by item. The ranges are pushed by the host; this installs the
   // machinery that uses them.
   if (lang.serverFold) {
-    foldingExts.push(codeFolding(), foldGutter({ markerDOM: foldMarkerDOM }), serverFolding());
+    foldingExts.push(codeFolding(), foldGutter({ markerDOM: foldMarkerDOM, foldingChanged: foldRangesChanged }), serverFolding(), foldAnimation());
   }
 
   // The completion source a language brings, if it brings one. Read here because the popup's
@@ -400,6 +406,7 @@ export function createCodeEditorExtensions(
   const activeLineHighlight = [highlightActiveLine(), highlightActiveLineGutter()];
   const whitespaceGlyphs = highlightWhitespace();
   const commentFoldOnLoad = foldBlockCommentsOnLoad(lang, getTree);
+  const importFoldOnLoad = lang.foldNode ? foldImportsOnLoad(getTree) : [];
 
   /**
    * Build the contents of {@link preferencesCompartment} for one set of preferences.
@@ -419,7 +426,8 @@ export function createCodeEditorExtensions(
     prefs.folding === false ? [] : foldingExts,
     // Folding the comments needs the folding: `foldEffect` on a state with no fold field is
     // dropped silently, which would look like a setting that works some days.
-    prefs.folding !== false && prefs.foldBlockComments ? commentFoldOnLoad : [],
+    prefs.folding !== false && prefs.foldBlockComments && !prefs.skipFoldDefaults ? commentFoldOnLoad : [],
+    prefs.folding !== false && prefs.foldImports && !prefs.skipFoldDefaults ? importFoldOnLoad : [],
     completionSource && !opts.readOnly
       ? completionExtension(completionSource, prefs.completion)
       : [],

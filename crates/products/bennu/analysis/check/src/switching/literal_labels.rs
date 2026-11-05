@@ -78,13 +78,13 @@ fn is_in_scope_at(declaration: Node, label: Node) -> bool {
     if declaration.start_byte() >= label.start_byte() {
         return false;
     }
-    let Some(scope) = declaration.parent() else { return false };
-    let mut cur = label.parent();
+    let Some(scope) = bennu_java::prelude::parent_of(declaration) else { return false };
+    let mut cur = bennu_java::prelude::parent_of(label);
     while let Some(p) = cur {
         if p.id() == scope.id() {
             return true;
         }
-        cur = p.parent();
+        cur = bennu_java::prelude::parent_of(p);
     }
     false
 }

@@ -25,12 +25,13 @@ use bennu_query::prelude::{
     inherited_members, IndexResolver, InheritedMember, JdkMemberIndex, PlanFile,
 };
 
+use crate::java_index::parallel_map;
 use crate::hierarchy::{HierarchyCtx, HierarchyDirection, HierarchyHandle, HierarchyItem};
 use crate::safe_delete::SafeDelete;
 use crate::refs::{
     build_reference_index_incremental, build_reference_index_with_progress, classify_caret,
     classify_target, references, AliasUsages, DeclKey, LangLevel, ReferenceIndex, ReferencesResult,
-    RenameTarget, SourceFile,
+    walk_file, FileContribution, RenameTarget, SourceFile,
 };
 use crate::rename::{
     decl_site_for_key, generated_aliases, hover_for_call, plan_types,
@@ -124,16 +125,113 @@ impl Policy {
 struct Live {
     index: ReferenceIndex,
     java_files: Vec<PlanFile>,
+    /// `java_files`' path → position, so finding a file's text is a probe and not a scan of the
+    /// project. Kept in step by [`Live::set_source`], the only place the list changes shape.
+    slots: HashMap<String, usize>,
     /// The project's simple→binary type map, which the walk resolves bare type names through. In
     /// here because a file that declares a *new* type has to make it resolvable to every other
     /// file's walk, and the map is how they find it.
-    project_types: HashMap<String, String>,
+    ///
+    /// Behind an `Arc` so a dependents sweep can walk against a snapshot of it without holding the
+    /// lock: the snapshot is a pointer copy, and an edit that adds a type pays the map clone only
+    /// when a sweep is actually holding the old one (`Arc::make_mut`).
+    project_types: Arc<HashMap<String, String>>,
     /// Who extends/implements whom, so an override family descends instead of scanning the project
     /// once per rename. In here because an `extends` clause is something an edit changes, and a
     /// stale answer here is not a missing feature but a **wrong rename**: a method's override family
     /// is what carries the rename to its implementations, so a subtype the map has not heard of
     /// keeps the old name and stops overriding what it declares.
     subtypes: SubtypeMap,
+    /// Bumped whenever an edit changes what OTHER files resolve against (a declaration fingerprint
+    /// moved). A dependents sweep walks outside the lock against a snapshot; if this has moved by
+    /// the time it comes back to swap its results in, the snapshot was taken against a different
+    /// project shape and the sweep is redone rather than applied.
+    shape_generation: u64,
+}
+
+impl Live {
+    fn new(
+        index: ReferenceIndex,
+        java_files: Vec<PlanFile>,
+        project_types: HashMap<String, String>,
+        subtypes: SubtypeMap,
+    ) -> Self {
+        let slots = slot_map(&java_files);
+        Self {
+            index,
+            java_files,
+            slots,
+            project_types: Arc::new(project_types),
+            subtypes,
+            shape_generation: 0,
+        }
+    }
+
+    /// Keep the plan sources in step with the index — see [`Live`]. `None` removes the file.
+    fn set_source(&mut self, file: &str, source: Option<&str>) {
+        match source {
+            Some(text) => match self.slots.get(file) {
+                Some(&slot) => self.java_files[slot].source = text.to_string(),
+                None => {
+                    self.slots.insert(file.to_string(), self.java_files.len());
+                    self.java_files.push(PlanFile { path: file.to_string(), source: text.to_string() });
+                }
+            },
+            None => {
+                if self.slots.contains_key(file) {
+                    // `retain` keeps the order the planners see; a delete is rare enough to pay
+                    // for rebuilding the positions after it.
+                    self.java_files.retain(|f| f.path != file);
+                    self.slots = slot_map(&self.java_files);
+                }
+            }
+        }
+    }
+}
+
+/// `files`' path → position.
+fn slot_map(files: &[PlanFile]) -> HashMap<String, usize> {
+    files.iter().enumerate().map(|(i, f)| (f.path.clone(), i)).collect()
+}
+
+/// The `(path, text)` pairs as the reference walk's input — moved, not cloned: a project's whole
+/// source text is held twice for the length of the walk otherwise.
+fn into_source_files(sources: Vec<(String, String)>) -> Vec<SourceFile> {
+    sources.into_iter().map(|(path, source)| SourceFile { path, source }).collect()
+}
+
+/// The walk input back into the plan sources the engine keeps — the other half of
+/// [`into_source_files`], so the text changes hands twice and is copied never.
+fn into_plan_files(files: Vec<SourceFile>) -> Vec<PlanFile> {
+    files.into_iter().map(|f| PlanFile { path: f.path, source: f.source }).collect()
+}
+
+/// What a dependents sweep takes out of the lock to work on without it: the files to re-walk (their
+/// text as it was), the type map as it was, and the shape generation both were read at.
+struct SweepJob {
+    files: Vec<PlanFile>,
+    project_types: Arc<HashMap<String, String>>,
+    generation: u64,
+}
+
+impl SweepJob {
+    /// Read the dependents of `touched` (other than `edited`) off the live state. Cost: the index
+    /// lookup plus one copy of each dependent's text — no parsing.
+    fn capture(live: &Live, touched: &HashSet<String>, edited: &str) -> Self {
+        let files = live
+            .index
+            .dependents_of(touched, edited)
+            .into_iter()
+            .filter_map(|dep| live.slots.get(&dep).map(|&slot| live.java_files[slot].clone()))
+            .collect();
+        Self { files, project_types: Arc::clone(&live.project_types), generation: live.shape_generation }
+    }
+
+    /// Re-walk every captured file in parallel. Touches no lock: a walk needs only the resolver and
+    /// the type map it was captured with.
+    fn walk(&self, resolver: &(dyn TypeResolver + Send + Sync)) -> Vec<FileContribution> {
+        parallel_map(&self.files, |f| walk_file(&f.path, &f.source, resolver, &self.project_types))
+    }
 }
 
 /// A resolver over the persisted project index ALONE — no JDK, no dependencies. The fallback for
@@ -170,23 +268,14 @@ impl SemanticEngine {
         project_types: HashMap<String, String>,
         on_progress: &(dyn Fn(usize, usize) + Sync),
     ) -> Self {
-        let ref_input: Vec<SourceFile> = java_sources
-            .iter()
-            .map(|(p, s)| SourceFile {
-                path: p.clone(),
-                source: s.clone(),
-            })
-            .collect();
+        let ref_input = into_source_files(java_sources);
         let index = build_reference_index_with_progress(
             &ref_input,
             &*resolver,
             &project_types,
             on_progress,
         );
-        let java_files = java_sources
-            .into_iter()
-            .map(|(path, source)| PlanFile { path, source })
-            .collect();
+        let java_files = into_plan_files(ref_input);
         let xml_files = xml_sources
             .into_iter()
             .map(|(path, source)| PlanFile { path, source })
@@ -196,7 +285,7 @@ impl SemanticEngine {
         let policy = RwLock::new(Policy::complete(Arc::clone(&resolver)));
         let subtypes = SubtypeMap::build(&index, &*resolver);
         Self {
-            live: RwLock::new(Live { index, java_files, project_types, subtypes }),
+            live: RwLock::new(Live::new(index, java_files, project_types, subtypes)),
             resolver,
             policy,
             xml_files,
@@ -321,13 +410,7 @@ impl SemanticEngine {
         let cache_path = index_dir.parent().map(crate::refcache::cache_path);
         let prior = cache_path.as_deref().and_then(crate::refcache::load);
 
-        let ref_input: Vec<SourceFile> = java_sources
-            .iter()
-            .map(|(p, s)| SourceFile {
-                path: p.clone(),
-                source: s.clone(),
-            })
-            .collect();
+        let ref_input = into_source_files(java_sources);
         let built = build_reference_index_incremental(
             &ref_input,
             &*resolver,
@@ -337,13 +420,12 @@ impl SemanticEngine {
         );
         let index = built.index;
         if let (Some(path), Some(cache)) = (&cache_path, &built.cache_to_save) {
-            crate::refcache::save(path, cache);
+            // Off the critical path: the engine goes live now, the cache reaches the disk behind it.
+            crate::refcache::save_in_background(path.clone(), cache.clone());
         }
 
-        let java_files = java_sources
-            .into_iter()
-            .map(|(path, source)| PlanFile { path, source })
-            .collect();
+        // The sources move back out of the walk input instead of being cloned into it.
+        let java_files = into_plan_files(ref_input);
         let xml_files = xml_sources
             .into_iter()
             .map(|(path, source)| PlanFile { path, source })
@@ -352,7 +434,7 @@ impl SemanticEngine {
         let policy = RwLock::new(Policy::complete(Arc::clone(&resolver)));
         let subtypes = SubtypeMap::build(&index, &*resolver);
         Ok(Self {
-            live: RwLock::new(Live { index, java_files, project_types, subtypes }),
+            live: RwLock::new(Live::new(index, java_files, project_types, subtypes)),
             resolver,
             policy,
             xml_files,
@@ -377,79 +459,122 @@ impl SemanticEngine {
     /// index's own record of which buckets each file is in, so finding it costs no parsing.
     ///
     /// Returns how many files were re-walked (the edited one included), for logging.
+    ///
+    /// The edited file is refreshed under the write lock, briefly. The dependents are NOT: they are
+    /// re-walked in parallel against a snapshot with no lock held, so go-to, hover and find-usages keep
+    /// answering while a declaration change fans out, and only the swap-in takes the lock again.
     pub fn refresh_file(&self, file: &str, source: Option<&str>) -> usize {
-        let mut guard = self.live.write().unwrap_or_else(|p| p.into_inner());
-        // Reborrow as a plain `&mut Live` so the fields below can be borrowed apart — the index
-        // mutably while the type map is read. Through the guard's `DerefMut` they cannot be.
-        let live = &mut *guard;
+        let touched = {
+            let mut guard = self.live.write().unwrap_or_else(|p| p.into_inner());
+            // Reborrow as a plain `&mut Live` so the fields below can be borrowed apart — the index
+            // mutably while the type map is read. Through the guard's `DerefMut` they cannot be.
+            let live = &mut *guard;
 
-        // Keep the plan sources in step with the index — see [`Live`]. Done FIRST because the walk
-        // below reads `java_files` for the dependents, and one of them could be this file.
-        match source {
-            Some(text) => match live.java_files.iter_mut().find(|f| f.path == file) {
-                Some(pf) => pf.source = text.to_string(),
-                None => live
-                    .java_files
-                    .push(PlanFile { path: file.to_string(), source: text.to_string() }),
-            },
-            None => live.java_files.retain(|f| f.path != file),
-        }
+            // Done FIRST because the sweep reads `java_files` for the dependents, and one of them
+            // could be this file.
+            live.set_source(file, source);
 
-        let before_types: Vec<String> = live.index.types_declared_in(file);
-        let before_print = live.index.declaration_fingerprint(file);
-        live.index.refresh_file(file, source, &*self.resolver, &live.project_types);
-        let after_print = live.index.declaration_fingerprint(file);
+            let before_types: Vec<String> = live.index.types_declared_in(file);
+            let before_print = live.index.declaration_fingerprint(file);
+            live.index.refresh_file(file, source, &*self.resolver, &live.project_types);
+            let after_print = live.index.declaration_fingerprint(file);
 
-        // A body-only edit — which is nearly every edit — changes nothing another file resolves
-        // against, so it costs exactly one walk. Only a moved fingerprint earns the sweep.
-        if before_print == after_print {
-            return 1;
-        }
-
-        // A type this file declares may be new, and until the map knows it every other file's walk
-        // resolves the bare name to nothing. Additive on purpose: a type that went away leaves its
-        // entry behind until the next full build, which resolves a name to a type that no longer
-        // exists — strictly better than the alternative, where removing one class from a file
-        // silently unresolves the ones still in it.
-        let after_types = live.index.types_declared_in(file);
-        for binary in &after_types {
-            if let Some(simple) = binary.rsplit(['/', '$']).next() {
-                live.project_types.insert(simple.to_string(), binary.clone());
+            // A body-only edit — which is nearly every edit — changes nothing another file resolves
+            // against, so it costs exactly one walk. Only a moved fingerprint earns the sweep.
+            if before_print == after_print {
+                return 1;
             }
-        }
+            live.shape_generation += 1;
 
-        // Re-file this file's types in the subtype map, so an `extends` or `implements` that just
-        // changed is reflected in the override families a rename descends. Driven by the INDEX's
-        // view of which types the file declares rather than by the resolver's: the resolver keeps
-        // serving a deleted type out of the persisted index until a full rebuild, and a subtype the
-        // map still believes in would have a rename plan edits into a class that is not there.
-        for binary in &before_types {
-            if !after_types.iter().any(|b| b == binary) {
-                live.subtypes.withdraw_type(binary);
+            // A type this file declares may be new, and until the map knows it every other file's walk
+            // resolves the bare name to nothing. Additive on purpose: a type that went away leaves its
+            // entry behind until the next full build, which resolves a name to a type that no longer
+            // exists — strictly better than the alternative, where removing one class from a file
+            // silently unresolves the ones still in it.
+            let after_types = live.index.types_declared_in(file);
+            if !after_types.is_empty() {
+                let types = Arc::make_mut(&mut live.project_types);
+                for binary in &after_types {
+                    if let Some(simple) = binary.rsplit(['/', '$']).next() {
+                        types.insert(simple.to_string(), binary.clone());
+                    }
+                }
             }
-        }
-        for binary in &after_types {
-            live.subtypes.refresh_type(binary, &*self.resolver);
-        }
 
-        // Whatever this file declared before or declares now: a type that disappeared invalidates
-        // its referrers exactly as much as one that appeared.
-        let mut touched: HashSet<String> = before_types.into_iter().collect();
-        touched.extend(after_types);
+            // Re-file this file's types in the subtype map, so an `extends` or `implements` that just
+            // changed is reflected in the override families a rename descends. Driven by the INDEX's
+            // view of which types the file declares rather than by the resolver's: the resolver keeps
+            // serving a deleted type out of the persisted index until a full rebuild, and a subtype the
+            // map still believes in would have a rename plan edits into a class that is not there.
+            for binary in &before_types {
+                if !after_types.iter().any(|b| b == binary) {
+                    live.subtypes.withdraw_type(binary);
+                }
+            }
+            for binary in &after_types {
+                live.subtypes.refresh_type(binary, &*self.resolver);
+            }
+
+            // Whatever this file declared before or declares now: a type that disappeared invalidates
+            // its referrers exactly as much as one that appeared.
+            let mut touched: HashSet<String> = before_types.into_iter().collect();
+            touched.extend(after_types);
+            touched
+        };
         if touched.is_empty() {
             return 1;
         }
-        let dependents = live.index.dependents_of(&touched, file);
-        let mut walked = 1;
-        for dep in dependents {
-            let Some(text) = live.java_files.iter().find(|f| f.path == dep).map(|f| f.source.clone())
-            else {
+        1 + self.rewalk_dependents(&touched, file)
+    }
+
+    /// Re-walk every file that resolves against one of `touched` (other than `edited`) and swap the
+    /// results in. Returns how many files were swapped.
+    ///
+    /// Optimistic: capture under the read lock, walk with none, then take the write lock and apply
+    /// only if the project's declaration shape is what the capture saw. If another declaration edit
+    /// landed in between, the snapshot may have resolved names against a stale type map, so it is
+    /// redone from the new state; after a few lost races it is done serially under the write lock —
+    /// the old behaviour — so the result is always correct, merely not always concurrent.
+    fn rewalk_dependents(&self, touched: &HashSet<String>, edited: &str) -> usize {
+        const OPTIMISTIC_ATTEMPTS: usize = 3;
+        for _ in 0..OPTIMISTIC_ATTEMPTS {
+            let job = SweepJob::capture(&self.live(), touched, edited);
+            if job.files.is_empty() {
+                return 0;
+            }
+            let walked = job.walk(&*self.resolver);
+
+            let mut guard = self.live.write().unwrap_or_else(|p| p.into_inner());
+            let live = &mut *guard;
+            if live.shape_generation != job.generation {
+                continue;
+            }
+            let mut swapped = 0;
+            for (planned, contribution) in job.files.iter().zip(walked) {
+                // A dependent that was itself edited while the sweep ran has already been walked
+                // against its newer text by that edit's own refresh; writing the older walk over it
+                // would put the stale edges back.
+                let current = live.slots.get(&planned.path).map(|&slot| &live.java_files[slot]);
+                if current.is_some_and(|f| f.source == planned.source) {
+                    live.index.replace_file(&planned.path, contribution);
+                    swapped += 1;
+                }
+            }
+            return swapped;
+        }
+
+        let mut guard = self.live.write().unwrap_or_else(|p| p.into_inner());
+        let live = &mut *guard;
+        let mut swapped = 0;
+        for dep in live.index.dependents_of(touched, edited) {
+            let Some(&slot) = live.slots.get(&dep) else {
                 continue; // not a project source we hold — nothing to re-walk it from
             };
+            let text = live.java_files[slot].source.clone();
             live.index.refresh_file(&dep, Some(&text), &*self.resolver, &live.project_types);
-            walked += 1;
+            swapped += 1;
         }
-        walked
+        swapped
     }
 
     /// Plan a rename at `file`:`offset` → the new name. `None` when the caret isn't on a
@@ -778,6 +903,7 @@ impl SemanticEngine {
             files: &live.java_files,
             resolver: &*self.resolver,
             subtypes: &live.subtypes,
+            slots: &live.slots,
         }
     }
 

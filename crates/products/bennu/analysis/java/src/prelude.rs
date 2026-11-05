@@ -24,6 +24,8 @@ pub use crate::infer::{
 };
 pub use crate::annotation_site::{annotation_site, target_admits, AnnotationSite, ElementTarget};
 pub use crate::symbols::{extract_symbols, extract_symbols_from_root};
+// A node's parent in constant time while one file is being checked — a drop-in for `Node::parent()`.
+pub use crate::parents::{parent_of, ParentGuard, ParentTable};
 
 // The AST: the same parse read in Java's vocabulary, bodies included, typed where the resolver
 // can say. Derived on demand and never stored — see `ast`'s module doc for why that is what makes
@@ -33,7 +35,7 @@ pub use crate::ast::{lower as lower_ast, AstNode};
 // "Import class" detection: the simple type name under the caret that needs an import.
 // The grammar itself, for callers that walk a parse rather than ask a question of it —
 // the syntax-tree panel. One pin for the whole workspace (see `grammar.rs`).
-pub use crate::grammar::{language as java_language, parse_java};
+pub use crate::grammar::{language as java_language, parse_cache_stats, parse_java};
 // The `/** … */` above a declaration — for one offset, or for every declaration in a file (which is
 // how a library's documentation is read out of its `-sources.jar`).
 pub use crate::javadoc::{

@@ -43,5 +43,7 @@
   .rb { display: flex; gap: 8px; align-items: center; padding: 12px 12px 8px; }
   /* One height for the three controls of the bar: method, URL, Send. */
   .rb :global(.btn) { height: 32px; }
+  /* The method picker is a field like the URL next to it: same fill, not the bare outline button. */
+  .rb :global(.btn-outline:not(:hover):not([aria-expanded='true'])) { background: var(--bg-input); }
   .rb-url { flex: 1; min-width: 0; }
 </style>

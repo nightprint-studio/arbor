@@ -103,9 +103,12 @@
     <p class="kv-empty">Nothing here yet. Type in the empty row, or <Button variant="link" size="xs" onclick={toggleBulk}>paste as bulk</Button> — one entry per line.</p>
   {/if}
   <div class="kv" role="table">
+    <div class="kv-row kv-cols" class:no-desc={!describe} role="row" aria-hidden="true">
+      <span></span><span>{keyPlaceholder}</span><span>{valuePlaceholder}</span>{#if describe}<span>Description</span>{/if}<span></span>
+    </div>
     {#each shown as row, i (i)}
       {@const last = i === shown.length - 1}
-      <div class="kv-row" class:off={!row.enabled && !last} role="row">
+      <div class="kv-row" class:off={!row.enabled && !last} class:no-desc={!describe} role="row">
         <span class="kv-check">
           {#if !last}<Checkbox checked={row.enabled} ariaLabel="Enabled" onchange={(v) => patch(i, { enabled: v })} />{/if}
         </span>
@@ -141,14 +144,23 @@
 
 <style>
   .kv-empty { margin: 4px 12px 0; font-size: var(--font-size-xs); color: var(--text-muted); }
-  .kv-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px 2px; }
+  .kv-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px 2px; }
   .kv-title { font-size: var(--font-size-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-  .kv { display: flex; flex-direction: column; padding: 4px 8px 12px; }
+  /* The rows sit on a rounded, slightly raised card with room at the sides, like the panels of the Git view. */
+  .kv {
+    display: flex; flex-direction: column; margin: 6px 12px 12px; padding: 4px 8px 6px;
+    background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+  }
   .kv-row {
-    display: grid; align-items: center; gap: 6px; padding: 1px 0;
+    display: grid; align-items: center; gap: 8px; padding: 3px 0;
     grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr) 48px;
     border-bottom: 1px solid var(--border-subtle);
   }
+  .kv-row.no-desc { grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1.4fr) 48px; }
+  .kv-row:last-child { border-bottom: none; }
+  .kv-row:not(.kv-cols):hover { background: color-mix(in srgb, var(--text-primary) 4%, transparent); border-radius: var(--radius-sm); }
+  .kv-cols { padding: 4px 0 6px; font-size: var(--font-size-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+  .kv-cols > span { padding-left: 7px; }
   .kv-row.off .kv-cell { opacity: 0.5; }
   .kv-check { display: grid; place-items: center; }
   .kv-cell { min-width: 0; }

@@ -52,7 +52,7 @@ fn check_extends_record(class: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
 /// Whether the file holding `from` declares a class, interface, enum or record called `name`.
 fn declares_type_named(from: Node, name: &str, bytes: &[u8]) -> bool {
     let mut root = from;
-    while let Some(p) = root.parent() {
+    while let Some(p) = bennu_java::prelude::parent_of(root) {
         root = p;
     }
     let mut stack = vec![root];
@@ -292,7 +292,7 @@ fn squeeze(text: &str) -> String {
 /// `public` 3, `protected` 2, package 1, `private` 0. `None` for a record nested in an interface,
 /// which is implicitly public whatever is written.
 fn access_of(decl: Node, bytes: &[u8]) -> Option<u8> {
-    let in_interface = decl.parent().is_some_and(|p| p.kind() == "interface_body");
+    let in_interface = bennu_java::prelude::parent_of(decl).is_some_and(|p| p.kind() == "interface_body");
     if in_interface && decl.kind() == "record_declaration" {
         return None;
     }

@@ -16,7 +16,8 @@
    *
    * Keyboard comes with the shared Tree: Tab / arrows to a row, Enter or Space pins it.
    */
-  import { Boxes, Package } from 'lucide-svelte';
+  import { Boxes } from 'lucide-svelte';
+  import ModuleKindIcon from './ModuleKindIcon.svelte';
   import Tree, { type RowSnippetCtx } from '$lib/components/shared/ui/Tree.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { moduleFocusStore } from '$lib/stores/bennu/module-focus.svelte';
@@ -46,8 +47,22 @@
   const target = $derived(moduleFocusStore.targetFor(...kinds));
   const groups = $derived(groupByProject(refs));
 
+  /** The project's name for the module at its root, the folder for any other — "root" said nothing
+   *  when a project carries two ecosystems side by side. */
   function moduleLabel(m: ModuleRef): string {
-    return m.dir === '.' ? 'root' : m.dir;
+    return m.dir === '.' ? projectStore.projectNameOf(m.root) : m.dir;
+  }
+
+  const MANIFEST: Record<ModuleKind, string> = {
+    Maven: 'pom.xml',
+    Gradle: 'build.gradle',
+    Cargo: 'Cargo.toml',
+    Node: 'package.json',
+  };
+
+  /** What tells two modules of one folder apart: the ecosystem and the manifest that makes it one. */
+  function moduleDetail(m: ModuleRef): string {
+    return `${m.kind} · ${MANIFEST[m.kind]}`;
   }
 
   const nodes = $derived.by<Node[]>(() => {
@@ -84,9 +99,10 @@
     >
       {#snippet row({ node }: RowSnippetCtx<Node>)}
         <span class="tree-icon">
-          {#if node.module}<Package size={12} />{:else}<Boxes size={12} />{/if}
+          {#if node.module}<ModuleKindIcon kind={node.module.kind} size={13} />{:else}<Boxes size={12} />{/if}
         </span>
         <span class="mt-name">{node.label}</span>
+        {#if node.module}<span class="mt-detail">{moduleDetail(node.module)}</span>{/if}
         {#if node.module && moduleFocusStore.selectedId === node.module.id}
           <span class="mt-pin">pinned</span>
         {/if}
@@ -98,6 +114,10 @@
 <style>
   .mt { padding: 2px 0 6px; border-bottom: 1px solid var(--border-subtle); }
   .mt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mt-detail {
+    flex-shrink: 0; margin-left: 6px;
+    font-size: var(--font-size-3xs); color: var(--text-disabled);
+  }
   .mt-pin {
     margin-left: auto;
     font-size: var(--font-size-3xs);

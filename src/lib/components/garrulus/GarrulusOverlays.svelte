@@ -25,8 +25,10 @@
   import GarrulusCommitModal from './shell/GarrulusCommitModal.svelte';
   import GarrulusRemoteModal from './shell/GarrulusRemoteModal.svelte';
   import NoteDialogs from './notes/NoteDialogs.svelte';
+  import GarrulusFindModal from './search/GarrulusFindModal.svelte';
   import { noteCommands } from './notes/note-commands';
   import { garrulusNotesStore } from '$lib/stores/garrulus/notes.svelte';
+  import { garrulusSearchStore } from '$lib/stores/garrulus/search.svelte';
   import {
     buildGarrulusPalette,
     type GarrulusPaletteActions,
@@ -36,6 +38,19 @@
   import { garrulusSyncStore } from '$lib/stores/garrulus/sync.svelte';
   import { garrulusVaultStore } from '$lib/stores/garrulus/vault.svelte';
   import type { VaultSummary } from '$lib/ipc/garrulus';
+
+  /**
+   * Results belong to the vault they were found in. Closing a vault or switching to another
+   * leaves the old hits addressing notes that are no longer there — the one state where every
+   * row lies — so the search is cleared when the root changes, whether or not the modal is up.
+   */
+  let lastRoot: string | null = garrulusVaultStore.root;
+  $effect(() => {
+    const root = garrulusVaultStore.root;
+    if (root === lastRoot) return;
+    lastRoot = root;
+    garrulusSearchStore.clear();
+  });
 
   /** The palette's query. Session-shaped and window-local, so it lives here. */
   let paletteQuery = $state('');
@@ -84,7 +99,7 @@
     formatNote: noteCommands.format,
 
     // Finding things.
-    search: () => garrulusUiStore.selectSection('search'),
+    search: () => garrulusUiStore.openFind(),
     showConflicts: () => garrulusUiStore.showDock('conflicts'),
 
     // Vault.
@@ -162,6 +177,13 @@
 
 {#if garrulusUiStore.commitMessageOpen}
   <GarrulusCommitModal onClose={() => garrulusUiStore.closeCommitMessage()} />
+{/if}
+
+{#if garrulusUiStore.findOpen}
+  <GarrulusFindModal
+    onClose={() => garrulusUiStore.closeFind()}
+    onOpenNote={(id) => void garrulusNotesStore.openNote(id)}
+  />
 {/if}
 
 {#if garrulusUiStore.paletteOpen}

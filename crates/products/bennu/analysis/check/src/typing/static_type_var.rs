@@ -78,7 +78,7 @@ fn visit(node: Node, params: &[String], owner: &str, bytes: &[u8], out: &mut Vec
         return;
     }
     if node.kind() == "type_identifier"
-        && !node.parent().is_some_and(|p| matches!(p.kind(), "scoped_type_identifier" | "type_parameter"))
+        && !bennu_java::prelude::parent_of(node).is_some_and(|p| matches!(p.kind(), "scoped_type_identifier" | "type_parameter"))
     {
         if let Ok(name) = node.utf8_text(bytes) {
             if live.iter().any(|p| p == name) {

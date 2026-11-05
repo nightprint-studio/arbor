@@ -139,6 +139,7 @@ export interface BennuSettingsSnapshot {
   // Folding
   foldingEnabled: boolean;
   foldBlockComments: boolean;
+  foldImports: boolean;
   // Java Style (drives the Generate flow's output formatting)
   /** Java formatter: most consecutive blank lines kept between members. */
   javaBlankLines: number;
@@ -218,6 +219,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   autoImport: true,
   foldingEnabled: true,
   foldBlockComments: false,
+  foldImports: true,
   javaBlankLines: 1,
   javaIndentCaseBody: true,
   finalParams: false,
@@ -279,6 +281,7 @@ function createSettingsStore() {
   // Folding
   let foldingEnabled = $state(DEFAULTS.foldingEnabled);
   let foldBlockComments = $state(DEFAULTS.foldBlockComments);
+  let foldImports = $state(DEFAULTS.foldImports);
   // Java Style
   let javaBlankLines = $state(DEFAULTS.javaBlankLines);
   let javaIndentCaseBody = $state(DEFAULTS.javaIndentCaseBody);
@@ -337,7 +340,7 @@ function createSettingsStore() {
       collapseLibraryFrames, searchDependencies,
       localHistory, localHistoryDays, localHistoryMaxMb, localHistoryMaxFileMb,
       autoPopup, popupDelayMs, caseSensitive, importCensus, autoImport,
-      foldingEnabled, foldBlockComments,
+      foldingEnabled, foldBlockComments, foldImports,
       javaBlankLines, javaIndentCaseBody,
       finalParams, useLombokVal, entityLombok, entityFluent, useLocalVar, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
       rustVisibility, rustDerives, rustDocComments, rustErrorStyle, rustSelfInImpl,
@@ -377,6 +380,7 @@ function createSettingsStore() {
         caret_color: caretColor,
         folding_enabled: foldingEnabled,
         fold_block_comments: foldBlockComments,
+        fold_imports: foldImports,
         completion_auto_popup: autoPopup,
         completion_delay_ms: popupDelayMs,
         completion_case_sensitive: caseSensitive,
@@ -546,6 +550,8 @@ function createSettingsStore() {
     setFoldingEnabled(v: boolean) { foldingEnabled = v; void persistConfigBacked(); },
     get foldBlockComments() { return foldBlockComments; },
     setFoldBlockComments(v: boolean) { foldBlockComments = v; void persistConfigBacked(); },
+    get foldImports() { return foldImports; },
+    setFoldImports(v: boolean) { foldImports = v; void persistConfigBacked(); },
 
     // ── Java Style (Generate output formatting) ────────────────────────────
     get javaBlankLines() { return javaBlankLines; },
@@ -693,6 +699,7 @@ function createSettingsStore() {
         caretColor = cfg.caret_color || DEFAULTS.caretColor;
         foldingEnabled = cfg.folding_enabled ?? DEFAULTS.foldingEnabled;
         foldBlockComments = cfg.fold_block_comments ?? DEFAULTS.foldBlockComments;
+        foldImports = cfg.fold_imports ?? DEFAULTS.foldImports;
         autoPopup = cfg.completion_auto_popup ?? DEFAULTS.autoPopup;
         popupDelayMs = cfg.completion_delay_ms ?? DEFAULTS.popupDelayMs;
         caseSensitive = cfg.completion_case_sensitive ?? DEFAULTS.caseSensitive;
@@ -805,6 +812,7 @@ function createSettingsStore() {
       autoImport = DEFAULTS.autoImport;
       foldingEnabled = DEFAULTS.foldingEnabled;
       foldBlockComments = DEFAULTS.foldBlockComments;
+      foldImports = DEFAULTS.foldImports;
       javaBlankLines = DEFAULTS.javaBlankLines;
       javaIndentCaseBody = DEFAULTS.javaIndentCaseBody;
       finalParams = DEFAULTS.finalParams;

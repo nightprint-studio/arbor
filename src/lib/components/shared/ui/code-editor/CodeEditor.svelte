@@ -33,7 +33,7 @@
     type ViewUpdate,
   } from '@codemirror/view';
   import { RangeSet, type ChangeSet, type Text } from '@codemirror/state';
-  import { indentUnit as cmIndentUnit } from '@codemirror/language';
+  import { indentUnit as cmIndentUnit, foldEffect, foldedRanges, unfoldEffect } from '@codemirror/language';
   import { setDiagnostics as cmSetDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
   import { tooltip } from '$lib/actions/tooltip';
   import { openSearchPanel, searchPanelOpen } from '@codemirror/search';
@@ -91,6 +91,7 @@
     showWhitespace = false,
     folding = true,
     foldBlockComments = false,
+    foldImports = false,
     completion,
     caret,
     keyBindings,
@@ -214,6 +215,9 @@
     /** Collapse the block comments of a file when it opens (needs `folding`). An opening state,
      *  not a rule: nothing re-folds what you unfold. */
     foldBlockComments?: boolean;
+    /** Collapse the import block when the file opens — an opening state like {@link foldBlockComments}, and like
+     *  it dropped for a tab whose folds the host already holds (`initialState.folds`). */
+    foldImports?: boolean;
     /** How the completion popup behaves — auto-popup, its delay, case sensitivity. Ignored by an
      *  editor whose language brings no completion source. Applied live. */
     completion?: CompletionPreferences;
@@ -387,7 +391,7 @@
   /** The user-facing preferences as one object — read in both places that need them (the mount
    *  and the live reconfigure) so the two can never drift. */
   function currentPreferences(): CodeEditorPreferences {
-    return { lineNumbers, problemMarkers, stableGutter, highlightActiveLine, showWhitespace, wrap, folding, foldBlockComments, completion, caret };
+    return { lineNumbers, problemMarkers, stableGutter, highlightActiveLine, showWhitespace, wrap, folding, foldBlockComments, foldImports, skipFoldDefaults, completion, caret };
   }
 
   let lastEmitted: string | null = null;
@@ -422,6 +426,21 @@
    * history is a growing structure and this runs on every cursor move, so paying to serialise it
    * there would be paying thousands of times for something read once.
    */
+  /** The host handed this mount folds to restore, so the opening folds do not run. Set before the extensions are built. */
+  let skipFoldDefaults = false;
+  /** A fold or an unfold has happened in this document, by the user or by an opening fold. Until then the folds
+   *  are not worth recording: a tab left before its tree arrived would otherwise say "nothing is folded" and
+   *  keep the imports expanded for good. */
+  let foldsTouched = false;
+
+  /** The folded regions of the live document. */
+  function foldedNow(): { from: number; to: number }[] {
+    if (!view) return [];
+    const out: { from: number; to: number }[] = [];
+    foldedRanges(view.state).between(0, view.state.doc.length, (from, to) => { out.push({ from, to }); });
+    return out;
+  }
+
   function emitViewState(withHistory = false) {
     if (!view || !onViewState) return;
     // A view torn down before its text arrived describes an empty document: its caret and scroll are the top
@@ -437,6 +456,8 @@
           ? (view.state.toJSON({ history: historyField }) as { history?: unknown }).history
           : undefined,
         historyHash: withHistory ? docHash(view.state.doc.toString()) : undefined,
+        folds: foldsTouched ? foldedNow() : undefined,
+        foldsLength: foldsTouched ? view.state.doc.length : undefined,
       },
       heldKey,
     );
@@ -810,6 +831,14 @@
   }
 
   function mount(target: HTMLDivElement) {
+    // The folds this tab was left with, when the host remembered them for the same text. Decided before the
+    // extensions are built because it switches the opening folds off (they would re-fold what was unfolded).
+    const savedFolds =
+      initialState?.folds !== undefined && initialState.foldsLength === value.replace(/\r\n?/g, '\n').length
+        ? initialState.folds
+        : null;
+    skipFoldDefaults = savedFolds !== null;
+    foldsTouched = savedFolds !== null;
     const { extensions, preferences } = createCodeEditorExtensions(language, {
       readOnly, onGoto, onFindInFiles, onLensPress, rulerColumn, emmet, indentGuides, stickyScroll,
       scrollbarOverview, keyBindings, ...currentPreferences(),
@@ -818,6 +847,9 @@
     appliedPrefs = JSON.stringify(currentPreferences());
 
     const updateListener = EditorView.updateListener.of((u) => {
+      if (!foldsTouched && u.transactions.some((tr) => tr.effects.some((e) => e.is(foldEffect) || e.is(unfoldEffect)))) {
+        foldsTouched = true;
+      }
       if (u.docChanged && !suppressEmit) {
         const text = u.state.doc.toString();
         lastEmitted = text;
@@ -896,6 +928,12 @@
     // The document this view holds, fixed for its lifetime. Read once here so the teardown
     // snapshot cannot be filed under whatever the host switched to.
     heldKey = stateKey;
+    if (savedFolds && savedFolds.length) {
+      const len = view.state.doc.length;
+      try {
+        view.dispatch({ effects: savedFolds.filter((r) => r.to <= len && r.from < r.to).map((r) => foldEffect.of(r)) });
+      } catch { /* a stale range is not worth a broken tab */ }
+    }
     pushDiagnostics();
     pushMarks();
     pushLineHighlights();

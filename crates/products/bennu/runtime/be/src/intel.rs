@@ -596,6 +596,12 @@ fn bennu_did_change(_ctx: &BennuState, args: DidChangeArgs) -> Result<bool, Stri
     if let Some(handled) = crate::lsp_route::did_change(&args.file, args.text.as_deref()) {
         return Ok(handled);
     }
-    IndexService::global().patch_file(&args.file, args.text.as_deref());
+    // Ticketed on arrival and applied under the file's turn: this handler runs on its own thread per
+    // request, so without it a slow patch could finish after the NEXT edit's and put the older text
+    // back into the index. An overtaken request is dropped — the newer one carries the full buffer.
+    let ticket = crate::edit_order::EditOrder::global().begin(&args.file);
+    ticket.run_if_current(|| {
+        IndexService::global().patch_file(&args.file, args.text.as_deref());
+    });
     Ok(true)
 }

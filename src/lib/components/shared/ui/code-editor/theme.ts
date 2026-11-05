@@ -122,13 +122,23 @@ export const codeEditorTheme = EditorView.theme(
     '.cm-foldGutter .cm-gutterElement:hover': { color: 'var(--text-primary)' },
     // Chevron markers (markerDOM in folding.ts). Muted, brighten on hover; the
     // collapsed marker is a touch stronger so a folded block reads at a glance.
-    '.cm-foldMarker': { fontSize: 'var(--font-size-2xs)', lineHeight: '1', color: 'var(--text-disabled)' },
+    '.cm-foldMarker': { display: 'inline-block', fontSize: 'var(--font-size-2xs)', lineHeight: '1', color: 'var(--text-disabled)' },
+    // A fold or an unfold makes the gutter draw a new marker, so the turn is an animation on creation. The
+    // durations are the app's animation setting; with animations off they are 0 and nothing moves.
+    '.cm-foldMarker-open': { animation: 'cm-fold-chevron-open var(--anim-dur-fast, 0ms) ease-out' },
+    '@keyframes cm-fold-chevron-open': { from: { transform: 'rotate(-90deg)' }, to: { transform: 'none' } },
+    '@keyframes cm-fold-chevron-closed': { from: { transform: 'rotate(90deg)' }, to: { transform: 'none' } },
+    // The lines an unfold uncovers (`fold-animation.ts`) and the placeholder a fold leaves behind.
+    '.cm-fold-reveal': { animation: 'cm-fold-reveal var(--anim-dur-base, 0ms) ease-out' },
+    '@keyframes cm-fold-reveal': { from: { opacity: '0', transform: 'translateY(-4px)' }, to: { opacity: '1', transform: 'none' } },
+    '@keyframes cm-fold-pop': { from: { opacity: '0', transform: 'scale(0.85)' }, to: { opacity: '1', transform: 'none' } },
     '.cm-foldGutter .cm-gutterElement:hover .cm-foldMarker': { color: 'var(--text-primary)' },
-    '.cm-foldMarker-closed': { color: 'var(--text-muted)' },
+    '.cm-foldMarker-closed': { color: 'var(--text-muted)', animation: 'cm-fold-chevron-closed var(--anim-dur-fast, 0ms) ease-out' },
     '.cm-foldPlaceholder': {
       backgroundColor: 'var(--bg-hover)', color: 'var(--text-muted)',
       border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
       margin: '0 2px', padding: '0 4px', cursor: 'pointer',
+      animation: 'cm-fold-pop var(--anim-dur-fast, 0ms) ease-out',
     },
     '.cm-foldPlaceholder:hover': { color: 'var(--text-primary)', borderColor: 'var(--border-focus, var(--accent))' },
     // Current line: a touch warmer than plain hover and tinted with the accent so the

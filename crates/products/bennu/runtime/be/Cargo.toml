@@ -162,6 +162,10 @@ bennu-test = { path = "../../frameworks/test" }
 # own — this crate's `debug` module is what makes it a debugger, by deciding what a session is
 # and turning the VM's locations back into this project's files.
 bennu-jdwp = { path = "../../protocols/jdwp" }
+# The expression language both debuggers share for watches and conditions (parser + evaluator,
+# generic over a target). This crate supplies the two targets: JDWP in `debug_jdwp_target`, DAP in
+# `debug_dap_target`.
+bennu-debug-expr = { path = "../debug-expr" }
 # The DAP client — the debugger's transport for a native binary, as `bennu-jdwp` is for a JVM.
 bennu-dap = { path = "../../protocols/dap" }
 # What the project depends on, read out of its poms and matched against the classpath the

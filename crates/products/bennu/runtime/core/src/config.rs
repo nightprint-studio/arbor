@@ -74,6 +74,9 @@ pub struct BennuConfig {
     /// Collapse a file's block comments when it opens. `false` by default. Needs `folding_enabled`;
     /// an opening state rather than a rule, so nothing re-folds what the reader unfolds.
     pub fold_block_comments: bool,
+    /// Collapse a file's import block when it opens (`import …`). `true` by default. Needs `folding_enabled`; an
+    /// opening state, and a tab keeps whatever was done to the fold until it is closed.
+    pub fold_imports: bool,
     /// Open the completion popup on its own while an identifier is being typed. `true` by default;
     /// off leaves completion to the explicit chord (`Ctrl+Space`, `Cmd+Shift+Space` on a Mac).
     pub completion_auto_popup: bool,
@@ -968,6 +971,7 @@ impl Default for BennuConfig {
             folding_enabled: true,
             assistant: AssistantConfig::default(),
             fold_block_comments: false,
+            fold_imports: true,
             completion_auto_popup: true,
             completion_delay_ms: 150,
             completion_case_sensitive: false,

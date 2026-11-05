@@ -121,6 +121,17 @@ pub struct HierarchyCtx<'a> {
     pub files: &'a [PlanFile],
     pub resolver: &'a dyn TypeResolver,
     pub subtypes: &'a SubtypeMap,
+    /// `files`' path → position, so finding a node's source is a probe rather than a scan of the
+    /// project per node (a hierarchy holds hundreds of nodes).
+    pub slots: &'a HashMap<String, usize>,
+}
+
+impl<'a> HierarchyCtx<'a> {
+    /// The project source of `file`.
+    fn source_of(&self, file: &str) -> Option<&'a str> {
+        let slot = *self.slots.get(file)?;
+        self.files.get(slot).map(|f| f.source.as_str())
+    }
 }
 
 /// The root of the tree for the declaration at the caret, or nothing when the caret is not on one
@@ -464,7 +475,7 @@ fn method_item(
     let file = ctx.index.file_declaring(owner)?.to_string();
     let symbols = ctx.index.symbols(&file)?;
     let decl_type = type_decl_for(symbols, owner)?;
-    let source = source_of(ctx.files, &file)?;
+    let source = ctx.source_of(&file)?;
     // The first overload that is actually written: the key collapses them, so one of them is where
     // the row points, and the label says which arity it took.
     let method = decl_type
@@ -517,7 +528,7 @@ fn type_item(ctx: &HierarchyCtx, binary: &str) -> Option<HierarchyItem> {
         .and_then(|file| {
             let symbols = ctx.index.symbols(&file)?;
             let decl = type_decl_for(symbols, binary)?;
-            let source = source_of(ctx.files, &file)?;
+            let source = ctx.source_of(&file)?;
             Some((file, decl, source))
         });
 
@@ -602,11 +613,6 @@ fn type_decl_for<'a>(symbols: &'a FileSymbols, binary: &str) -> Option<&'a TypeD
     }
     let alt = dotted.replace('$', ".");
     symbols.types.iter().find(|t| t.fqn == alt)
-}
-
-/// The project source of `file`.
-fn source_of<'a>(files: &'a [PlanFile], file: &str) -> Option<&'a str> {
-    files.iter().find(|f| f.path == file).map(|f| f.source.as_str())
 }
 
 /// The span of the identifier `name` as written in the header of the declaration at `decl`.

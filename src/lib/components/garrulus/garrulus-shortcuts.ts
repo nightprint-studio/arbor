@@ -49,9 +49,9 @@ export const GARRULUS_SHORTCUTS: GarrulusShortcutGroup[] = [
       // the Shift. Everything on screen belongs to one vault, so choosing which
       // is a rarer and larger act than choosing a note.
       { keys: ['Ctrl', 'Shift', 'O'], description: 'Vaults — open, switch or create the folder of notes this window shows' },
-      { keys: ['Ctrl', 'Shift', 'F'], description: 'Search the vault — full text plus type: and field: filters' },
+      { keys: ['Ctrl', 'Shift', 'F'], description: 'Search the vault — full text plus type: and field: filters; Enter runs it, then opens the highlighted note' },
       { keys: ['Ctrl', '1'], description: 'Notes — the vault tree, pinned notes and recents' },
-      { keys: ['Ctrl', '2'], description: 'Search' },
+      { keys: ['Ctrl', '2'], description: 'Search — opens the search window' },
       { keys: ['Ctrl', '3'], description: 'Tags and frontmatter fields' },
       { keys: ['Ctrl', '4'], description: 'Note types' },
       { keys: ['Ctrl', 'B'], description: 'Toggle the sidebar' },
