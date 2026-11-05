@@ -18,12 +18,13 @@
   import type { Component, Snippet } from 'svelte';
   import {
     Bold, Braces, Code, Highlighter, Italic, Link, List, ListChecks, ListOrdered, Quote,
-    Strikethrough, Table2,
+    Strikethrough,
   } from 'lucide-svelte';
   import IconButton from './IconButton.svelte';
   import Select from './Select.svelte';
+  import TableSizePicker from './TableSizePicker.svelte';
   import {
-    markdownAction, setHeading, NO_FORMAT, type EditorCommand, type FormatState,
+    markdownAction, setHeading, insertTableOfSize, NO_FORMAT, type EditorCommand, type FormatState,
   } from '$lib/utils/markdown-format';
 
   interface Props {
@@ -32,7 +33,7 @@
     state?: FormatState;
     /** Greys the strip — a note shown in reading mode has no caret to format. */
     disabled?: boolean;
-    /** Action ids to leave out (`['table']` where the host has its own table picker). */
+    /** Action ids to leave out. */
     hide?: string[];
     /** Host buttons appended after the built-in groups (a vault's "link to a note"). */
     extra?: Snippet;
@@ -44,7 +45,7 @@
   const ICONS: Record<string, Component<any>> = {
     bold: Bold, italic: Italic, strike: Strikethrough, highlight: Highlighter, code: Code,
     quote: Quote, bullet: List, numbered: ListOrdered, task: ListChecks,
-    link: Link, codeblock: Braces, table: Table2,
+    link: Link, codeblock: Braces,
   };
 
   /** Button groups, by action id; the heading picker sits between the first and second. */
@@ -53,6 +54,18 @@
     ['quote', 'bullet', 'numbered', 'task'],
     ['link', 'codeblock', 'table'],
   ];
+
+  /** The hue each button wears, so the strip reads by colour before it reads by shape: emphasis
+   *  blue, the highlighter yellow, lists green, structure (quote, block, table) in the code
+   *  palette. A row of identical grey outlines made the reader hover each one to find it. */
+  const TINTS: Record<string, string> = {
+    bold: 'var(--info)', italic: 'var(--info)', strike: 'var(--info)',
+    highlight: 'var(--warning)', code: 'var(--syntax-string, #6a8759)',
+    quote: 'var(--syntax-type, #4ec9b0)',
+    bullet: 'var(--success)', numbered: 'var(--success)', task: 'var(--success)',
+    link: 'var(--accent)', codeblock: 'var(--syntax-keyword, #cc7832)',
+    table: 'var(--syntax-function, #ffc66d)',
+  };
 
   const groups = $derived(GROUPS.map((g) => g.filter((id) => !hide.includes(id))).filter((g) => g.length));
 
@@ -81,20 +94,33 @@
     {#each group as id (id)}
       {@const action = markdownAction(id)}
       {@const Icon = ICONS[id]}
-      <!-- mousedown is held back so the click does not pull focus (and the selection) out of
-           the editor before the command reads it. -->
-      <span class="mdt-slot" role="presentation" onmousedown={(e) => e.preventDefault()}>
-        <IconButton
-          tooltip={action.label}
+      {#if id === 'table'}
+        <!-- A size, not a default: the grid you point a width and a height out of. -->
+        <TableSizePicker
+          tooltip="Table"
           shortcut={action.shortcut}
           size={22}
+          color={TINTS.table}
           disabled={!canApply}
-          active={action.active?.(state) ?? false}
-          onclick={() => onCommand(action.command)}
-        >
-          <Icon size={13} />
-        </IconButton>
-      </span>
+          onPick={(rows, cols) => onCommand(insertTableOfSize(cols, rows))}
+        />
+      {:else}
+        <!-- mousedown is held back so the click does not pull focus (and the selection) out of
+             the editor before the command reads it. -->
+        <span class="mdt-slot" role="presentation" onmousedown={(e) => e.preventDefault()}>
+          <IconButton
+            swell
+            tooltip={action.label}
+            shortcut={action.shortcut}
+            size={22}
+            disabled={!canApply}
+            active={action.active?.(state) ?? false}
+            onclick={() => onCommand(action.command)}
+          >
+            <span class="mdt-ico" style:color={TINTS[id]}><Icon size={13} /></span>
+          </IconButton>
+        </span>
+      {/if}
     {/each}
   {/each}
   {#if extra}
@@ -111,6 +137,7 @@
     min-width: 0;
   }
   .mdt-slot { display: inline-flex; }
+  .mdt-ico { display: inline-flex; align-items: center; justify-content: center; }
   .mdt-heading { display: inline-flex; flex: none; margin-right: 2px; }
   .mdt-sep {
     width: 1px;

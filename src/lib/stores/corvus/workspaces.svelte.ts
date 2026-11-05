@@ -49,6 +49,10 @@ export interface WorkspaceTabBridge {
   currentTabMeta?: () => TabMeta[];
   /** Apply persisted metadata to a tab that was just opened from a snapshot. */
   applyTabMeta?: (repoId: string, meta: { nameOverride?: string | null; isLinkedWorktree?: boolean }) => void;
+  /** Put the open tabs in the order of `ids` (ids not listed keep their place at the end). Called after
+   *  each tab of a restored workspace opens, so a tab that finished early still lands where the
+   *  snapshot had it. */
+  orderTabs?: (ids: string[]) => void;
   /** Fire just before we swap out the tab set — gives the consumer a
    *  chance to flush in-flight work (cache saves, draft commits, …). */
   beforeSwap?: () => Promise<void>;
@@ -166,6 +170,12 @@ function createWorkspacesStore() {
    * Switch the active workspace: persist the current snapshot, close every
    * current tab that isn't in the new workspace, open new members, restore
    * cross-workspace markers, and activate the previously-focused tab.
+   *
+   * The round trips that do not depend on each other run together — saving the old snapshot,
+   * reading the new one and announcing the switch (which waits on every plugin's
+   * `on_workspace_switched`) — and the announcement is NOT waited for before the tabs change:
+   * the switch is finished when the user can see and use the new workspace, not when every
+   * plugin has heard about it.
    */
   async function setActive(newId: string): Promise<void> {
     if (newId === activeId) return;
@@ -181,11 +191,12 @@ function createWorkspacesStore() {
       // 1) Flush any pending consumer work (cache, stats, …).
       await bridge.beforeSwap?.();
 
-      // 2) Save current workspace's snapshot.
+      // 2) Save the current workspace's snapshot, read the next one, announce the switch.
+      let saved: Promise<unknown> = Promise.resolve();
       if (activeId) {
         const crossList: CrossWsTabRef[] = [...crossWsMap.entries()]
           .map(([repo_id, source_ws_id]) => ({ repo_id, source_ws_id }));
-        await saveWorkspaceSnapshot(
+        saved = saveWorkspaceSnapshot(
           activeId,
           bridge.currentOpenTabIds(),
           bridge.currentActiveTabId(),
@@ -193,17 +204,24 @@ function createWorkspacesStore() {
           bridge.currentTabMeta?.() ?? [],
         );
       }
+      const announced = ipcSetActive(newId);
+      const snap = await loadWorkspaceSnapshot(newId);
+      await saved;
 
-
-      // 3) Announce the switch to the backend (fires hook, emits event).
-      await ipcSetActive(newId);
-
-      // 4) Apply the new workspace's snapshot.
-      await applyActiveWorkspace(newId);
-    } finally {
+      // 3) Apply the new workspace's snapshot. The announcement is settled in the background; if the
+      //    backend refused the switch, the state is re-read from it rather than left half-applied.
+      const settle = announced.catch(() => { void load(); });
+      await applyActiveWorkspace(newId, { snapshot: snap, settle });
+    } catch (err) {
       switching = false;
+      throw err;
     }
   }
+
+  /** Bumped by every apply; a pass that finds it moved on has been overtaken by a newer switch. */
+  let applyGeneration = 0;
+  /** How many tabs of a restored workspace are opened at once, behind the one on screen. */
+  const BACKGROUND_OPENS = 3;
 
   /**
    * Load the snapshot for `wsId` and reconcile open tabs against it.
@@ -212,98 +230,140 @@ function createWorkspacesStore() {
    * Flow:
    *   1. Clear activeTabId up-front so subscribers (CommitGraph etc.) don't
    *      trigger loads for tabs during the close phase.
-   *   2. Close every current tab (workspaces are exclusive — cross-WS tabs
-   *      are snapshot-only and will be re-opened below if the new snapshot
-   *      still lists them).
-   *   3. Open every tab from the new snapshot, in order.
-   *   4. Activate the last-active tab from the snapshot, if still present.
+   *   2. Drop every tab the new workspace does not want — from the UI at once, the backend is told
+   *      alongside (workspaces are exclusive — cross-WS tabs are snapshot-only and will be
+   *      re-opened below if the new snapshot still lists them).
+   *   3. Open the tab that was active FIRST and activate it, so the graph starts loading while
+   *      the rest are still being brought up.
+   *   4. Open the remaining tabs behind it, a few at a time, each placed at its snapshot position.
+   *
+   * `switching` stays on until every tab is open: a snapshot saved from a half-restored tab set
+   * would overwrite the workspace's real one.
    */
-  async function applyActiveWorkspace(wsId: string): Promise<void> {
+  async function applyActiveWorkspace(
+    wsId: string,
+    opts: { snapshot?: Awaited<ReturnType<typeof loadWorkspaceSnapshot>>; settle?: Promise<unknown> } = {},
+  ): Promise<void> {
     if (!bridge) return;
-    const snap = await loadWorkspaceSnapshot(wsId);
-    activeId = wsId;
+    const gen = ++applyGeneration;
+    switching = true;
+    const pendingWork: Promise<unknown>[] = opts.settle ? [opts.settle] : [];
+    // Switching ends when the whole pass has — and only if no newer switch has taken over.
+    const finish = async () => {
+      await Promise.allSettled(pendingWork);
+      if (gen !== applyGeneration) return;
+      switching = false;
+      void persistSnapshotNow();
+    };
 
-    // Rebuild cross-WS map from the snapshot.
-    crossWsMap = new Map(snap.cross_ws_tabs.map(c => [c.repo_id, c.source_ws_id]));
+    try {
+      const snap = opts.snapshot ?? await loadWorkspaceSnapshot(wsId);
+      if (gen !== applyGeneration) return;
+      activeId = wsId;
 
-    // Desired tab set for the new workspace.  Members-without-snapshot are
-    // NOT auto-opened — opening 30 tabs on switch would be rude; the
-    // snapshot represents the last-known tabbed state.
-    const wantedIds = new Set<string>(snap.open_tab_ids);
+      // Rebuild cross-WS map from the snapshot.
+      crossWsMap = new Map(snap.cross_ws_tabs.map(c => [c.repo_id, c.source_ws_id]));
 
-    // 1. Deactivate first — empties the graph/sidebar subscribers so the
-    //    cascading closes below don't briefly re-activate tabs that are
-    //    about to be torn down.
-    bridge.clearActiveTab();
+      // Desired tab set for the new workspace.  Members-without-snapshot are
+      // NOT auto-opened — opening 30 tabs on switch would be rude; the
+      // snapshot represents the last-known tabbed state.
+      const order = snap.open_tab_ids;
+      const wanted = new Set<string>(order);
 
-    // 2. Close every tab not wanted by the new workspace.
-    const currentIds = bridge.currentOpenTabIds();
-    for (const openId of currentIds) {
-      if (!wantedIds.has(openId)) {
-        try { await bridge.closeTab(openId); } catch { /* ignore */ }
+      // 1. Deactivate first — empties the graph/sidebar subscribers so the
+      //    cascading closes below don't briefly re-activate tabs that are
+      //    about to be torn down.
+      bridge.clearActiveTab();
+
+      // 2. Close every tab not wanted by the new workspace. The bridge removes the tab from the UI
+      //    synchronously and only then talks to the backend, so they all disappear at once and the
+      //    backend work (which waits on `on_repo_close` hooks) overlaps everything below.
+      for (const openId of bridge.currentOpenTabIds()) {
+        if (!wanted.has(openId)) pendingWork.push(bridge.closeTab(openId).catch(() => { /* ignore */ }));
       }
-    }
 
-    // 3. Open missing tabs (in snapshot order, to preserve layout).
-    const metaByRepo = new Map<string, TabMeta>(
-      (snap.tab_meta ?? []).map(m => [m.repo_id, m]),
-    );
-    const nowOpen = new Set(bridge.currentOpenTabIds());
-    // Count the repos we'll actually try to open so the boot splash can
-    // show a determinate progress bar while we walk the snapshot.
-    const toOpen = snap.open_tab_ids.filter(
-      id => !nowOpen.has(id) && registryById.has(id),
-    );
-    const reportInit = tabsStore.isInitializing && toOpen.length > 0;
-    if (reportInit) {
-      tabsStore.setInitProgress({
-        current: 0,
-        total:   toOpen.length,
-        message: toOpen.length === 1
-          ? 'Opening 1 repository…'
-          : `Opening ${toOpen.length} repositories…`,
-      });
-    }
-    let opened = 0;
-    for (const repoId of snap.open_tab_ids) {
-      if (nowOpen.has(repoId)) continue;
-      const entry = registryById.get(repoId);
-      if (!entry) continue; // registry mismatch — skip
+      // 3. What has to be opened, and which of it the user will look at.
+      const metaByRepo = new Map<string, TabMeta>(
+        (snap.tab_meta ?? []).map(m => [m.repo_id, m]),
+      );
+      const nowOpen = new Set(bridge.currentOpenTabIds());
+      const toOpen = order.filter(id => !nowOpen.has(id) && registryById.has(id));
+      // Count the repos we'll actually try to open so the boot splash can
+      // show a determinate progress bar while we walk the snapshot.
+      const reportInit = tabsStore.isInitializing && toOpen.length > 0;
       if (reportInit) {
-        const display = entry.display_name
-          || entry.path.replace(/\\/g, '/').split('/').filter(Boolean).pop()
-          || 'repository';
         tabsStore.setInitProgress({
-          current: opened,
+          current: 0,
           total:   toOpen.length,
-          message: `Opening ${display}…`,
+          message: toOpen.length === 1
+            ? 'Opening 1 repository…'
+            : `Opening ${toOpen.length} repositories…`,
         });
       }
-      try {
-        await bridge.openRepo(entry.path, repoId);
-        const meta = metaByRepo.get(repoId);
-        if (meta) {
-          bridge.applyTabMeta?.(repoId, {
-            nameOverride:     meta.name_override,
-            isLinkedWorktree: meta.is_linked_worktree,
+      let opened = 0;
+      const openOne = async (repoId: string) => {
+        const entry = registryById.get(repoId);
+        if (!entry) return; // registry mismatch — skip
+        if (reportInit) {
+          const display = entry.display_name
+            || entry.path.replace(/\\/g, '/').split('/').filter(Boolean).pop()
+            || 'repository';
+          tabsStore.setInitProgress({
+            current: opened,
+            total:   toOpen.length,
+            message: `Opening ${display}…`,
           });
         }
-      } catch { /* repo may have been deleted from disk; skip */ }
-      opened += 1;
-      if (reportInit && opened === toOpen.length) {
-        tabsStore.setInitProgress({
-          current: opened,
-          total:   toOpen.length,
-          message: 'Finalising workspace…',
-        });
-      }
-    }
+        try {
+          await bridge?.openRepo(entry.path, repoId);
+          const meta = metaByRepo.get(repoId);
+          if (meta) {
+            bridge?.applyTabMeta?.(repoId, {
+              nameOverride:     meta.name_override,
+              isLinkedWorktree: meta.is_linked_worktree,
+            });
+          }
+          // Tabs arrive in the order they finish, not the order they sit in: put this one where
+          // the snapshot had it.
+          bridge?.orderTabs?.(order);
+        } catch { /* repo may have been deleted from disk; skip */ }
+        opened += 1;
+        if (reportInit && opened === toOpen.length) {
+          tabsStore.setInitProgress({
+            current: opened,
+            total:   toOpen.length,
+            message: 'Finalising workspace…',
+          });
+        }
+      };
 
-    // 4. Activate the previously-active tab if it's in the new set.
-    if (snap.active_tab_id && bridge.currentOpenTabIds().includes(snap.active_tab_id)) {
-      // Wait a tick so Svelte has flushed the newly-added tabs before we
-      // trigger the graph load for the target tab.
-      queueMicrotask(() => { bridge?.setActiveTab(snap.active_tab_id!); });
+      // The tab that was active, opened first and activated the moment it exists: the graph and the
+      // sidebar start loading now instead of after every other repository has been opened.
+      const target = snap.active_tab_id && order.includes(snap.active_tab_id) ? snap.active_tab_id : null;
+      if (target && toOpen.includes(target)) await openOne(target);
+      if (gen !== applyGeneration) return;
+      if (target && bridge.currentOpenTabIds().includes(target)) bridge.setActiveTab(target);
+
+      // 4. The rest, a few at a time, behind it. Opening is not an index mutation, so it may overlap;
+      //    each worker stops as soon as a newer switch has taken over.
+      const rest = toOpen.filter(id => id !== target);
+      const openRest = async () => {
+        const queue = [...rest];
+        const worker = async () => {
+          for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+            if (gen !== applyGeneration) return;
+            await openOne(id);
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(BACKGROUND_OPENS, queue.length) }, worker));
+      };
+
+      // At startup the boot splash is still up and counts on the tabs being all there; on a switch
+      // the user is already looking at the target, so the rest fills in behind it.
+      if (tabsStore.isInitializing) await openRest();
+      else pendingWork.push(openRest());
+    } finally {
+      void finish();
     }
   }
 

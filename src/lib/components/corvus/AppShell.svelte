@@ -17,6 +17,8 @@
   import PluginPanelSurface from '../plugins/PluginPanelSurface.svelte';
   import PluginViewPanel from '../plugins/PluginViewPanel.svelte';
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
+  import EdgePeekTriggers from '$lib/components/shared/ui/EdgePeekTriggers.svelte';
+  import { createEdgePeek } from '$lib/utils/edge-peek.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
   import Sidebar from './sidebar/Sidebar.svelte';
   import CommitGraph from './graph/CommitGraph.svelte';
@@ -775,12 +777,16 @@
           }
         },
         closeTab: async (tabId) => {
-          try { await import('$lib/ipc/corvus/graph').then(m => m.closeRepo(tabId)); } catch { /* ignore */ }
           // Silent removal — workspace swap clears activeTabId separately
           // so we don't want a cascade that reactivates adjacent tabs
           // mid-loop (that fired "Repository not open" errors).
+          // Taken out of the UI BEFORE the backend is told: `close_repo` waits on every plugin's
+          // `on_repo_close`, and a tab that lingers until the last of them returns is what made
+          // closing a whole workspace's tabs one after another a visible pause.
           tabsStore.removeTabSilent(tabId);
+          try { await import('$lib/ipc/corvus/graph').then(m => m.closeRepo(tabId)); } catch { /* ignore */ }
         },
+        orderTabs: (ids) => { tabsStore.orderTabs(ids); },
         setActiveTab:   (tabId) => { tabsStore.setActive(tabId); },
         clearActiveTab: ()       => { tabsStore.clearActive(); },
         currentOpenTabIds:  () => tabsStore.tabs.map(t => t.id),
@@ -1913,48 +1919,11 @@
   }
 
   // ── Activity bar "peek" (for appearance.activity_bar_position = hidden) ──
-  // Each edge has its own independent peek flag and global mousemove watcher:
-  // hovering the LEFT edge reveals whichever bar currently sits on the left
+  // Hovering the LEFT edge reveals whichever bar currently sits on the left
   // (built-in by default, plugin bar in `right` mirror mode); the RIGHT edge
-  // mirrors that affordance. Using mouseleave on the 4-px sliver would close
-  // the peek the instant the cursor crossed onto the bar itself — a global
-  // mousemove watcher with an explicit threshold is the robust path.
-  const PEEK_WIDTH = 38;
-  let _peekLeft  = $state(false);
-  let _peekRight = $state(false);
-  let _peekLeftMoveHandler:  ((e: MouseEvent) => void) | null = null;
-  let _peekRightMoveHandler: ((e: MouseEvent) => void) | null = null;
-
-  function onPeekLeftStart() {
-    if (_peekLeftMoveHandler) return;
-    _peekLeft = true;
-    _peekLeftMoveHandler = (e: MouseEvent) => {
-      if (e.clientX > PEEK_WIDTH) onPeekLeftEnd();
-    };
-    window.addEventListener('mousemove', _peekLeftMoveHandler);
-  }
-  function onPeekLeftEnd() {
-    if (_peekLeftMoveHandler) {
-      window.removeEventListener('mousemove', _peekLeftMoveHandler);
-      _peekLeftMoveHandler = null;
-    }
-    _peekLeft = false;
-  }
-  function onPeekRightStart() {
-    if (_peekRightMoveHandler) return;
-    _peekRight = true;
-    _peekRightMoveHandler = (e: MouseEvent) => {
-      if (e.clientX < window.innerWidth - PEEK_WIDTH) onPeekRightEnd();
-    };
-    window.addEventListener('mousemove', _peekRightMoveHandler);
-  }
-  function onPeekRightEnd() {
-    if (_peekRightMoveHandler) {
-      window.removeEventListener('mousemove', _peekRightMoveHandler);
-      _peekRightMoveHandler = null;
-    }
-    _peekRight = false;
-  }
+  // mirrors that affordance. The state and the closing watcher are shared
+  // (`createEdgePeek`) with every other window that can hide its bars.
+  const edgePeek = createEdgePeek();
 
   // Position `hidden` is mutually exclusive with the mirror — when hidden,
   // built-in stays at its natural DOM spot (left) and the plugin bar at
@@ -1963,19 +1932,16 @@
   //   peek-right ⇒ reveals the plugin bar (visually rightmost)
   // Outside of `hidden`, both bars are always mounted.
   const showBuiltinBar = $derived(
-    appearanceStore.activityBarPosition !== 'hidden' || _peekLeft
+    appearanceStore.activityBarPosition !== 'hidden' || edgePeek.left
   );
   const showPluginBar = $derived(
-    appearanceStore.activityBarPosition !== 'hidden' || _peekRight
+    appearanceStore.activityBarPosition !== 'hidden' || edgePeek.right
   );
 
   // If the user flips OUT of "hidden" while peeking, clear both watchers so
   // they don't keep firing against a no-op state.
   $effect(() => {
-    if (appearanceStore.activityBarPosition !== 'hidden') {
-      onPeekLeftEnd();
-      onPeekRightEnd();
-    }
+    if (appearanceStore.activityBarPosition !== 'hidden') edgePeek.reset();
   });
 
 </script>
@@ -2010,18 +1976,7 @@
              <WorkspaceShell>; the peek-state watchers are wired here. -->
         {#snippet beforeRails()}
           {#if appearanceStore.activityBarPosition === 'hidden'}
-            <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
-            <div
-              class="activity-bar-edge-trigger edge-left"
-              aria-hidden="true"
-              onmouseenter={onPeekLeftStart}
-            ></div>
-            <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
-            <div
-              class="activity-bar-edge-trigger edge-right"
-              aria-hidden="true"
-              onmouseenter={onPeekRightStart}
-            ></div>
+            <EdgePeekTriggers onLeft={edgePeek.startLeft} onRight={edgePeek.startRight} />
           {/if}
         {/snippet}
 

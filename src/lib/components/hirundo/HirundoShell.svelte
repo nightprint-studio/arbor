@@ -208,8 +208,9 @@
 <FeedbackHost id="hirundo" />
 
 <style>
-  .shell { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg-base); overflow: hidden; }
-  .content-area { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding-top: 6px; background: var(--chrome-fill); }
+  /* `--chrome-gap`: the veil between the title bar and the panels; the title bar centres itself on bar + gap. */
+  .shell { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg-base); overflow: hidden; --chrome-gap: 6px; }
+  .content-area { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding-top: var(--chrome-gap); background: var(--chrome-fill); }
   .main-col { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden; gap: 4px; }
   .card { display: flex; flex-shrink: 0; min-width: 0; min-height: 0; background: var(--bg-base); border-radius: var(--radius-lg); overflow: hidden; }
   .card.grow { flex: 1; }

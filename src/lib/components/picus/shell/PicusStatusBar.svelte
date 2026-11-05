@@ -145,7 +145,6 @@
     flex-shrink: 0;
     padding: 0 8px 0 6px;
     background: var(--bg-elevated);
-    border-top: 1px solid var(--border-subtle);
     font-family: var(--font-ui-sans);
     font-size: var(--font-size-xs);
     color: var(--text-muted);

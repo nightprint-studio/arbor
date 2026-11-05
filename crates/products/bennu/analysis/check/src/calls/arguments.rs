@@ -31,7 +31,7 @@ mod ambiguity;
 mod tests;
 
 use bennu_java::prelude::{
-    infer_node_type_cached, lambda_refused, overload_fit, same_binary_type, FileSymbols, InferCache,
+    infer_node_type_cached, lambda_refused, overload_fit, same_binary_type, substitute, FileSymbols, InferCache,
     Member, OverloadFit, TypeRef, TypeResolver,
 };
 use bennu_proto::prelude::Diagnostic;
@@ -319,7 +319,10 @@ fn functional_arguments(method: &Member, args: &[Node], callee: Callee, file: &F
             "method_reference" => false,
             _ => continue,
         };
-        let Some(sam) = lambda_body::sam_through(param, file.resolver) else { continue };
+        let Some(mut sam) = lambda_body::sam_through(param, file.resolver) else { continue };
+        if !is_lambda {
+            bind_variables_from_other_arguments(&mut sam, method, args, i, file);
+        }
         let problem = match is_lambda {
             true => lambda_body::lambda_body_mismatch(*arg, &sam, &ctx),
             false => lambda_body::method_reference_mismatch(*arg, &sam, &ctx),
@@ -329,6 +332,81 @@ fn functional_arguments(method: &Member, args: &[Node], callee: Callee, file: &F
         }
     }
 }
+/// The type variables a generic method declares, as far as its OTHER arguments fix them, read into the
+/// functional interface a method reference is passed as.
+///
+/// `static <X, Y> Y mapOrNull(X value, Function<X, Y> fun)` called as `mapOrNull(boxed, Long::toString)`:
+/// the interface is `Function<X, Y>`, which names no type to judge `Long::toString` against — until
+/// `X` is read off the argument that is a plain `X`, a `Long`. javac does exactly that before it looks at
+/// the reference, and then finds two `toString` that fit (the static `toString(long)` and the instance
+/// `toString()`): an ambiguity error the call cannot escape.
+///
+/// Only an identity parameter binds (one whose declared type IS the variable), an untypeable argument
+/// binds nothing, and a variable two arguments disagree about is left open — never a guess.
+fn bind_variables_from_other_arguments(
+    sam: &mut lambda_body::Sam,
+    method: &Member,
+    args: &[Node],
+    at: usize,
+    file: &FileCtx,
+) {
+    let is_variable = |name: &str| {
+        !name.is_empty() && !name.contains('/') && !is_primitive(name) && file.resolver.members_of(name).is_none()
+    };
+    let mut names: Vec<String> = Vec::new();
+    let mut types: Vec<TypeRef> = Vec::new();
+    let mut open: Vec<String> = Vec::new();
+    for (j, (arg, param)) in args.iter().zip(&method.params).enumerate() {
+        if j == at || param.dims != 0 || !param.type_args.is_empty() || !is_variable(&param.binary_name) {
+            continue;
+        }
+        if matches!(arg.kind(), "lambda_expression" | "method_reference") {
+            continue;
+        }
+        let typed = infer_node_type_cached(&file.root, file.source, file.symbols, arg, file.resolver, file.cache)
+            .map(boxed_type)
+            .filter(|ty| ty.dims == 0 && ty.binary_name.contains('/'));
+        let Some(ty) = typed else {
+            open.push(param.binary_name.clone());
+            continue;
+        };
+        match names.iter().position(|n| *n == param.binary_name) {
+            Some(k) if types[k] != ty => open.push(param.binary_name.clone()),
+            Some(_) => {}
+            None => {
+                names.push(param.binary_name.clone());
+                types.push(ty);
+            }
+        }
+    }
+    let keep: Vec<usize> = (0..names.len()).filter(|k| !open.contains(&names[*k])).collect();
+    if keep.is_empty() {
+        return;
+    }
+    let names: Vec<String> = keep.iter().map(|k| names[*k].clone()).collect();
+    let types: Vec<TypeRef> = keep.iter().map(|k| types[*k].clone()).collect();
+    sam.params = sam.params.iter().map(|p| substitute(p, &names, &types)).collect();
+}
+
+/// A primitive as the class a type variable stands for: `List.of(1)` is a `List<Integer>`.
+fn boxed_type(ty: TypeRef) -> TypeRef {
+    if ty.dims > 0 {
+        return ty;
+    }
+    let wrapper = match ty.binary_name.as_str() {
+        "int" => "java/lang/Integer",
+        "long" => "java/lang/Long",
+        "double" => "java/lang/Double",
+        "float" => "java/lang/Float",
+        "boolean" => "java/lang/Boolean",
+        "char" => "java/lang/Character",
+        "byte" => "java/lang/Byte",
+        "short" => "java/lang/Short",
+        _ => return ty,
+    };
+    TypeRef::simple(wrapper)
+}
+
 /// Parameterized types are invariant (JLS §4.10.2): the one overload that binds takes a
 /// `Consumer<Integer>`, and a variable declared `Consumer<String>` is not one. The applicability rules
 /// read the erasure, where it fits; this reads the arguments, only where both sides write them —

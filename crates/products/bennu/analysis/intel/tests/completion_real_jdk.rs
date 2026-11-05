@@ -540,3 +540,64 @@ fn a_jdk_static_that_does_not_exist_is_flagged() {
         "{errors:?}"
     );
 }
+
+// ── A constant table of hundreds of entries ───────────────────────────────────────────────────────
+//
+// `Map.ofEntries(Map.entry(…), Map.entry(…), … ×300)` is how a legacy class spells a lookup table.
+// It is one call with three hundred arguments, each itself a generic call — and every stage that
+// types an argument list (validation, hints, completion at an argument) has to stay roughly linear
+// in it. A stage that re-solves the whole list per argument, or per candidate, goes quadratic or
+// worse and the editor stops answering on the file.
+
+fn big_map_source(entries: usize) -> String {
+    let mut s = String::from(
+        "package p;
+
+import java.util.Map;
+
+public class Tipi {
+    public static final Map<String, String> TIPI_CARICA = Map.ofEntries(
+",
+    );
+    for i in 0..entries {
+        let sep = if i + 1 == entries { "" } else { "," };
+        s.push_str(&format!("            Map.entry(\"K{i}\", \"{i},{}\"){sep}
+", i * 7 % 1000));
+    }
+    s.push_str("    );
+
+    public static String of(String code) {
+        return TIPI_CARICA.get(code);
+    }
+}
+");
+    s
+}
+
+#[test]
+fn a_three_hundred_entry_map_literal_does_not_stall_any_stage() {
+    use std::time::{Duration, Instant};
+    let entries = 300;
+    let src = big_map_source(entries);
+    let files = [("Tipi.java", src.as_str())];
+
+    let started = Instant::now();
+    let p = project_or_skip!(&files);
+    let built_in = started.elapsed();
+
+    let started = Instant::now();
+    let errors = p.errors("Tipi.java");
+    let validated_in = started.elapsed();
+
+    // The caret inside the last entry's first argument: completion has to type the whole call.
+    let started = Instant::now();
+    let _ = p.labels_after("Tipi.java", "TIPI_CARICA = ");
+    let completed_in = started.elapsed();
+
+    eprintln!("big map: project {built_in:?}, validation {validated_in:?}, completion {completed_in:?}");
+    assert!(errors.is_empty(), "legal code reported errors: {errors:?}");
+    let ceiling = Duration::from_secs(10);
+    assert!(built_in < ceiling, "indexing 300 entries took {built_in:?}");
+    assert!(validated_in < ceiling, "validating 300 entries took {validated_in:?}");
+    assert!(completed_in < ceiling, "completing inside 300 entries took {completed_in:?}");
+}

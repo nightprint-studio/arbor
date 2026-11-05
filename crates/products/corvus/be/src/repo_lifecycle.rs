@@ -146,7 +146,9 @@ fn open_repo(state: &CorvusState, path: String, tab_id: String) -> Result<RepoIn
     state.register_repo(tab_id.clone(), path.clone());
     let mut info = RepoInfo::for_path(&path).map_err(|e| e.to_string())?;
     info.tab_id = tab_id;
-    state.fire_hook(
+    // Queued: nobody reads anything back from `on_repo_open`, and opening a workspace's tabs used to wait
+    // for every plugin's handler once per repository.
+    state.fire_hook_queued(
         arbor_hooks::REPO_OPEN,
         json!({ "tab_id": &info.tab_id, "path": &info.path, "name": &info.name }),
     );
@@ -169,7 +171,7 @@ fn close_repo(state: &CorvusState, tab_id: String) -> Result<(), String> {
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    state.fire_hook(
+    state.fire_hook_queued(
         arbor_hooks::REPO_CLOSE,
         json!({ "tab_id": &tab_id, "path": &path, "name": &name }),
     );

@@ -59,6 +59,13 @@
   import RepoActions from '../sidebar/RepoActions.svelte';
 
   const PAGE_SIZE = 500;
+  /**
+   * The first page of a tab: just enough rows to fill the window (and a screenful of scrolling).
+   * The graph is drawn as soon as these arrive, and the next `PAGE_SIZE` rows are fetched right
+   * behind them (see `loadGraph`) — the lanes of a short page are laid out in a fraction of the time,
+   * and the rest of the history fills in without the view having waited for it.
+   */
+  const FIRST_PAGE = 80;
   // When pagination is disabled we request the entire history in one shot.
   const ALL_COMMITS = 999_999;
 
@@ -789,7 +796,7 @@
     try {
       const filter = graphStore.fileFilter;
 
-      const limit = graphConfigStore.paginate ? PAGE_SIZE : ALL_COMMITS;
+      const limit = graphConfigStore.paginate ? FIRST_PAGE : ALL_COMMITS;
 
       // Clear stale hints from the previous tab so old ghost edges don't
       // flash over the new graph while the API call below is in flight.
@@ -857,6 +864,11 @@
       loaded = true;
       await tick();
       graphStore.notifyGraphLoaded(tabId);
+
+      // The graph is on screen with its first rows; bring in the next page behind it so scrolling does
+      // not meet the end of a short list. Skipped when the first page already held everything, and
+      // for a file filter (its own, smaller history).
+      if (graphConfigStore.paginate && !filter && tabId === tabsStore.activeTabId) void loadMore();
 
       // Reload bisect state here (not just on tab switch) so that a hard
       // webview refresh (Ctrl+F5) restores it correctly — at this point the

@@ -278,6 +278,17 @@
    * a background cannot intercept the window drag the way an overlay would.
    */
 
+  /*
+   * Centred in what the eye reads as the bar, not in the box that is the bar.
+   *
+   * Most windows leave a few px of the same chrome veil between the title bar and the panels
+   * (`--chrome-gap`, set by the shell that has one), so the band you see is the bar PLUS that gap
+   * — and content centred in the bar alone sits half a gap too high. Nudged down by half of it:
+   * a paint offset, not layout, so heights, the drag region and the absolute centre slot are
+   * untouched. A window with no gap has `--chrome-gap: 0px` and nothing moves.
+   */
+  .tb > :not(.tb-center) { position: relative; top: calc(var(--chrome-gap, 0px) / 2); }
+
   /* Each interactive cluster opts out of the window-drag region and lays its
      children out inline. (Plain flex, not `display: contents`, so the wrapper
      keeps a measurable box for the Dropdown anchor + its own padding.) */
@@ -311,6 +322,7 @@
      the drag region) but keeps the tabs nailed to the same pixel everywhere. */
   .tb-center {
     position: absolute;
+    top: calc(var(--chrome-gap, 0px) / 2);
     left: 50%;
     transform: translateX(-50%);
     display: flex;

@@ -151,7 +151,6 @@
     height: 24px; flex-shrink: 0;
     padding: 0 12px;
     background: var(--bg-elevated);
-    border-top: 1px solid var(--border-subtle);
     font-size: var(--font-size-xs); color: var(--text-muted);
     user-select: none;
   }

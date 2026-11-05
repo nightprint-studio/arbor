@@ -67,6 +67,13 @@
   A Cargo root has no Structure, Maven or Forms button, so they are not there to arrange — but the arrangement you gave them on a Maven project is remembered, and comes back with them.
 </Callout>
 
+<h2>Distraction-free mode</h2>
+<p>
+  <kbd>Alt+Z</kbd> (or <em>Distraction-free mode</em> in the palette) leaves the editor alone: the rails, the tool windows, the bottom dock and the status bar go away, and the title bar and the open tabs stay. Nothing is closed — the panels that were open come back as they were when you press the chord again.
+  Resting the pointer on the left or right edge of the window brings that side's rail back; picking a tool from it opens the tool window and leaves the mode.
+  It is not remembered between launches: it is a mode you go into to write, not one you want to find on the next start.
+</p>
+
 <h2>Where it is kept</h2>
 <p>
   In the active profile's <code>config.toml</code>, beside the rest of the interface settings — never in the project. Two machines on one profile get the same bar; two

@@ -13,7 +13,9 @@
 //! [`crate::stash::collect_stash_refs`] after the walk (the `stashes` field is
 //! left empty by the crate, exactly as before).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use git2::{Oid, Repository, Sort};
 use serde::{Deserialize, Serialize};
@@ -288,6 +290,148 @@ fn commit_touches_file(repo: &Repository, oid: Oid, file_path: &str) -> bool {
     false
 }
 
+/// Everything about a repository's history that does not depend on WHICH page is asked for.
+///
+/// The commits in walk order, and every commit on a primary branch's first-parent chain. Both are
+/// a function of the refs alone, so they are computed once per ref state ([`history_of`]) and
+/// shared by every page, every refresh and every switch back to the tab — the walk reads the whole
+/// history (a topological order cannot be produced from a prefix), and doing that again for page
+/// two, three, … of the same unchanged repository was the cost of scrolling, not of the page.
+struct History {
+    oids: Vec<Oid>,
+    primary: HashSet<String>,
+}
+
+/// The tips of the primary branch — local AND every remote-tracking variant.
+///
+/// A well-known name wins over HEAD (develop > main > master > trunk), which keeps develop on lane
+/// 0 even when a feature branch is checked out. When the local branch is behind origin, commits
+/// on origin/develop are not reachable from the local tip; without them here those commits would
+/// not be recognised as primary and would land on secondary lanes. No known name → HEAD.
+fn primary_tips_of(repo: &Repository, head_target: Option<&str>) -> Vec<String> {
+    let mut tips: Vec<String> = Vec::new();
+    for name in ["develop", "main", "master", "trunk"] {
+        let mut found_any = false;
+        let mut take = |refname: String| {
+            if let Ok(r) = repo.find_reference(&refname) {
+                if let Some(id) = r.resolve().ok().and_then(|r| r.target()) {
+                    let s = id.to_string();
+                    if !tips.contains(&s) {
+                        tips.push(s);
+                    }
+                    found_any = true;
+                }
+            }
+        };
+        take(format!("refs/heads/{name}"));
+        for remote in ["origin", "upstream"] {
+            take(format!("refs/remotes/{remote}/{name}"));
+        }
+        if found_any {
+            break; // found the right branch name, stop iterating candidates
+        }
+    }
+    if tips.is_empty() {
+        head_target.map(str::to_string).into_iter().collect()
+    } else {
+        tips
+    }
+}
+
+/// Every commit on the first-parent chain of any of `tips`, regardless of page.
+///
+/// Used to guard develop commits from being claimed by feature branches. Chains that converge stop
+/// early; the cap bounds a pathological history.
+fn primary_chain(repo: &Repository, tips: &[String]) -> HashSet<String> {
+    let mut all = HashSet::new();
+    for tip in tips {
+        let mut cur = tip.clone();
+        for _ in 0..200_000 {
+            if all.contains(&cur) {
+                break; // chains have converged — no need to continue
+            }
+            all.insert(cur.clone());
+            let oid = match Oid::from_str(&cur) {
+                Ok(o) => o,
+                Err(_) => break,
+            };
+            match repo.find_commit(oid).and_then(|c| c.parent(0)) {
+                Ok(p) => cur = p.id().to_string(),
+                Err(_) => break,
+            }
+        }
+    }
+    all
+}
+
+/// The topological walk over every branch, tag and remote ref (and a detached HEAD).
+///
+/// `Sort::TOPOLOGICAL | Sort::TIME`: parents never come before their children, and among commits
+/// with no ordering dependency (tips of unrelated branches) the more recent one is preferred, so an
+/// old remote tip does not float to the top — the order of `git log --graph --date-order`.
+fn walk_history(repo: &Repository, path_filter: Option<&str>, tips: &[String]) -> Result<History> {
+    let mut revwalk = repo.revwalk()?;
+    revwalk.push_glob("refs/heads/*")?;
+    revwalk.push_glob("refs/tags/*")?;
+    revwalk.push_glob("refs/remotes/*")?;
+    // also push HEAD in case it's detached
+    if let Ok(head) = repo.head() {
+        if let Some(id) = head.target() {
+            let _ = revwalk.push(id);
+        }
+    }
+    revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+
+    let oids: Vec<Oid> = if let Some(path) = path_filter {
+        revwalk.filter_map(|r| r.ok()).filter(|&oid| commit_touches_file(repo, oid, path)).collect()
+    } else {
+        revwalk.filter_map(|r| r.ok()).collect()
+    };
+    Ok(History { oids, primary: primary_chain(repo, tips) })
+}
+
+/// How many repositories' histories are kept. A switch back to a recent tab finds its history;
+/// the oldest-inserted-by-hash entry goes when a ninth arrives. Memory is ~20 bytes a commit.
+const HISTORY_CACHE_REPOS: usize = 8;
+
+/// `git-dir → (ref-state key, history)`.
+static HISTORY_CACHE: LazyLock<Mutex<HashMap<String, (u64, Arc<History>)>>> =
+    LazyLock::new(Default::default);
+
+/// The history for this exact state of the refs: from the cache when the refs have not moved, walked
+/// (and remembered) when they have. The key is a hash of every ref name and target plus HEAD, so any
+/// commit, fetch, branch move or tag changes it and nothing stale is ever served.
+fn history_of(repo: &Repository, key: u64, tips: &[String]) -> Result<Arc<History>> {
+    let id = repo.path().to_string_lossy().into_owned();
+    if let Ok(cache) = HISTORY_CACHE.lock() {
+        if let Some((k, history)) = cache.get(&id) {
+            if *k == key {
+                return Ok(history.clone());
+            }
+        }
+    }
+    // Walked outside the lock: a second tab asking for another repo must not wait on this one.
+    let history = Arc::new(walk_history(repo, None, tips)?);
+    if let Ok(mut cache) = HISTORY_CACHE.lock() {
+        if !cache.contains_key(&id) && cache.len() >= HISTORY_CACHE_REPOS {
+            if let Some(oldest) = cache.keys().next().cloned() {
+                cache.remove(&oldest);
+            }
+        }
+        cache.insert(id, (key, history.clone()));
+    }
+    Ok(history)
+}
+
+/// A hash of the ref state the history depends on.
+fn ref_state_key(refs: &mut [(String, String)], head: Option<&str>) -> u64 {
+    refs.sort_unstable();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    refs.hash(&mut hasher);
+    head.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Load a paginated slice of the commit graph.
 ///
 /// * `offset`      — how many commits to skip from the most recent
@@ -297,6 +441,7 @@ fn load_graph_inner(repo: &Repository, offset: usize, limit: usize, path_filter:
     // --- collect refs (oid → labels) ---
     let mut ref_map: HashMap<String, Vec<RefLabel>> = HashMap::new();
     let head_target = repo.head().ok().and_then(|h| h.target()).map(|id| id.to_string());
+    let mut ref_pairs: Vec<(String, String)> = Vec::new();
 
     for reference in repo.references()? {
         let reference = reference?;
@@ -324,127 +469,34 @@ fn load_graph_inner(repo: &Repository, offset: usize, limit: usize, path_filter:
         };
 
         let is_current = head_target.as_deref() == Some(&target_oid);
+        ref_pairs.push((full_name.to_string(), target_oid.clone()));
         ref_map
             .entry(target_oid)
             .or_default()
             .push(RefLabel { name: short_name, ref_type, is_current });
     }
 
-    // --- topological walk ---
-    let mut revwalk = repo.revwalk()?;
-    revwalk.push_glob("refs/heads/*")?;
-    revwalk.push_glob("refs/tags/*")?;
-    revwalk.push_glob("refs/remotes/*")?;
-    // also push HEAD in case it's detached
-    if let Ok(head) = repo.head() {
-        if let Some(id) = head.target() {
-            let _ = revwalk.push(id);
-        }
-    }
-    // Sort::TOPOLOGICAL | Sort::TIME: topological order is maintained (parents
-    // never appear before their children), but among commits with no ordering
-    // dependency (e.g. tips of unrelated branches), the one with the more
-    // recent timestamp is preferred.  This prevents old remote branch tips
-    // from floating to the top of the graph even though they haven't been
-    // touched in months — which is the standard behavior of GitKraken and
-    // `git log --graph --date-order`.
-    revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-
-    let all_oids: Vec<Oid> = if let Some(path) = path_filter {
-        revwalk.filter_map(|r| r.ok())
-            .filter(|&oid| commit_touches_file(repo, oid, path))
-            .collect()
+    // --- history ---
+    //
+    // The commits in walk order and the primary branches' first-parent chains: both depend on the
+    // refs and nothing else, so they come from the cache while the refs have not moved (see
+    // `history_of`) and every page after the first is a slice of what is already known.
+    let primary_tips = primary_tips_of(repo, head_target.as_deref());
+    let history = if path_filter.is_some() {
+        Arc::new(walk_history(repo, path_filter, &primary_tips)?)
     } else {
-        revwalk.filter_map(|r| r.ok()).collect()
+        let key = ref_state_key(&mut ref_pairs, head_target.as_deref());
+        history_of(repo, key, &primary_tips)?
     };
-    let total = all_oids.len();
+    let total = history.oids.len();
+    let page: Vec<Oid> = history.oids.iter().skip(offset).take(limit).copied().collect();
 
-    let page: Vec<Oid> = all_oids.into_iter().skip(offset).take(limit).collect();
-
-    // --- pre-compute first-parent chain ---
-    //
-    // We walk the "primary branch" first-parent chain and collect every OID that
-    // falls within the current page.  These commits are assigned to lane 0 so the
-    // main development line always appears as the leftmost straight line.  All other
-    // commits use alloc_secondary() which skips slot 0.
-    //
-    // IMPORTANT: we prefer a well-known primary branch (develop > main > master >
-    // trunk) over HEAD.  This keeps develop on lane 0 even when the user has a
-    // feature branch checked out.  If none of those names exist we fall back to HEAD.
-    let page_oid_set: std::collections::HashSet<String> =
-        page.iter().map(|o| o.to_string()).collect();
-
-    // Collect ALL tips of the primary branch — local AND every remote-tracking
-    // variant.  When the local branch is behind origin (e.g. origin/develop is
-    // ahead of the local develop), commits on origin/develop are NOT reachable
-    // from the local tip.  Without including origin/develop here, those commits
-    // are not recognised as primary and end up on wrong secondary lanes, making
-    // the develop line visually break and feature branch tips go undetected by
-    // the pre-pass.
-    let primary_tips: Vec<String> = {
-        let candidates = ["develop", "main", "master", "trunk"];
-        let mut tips: Vec<String> = Vec::new();
-        for name in candidates {
-            let mut found_any = false;
-            // Local ref
-            if let Ok(r) = repo.find_reference(&format!("refs/heads/{}", name)) {
-                if let Some(id) = r.resolve().ok().and_then(|r| r.target()) {
-                    let s = id.to_string();
-                    if !tips.contains(&s) { tips.push(s); }
-                    found_any = true;
-                }
-            }
-            // Remote-tracking refs (origin and upstream are the most common)
-            for remote in &["origin", "upstream"] {
-                if let Ok(r) = repo.find_reference(
-                    &format!("refs/remotes/{}/{}", remote, name)
-                ) {
-                    if let Some(id) = r.resolve().ok().and_then(|r| r.target()) {
-                        let s = id.to_string();
-                        if !tips.contains(&s) { tips.push(s); }
-                        found_any = true;
-                    }
-                }
-            }
-            if found_any { break; } // found the right branch name, stop iterating candidates
-        }
-        if tips.is_empty() {
-            head_target.clone().into_iter().collect()
-        } else {
-            tips
-        }
-    };
-    // Two sets derived from first-parent walks of ALL primary tips:
-    //
     // • first_parent_set  — primary commits on the current page.
-    // • all_primary_oids  — every commit on any primary first-parent chain,
-    //   regardless of page, used to guard develop commits from being
-    //   incorrectly claimed by feature branches.
-    let (first_parent_set, all_primary_oids): (
-        std::collections::HashSet<String>,
-        std::collections::HashSet<String>,
-    ) = {
-        let mut page_set = std::collections::HashSet::new();
-        let mut all_set  = std::collections::HashSet::new();
-        for tip in &primary_tips {
-            let mut cur = tip.clone();
-            for _ in 0..200_000 {
-                if all_set.contains(&cur) {
-                    break; // chains have converged — no need to continue
-                }
-                all_set.insert(cur.clone());
-                if page_oid_set.contains(&cur) {
-                    page_set.insert(cur.clone());
-                }
-                let oid = match git2::Oid::from_str(&cur) { Ok(o) => o, Err(_) => break };
-                match repo.find_commit(oid).and_then(|c| c.parent(0)) {
-                    Ok(p) => cur = p.id().to_string(),
-                    Err(_) => break,
-                }
-            }
-        }
-        (page_set, all_set)
-    };
+    // • all_primary_oids  — every commit on any primary first-parent chain, regardless of page,
+    //   used to guard develop commits from being incorrectly claimed by feature branches.
+    let all_primary_oids = &history.primary;
+    let first_parent_set: HashSet<String> =
+        page.iter().map(|o| o.to_string()).filter(|s| all_primary_oids.contains(s)).collect();
 
     // --- lane algorithm (pass 1) ---
     //
@@ -1323,5 +1375,61 @@ mod tests {
         let first = lanes.try_set(2, "x");
         let again = lanes.try_set(5, "x");
         assert_eq!(first, again);
+    }
+
+    // ── The history cache, against a real (throwaway) repository ─────────────
+
+    /// A repository in a fresh temp directory, removed when dropped.
+    struct TempRepo {
+        dir: std::path::PathBuf,
+        repo: Repository,
+    }
+    impl TempRepo {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("arbor-graph-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = Repository::init(&dir).unwrap();
+            TempRepo { dir, repo }
+        }
+        fn commit(&self, message: &str) -> Oid {
+            let sig = git2::Signature::now("t", "t@example.com").unwrap();
+            let tree_id = self.repo.index().unwrap().write_tree().unwrap();
+            let tree = self.repo.find_tree(tree_id).unwrap();
+            let parent = self.repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+            let parents: Vec<&git2::Commit> = parent.iter().collect();
+            self.repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents).unwrap()
+        }
+    }
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn pages_are_slices_of_one_history_and_a_new_commit_is_seen() {
+        let r = TempRepo::new("pages");
+        for i in 0..5 {
+            r.commit(&format!("c{i}"));
+        }
+        let whole = load_graph(&r.repo, 0, 100).unwrap();
+        assert_eq!(whole.total_commits, 5);
+
+        // Page by page, the rows continue where the last page ended and nothing repeats.
+        let first = load_graph(&r.repo, 0, 2).unwrap();
+        let second = load_graph(&r.repo, 2, 2).unwrap();
+        let third = load_graph(&r.repo, 4, 2).unwrap();
+        let paged: Vec<&str> =
+            [&first, &second, &third].iter().flat_map(|p| p.nodes.iter().map(|n| n.oid.as_str())).collect();
+        let all: Vec<&str> = whole.nodes.iter().map(|n| n.oid.as_str()).collect();
+        assert_eq!(paged, all);
+        assert_eq!(second.nodes[0].row, 2, "rows are absolute");
+
+        // The refs moved: the cached history must not be served.
+        let tip = r.commit("c5");
+        let after = load_graph(&r.repo, 0, 100).unwrap();
+        assert_eq!(after.total_commits, 6);
+        assert_eq!(after.nodes[0].oid, tip.to_string());
     }
 }

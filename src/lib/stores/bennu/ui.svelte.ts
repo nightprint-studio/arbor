@@ -156,6 +156,13 @@ function createBennuUiStore() {
   let bottomPanel = $state<BottomPanel | null>(null);
   /** `'tests'`, or a `bennuRunStore` run id. `null` = whichever run tab is active. */
   let runTab = $state<RunTab | null>(null);
+  /**
+   * Distraction-free mode: the editor and nothing else. It hides the rails, the tool windows, the
+   * bottom dock and the status bar WITHOUT closing them — which panel was open stays remembered, so
+   * leaving the mode puts the window back exactly as it was. Session state, deliberately not a
+   * setting: a mode you enter to write is not one you want to wake up in on the next launch.
+   */
+  let zen = $state(false);
 
   let settingsOpen = $state(false);
   /** A specific Settings page to land on, when something opened it *for a reason*. */
@@ -353,6 +360,10 @@ function createBennuUiStore() {
     get gotoOffsetTarget() { return gotoOffsetTarget; },
     get revealTarget() { return revealTarget; },
     get newTarget() { return newTarget; },
+
+    get zen() { return zen; },
+    toggleZen() { zen = !zen; },
+    setZen(on: boolean) { zen = on; },
 
     /** Toggle a left tool window (clicking the active one closes it). */
     toggleLeft(p: LeftPanel)  { leftPanel = leftPanel === p ? null : p; },

@@ -383,7 +383,9 @@ fn set_active_workspace(state: &CorvusState, workspace_id: String) -> Result<Wor
         }
     }
     state.emit("arbor://workspace-switched", payload.clone());
-    state.fire_hook(hooks::WORKSPACE_SWITCHED, payload);
+    // Queued, like the repo open/close hooks: the switch is complete when the store says so, and the
+    // frontend should not wait for every plugin to hear about it before it changes tabs.
+    state.fire_hook_queued(hooks::WORKSPACE_SWITCHED, payload);
     Ok(ws)
 }
 

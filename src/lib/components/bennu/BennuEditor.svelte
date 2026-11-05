@@ -55,7 +55,6 @@
   import BennuBuiltinTemplateBanner from './templates/BennuBuiltinTemplateBanner.svelte';
   import { isBuiltinTemplatePath } from './templates/template-paths';
   import { isJinjaFile } from '$lib/utils/jinja-words';
-  import BennuTableInsert from './BennuTableInsert.svelte';
   import BennuHtmlScriptsModal from './BennuHtmlScriptsModal.svelte';
   import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -1098,28 +1097,6 @@
     templateLinkLines = lines;
     const first = lines[0];
     if (first && editorComp && !editorComp.isLineVisible(first)) editorComp.revealLine(first);
-  }
-
-  /**
-   * Write an empty `rows × cols` table into the buffer, under the caret's line.
-   *
-   * Through the store rather than through the editor: the markdown mount takes its document once
-   * and is re-mounted when the store's text changes from outside (see `mdMountedText`), which is
-   * exactly what an insertion from the toolbar is. The table lands on its own paragraph — a
-   * table glued to the line above it is not a table to the parser.
-   */
-  function insertMarkdownTable(rows: number, cols: number) {
-    const path = activePath;
-    if (!path) return;
-    const line = (cells: string) => `| ${Array(cols).fill(cells).join(' | ')} |`;
-    const table = [
-      line('   '),
-      `| ${Array(cols).fill('---').join(' | ')} |`,
-      ...Array.from({ length: rows }, () => line('   ')),
-    ].join('\n');
-    const source = projectStore.sourceOf(path);
-    const sep = source.length === 0 || source.endsWith('\n\n') ? '' : source.endsWith('\n') ? '\n' : '\n\n';
-    onMarkdownInput(`${source}${sep}${table}\n`);
   }
 
   /**
@@ -5239,6 +5216,17 @@
     pencil: 'var(--syntax-keyword, #cc7832)',
   };
   const actionTint = (kind: string) => ACTION_TINTS[kind] ?? 'var(--text-secondary)';
+  /** The same idea for the fixed tools of the bar (the ones no extension contributes), so the
+   *  whole row reads as colour-coded rather than half coloured and half grey. */
+  const TOOL_TINTS = {
+    i18n: 'var(--syntax-type, #4ec9b0)',
+    reference: 'var(--info)',
+    validation: 'var(--success)',
+    tag: 'var(--syntax-keyword, #cc7832)',
+    preview: 'var(--syntax-type, #4ec9b0)',
+    wand: 'var(--accent)',
+    goto: 'var(--syntax-number, #6897bb)',
+  } as const;
 
   /** Buttons the loaded plugins put on THIS file's toolbar.
    *
@@ -5589,10 +5577,24 @@
          just two toolbars. -->
     {#if !isPreviewTab}
     <div class="ed-toolbar">
-      <div class="ed-crumbs">
-        {#if isValidationFile}<ShieldCheck size={12} class="crumb-icon" />{/if}
-        <span class="crumb last">{activePath ? baseName(activePath) : ''}</span>
-      </div>
+      {#if markdownLive}
+        <!-- One row, not two: in the live preview the file name is already on the tab, so the
+             left of the bar carries the formatting strip (the same one Garrulus's notes have —
+             toggles that follow the caret, the same commands as the Alt chords) instead of a
+             breadcrumb that repeats it, and the right keeps the file's own tools. -->
+        <div class="ed-crumbs ed-md">
+          <MarkdownToolbar
+            state={mdFormat}
+            disabled={isDecompiledView || isBuiltinTemplate}
+            onCommand={(cmd) => mdComp?.exec(cmd)}
+          />
+        </div>
+      {:else}
+        <div class="ed-crumbs">
+          {#if isValidationFile}<ShieldCheck size={12} class="crumb-icon" />{/if}
+          <span class="crumb last">{activePath ? baseName(activePath) : ''}</span>
+        </div>
+      {/if}
       <div class="ed-actions">
         <!-- What the frameworks offer to write into THIS file. Every button here was
              contributed by an extension that looked at the buffer, so an entity shows the entity
@@ -5612,7 +5614,7 @@
                    you have already made when you reach for this. -->
               <Dropdown items={actionMenu(a)} position="fixed" direction="down" width="230px">
                 {#snippet trigger({ open, toggle })}
-                  <IconButton
+                  <IconButton swell
                     tooltip={a.detail || a.label}
                     size={26}
                     active={open}
@@ -5625,7 +5627,7 @@
                 {/snippet}
               </Dropdown>
             {:else}
-              <IconButton
+              <IconButton swell
                 tooltip={a.detail || a.label}
                 size={26}
                 onclick={() => bennuUiStore.openJpaGenerate(a.id, activePath)}
@@ -5642,7 +5644,7 @@
                file-type tools is how it stays undiscovered — which is the whole reason it is
                not only a palette entry. -->
           {#each pluginToolbar as b (b.id)}
-            <IconButton
+            <IconButton swell
               tooltip={b.tooltip}
               size={26}
               onclick={() => {
@@ -5662,23 +5664,23 @@
                where the i18n panel has something to say, so the button exists exactly there — which
                makes the toolbar's contents the answer to "what kind of file is this", the same rule
                the contributed actions above follow. -->
-          <IconButton
+          <IconButton swell
             tooltip="i18n — preview this translation, and write markup into it"
             shortcut="Alt+Shift+I"
             size={26}
             active={bennuUiStore.rightPanel === 'i18n'}
             onclick={() => bennuUiStore.toggleRight('i18n')}
           >
-            <Languages size={13} />
+            <span class="ed-act-icon" style:color={TOOL_TINTS.i18n}><Languages size={15} /></span>
           </IconButton>
           <span class="ed-tsep"></span>
         {/if}
         {#if isValidationFile}
           <!-- Struts validation-file tools. -->
-          <IconButton tooltip="Validation reference" size={26} onclick={() => bennuUiStore.toggleDocs()}>
-            <BookOpen size={13} />
+          <IconButton swell tooltip="Validation reference" size={26} onclick={() => bennuUiStore.toggleDocs()}>
+            <span class="ed-act-icon" style:color={TOOL_TINTS.reference}><BookOpen size={15} /></span>
           </IconButton>
-          <IconButton
+          <IconButton swell
             tooltip="Add a validator chain to a field"
             size={26}
             variant="accent"
@@ -5690,12 +5692,12 @@
         {:else if isJavaFile && hasStruts}
           <!-- On a Java action class: create (or open) its `<Class>-validation.xml`. Offered only
                where Struts is actually in use — see `hasStruts`. -->
-          <IconButton
+          <IconButton swell
             tooltip="Create or open the Struts validation file for this action class"
             size={26}
             onclick={createValidationFile}
           >
-            <ShieldCheck size={13} />
+            <span class="ed-act-icon" style:color={TOOL_TINTS.validation}><ShieldCheck size={15} /></span>
           </IconButton>
           <span class="ed-tsep"></span>
         {:else if isJspFile}
@@ -5716,7 +5718,7 @@
           <!-- On a JSP: an "Insert tag" menu that drops JSTL/Struts snippets at the caret. -->
           <Dropdown items={snippetMenu} position="fixed" direction="down" width="200px">
             {#snippet trigger({ open, toggle })}
-              <IconButton
+              <IconButton swell
                 tooltip="Insert a JSTL / Struts tag at the caret"
                 size={26}
                 active={open}
@@ -5724,7 +5726,7 @@
                 ariaExpanded={open}
                 onclick={toggle}
               >
-                <span class="ed-menu-icon"><Braces size={13} /><ChevronDown size={9} /></span>
+                <span class="ed-menu-icon" style:color={TOOL_TINTS.tag}><Braces size={15} /><ChevronDown size={9} /></span>
               </IconButton>
             {/snippet}
           </Dropdown>
@@ -5733,7 +5735,7 @@
         {#if isHtmlTab}
           <!-- The page, rendered. Not a mode the editor is in — the source is one press away
                again — and gated the first time, because a page can run its own code. -->
-          <IconButton
+          <IconButton swell
             tooltip={htmlPreviewing ? 'Close the preview' : 'Preview this page beside the source'}
             size={26}
             active={htmlPreviewing}
@@ -5743,24 +5745,24 @@
               else htmlPreviewOpen.add(activePath);
             }}
           >
-            {#if htmlPreviewing}<FileCode2 size={13} />{:else}<Eye size={13} />{/if}
+            <span class="ed-act-icon" style:color={TOOL_TINTS.preview}>{#if htmlPreviewing}<FileCode2 size={15} />{:else}<Eye size={15} />{/if}</span>
           </IconButton>
         {/if}
         {#if isSpringConfigTab}
           <!-- The keys, as the class that binds them. On the file itself, because that is where the
                question comes up — an entry in the right-click menu alone is one nobody finds. -->
-          <IconButton
+          <IconButton swell
             tooltip="Write a @ConfigurationProperties class from these keys"
             size={26}
             onclick={() => bennuUiStore.openConfigClass()}
           >
-            <Wand2 size={13} />
+            <span class="ed-act-icon" style:color={TOOL_TINTS.wand}><Wand2 size={15} /></span>
           </IconButton>
         {/if}
         {#if isJinjaTab}
           <!-- What the template writes, beside it. The same toggle as a page's preview: the source
                stays where it is, and one press puts it back to the whole width. -->
-          <IconButton
+          <IconButton swell
             tooltip={templatePreviewing ? 'Close the preview' : 'Preview what this template renders, beside it'}
             size={26}
             active={templatePreviewing}
@@ -5770,33 +5772,27 @@
               else templatePreviewOpen.add(activePath);
             }}
           >
-            {#if templatePreviewing}<FileCode2 size={13} />{:else}<Eye size={13} />{/if}
+            <span class="ed-act-icon" style:color={TOOL_TINTS.preview}>{#if templatePreviewing}<FileCode2 size={15} />{:else}<Eye size={15} />{/if}</span>
           </IconButton>
-        {/if}
-        {#if markdownLive}
-          <!-- Only in the live preview: in the source view a table is markdown you type, and a
-               picker that inserted pipes into a code editor would be answering a question
-               nobody asked there. -->
-          <BennuTableInsert onPick={insertMarkdownTable} />
         {/if}
         {#if isMarkdownTab}
           <!-- Rendered or raw. The rendered side is still an editor — this is not a preview
                pane — so the toggle is about what the markup looks like while you work on it,
                not about whether the file can be changed. -->
-          <IconButton
+          <IconButton swell
             tooltip={markdownLive ? 'Edit the markdown source' : 'Live preview'}
             size={26}
             active={markdownLive}
             onclick={() => bennuSettingsStore.setMarkdownLivePreview(!markdownLive)}
           >
-            {#if markdownLive}<FileCode2 size={13} />{:else}<Eye size={13} />{/if}
+            <span class="ed-act-icon" style:color={TOOL_TINTS.preview}>{#if markdownLive}<FileCode2 size={15} />{:else}<Eye size={15} />{/if}</span>
           </IconButton>
         {/if}
         {#if !markdownLive}
           <!-- Go-to-line belongs to the code editor, and in the live preview there is not one
                mounted to answer it. A button that quietly does nothing is worse than no button. -->
-          <IconButton tooltip="Go to line" shortcut="Ctrl+G" size={26} onclick={openGoto}>
-            <Hash size={13} />
+          <IconButton swell tooltip="Go to line" shortcut="Ctrl+G" size={26} onclick={openGoto}>
+            <span class="ed-act-icon" style:color={TOOL_TINTS.goto}><Hash size={15} /></span>
           </IconButton>
         {/if}
       </div>
@@ -5847,17 +5843,6 @@
          buffer — every change goes through `onInput` like the code editor's, so dirty state,
          Ctrl+S and autosave are unchanged. No editor context menu: every entry on it (go to
          declaration, find usages, the refactorings) is about code. -->
-    <!-- The same formatting strip Garrulus's notes have: toggles that follow the caret, the same
-         commands as the Alt chords. The table button is left out — the toolbar above has a sized
-         grid picker of its own. -->
-    <div class="md-format">
-      <MarkdownToolbar
-        state={mdFormat}
-        disabled={isDecompiledView || isBuiltinTemplate}
-        hide={['table']}
-        onCommand={(cmd) => mdComp?.exec(cmd)}
-      />
-    </div>
     <div class="ed-editor-wrap">
       <MarkdownEditor
         bind:this={mdComp}
@@ -6244,12 +6229,9 @@
   .ed-sources-banner .ed-tbtn:disabled { opacity: 0.6; cursor: default; }
   .ed-sources-banner .ed-tbtn.primary:disabled:hover { filter: none; }
 
-  .md-format {
-    display: flex; align-items: center; flex: none;
-    height: 28px; padding: 0 8px;
-    background: var(--bg-base);
-    border-bottom: 1px solid var(--border-subtle);
-  }
+  /* The formatting strip sits where the breadcrumb is: its heading picker opens a menu, which the
+     breadcrumb's `overflow: hidden` would clip. */
+  .ed-crumbs.ed-md { overflow: visible; }
   .ed-editor-wrap { flex: 1; display: flex; min-width: 0; min-height: 0; position: relative; }
   /* The modal body is a block box (see the note at the call site): this is the flex context the
      preview needs to fill it. */

@@ -673,11 +673,19 @@ impl SemanticEngine {
         // Done here rather than in `references` because finding them needs the TEXT of the file
         // that declares the owner, which the index does not hold and the engine does.
         if let DeclKey::Field { owner, name } = result.target.clone() {
-            if let Some(decl) = live
+            // The text that declares the owner: the project's own file for a project type, and — for a
+            // field in a LIBRARY source view, whose type no project file declares — the buffer the
+            // caret is in. A `@Data` class from a dependency's `-sources.jar` is used through
+            // `getX()` / `setX()` exactly like a project one; without this the search from its field
+            // found a field nobody touches. `generated_aliases` reads nothing when the text does not
+            // declare `owner`, so a caret in some other file costs a parse and answers nothing.
+            let declaring = live
                 .index
                 .file_declaring(&owner)
-                .and_then(|f| project_source(&live.java_files, f))
-            {
+                .and_then(|f| project_source(&live.java_files, f));
+            if let Some(decl) = declaring.or_else(|| {
+                live.index.file_declaring(&owner).is_none().then_some(source)
+            }) {
                 for alias in generated_aliases(decl, &owner, &name) {
                     let usages = live.index.usages_of(&alias.key).to_vec();
                     if !usages.is_empty() {

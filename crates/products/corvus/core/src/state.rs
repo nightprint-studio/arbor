@@ -1,7 +1,7 @@
 //! [`CorvusState`] — the headless backend's owned state.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use arbor_ipc::prelude::{EventSink, HostCaller};
@@ -82,6 +82,9 @@ pub struct CorvusState {
     /// Tabs with an in-flight stats computation — the dedup guard that makes a second
     /// `compute_repo_stats` while one is already running a no-op (last finisher wins).
     stats_computing: Arc<Mutex<HashSet<String>>>,
+    /// The queue behind [`fire_hook_queued`](Self::fire_hook_queued): one worker thread that fires hooks in the
+    /// order they were handed over. Started on first use, so a state that never queues one costs nothing.
+    queued_hooks: OnceLock<mpsc::Sender<(String, Value)>>,
 }
 
 impl CorvusState {
@@ -97,6 +100,7 @@ impl CorvusState {
             config: Mutex::new(Map::new()),
             stats_cache: Arc::new(Mutex::new(HashMap::new())),
             stats_computing: Arc::new(Mutex::new(HashSet::new())),
+            queued_hooks: OnceLock::new(),
         }
     }
 
@@ -126,6 +130,33 @@ impl CorvusState {
     /// misses, and returns.
     pub fn fire_hook(&self, hook: &str, ctx: Value) {
         self.hooks.fire_blocking(hook, PluginValue::from_json(ctx));
+    }
+
+    /// Fire a plugin hook **after** the call returns, in order with the other queued ones.
+    ///
+    /// [`fire_hook`](Self::fire_hook) runs every subscriber's handler before the handler that fired it
+    /// can answer, so a request that fires a hook is as slow as the slowest plugin listening. That is
+    /// the right trade for a hook whose effect the caller reads back; it is the wrong one for a
+    /// notification nobody waits on — a repository opening or closing, a workspace switching — where
+    /// opening a dozen repos meant a dozen rounds of every plugin's handler before the UI could show
+    /// the first. One worker thread drains the queue, so the hooks still reach the plugins one at a
+    /// time and in the order they were fired (the plugin VM is single-threaded anyway).
+    pub fn fire_hook_queued(&self, hook: &str, ctx: Value) {
+        let sender = self.queued_hooks.get_or_init(|| {
+            let (tx, rx) = mpsc::channel::<(String, Value)>();
+            let hooks = self.hooks.clone();
+            let spawned = std::thread::Builder::new().name("corvus-hook-queue".into()).spawn(move || {
+                for (hook, ctx) in rx {
+                    hooks.fire_blocking(&hook, PluginValue::from_json(ctx));
+                }
+            });
+            if let Err(e) = spawned {
+                eprintln!("corvus: hook queue thread did not start: {e}");
+            }
+            tx
+        });
+        // A closed queue (the worker is gone) means the process is shutting down; nothing to tell.
+        let _ = sender.send((hook.to_string(), ctx));
     }
 
     /// Fire the vetoable [`PRE_COMMIT`](crate::hooks::PRE_COMMIT) hook; `Some(reason)` aborts the commit
@@ -368,6 +399,25 @@ mod tests {
             rec.fired.lock().unwrap().as_slice(),
             &[crate::hooks::STASH_PUSH.to_string()]
         );
+    }
+
+    #[test]
+    fn a_queued_hook_reaches_the_listener_after_the_call_and_in_order() {
+        let rec = Arc::new(RecordingListener::default());
+        let state = CorvusState::new(Arc::new(RecordingSink::default()))
+            .with_hooks(dispatcher_with(rec.clone()));
+        let names = ["a", "b", "c", "d"];
+        for n in names {
+            state.fire_hook_queued(n, json!({}));
+        }
+        // Delivered by a worker thread: wait for it, with a generous ceiling so a slow machine
+        // is not a flaky test.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while rec.fired.lock().unwrap().len() < names.len() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let got = rec.fired.lock().unwrap().clone();
+        assert_eq!(got, names.map(String::from).to_vec(), "queued hooks keep the order they were fired in");
     }
 
     #[test]

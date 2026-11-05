@@ -49,6 +49,10 @@
     /** A filled chip with a 1px border (`--bg-overlay` / `--border-subtle`) — the icon button
      *  that sits next to an input. */
     bordered?: boolean;
+    /** The glyph swells a little under the pointer and settles back when it leaves. On the glyph and not
+     *  on the button, so the hover fill keeps its size and neighbours do not shift. Off under
+     *  `prefers-reduced-motion`. */
+    swell?: boolean;
     /** Extra class on the button, for layout concerns of the caller (margin, alignment). */
     class?: string;
     /** ARIA for a trigger that opens a menu. */
@@ -68,6 +72,7 @@
     tone,
     hoverBg = 'default',
     bordered = false,
+    swell = false,
     class: extraClass = '',
     ariaHasPopup = false,
     ariaExpanded,
@@ -94,6 +99,7 @@
   class:hb-overlay={hoverBg === 'overlay'}
   class:hb-elevated={hoverBg === 'elevated'}
   class:bordered
+  class:swell
   class:active
   style="--ib-size: {size}px"
   {disabled}
@@ -104,7 +110,7 @@
   use:tooltipAction={tooltipInput}
   {onclick}
 >
-  {@render children()}
+  {#if swell}<span class="ib-glyph">{@render children()}</span>{:else}{@render children()}{/if}
 </button>
 
 <style>
@@ -126,6 +132,12 @@
   .ib:hover:not(:disabled) {
     background: var(--bg-hover);
     color: var(--text-primary);
+  }
+  .ib-glyph { display: inline-flex; align-items: center; justify-content: center; transition: transform 140ms ease; }
+  .swell:hover:not(:disabled) .ib-glyph { transform: scale(1.2); }
+  @media (prefers-reduced-motion: reduce) {
+    .ib-glyph { transition: none; }
+    .swell:hover:not(:disabled) .ib-glyph { transform: none; }
   }
   .ib:focus-visible {
     outline: 1px solid var(--accent);

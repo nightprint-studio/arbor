@@ -110,11 +110,16 @@
     // Ensure the menu doesn't go off screen
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const rect = menuEl.getBoundingClientRect();
-    adjustedX = Math.min(x, vw - rect.width - 8);
+    // The LAYOUT size, not `getBoundingClientRect()`: the menu is measured while its opening
+    // transition is still running, and that scales it down (to 90% of its height at the first
+    // frame). Placed by that smaller box, a menu opened near the bottom came to rest with its last
+    // rows below the window edge — the final entry simply gone.
+    const width = menuEl.offsetWidth;
+    const height = menuEl.offsetHeight;
+    adjustedX = Math.max(8, Math.min(x, vw - width - 8));
     // Above: the bottom edge sits a few pixels over `y`; with no room up there, it opens below as usual.
-    const upY = y - rect.height - 6;
-    adjustedY = above && upY >= 8 ? upY : Math.min(y, vh - rect.height - 8);
+    const upY = y - height - 6;
+    adjustedY = above && upY >= 8 ? upY : Math.max(8, Math.min(y, vh - height - 8));
   });
 
   // ── Submenu (one level deep) ───────────────────────────────────────────────

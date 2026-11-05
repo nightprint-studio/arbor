@@ -80,4 +80,15 @@ public class MrefOk {
     void objectMethodThroughAnUnboundReceiver() {
         Function<Object, String> describe = Object::toString;
     }
+
+    static <X, Y> Y mapOrNull(X value, Function<X, Y> fun) {
+        return fun.apply(value);
+    }
+
+    void referencesToAGenericMethodThatAreNotAmbiguous(Long boxed) {
+        String described = mapOrNull(boxed, Object::toString);
+        Long widened = mapOrNull(boxed, Long::longValue);
+        Integer length = mapOrNull("text", String::length);
+        String valueOf = mapOrNull(boxed, String::valueOf);
+    }
 }

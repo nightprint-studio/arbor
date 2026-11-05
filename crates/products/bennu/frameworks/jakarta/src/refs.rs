@@ -170,8 +170,11 @@ fn target_of(node: Node<'_>, source: &str) -> (Option<String>, Option<String>, O
         at = current.parent();
     }
     let Some(member) = member else { return (None, None, owner) };
-    let written_type =
-        member.child_by_field_name("type").map(|n| text(&n, source).trim().to_string());
+    // `Map<Integer, @PositiveOrZero Integer>`: written inside the type, the annotation constrains the
+    // type argument it precedes, NOT the field. Judging it against the field's `Map<…>` reported
+    // "cannot be applied to Map" on perfectly legal code.
+    let written_type = type_use_target(node, source)
+        .or_else(|| member.child_by_field_name("type").map(|n| text(&n, source).trim().to_string()));
     let member_name = member
         .child_by_field_name("name")
         .or_else(|| {
@@ -180,6 +183,19 @@ fn target_of(node: Node<'_>, source: &str) -> (Option<String>, Option<String>, O
         })
         .map(|n| text(&n, source).to_string());
     (written_type, member_name, owner)
+}
+
+/// The type a TYPE_USE annotation written inside a type belongs to: `Integer` in
+/// `@NotNull @Min(0) Integer`, which the grammar wraps in an `annotated_type`. `None` for an
+/// annotation that is a modifier of the declaration itself.
+fn type_use_target(annotation: Node<'_>, source: &str) -> Option<String> {
+    let annotated = annotation.parent().filter(|p| p.kind() == "annotated_type")?;
+    let mut cursor = annotated.walk();
+    let inner = annotated
+        .named_children(&mut cursor)
+        .filter(|c| !matches!(c.kind(), "annotation" | "marker_annotation"))
+        .last()?;
+    Some(text(&inner, source).trim().to_string())
 }
 
 /// The bundle keys named inside a message.
@@ -330,6 +346,18 @@ public class Order {
     fn uses() -> Vec<ConstraintUse> {
         let tree = bennu_java::prelude::parse_java(SRC).expect("parses");
         constraints_in(tree.root_node(), SRC)
+    }
+
+    #[test]
+    fn a_constraint_inside_a_type_argument_belongs_to_that_argument() {
+        let src = "class C { private java.util.Map<Integer, @PositiveOrZero @NotNull Integer> m; }";
+        let tree = bennu_java::prelude::parse_java(src).expect("parses");
+        let found = constraints_in(tree.root_node(), src);
+        assert_eq!(found.len(), 2);
+        for used in &found {
+            assert_eq!(used.target_type.as_deref(), Some("Integer"), "{} is on the value type", used.name);
+            assert_eq!(used.target_name.as_deref(), Some("m"));
+        }
     }
 
     #[test]

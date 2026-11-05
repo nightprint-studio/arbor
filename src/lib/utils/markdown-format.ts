@@ -529,19 +529,29 @@ export const toggleCodeBlock: EditorCommand = (view) => {
   return true;
 };
 
-/** A table skeleton on its own lines at the caret. */
-export const insertTable: EditorCommand = (view) => {
-  const head = view.state.selection.main.head;
-  const line = view.state.doc.lineAt(head);
-  const lead = line.text.trim() ? '\n\n' : '';
-  const insert = `${lead}${tableSkeleton()}\n`;
-  view.dispatch({
-    changes: { from: line.to, insert },
-    selection: EditorSelection.cursor(line.to + lead.length + 2),
-  });
-  view.focus();
-  return true;
-};
+/**
+ * A `columns` × `rows` table skeleton on its own lines under the caret's line.
+ *
+ * A table glued to the line above it is not a table to the parser, hence the blank line when
+ * that line has text. The caret lands in the first header cell, ready to be typed over.
+ */
+export function insertTableOfSize(columns: number, rows: number): EditorCommand {
+  return (view) => {
+    const head = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(head);
+    const lead = line.text.trim() ? '\n\n' : '';
+    const insert = `${lead}${tableSkeleton(columns, rows)}\n`;
+    view.dispatch({
+      changes: { from: line.to, insert },
+      selection: EditorSelection.cursor(line.to + lead.length + 2),
+    });
+    view.focus();
+    return true;
+  };
+}
+
+/** The default table (2 × 1) — what the `Ctrl+Shift+T` chord writes without asking a size. */
+export const insertTable: EditorCommand = insertTableOfSize(2, 1);
 
 // ─── The action table ────────────────────────────────────────────────────────
 

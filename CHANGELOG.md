@@ -8,6 +8,21 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Changed
+- **One table picker everywhere** — the size grid from Bennu (hover to choose columns × rows, arrows + Enter) is now the markdown toolbar's table button in Garrulus and Bennu alike, and inserts at the caret. The markdown toolbar's buttons are coloured and swell on hover too.
+- **Bennu: one toolbar on markdown** — the formatting strip takes the place of the breadcrumb instead of adding a second row.
+- **Distraction-free mode** (Bennu, Alt+Z) — hides the rails, tool windows, bottom dock and status bar without closing anything; the pointer on a side edge brings the rail back, and opening a tool window leaves the mode.
+- **Title bar content is centred on the bar plus the gap below it**, in every window that has one; the status bars of Bennu, Picus and Merula lose their top hairline.
+- **Context menus keep their last entry near the bottom of the window** — the menu was placed by its size while still animating open, so a right-click low on the screen pushed the final row (Git) out of view.
+- **Chords no longer reach a product behind another tab** — typing in Bennu could change Picus's tab or open a dialog there.
+- **Bennu: a constraint on a type argument is not judged against the field** — `Map<Integer, @PositiveOrZero Integer>` no longer reports "cannot be applied to Map".
+- **Editor error and hover tooltips can be selected and copied.**
+- **Corvus: the commit graph opens on its first screenful and fills in behind it, and scrolling it no longer re-reads the whole history** — the first 80 commits are drawn at once, the next page follows, and the ordered history is kept per repository until its refs change.
+- **Bennu: a class with a table of hundreds of `Map.entry(…)` no longer stalls validation** — checking each call re-read the whole argument list to see whether `Map` was a local, which made the pass quadratic (a minute for 300 entries); it is now linear.
+- **Bennu: Find Usages on a Lombok field in a library source also finds its getters and setters.**
+- **Bennu: an ambiguous method reference passed to a generic method is reported** — `mapOrNull(boxedLong, Long::toString)` is an error in javac (the static `toString(long)` and the instance `toString()` both fit), and now here, once the method's own type variables are read off its other arguments.
+- **Bennu: a program's console and a build's log travel in batches** — the lines of a noisy start are sent a batch to an event instead of one each, and the backlog a background window accumulates is capped, so coming back to the window no longer replays thousands of events.
+- **Corvus: switching workspace is much quicker** — the tabs of the old workspace disappear at once, the one that was active opens first and starts loading, the others open behind it, and plugin notifications about opening/closing a repository or switching workspace no longer hold the switch up.
+- **Bennu: every icon of the editor toolbar is coloured, and swells on hover** — the fixed tools (preview, table, tag menu, go to line, i18n, validation) now wear a colour like the generator actions do, and every icon grows slightly under the pointer.
 - **Hirundo: every import has one layout** — cURL, SOAP/WSDL, .http and OpenAPI show the source in a large editor with Paste / From file / From URL / Example on top, what will be created on the right, and parse errors marked in the text.
 - **Hirundo: endpoints from Bennu are filled in** — path variables are rows in Params (typed, with a sample), required/optional on every parameter, the JSON body starts from the DTO, Send asks when required fields are empty, and `body.` / JSON keys complete from the endpoint's types; project constants in `produces` / `consumes` are resolved.
 - **Hirundo: streams are a setting** — a request that asks for `text/event-stream` is a stream and Send listens to it.

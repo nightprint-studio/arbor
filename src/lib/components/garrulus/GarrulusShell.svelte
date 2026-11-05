@@ -278,6 +278,8 @@
     flex-direction: column;
     background: var(--bg-base);
     overflow: hidden;
+    /* The veil between the title bar and the panels; the title bar centres itself on bar + gap. */
+    --chrome-gap: 6px;
   }
 
   /* A few px of bg-elevated under the titlebar so the floating panel cards read
@@ -289,7 +291,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding-top: 6px;
+    padding-top: var(--chrome-gap);
     background: var(--chrome-fill);
   }
 

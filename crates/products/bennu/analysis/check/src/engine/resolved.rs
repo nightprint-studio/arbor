@@ -77,6 +77,8 @@ pub(crate) fn per_body_diagnostics<'a>(subject: &Subject<'a, '_>, nodes: &[Node<
 
 /// The checks that answer about the file as a unit. `nodes` must be every node of the file.
 pub(crate) fn whole_file<'a>(run: &mut Run, subject: &Subject<'a, '_>, nodes: &[Node<'a>], infer: &InferCache) {
+    // One answer per (scope, name) for the whole pass — see `ScopeMemo`.
+    let _scope_memo = crate::support::scopes::ScopeMemo::begin();
     let Subject { root, source, symbols, resolver, ctx } = *subject;
     run.check("unresolved_imports", || crate::source::imports::unresolved_imports_at(root, source, resolver, ctx.classpath_complete, ctx.jdk_is_behind()));
     run.check("import_ambiguity", || crate::source::import_ambiguity::import_ambiguity_errors_in(root, nodes, source, symbols, resolver, infer, ctx.classpath_complete));
@@ -105,6 +107,8 @@ pub(crate) fn whole_file<'a>(run: &mut Run, subject: &Subject<'a, '_>, nodes: &[
 
 /// The per-expression checks, over any bucket of the file's nodes — the whole file, or one body.
 pub(crate) fn per_body<'a>(run: &mut Run, subject: &Subject<'a, '_>, nodes: &[Node<'a>], infer: &InferCache) {
+    // One answer per (scope, name) for the whole pass — see `ScopeMemo`.
+    let _scope_memo = crate::support::scopes::ScopeMemo::begin();
     let Subject { root, source, symbols, resolver, ctx } = *subject;
     run.check("unknown_members", || crate::calls::members::unknown_members_in(root, nodes, source, symbols, resolver, infer));
     run.check("unknown_fields", || crate::calls::fields::unknown_fields_in(root, nodes, source, symbols, resolver, infer));

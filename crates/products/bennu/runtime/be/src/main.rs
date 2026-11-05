@@ -308,6 +308,8 @@ mod hirundo_endpoints;
 mod index_service;
 // Focus-aware rate limit for the per-file "done of total" progress events.
 mod progress_gate;
+// A program's and a build's output lines leave the process a batch to an event, not one each.
+mod event_batch;
 // Config-graph input discovery: walk the project tree to find struts/spring/tiles files
 // (`WebInputs`) for the config-graph build.
 mod web_discovery;
@@ -660,7 +662,10 @@ fn main() {
     // The state every handler gets: event egress + the reverse channel (for host
     // round-trips like reveal-in-explorer). `Arc`-shared across the dispatcher + any
     // background workers (the future indexing thread).
-    let state = Arc::new(BennuState::new(app.sink()).with_host_caller(app.host_caller()));
+    // The egress every handler emits through — wrapped so the lines of a run or a build travel in
+    // batches (see `event_batch`); every other event passes through as it was.
+    let events = event_batch::OutputBatcher::wrap(app.sink());
+    let state = Arc::new(BennuState::new(events).with_host_caller(app.host_caller()));
 
     // The method routing, declared as the inventory of `#[handler]`s this binary
     // links. `inventory("")` covers them all — bennu-be links only its own handlers.

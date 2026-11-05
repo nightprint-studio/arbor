@@ -51,6 +51,64 @@ pub(crate) fn resolves_as_local(ident: Node, top: Node, bytes: &[u8]) -> bool {
 /// constructor parameters, `catch` params, enhanced-`for` and classic-`for` variables, `try`-with-
 /// resources resources, local variable declarations, and record/instanceof pattern variables.
 pub(crate) fn declares_name_in_scope(scope: Node, name: &str, bytes: &[u8]) -> bool {
+    let key = (scope.id(), name.to_string());
+    if let Some(known) = BINDINGS.with(|b| b.borrow().as_ref().and_then(|m| m.get(&key).copied())) {
+        return known;
+    }
+    let found = declares_name_in_scope_uncached(scope, name, bytes);
+    BINDINGS.with(|b| {
+        if let Some(m) = b.borrow_mut().as_mut() {
+            m.insert(key, found);
+        }
+    });
+    found
+}
+
+thread_local! {
+    /// `(scope node id, name)` → whether that scope declares the name. Live only between a
+    /// [`ScopeMemo::begin`] and its drop — a node id is only meaningful inside the one tree being
+    /// checked, so the memo must not outlive it.
+    static BINDINGS: std::cell::RefCell<Option<std::collections::HashMap<(usize, String), bool>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// While alive, [`declares_name_in_scope`] remembers its answers.
+///
+/// The scan reads a scope's WHOLE subtree, and the scopes that enclose a call are, for a call written
+/// inside a big argument list, the whole argument list: three hundred `Map.entry(…)` inside one
+/// `Map.ofEntries(…)` asked "is `Map` a local?" three hundred times of the same two subtrees, each
+/// time reading all of it — quadratic in the table's length, and the validation of a class with such a
+/// table ran for a minute. Same question, same scope, same name: one answer.
+///
+/// Held by the driver for the duration of a file's checks (see `engine::resolved`); a nested guard
+/// on the same thread joins the outer one rather than clearing it.
+pub(crate) struct ScopeMemo {
+    owner: bool,
+}
+
+impl ScopeMemo {
+    pub(crate) fn begin() -> Self {
+        BINDINGS.with(|b| {
+            let mut slot = b.borrow_mut();
+            if slot.is_none() {
+                *slot = Some(std::collections::HashMap::new());
+                ScopeMemo { owner: true }
+            } else {
+                ScopeMemo { owner: false }
+            }
+        })
+    }
+}
+
+impl Drop for ScopeMemo {
+    fn drop(&mut self) {
+        if self.owner {
+            BINDINGS.with(|b| *b.borrow_mut() = None);
+        }
+    }
+}
+
+fn declares_name_in_scope_uncached(scope: Node, name: &str, bytes: &[u8]) -> bool {
     if binds_directly(scope, name, bytes) {
         return true;
     }

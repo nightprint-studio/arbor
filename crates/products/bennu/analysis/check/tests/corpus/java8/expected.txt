@@ -22,6 +22,8 @@ corpus/annotation/AnnotationElementBad.java:28:25: compiler.err.duplicate.annota
 corpus/annotation/AnnotationElementBad.java:32:17: compiler.err.duplicate.annotation.missing.container
 corpus/annotation/AnnotationHeaderBad.java:5:43: compiler.err.cant.extend.intf.annotation
 corpus/annotation/AnnotationHeaderImplementsBad.java:5:37: compiler.err.expected
+corpus/annotation/AnnotationLibraryElementBad.java:5:44: compiler.err.cant.resolve.location.args
+corpus/annotation/AnnotationLibraryElementBad.java:9:17: compiler.err.cant.resolve.location.args
 corpus/annotation/AnnotationTargetBad.java:7:1: compiler.err.annotation.type.not.applicable
 corpus/annotation/AnnotationTargetBad.java:9:5: compiler.err.annotation.type.not.applicable
 corpus/annotation/AnnotationTargetBad.java:12:5: compiler.err.annotation.type.not.applicable
@@ -412,6 +414,7 @@ corpus/mref/MrefBad.java:41:44: compiler.err.prob.found.req
 corpus/mref/MrefBad.java:45:14: compiler.err.cant.apply.symbol
 corpus/mref/MrefBad.java:49:43: compiler.err.prob.found.req
 corpus/mref/MrefBad.java:53:25: compiler.err.prob.found.req
+corpus/mref/MrefBad.java:61:18: compiler.err.prob.found.req
 corpus/overload/OverloadBad.java:44:9: compiler.err.ref.ambiguous
 corpus/overload/OverloadBad.java:48:9: compiler.err.ref.ambiguous
 corpus/overload/OverloadBad.java:52:9: compiler.err.ref.ambiguous

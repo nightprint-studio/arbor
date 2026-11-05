@@ -59,17 +59,42 @@ export interface Coalesced<P> {
 /** Wrap `handle` so every payload that arrives within the same frame is
  *  collected, and `handle` runs once per frame with the full array.  Order
  *  is preserved.  Empty bursts never call the handler. */
-export function coalesceBatch<P>(handle: (batch: P[]) => void): Coalesced<P> {
+export function coalesceBatch<P>(
+  handle: (batch: P[]) => void,
+  limits: {
+    /** Keep at most this many payloads waiting: the oldest go first. For a stream the consumer
+     *  itself trims (a console keeps its last N lines), the backlog built while the window is in
+     *  the background — when `requestAnimationFrame` is not running and nothing drains — would only
+     *  be thrown away at the flush, after being held in memory the whole time. */
+    max?: number;
+    /** Payloads that must never be dropped, whatever `max` says (a "finished" marker among lines). */
+    keep?: (p: P) => boolean;
+  } = {},
+): Coalesced<P> {
   let queue: P[] = [];
   let scheduled  = false;
+  const { max, keep } = limits;
+  /** `q` without its oldest payloads beyond `max`, the kept ones aside. */
+  const trim = (q: P[]): P[] => {
+    if (max === undefined || q.length <= max) return q;
+    let drop = q.length - max;
+    return q.filter((p) => {
+      if (drop <= 0 || keep?.(p)) return true;
+      drop--;
+      return false;
+    });
+  };
   const drain = () => {
     if (queue.length === 0) return;
-    const drained = queue;
+    const drained = trim(queue);
     queue = [];
     handle(drained);
   };
   const push = ((e: P) => {
     queue.push(e);
+    // Trimmed in steps, not on every push: a filter per payload would make the cap cost more than the
+    // backlog it prevents.
+    if (max !== undefined && queue.length > max * 2) queue = trim(queue);
     if (scheduled) return;
     scheduled = true;
     schedule(() => {

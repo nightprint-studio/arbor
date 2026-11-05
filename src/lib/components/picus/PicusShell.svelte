@@ -1,5 +1,6 @@
 <script lang="ts">
   import { paletteIcon } from '$lib/utils/plugin-icons';
+  import { surfaceStore } from '$lib/stores/surfaces.svelte';
   /**
    * PicusShell — the SQL studio window.
    *
@@ -706,6 +707,10 @@
   ];
 
   function onKeyDown(e: KeyboardEvent) {
+    // In the tabbed container every product stays mounted — and listening on the window — while
+    // its tab is behind another. Without this, a chord typed in Bennu also ran here, and Picus came
+    // back with a different tab selected or a dialog open.
+    if (!surfaceStore.hasFocus('picus')) return;
     if (dispatchKeymap(e, helpRules)) return;
 
     // Behind a dialog, let it own the keyboard (its own Esc, Tab, Enter). Only the
@@ -1016,6 +1021,8 @@
     flex-direction: column;
     background: var(--bg-base);
     overflow: hidden;
+    /* The veil between the title bar and the panels; the title bar centres itself on bar + gap. */
+    --chrome-gap: 6px;
   }
 
   /* A few px of bg-elevated under the titlebar so the floating panel cards read
@@ -1027,7 +1034,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding-top: 6px;
+    padding-top: var(--chrome-gap);
     background: var(--chrome-fill);
   }
 

@@ -55,6 +55,8 @@
   import { recordRecentProject, onOpenIntent } from '$lib/ipc/recents';
 
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
+  import EdgePeekTriggers from '$lib/components/shared/ui/EdgePeekTriggers.svelte';
+  import { createEdgePeek } from '$lib/utils/edge-peek.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
   import ActivityBar, { type ActivityRailButton } from '$lib/components/shared/ui/ActivityBar.svelte';
   import BennuCustomizeRailsModal from './BennuCustomizeRailsModal.svelte';
@@ -1584,8 +1586,9 @@
     );
   });
 
-  const showLeft   = $derived(bennuUiStore.leftPanel !== null);
-  const showRight  = $derived(bennuUiStore.rightPanel !== null);
+  // Distraction-free mode hides the tool windows without closing them (see `bennuUiStore.zen`).
+  const showLeft   = $derived(!bennuUiStore.zen && bennuUiStore.leftPanel !== null);
+  const showRight  = $derived(!bennuUiStore.zen && bennuUiStore.rightPanel !== null);
   /** Whether the open right panel wants the wider column — see the card below. */
   /** The views the loaded plugins registered, as `plugin:<plugin>:<id>` panel keys. */
   const pluginViews = $derived(
@@ -1624,12 +1627,12 @@
       ? bennuPanelSizes.rightFor(wideRight) + 4 + mainColWidth
       : null,
   );
-  const showBottom = $derived(bennuUiStore.bottomPanel !== null);
+  const showBottom = $derived(!bennuUiStore.zen && bennuUiStore.bottomPanel !== null);
   // A job's output was opened from the (shared) Jobs overlay — the shared uiStore drives it, exactly
   // like corvus. It takes the bottom slot while shown; closing it (its back/close button clears the
   // shared section) falls back to Bennu's own bottom dock.
   const showJobOutput = $derived(
-    sharedUiStore.activeBottomSection === 'jobs' && jobsStore.activeJobId !== null,
+    !bennuUiStore.zen && sharedUiStore.activeBottomSection === 'jobs' && jobsStore.activeJobId !== null,
   );
 
   // ── Command palette ────────────────────────────────────────────────────────
@@ -2178,7 +2181,8 @@
         action: () => run(() => { bennuUiStore.showBottom('bevyremote'); bennuUiStore.showRight('bevy'); bennuBrpStore.setSearch(q.search); }),
         when: bevyTools && bennuBrpStore.connected,
       })),
-      { id: 'dependencies', title: 'Dependencies',  icon: 'Library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: hasDependencyTooling },
+      { id: 'zen', title: bennuUiStore.zen ? 'Leave distraction-free mode' : 'Distraction-free mode', icon: 'Focus', shortcut: 'Alt+Z', action: () => run(toggleZenMode) },
+      { id: 'dependencies', title: 'Dependencies',  icon: 'Library',    shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: hasDependencyTooling },
       // The same subject from the other angle: the list says what each module needs, the graph says
       // who needs *it*, what a change to it rebuilds, and whether the project has a cycle. Named for
       // the ecosystem's own word so a Rust workspace is not offered a "module" graph.
@@ -2666,6 +2670,32 @@
     });
   });
 
+  // In distraction-free mode the rails are away, but resting the pointer on a window edge brings that
+  // side's rail back (the same peek Corvus's "hidden" bar position uses). Picking a tool from it
+  // opens its window and ends the mode — see the effect below.
+  const edgePeek = createEdgePeek();
+  $effect(() => { if (!bennuUiStore.zen) edgePeek.reset(); });
+
+  // A tool window opening while the mode is on means the rail was used (or a build wanted its output
+  // seen): the mode steps aside rather than hiding what was just asked for.
+  let seenPanels = { left: bennuUiStore.leftPanel, right: bennuUiStore.rightPanel, bottom: bennuUiStore.bottomPanel };
+  $effect(() => {
+    const now = { left: bennuUiStore.leftPanel, right: bennuUiStore.rightPanel, bottom: bennuUiStore.bottomPanel };
+    untrack(() => {
+      const opened = (now.left && now.left !== seenPanels.left)
+        || (now.right && now.right !== seenPanels.right)
+        || (now.bottom && now.bottom !== seenPanels.bottom);
+      seenPanels = now;
+      if (opened && bennuUiStore.zen) bennuUiStore.setZen(false);
+    });
+  });
+
+  function toggleZenMode() {
+    bennuUiStore.toggleZen();
+    if (bennuUiStore.zen) toastStore.show('Distraction-free mode — Alt+Z to leave; the pointer on a side edge brings the rail back', 'info');
+    else editor?.focusEditor();
+  }
+
   function onKeyDown(e: KeyboardEvent) {
     // In the tabbed container this shell stays mounted (and subscribed) while
     // its tab is in the background — ignore keys unless we're the tab on
@@ -2685,8 +2715,19 @@
     }
     if (bennuUiStore.paletteOpen) return; // the palette owns the keyboard while open
 
+    // Plugin Logs — the same rebindable action as in Corvus (default Alt+Shift+L). Bennu reads its
+    // chords by hand, so a binding registered only in Corvus's shell never reached this window.
+    if (matchesBinding(e, keybindingsStore.getBinding('plugin_logs'))) {
+      e.preventDefault();
+      bennuUiStore.togglePluginLogs();
+      return;
+    }
+
     // F1 toggles docs from anywhere; Docs/Settings/Find modals own Esc themselves.
     if (e.key === 'F1') { e.preventDefault(); bennuUiStore.toggleDocs(); return; }
+    // Distraction-free mode (Z for Zen): the editor alone. Same chord in and out, and the way out
+    // is also said once on entering, since a window with no chrome gives nothing to click.
+    if (e.altKey && !mod && !e.shiftKey && isKey(e, 'z')) { e.preventDefault(); toggleZenMode(); return; }
     if (mod && e.key === ',' && !e.shiftKey) { e.preventDefault(); bennuUiStore.openSettings(); return; }
     // The project's own settings, one modifier away from yours: the two dialogs answer "how do I
     // work" and "what is this project", and which one you want is never in doubt once you know
@@ -3161,7 +3202,13 @@
   <BennuTitleBar />
 
   <div class="content-area" class:swap={swapping} onanimationend={() => (swapping = false)}>
-    <WorkspaceShell>
+    <WorkspaceShell
+      showLeftRail={!bennuUiStore.zen || edgePeek.left}
+      showRightRail={!bennuUiStore.zen || edgePeek.right}
+    >
+      {#snippet beforeRails()}
+        {#if bennuUiStore.zen}<EdgePeekTriggers onLeft={edgePeek.startLeft} onRight={edgePeek.startRight} />{/if}
+      {/snippet}
       {#snippet leftRail()}
         <ActivityBar side="left" ariaLabel="Tool windows" topItems={leftTop} bottomItems={leftBottom} {iconFor} />
       {/snippet}
@@ -3294,6 +3341,7 @@
     </WorkspaceShell>
   </div>
 
+  {#if !bennuUiStore.zen}
   <BennuStatusBar>
     {#snippet footerExtra()}
       <!-- Keep the relevant status badges (jobs · notifications); the transfers
@@ -3303,6 +3351,7 @@
       <FeedbackStatusButtons />
     {/snippet}
   </BennuStatusBar>
+  {/if}
 </div>
 
 <!-- Voice: the push-to-talk / toggle shortcuts and the voice overlay. Idle until asked. -->
@@ -3640,6 +3689,8 @@
     display: flex; flex-direction: column;
     background: var(--bg-base);
     overflow: hidden;
+    /* The veil between the title bar and the panels; the title bar centres itself on bar + gap. */
+    --chrome-gap: 5px;
   }
   /* A few px of bg-elevated between the titlebar and the tabbed editor pane, so
      the floating panel cards read as detached from the chrome (IntelliJ New UI
@@ -3647,7 +3698,7 @@
      here at the window level, painted with the same `--chrome-fill` veil as the rail/titlebar so it is the "gap". */
   .content-area {
     flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
-    padding-top: 5px;
+    padding-top: var(--chrome-gap);
     background: var(--chrome-fill);
   }
   /* A project swap: the panels settle in rather than snapping. Opacity + a few px only. */

@@ -181,6 +181,13 @@ export const codeEditorTheme = EditorView.theme(
       padding: '2px 6px', maxWidth: '520px', maxHeight: '340px', overflowY: 'auto',
     },
     '.cm-diagnostic': { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+    // The window is `user-select: none` (it is an app, not a page), and a tooltip inherits that — so an
+    // error you wanted to paste into a search or a ticket could not be selected, let alone copied.
+    // Diagnostics and hover cards are text to read AND to take away: selectable, with the text cursor
+    // to say so. Not the autocomplete list, where a drag across rows must not select anything.
+    '.cm-tooltip.cm-tooltip-lint, .cm-tooltip.cm-tooltip-hover': {
+      userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text',
+    },
     // A `code` span in a message — a version, a coordinate — as a chip, so it reads apart from the prose.
     '.cm-diag-code': {
       fontFamily: 'var(--font-code)', fontSize: '0.92em', padding: '1px 5px',

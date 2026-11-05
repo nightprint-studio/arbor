@@ -52,4 +52,12 @@ public class MrefBad {
     void noFunctionalTarget() {
         Object target = String::length; // error: compiler.err.prob.found.req
     }
+
+    static <X, Y> Y mapOrNull(X value, Function<X, Y> fun) {
+        return fun.apply(value);
+    }
+
+    void ambiguousReferenceAsAnArgumentOfAGenericMethod(Long boxed) {
+        mapOrNull(boxed, Long::toString); // error: compiler.err.prob.found.req
+    }
 }

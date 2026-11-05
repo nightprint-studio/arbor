@@ -44,7 +44,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { runTomcat as ipcRunTomcat } from '$lib/ipc/bennu/tomcat';
 import { coalesceBatch, coalesceLatest } from '$lib/utils/coalesce';
-import { appendLogLines } from './log-buffer';
+import { appendLogLines, MAX_LOG_LINES } from './log-buffer';
 import {
   build as ipcBuild, validateProject as ipcValidateProject, run as ipcRun,
   cancelRun as ipcCancelRun, cancelValidation as ipcCancelValidation,
@@ -539,7 +539,7 @@ function createBennuRunStore() {
   // rebuild per flush.
 
   /** The build log (mvn / javac / validation). */
-  const flushBuildOutput = coalesceBatch<RunLogLine>((batch) => pushMany(batch));
+  const flushBuildOutput = coalesceBatch<RunLogLine>((batch) => pushMany(batch), { max: MAX_LOG_LINES });
 
   /**
    * A program's stdout/stderr **and** its exit, on one queue.
@@ -575,7 +575,7 @@ function createBennuRunStore() {
       if (tab) pushToMany(tab.id, batched);
       else stash(runId, (tabId) => pushToMany(tabId, batched));
     }
-  });
+  }, { max: MAX_LOG_LINES, keep: (e) => e.kind === 'exit' });
 
   /** Whole-project validation progress — a counter, so only the last one of a frame is worth
    *  applying. */
@@ -597,37 +597,36 @@ function createBennuRunStore() {
         /* missing/corrupt config → keep the default */
       });
     const add = (f: UnlistenFn) => unlisteners.push(f);
+    // Lines normally arrive in batches (`arbor://bennu/output-batch`, one event for many lines — see the
+    // backend's `event_batch`); the per-line topics below are the same payloads one at a time, and
+    // stay for a backend that does not batch.
+    const onBuildLine = (p: { text: string } & LogAnnotation) =>
+      flushBuildOutput({ text: p.text, stream: 'out', level: p.level, pieces: p.pieces });
+    const onRunLine = (p: { run_id: string; stream: string; text: string } & LogAnnotation) => {
+      noteTomcatOutput(p.run_id, p.text);
+      flushRunEvents({
+        kind: 'out',
+        runId: p.run_id,
+        line: { text: p.text, stream: p.stream === 'stderr' ? 'err' : 'out', level: p.level, pieces: p.pieces },
+      });
+    };
     add(
-      await listen<{ text: string } & LogAnnotation>('arbor://bennu/build-output', (e) =>
-        flushBuildOutput({
-          text: e.payload.text,
-          stream: 'out',
-          level: e.payload.level,
-          pieces: e.payload.pieces,
-        }),
-      ),
+      await listen<{ events: { topic: string; payload: unknown }[] }>('arbor://bennu/output-batch', (e) => {
+        for (const { topic, payload } of e.payload.events ?? []) {
+          if (topic === 'arbor://bennu/run-output') onRunLine(payload as Parameters<typeof onRunLine>[0]);
+          else if (topic === 'arbor://bennu/build-output') onBuildLine(payload as Parameters<typeof onBuildLine>[0]);
+        }
+      }),
     );
+    add(await listen<{ text: string } & LogAnnotation>('arbor://bennu/build-output', (e) => onBuildLine(e.payload)));
     add(
       await listen<{ done: number; total: number }>('arbor://bennu/validate-progress', (e) => {
         flushValidateProgress({ done: e.payload.done, total: e.payload.total });
       }),
     );
     add(
-      await listen<{ run_id: string; stream: string; text: string } & LogAnnotation>(
-        'arbor://bennu/run-output',
-        (e) => {
-          noteTomcatOutput(e.payload.run_id, e.payload.text);
-          flushRunEvents({
-            kind: 'out',
-            runId: e.payload.run_id,
-            line: {
-              text: e.payload.text,
-              stream: e.payload.stream === 'stderr' ? 'err' : 'out',
-              level: e.payload.level,
-              pieces: e.payload.pieces,
-            },
-          });
-        },
+      await listen<{ run_id: string; stream: string; text: string } & LogAnnotation>('arbor://bennu/run-output', (e) =>
+        onRunLine(e.payload),
       ),
     );
     add(

@@ -53,6 +53,12 @@
      * viewport, so the consumer's own `min-width: max-content` is what decides the width.
      */
     scrollX?: boolean;
+    /**
+     * The vertical scroll offset, in px — bindable. Two lists that must scroll as one (the halves of a
+     * side-by-side diff) bind the same number: each writes it as the user scrolls, each follows it
+     * when the other does.
+     */
+    scrollTop?: number;
     class?: string;
     role?: string;
     ariaLabel?: string;
@@ -66,6 +72,7 @@
     getKey,
     scrollTo = null,
     scrollX = false,
+    scrollTop = $bindable(0),
     class: klass = '',
     role = 'listbox',
     ariaLabel,
@@ -73,7 +80,6 @@
   }: Props = $props();
 
   let viewport = $state<HTMLDivElement | null>(null);
-  let scrollTop = $state(0);
   let height = $state(0);
 
   const total = $derived(items.length);
@@ -83,6 +89,13 @@
   );
   /** The slice actually in the DOM, with its absolute starting index. */
   const window_ = $derived(items.slice(first, first + Math.max(visible, 0)));
+
+  // Follow a scroll the other half of a pair made. Writing the element's own offset back into
+  // `scrollTop` is a no-op (same value), so the two lists settle instead of chasing each other.
+  $effect(() => {
+    const wanted = scrollTop;
+    if (viewport && Math.abs(viewport.scrollTop - wanted) > 0.5) viewport.scrollTop = wanted;
+  });
 
   function onScroll() {
     scrollTop = viewport?.scrollTop ?? 0;

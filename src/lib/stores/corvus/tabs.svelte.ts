@@ -127,6 +127,16 @@ function createTabsStore() {
     savePersisted(tabs, activeTabId);
   }
 
+  /** Put the tabs in the order of `ids`; a tab not listed keeps its place after the listed ones.
+   *  Stable, and a no-op when the order already holds — it runs after every tab of a restored
+   *  workspace opens, which arrive in the order they finish and not the order they sit in. */
+  function orderTabs(ids: string[]) {
+    const rank = new Map(ids.map((id, i) => [id, i]));
+    const sorted = [...tabs].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
+    if (sorted.every((tab, i) => tab === tabs[i])) return;
+    tabs.splice(0, tabs.length, ...sorted);
+  }
+
   function clearActive() {
     activeTabId = null;
     savePersisted(tabs, activeTabId);
@@ -259,6 +269,7 @@ function createTabsStore() {
     nextTab,
     prevTab,
     reorderTabs,
+    orderTabs,
     replaceTab,
     beginInit,
     endInit,

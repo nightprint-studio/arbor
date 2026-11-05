@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { tooltip } from '$lib/actions/tooltip';
   /**
    * "Insert table" — the grid you drag a size out of.
    *
@@ -7,30 +6,48 @@
    * "how big", the answer is two numbers, and pointing at a cell answers both at once. A dialog
    * with two number fields asks the same question in four gestures.
    *
-   * The grid grows as you reach its edge — start at 6×6, and hovering the last row or column adds
-   * another — so a 3×2 costs no scrolling and a 9×7 is still reachable without a second control
-   * saying "more". The keyboard walks it with the arrows and commits with Enter, because a
-   * picker that only answers to a pointer is a feature half the people here cannot use.
+   * The keyboard walks the grid with the arrows and commits with Enter, because a picker that only
+   * answers to a pointer is a feature half the people here cannot use.
+   *
+   * App-agnostic: it knows nothing about markdown. The host turns `(rows, cols)` into whatever it
+   * inserts — the one markdown toolbar writes a pipe table, a sheet could add rows and columns.
    */
-  import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
+  import { Table2 } from 'lucide-svelte';
+  import Dropdown from './Dropdown.svelte';
+  import IconButton from './IconButton.svelte';
+
+  interface Props {
+    /** Body rows × columns, the header row counted out: `onPick(3, 4)` = a header plus 3 rows. */
+    onPick: (rows: number, cols: number) => void;
+    disabled?: boolean;
+    tooltip?: string;
+    shortcut?: string;
+    /** The trigger's square, in px. */
+    size?: number;
+    /** The trigger's glyph colour. */
+    color?: string;
+  }
 
   let {
-    /** Rows × columns, both counting the header row out: `onPick(3, 4)` = a header plus 3 rows. */
     onPick,
-  }: { onPick: (rows: number, cols: number) => void } = $props();
+    disabled = false,
+    tooltip = 'Insert a table',
+    shortcut,
+    size = 22,
+    color,
+  }: Props = $props();
 
   /**
    * A fixed 8×8, not a grid that grows.
    *
    * Growing is prettier and it is what Obsidian does, but the popover is positioned once when it
    * opens: a grid that gets wider as you reach the last column pushes its own right edge past the
-   * screen, which is exactly what happened. Eight by eight covers every table anyone inserts by
-   * hand, and it is the same size every time you open it — which is worth more than the last two
-   * columns, because a control you can aim at without reading is faster than a clever one.
+   * screen. Eight by eight covers every table anyone inserts by hand, and it is the same size
+   * every time you open it — a control you can aim at without reading is faster than a clever one.
    */
   const SIZE = 8;
-  /** Cell + gap, in px. Kept here because the popover's width is derived from it: the grid has to
-   *  fit the panel exactly or the panel is positioned around a size it does not have. */
+  /** Cell + gap + padding, in px. The popover's width is derived from them: the grid has to fit
+   *  the panel exactly or the panel is positioned around a size it does not have. */
   const CELL = 20;
   const GAP = 3;
   const PAD = 9;
@@ -38,8 +55,6 @@
 
   let rows = $state(0);
   let cols = $state(0);
-  const gridRows = SIZE;
-  const gridCols = SIZE;
 
   const label = $derived(rows && cols ? `${cols} × ${rows}` : 'Pick a size');
 
@@ -69,15 +84,13 @@
      whose width it had to guess ended up hanging off the right of the window. -->
 <Dropdown position="fixed" direction="down" width="{WIDTH}px">
   {#snippet trigger({ open, toggle })}
-    <button
-      class="ti-trigger"
-      class:active={open}
-      type="button"
-      onclick={toggle}
-      aria-haspopup="dialog"
-      aria-expanded={open}
-      use:tooltip={'Insert a table'}
-    >⊞</button>
+    <!-- mousedown is held back so opening the picker does not pull focus (and the selection) out
+         of the editor it will write into. -->
+    <span class="tsp-slot" role="presentation" onmousedown={(e) => e.preventDefault()}>
+      <IconButton swell {tooltip} {shortcut} {size} {disabled} active={open} ariaHasPopup ariaExpanded={open} onclick={toggle}>
+        <span class="tsp-ico" style:color={color}><Table2 size={13} /></span>
+      </IconButton>
+    </span>
   {/snippet}
 
   {#snippet children({ close }: { close: () => void })}
@@ -90,9 +103,9 @@
       onkeydown={(e) => onKey(e, close)}
       onmouseleave={() => { rows = 0; cols = 0; }}
     >
-      <div class="ti-grid" style="--ti-cols: {gridCols}">
-        {#each Array(gridRows) as _, r}
-          {#each Array(gridCols) as _, c}
+      <div class="ti-grid" style="--ti-cols: {SIZE}">
+        {#each Array(SIZE) as _, r}
+          {#each Array(SIZE) as _, c}
             <button
               type="button"
               class="ti-cell"
@@ -111,13 +124,8 @@
 </Dropdown>
 
 <style>
-  .ti-trigger {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 26px; height: 26px;
-    border: none; background: transparent; border-radius: var(--radius-sm);
-    color: var(--text-secondary); font-size: 15px; line-height: 1; cursor: pointer;
-  }
-  .ti-trigger:hover, .ti-trigger.active { color: var(--text-primary); background: var(--bg-hover); }
+  .tsp-slot { display: inline-flex; }
+  .tsp-ico { display: inline-flex; align-items: center; justify-content: center; }
 
   .ti { padding: 9px; }
   .ti-grid {
