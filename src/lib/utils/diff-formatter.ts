@@ -46,6 +46,8 @@ const EXT_TO_LANG: Record<string, string> = {
   wgsl: 'glsl', // no dedicated Prism grammar — glsl is the closest
   // Svelte
   svelte: 'svelte',
+  // Patina, the Voriz mod language (grammar in prism-languages/patina.ts)
+  ptn: 'patina',
   // Scripting
   lua: 'lua',
   // PowerShell
