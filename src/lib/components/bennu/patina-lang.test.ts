@@ -84,3 +84,68 @@ describe('patina Prism grammar: primitive types', () => {
     expect(classes('Foo { str: 1 }', 'str')).not.toContain('primitive-type');
   });
 });
+
+/** Tokenise several lines, carrying the state across them as `StreamLanguage` does. */
+function tokensOver(lines: string[]): Array<[string, string | null]> {
+  const state = patinaMode.startState!(2);
+  const out: Array<[string, string | null]> = [];
+  for (const line of lines) {
+    const stream = new StringStream(line, 2, 2, undefined);
+    let guard = 0;
+    while (!stream.eol()) {
+      const before = stream.pos;
+      const style = patinaMode.token(stream, state);
+      expect(stream.pos).toBeGreaterThan(before);
+      out.push([line.slice(before, stream.pos), style]);
+      stream.start = stream.pos;
+      if (++guard > 200) throw new Error('runaway');
+    }
+  }
+  return out;
+}
+
+describe('patina stream mode: attributes', () => {
+  it('colours the `#` and the name of a bare attribute', () => {
+    expect(tokens('#[server]')).toEqual([['#', 'attribute'], ['[', null], ['server', 'attribute'], [']', null]]);
+    expect(styleOf('#[worldgen]', 'worldgen')).toBe('attribute');
+    expect(styleOf('#[protected]', 'protected')).toBe('attribute');
+    expect(styleOf('#![allow]', '#')).toBe(undefined); // `#!` is one token, below
+    expect(tokens('#![allow]')[0]).toEqual(['#!', 'attribute']);
+  });
+
+  it('names the attribute and leaves the arguments to their own colours', () => {
+    const line = '#[on(DecorateChunk, decoration: "dungeon_doors")]';
+    expect(styleOf(line, 'on')).toBe('attribute');
+    expect(styleOf(line, 'DecorateChunk')).toBe('typeName');
+    expect(styleOf(line, 'decoration')).toBe('propertyName');
+    expect(styleOf(line, '"dungeon_doors"')).toBe('string');
+    expect(styleOf('#[command(name: "tp", ok: true)]', 'command')).toBe('attribute');
+  });
+
+  it('does not mistake a name in the arguments for the attribute name', () => {
+    const t = tokens('#[on(StepOn)]').filter(([, s]) => s === 'attribute').map(([x]) => x);
+    expect(t).toEqual(['#', 'on']);
+  });
+
+  it('colours the name when the `#[` and the name are on different lines, and after the attribute ends', () => {
+    const out = tokensOver(['#[', '    server', ']', 'fn f() {}']);
+    expect(out.filter(([, s]) => s === 'attribute').map(([x]) => x)).toEqual(['#', 'server']);
+    expect(out).toContainEqual(['fn', 'keyword']);
+    expect(out).toContainEqual(['f', 'variableName.definition']);
+  });
+
+  it('colours each attribute of a stack, one per line', () => {
+    const out = tokensOver(['#[server]', '#[protected]', '#[command(name: "x")]', 'fn f() {}']);
+    expect(out.filter(([, s]) => s === 'attribute').map(([x]) => x)).toEqual(['#', 'server', '#', 'protected', '#', 'command']);
+  });
+
+  it('an attribute that never closes stops at the next `{`, not at the end of the file', () => {
+    const out = tokensOver(['#[server', 'fn f() {', '    let x = 1;', '}']);
+    expect(out).toContainEqual(['fn', 'keyword']);
+    expect(out).toContainEqual(['let', 'keyword']);
+  });
+
+  it('a lone `#` is not an attribute', () => {
+    expect(styleOf('a # b', '#')).toBe('punctuation');
+  });
+});

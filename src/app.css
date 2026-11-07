@@ -929,6 +929,9 @@ input[type="radio"]:disabled {
 /* A primitive type (`int`, `fx`, `bool` in Patina): apart from keywords and from other types. Same variable and
    fallback as the editor's `primitiveType` tag in `bennu/patina-lang.ts`. */
 .token.primitive-type               { color: var(--syntax-primitive, color-mix(in srgb, var(--syntax-type, #4d78cc) 50%, var(--syntax-string, #6a9956))); }
+/* An attribute's `#` and name in Patina (`#[server]`, `#[on(…)]`); its arguments keep their ordinary token colours. Same
+   variable and fallback as the editor's `attribute` tag in `bennu/patina-lang.ts`. */
+.token.attribute                    { color: var(--syntax-attribute, var(--syntax-annotation, #bbb529)); }
 /* `$splice` in merula, `$VAR` in a shell fence, `@name` in others. */
 .token.variable                     { color: var(--syntax-field,   #9876aa); }
 /* A note name in a merula fence (`c3`, `eb2`, `~`) — the same warm colour the DAW's own

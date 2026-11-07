@@ -42,6 +42,7 @@ import type { StreamParser } from '@codemirror/language';
 import { Tag, tags as t } from '@lezer/highlight';
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
 import { backendCompletionSource, backendHoverSource } from './lsp-lang';
+import { patinaLinkRange } from './patina-link';
 
 /** Patina's keywords, as its lexer has them — reserved-for-later words included, so they read as reserved. */
 const KEYWORDS = new Set([
@@ -75,7 +76,17 @@ const staticCall = Tag.define(t.variableName);
  *  `--syntax-primitive`, so it reads apart from both the keywords and the other types. */
 const primitiveType = Tag.define(t.typeName);
 
+/** An attribute (`#[server]`, `#[on(DecorateChunk, …)]`): its `#` and its name. A tag of its own, styled below with
+ *  `--syntax-attribute`; the arguments inside the brackets keep their ordinary colours. */
+const attribute = Tag.define(t.meta);
+
 interface PatinaState {
+  /** Bracket depth inside an attribute's `[ … ]`; `0` outside one. Carried across lines, so `#[` and its name may be apart. */
+  attrDepth: number;
+  /** Just after `#` / `#!`: the next `[` opens an attribute. */
+  attrOpen: boolean;
+  /** Just after an attribute's `[`: the next word is the attribute's name. */
+  attrName: boolean;
   /** What the last meaningful token was: `.`, `::`, a keyword that declares, or nothing in particular. */
   prev: '' | '.' | '::' | 'fn' | 'type' | 'let';
   /** Inside a `use` line: every name in it is a path segment or an imported name. */
@@ -90,13 +101,13 @@ const SINGLE_COLON = /^\s*:(?!:)/;
 export const patinaMode: StreamParser<PatinaState> = {
   name: 'patina',
 
-  startState: () => ({ prev: '', inUse: false, inSignature: false }),
+  startState: () => ({ attrDepth: 0, attrOpen: false, attrName: false, prev: '', inUse: false, inSignature: false }),
 
   // `'` is a label, never a character literal: Patina has none. The rainbow-bracket scanner reads this, so a
   // `'outer` does not swallow the brackets after it.
   languageData: { commentTokens: { line: '//' }, rainbowSingleQuote: false },
 
-  tokenTable: { staticCall, primitiveType },
+  tokenTable: { staticCall, primitiveType, attribute },
 
   token(stream, state): string | null {
     if (stream.sol() && state.inUse) state.inUse = false;
@@ -107,8 +118,18 @@ export const patinaMode: StreamParser<PatinaState> = {
       stream.skipToEnd();
       return 'comment';
     }
-    // An attribute, whole: `#[on(StepOn, block: "landmine")]`.
-    if (stream.match(/^#!?\[[^\]]*\]?/)) return 'meta';
+    // An attribute, `#[on(StepOn, block: "landmine")]`: the `#` and the name get the attribute colour, the brackets the
+    // rainbow's and the arguments their own (a string is a string, `block:` a field) — read below as ordinary tokens.
+    if (state.attrDepth === 0 && stream.match(/^#!?(?=\[)/)) {
+      state.attrOpen = true;
+      return 'attribute';
+    }
+    if (state.attrOpen && stream.eat('[')) {
+      state.attrOpen = false;
+      state.attrDepth = 1;
+      state.attrName = true;
+      return null;
+    }
     if (stream.match(/^"(?:[^"\\]|\\.)*"?/)) {
       state.prev = '';
       return 'string';
@@ -139,12 +160,22 @@ export const patinaMode: StreamParser<PatinaState> = {
     // Brackets get no style of their own: the rainbow-bracket layer colours them by depth, and a highlight span
     // inside its mark would win and paint them all one grey.
     if (stream.eat('{')) {
+      // A `{` is never inside an attribute: an unclosed one ends here, instead of colouring the rest of the file.
+      state.attrDepth = 0;
+      state.attrName = false;
       // The signature is over: names with a colon inside the body are fields or named arguments again.
       state.inSignature = false;
       state.prev = '';
       return null;
     }
     if (stream.match(/^[()[\]}]/)) {
+      const c = stream.current();
+      if (state.attrDepth > 0) {
+        if (c === '[') state.attrDepth++;
+        else if (c === ']') state.attrDepth--;
+        else if (c === '}') state.attrDepth = 0;
+        state.attrName = false;
+      }
       state.prev = '';
       return null;
     }
@@ -162,6 +193,12 @@ export const patinaMode: StreamParser<PatinaState> = {
 function name(w: string, stream: Parameters<StreamParser<PatinaState>['token']>[0], state: PatinaState): string {
   const prev = state.prev;
   state.prev = '';
+
+  // The name of an attribute (`server`, `on`, `command`), whatever follows it.
+  if (state.attrName) {
+    state.attrName = false;
+    return 'attribute';
+  }
 
   if (w === 'self' || w === 'Self') return 'self';
   if (w === 'true' || w === 'false') return 'bool';
@@ -221,6 +258,9 @@ export const patinaHighlight = syntaxHighlighting(
     { tag: staticCall, color: 'var(--syntax-function, #ffc66d)', fontStyle: 'italic' },
     // `int`, `fx`, `bool`…: the primitive colour, a mix of the type and string colours when a theme has none of its own.
     { tag: primitiveType, color: PRIMITIVE_COLOR },
+    // `#[server]`, `#[on(…)]`: a rose of its own — the olive of the shared "annotation" read as grey next to the code, and
+    // nothing else in the language is red-ish. A theme without `--syntax-attribute` gets the shared annotation colour.
+    { tag: attribute, color: 'var(--syntax-attribute, var(--syntax-annotation, #bbb529))' },
     // A type a line declares, as a `fn` name is: the type colour, bolder.
     { tag: t.definition(t.typeName), color: 'var(--syntax-type, #4d9be6)', fontWeight: '600' },
     { tag: t.labelName, color: 'var(--syntax-label, var(--text-secondary))', fontStyle: 'italic' },
@@ -285,6 +325,8 @@ export const patinaLanguage: LanguageDescriptor = {
   cmFold: true,
   serverFold: false,
   commentTokens: { line: '//' },
+  // Ctrl/Cmd-hover: the one name under the pointer, not the whole `a.b` / `a::b` chain.
+  linkRange: patinaLinkRange,
   // A Rust-shaped language: completion after a dot, a `::`, or a word — the default backend source's gate.
   intel: { completion: backendCompletionSource, hover: backendHoverSource },
 };

@@ -677,7 +677,7 @@ export function createCodeEditorExtensions(
         // Otherwise, a reference-like token (a string-literal's contents or a
         // path such as `/do/Category/viewTree`) — so Ctrl/Cmd+Click on a JSP
         // action string resolves too. Generic, no product knowledge, no tree.
-        const ref = refTextAt(view.state.doc, pos);
+        const ref = linkTextAt(view.state.doc, pos, lang);
         if (ref) {
           event.preventDefault();
           placeCaret(view, pos);
@@ -691,7 +691,7 @@ export function createCodeEditorExtensions(
     // navigate, so the user sees WHERE go-to will land (IntelliJ / VS Code). Pushed as a
     // single nested Extension (CodeMirror flattens) rather than spread — an `Extension`
     // isn't statically iterable.
-    exts.push(ctrlHoverLink());
+    exts.push(ctrlHoverLink(lang));
   }
 
   return { extensions: exts, getTree, preferences: buildPreferences };
@@ -731,7 +731,7 @@ function currentGotoLink(view: EditorView): { from: number; to: number } | null 
   return found;
 }
 
-function ctrlHoverLink(): Extension {
+function ctrlHoverLink(lang: LanguageDescriptor): Extension {
   // A window keyup clears the link when Ctrl/Cmd is released without moving the mouse
   // (mousemove alone would leave a stale underline until the next move).
   const keyupPlugin = ViewPlugin.fromClass(
@@ -757,7 +757,7 @@ function ctrlHoverLink(): Extension {
       let range: { from: number; to: number } | null = null;
       if (active) {
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
-        if (pos != null) range = refRangeAt(view.state.doc, pos);
+        if (pos != null) range = linkRangeAt(view.state.doc, pos, lang);
       }
       const cur = currentGotoLink(view);
       // Only dispatch when the highlighted token actually changes (not once per pixel).
@@ -774,6 +774,21 @@ function ctrlHoverLink(): Extension {
   });
 
   return [gotoLinkField, keyupPlugin, events];
+}
+
+/** The link range at `offset`: the language's own when it has one (one line of text, pointer column), else the generic
+ *  {@link refRangeAt}. */
+function linkRangeAt(doc: Text, offset: number, lang: LanguageDescriptor): { from: number; to: number } | null {
+  if (!lang.linkRange) return refRangeAt(doc, offset);
+  const line = doc.lineAt(Math.max(0, Math.min(offset, doc.length)));
+  const r = lang.linkRange(line.text, offset - line.from);
+  return r && r.to > r.from ? { from: line.from + r.from, to: line.from + r.to } : null;
+}
+
+/** The text of {@link linkRangeAt} — what a click acts on must be what the hover underlined. */
+function linkTextAt(doc: Text, offset: number, lang: LanguageDescriptor): string | null {
+  const range = linkRangeAt(doc, offset, lang);
+  return range ? doc.sliceString(range.from, range.to) : null;
 }
 
 /** Characters that make up a "reference-like" token (identifiers, plus the path /

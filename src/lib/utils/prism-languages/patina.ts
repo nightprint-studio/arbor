@@ -17,8 +17,16 @@ const KEYWORDS =
 
 const grammar: Prism.Grammar = {
   comment: /\/\/.*/,
-  // An attribute, whole: `#[on(StepOn, block: "landmine")]`.
-  'attr-name': /#!?\[[^\]]*\]?/,
+  // An attribute, whole: `#[on(StepOn, block: "landmine")]`. The `#` and the name are an `attribute` token (see `inside`
+  // below, which also reads the arguments as ordinary Patina), so `app.css` can colour them apart from the arguments.
+  'attribute-group': {
+    pattern: /#!?\[[^\]]*\]?/,
+    inside: {
+      // The name first, while the `#[` is still in the text for the lookbehind; then the `#` that is left.
+      'attribute-name': { pattern: /(^#!?\[\s*)[\p{L}_][\p{L}\p{N}_]*/u, lookbehind: true, alias: 'attribute' },
+      attribute: /^#!?/,
+    } as Prism.Grammar,
+  },
   string: { pattern: /"(?:[^"\\\n]|\\.)*"?/, greedy: true },
   // A label: `'outer`. Patina has no character literals.
   symbol: /'[A-Za-z_]\w*/,
@@ -46,6 +54,9 @@ const grammar: Prism.Grammar = {
   operator: /->|=>|==|!=|<=|>=|&&|\|\||\.\.=?|[-+*/%]=?|[=<>!&|^?]/,
   punctuation: /::|[{}[\]();,.:]/,
 };
+
+// The arguments of an attribute read like any other Patina: everything after the `attribute` token.
+(grammar['attribute-group'] as { inside: Prism.Grammar }).inside.rest = grammar;
 
 Prism.languages.patina = grammar;
 Prism.languages.ptn = grammar;

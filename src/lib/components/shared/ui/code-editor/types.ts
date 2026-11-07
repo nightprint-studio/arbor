@@ -210,6 +210,14 @@ export interface LanguageDescriptor {
   resolveGoto?: (tree: Tree, offset: number) => GotoTarget | null;
 
   /**
+   * Optional: the range of the token a Ctrl/Cmd-hover underlines (and a Ctrl/Cmd+Click reports to `onGoto`), given one line of
+   * text and the pointer's column in it. Omit → the generic reference-like run (identifiers plus `/ . - $`, or a string's
+   * contents), which suits paths and dotted names; a language whose `.` and `::` separate names supplies its own so the
+   * link covers just the segment under the pointer. Return `null` for "nothing to follow here".
+   */
+  linkRange?: (lineText: string, column: number) => { from: number; to: number } | null;
+
+  /**
    * Optional client-side code folding. Given a leaf/container node, return a
    * `{ from, to }` range (UTF-16 doc offsets) to fold — typically the *inside*
    * of the node (after the opening brace/marker, before the close) so the head

@@ -71,6 +71,27 @@ describe('the Prism grammar for Patina', () => {
     expect(out).toContainEqual(['comment', '// done']);
   });
 
+  it('gives an attribute its `#` and name as an `attribute` token and the arguments their own', () => {
+    const flat = (toks: Array<string | Prism.Token>): Array<readonly [string, string]> =>
+      toks.flatMap((t): Array<readonly [string, string]> =>
+        typeof t === 'string'
+          ? []
+          : Array.isArray(t.content)
+            ? flat(t.content)
+            // The alias counts as the class too: `app.css` styles `.token.attribute`, whichever of the two names it came by.
+            : [[t.type, String(t.content)] as const, ...(t.alias ? [t.alias].flat().map((a) => [a, String(t.content)] as const) : [])],
+      );
+    const out = flat(Prism.tokenize('#[on(DecorateChunk, decoration: "dungeon_doors")]\nfn f() {}', Prism.languages.patina));
+    expect(out).toContainEqual(['attribute', '#']);
+    expect(out).toContainEqual(['attribute', 'on']);
+    expect(out).toContainEqual(['string', '"dungeon_doors"']);
+    expect(out).toContainEqual(['class-name-type', 'DecorateChunk']);
+    expect(out.filter(([k]) => k === 'attribute')).toHaveLength(2);
+    expect(flat(Prism.tokenize('#[server]\n#[protected]', Prism.languages.patina)).filter(([k]) => k === 'attribute').map(([, x]) => x))
+      .toEqual(['#', 'server', '#', 'protected']);
+    expect(flat(Prism.tokenize('#![allow]', Prism.languages.patina))).toContainEqual(['attribute', '#!']);
+  });
+
   it('reads `if (` as a keyword, not a call, and a duration as a number', () => {
     const out = types('if (ready) { wait(2s) }');
     expect(out).toContainEqual(['keyword', 'if']);
