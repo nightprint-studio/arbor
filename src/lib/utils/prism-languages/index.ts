@@ -28,6 +28,8 @@ import './dig';
 import './merula';
 import './wgsl';
 import './mermaid';
+// Patina (`.ptn`), the Voriz mod language: ```ptn / ```patina.
+import './patina';
 // Jinja code templates, over the language each one writes.
 import './jinja';
 

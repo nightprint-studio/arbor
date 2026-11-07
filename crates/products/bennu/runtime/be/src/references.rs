@@ -37,7 +37,7 @@ pub struct ReferencesArgs {
 /// its index is still building, or the caret isn't on a referenceable symbol.
 #[arbor_rpc::handler]
 pub(crate) fn bennu_references(
-    _ctx: &BennuState,
+    ctx: &BennuState,
     args: ReferencesArgs,
 ) -> Result<Option<UsagesResult>, String> {
     // A server-backed file answers from its own server. `origin_file` is a Java-only concern
@@ -48,6 +48,10 @@ pub(crate) fn bennu_references(
     }
     // A shader, scoped to its own file — see `wgsl_intel::references` for why not wider.
     if let Some(usages) = crate::wgsl_intel::references(&args.file, &args.source, args.offset) {
+        return Ok(usages);
+    }
+    // A `.ptn`, across its mod.
+    if let Some(usages) = crate::patina_intel::references(ctx, &args.file, &args.source, args.offset) {
         return Ok(usages);
     }
     let service = IndexService::global();

@@ -1182,6 +1182,71 @@ pub struct BuildResult {
     pub diagnostics: Vec<BuildDiagnostic>,
 }
 
+/// One thing a Patina build reports (`bennu_patina_build`). Like [`BuildDiagnostic`] it carries a 1-based line/col so the
+/// Build panel and the Problems list can open the file, plus the byte span the plugin gave and where the problem came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatinaBuildDiagnostic {
+    /// `error` | `warning` | `note`.
+    pub severity: String,
+    /// Who found it: `checker`, `compiler`, `dependency` or `build`.
+    pub origin: String,
+    /// A stable code: `check.not_mut`, `compile.unsupported`, `build.dependency_not_found`…
+    pub code: String,
+    /// The file it is about (forward slashes), when the report has one.
+    pub file: Option<String>,
+    /// 1-based line, when the file could be read and the report had a span.
+    pub line: Option<u32>,
+    /// 1-based column (in characters).
+    pub col: Option<u32>,
+    /// Byte span in the file, when the report had one.
+    pub start: Option<usize>,
+    pub end: Option<usize>,
+    pub message: String,
+}
+
+/// A type that crosses the host boundary and is saved or carried by field name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatinaBuildSchema {
+    /// The path of the type: `mymod::main::Charge`.
+    pub name: String,
+    /// `state`, `state(per_player)`, `event`, `intent`…
+    pub kind: String,
+}
+
+/// What a Patina build found: the real compiler's report on the whole mod. Nothing is produced — a mod is compiled from
+/// sources at every load — so this is the whole result. The raw, readable form of the same thing streams as
+/// `arbor://bennu/build-output`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatinaBuildReport {
+    /// No error among the diagnostics, and the compiler produced a module.
+    pub ok: bool,
+    /// The mod's id from its `manifest.ron`.
+    pub mod_id: String,
+    /// The mod folder that was built (the one with the manifest).
+    pub mod_root: String,
+    pub diagnostics: Vec<PatinaBuildDiagnostic>,
+    /// `.ptn` files compiled.
+    pub files: u32,
+    /// Functions in the compiled module (copies per type and wrappers included).
+    pub functions: u32,
+    pub entries: u32,
+    /// One per entry: `hook voriz::events::StepOn`, `command heal`…
+    pub entry_list: Vec<String>,
+    pub schemas: u32,
+    pub schema_list: Vec<PatinaBuildSchema>,
+    /// The capabilities the compiled functions use (what the manifest has to declare).
+    pub capabilities: Vec<String>,
+    /// The host functions the module imports, by path.
+    pub imports: Vec<String>,
+    /// The mods this one depends on that were found, each `id @ folder`.
+    pub dependencies: Vec<String>,
+    /// Things worth knowing that are not diagnostics (data that could not be read, a step that was skipped).
+    pub warnings: Vec<String>,
+    pub elapsed_ms: u32,
+    /// The one-line summary the Build panel prints: `3 file(s), 12 function(s), 1 entry, 2 schema(s) in 38 ms`.
+    pub summary: String,
+}
+
 /// Per-file timing + diagnostic counts from a project-wide validation
 /// (`bennu_validate_project`). One entry per `.java` file validated.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

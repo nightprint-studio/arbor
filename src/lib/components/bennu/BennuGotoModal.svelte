@@ -58,6 +58,7 @@
   import { lspWorkspaceSymbols, type LspSymbol } from '$lib/ipc/bennu/lsp';
   import { libraryClasses, libraryFiles, openLibraryFile } from '$lib/ipc/bennu/library';
   import { openLibraryClass } from './log-link';
+  import { isPatinaFile } from './file-kind';
   import type { TreeNode } from '$lib/types/bennu';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -481,7 +482,11 @@
     // A one-character query against a large workspace is a lot of rows for no discrimination, and
     // the server has to walk its whole index to produce them.
     if (!root || query.trim().length < 2) return [];
-    const hits = (await lspWorkspaceSymbols(root, query.trim()).catch(() => [])).map(unmangle);
+    // What the backend is asked about: the mod of the `.ptn` file being edited, if that is what is open (a repository can hold Rust and the mods
+    // written for it), else the project folder — which is itself a mod when that is what was opened.
+    const active = projectStore.activeFilePath;
+    const scope = active && isPatinaFile(active) ? active : root;
+    const hits = (await lspWorkspaceSymbols(scope, query.trim()).catch(() => [])).map(unmangle);
     return hits
       .filter((s) => (invert ? !kinds.has(s.kind) : kinds.has(s.kind)))
       .map((s, i) => {
@@ -512,8 +517,11 @@
    *
    *  Gated on the project *kind* rather than on a server being up: the categories are rebuilt from
    *  this, and swapping them as a server starts and stops would change what <kbd>Ctrl</kbd>+<kbd>N</kbd>
-   *  does mid-session. A Java project is untouched by any of this. */
-  const lspBacked = $derived(projectStore.isCargo);
+   *  does mid-session. A Java project is untouched by any of this.
+   *
+   *  A **plain** folder is in as well: it is what a Patina mod opened as a project is, and the Java index has nothing to say about it
+   *  (the backend answers a mod's names through the extension that serves `.ptn`, and an empty list for a folder that is no mod). */
+  const lspBacked = $derived(projectStore.isCargo || projectStore.isPlain);
 
   const categories = $derived.by<NavigateCategory[]>(() => {
     // Read so that changing the reach produces a NEW category list. That identity is what the

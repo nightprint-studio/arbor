@@ -15,7 +15,7 @@
  */
 
 import { EditorView, Decoration, type DecorationSet } from '@codemirror/view';
-import { StateField, RangeSetBuilder, type Extension, type Text } from '@codemirror/state';
+import { StateField, RangeSetBuilder, type EditorState, type Extension, type Text } from '@codemirror/state';
 
 /** The depth palette: matching open/close brackets at nesting depth `d` wear `RAINBOW_COLORS[d % N]`.
  *  Exported so other chrome (the indentation guides) can tint a block's guide the SAME hue as the
@@ -51,8 +51,12 @@ const SINGLE_STRING = 4;
 type Ctx = 0 | 1 | 2 | 3 | 4;
 
 /** Build the bracket decoration set for `doc`: one depth-coloured mark per real bracket
- *  (skipping strings / chars / comments). Returns an empty set past the size cap. */
-function buildDecorations(doc: Text): DecorationSet {
+ *  (skipping strings / chars / comments). Returns an empty set past the size cap.
+ *
+ *  `singleQuote` false: a `'` opens nothing. For a language where it is a label or a lifetime
+ *  (`'outer`, `'a`) rather than a character literal, reading it as a quote swallows every bracket
+ *  up to the next `'` — the block stops being coloured half-way, with no error anywhere. */
+function buildDecorations(doc: Text, singleQuote = true): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   if (doc.length === 0 || doc.length > MAX_CHARS) {
     return builder.finish();
@@ -91,7 +95,7 @@ function buildDecorations(doc: Text): DecorationSet {
           i++;
         } else if (c === '"') {
           ctx = DOUBLE_STRING;
-        } else if (c === "'") {
+        } else if (c === "'" && singleQuote) {
           ctx = SINGLE_STRING;
         } else if (c === '(' || c === '[' || c === '{') {
           // The opener wears its own depth; then we descend.
@@ -119,11 +123,17 @@ RAINBOW_COLORS.forEach((c, i) => {
 });
 const rainbowTheme = EditorView.baseTheme(rainbowThemeSpec);
 
+/** Whether the language at the start of the document reads `'` as a quote. A language says no with
+ *  `rainbowSingleQuote: false` in its language data (Patina, where `'outer` is a label). */
+function singleQuoteOf(state: EditorState): boolean {
+  return state.languageDataAt<boolean>('rainbowSingleQuote', 0)[0] !== false;
+}
+
 /** The rainbow-brackets extension: a doc-driven decoration field plus its colour theme. */
 export function rainbowBrackets(): Extension {
   const field = StateField.define<DecorationSet>({
-    create: (state) => buildDecorations(state.doc),
-    update: (deco, tr) => (tr.docChanged ? buildDecorations(tr.state.doc) : deco),
+    create: (state) => buildDecorations(state.doc, singleQuoteOf(state)),
+    update: (deco, tr) => (tr.docChanged ? buildDecorations(tr.state.doc, singleQuoteOf(tr.state)) : deco),
     provide: (f) => EditorView.decorations.from(f),
   });
   return [field, rainbowTheme];

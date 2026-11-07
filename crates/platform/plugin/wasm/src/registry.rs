@@ -47,6 +47,8 @@ pub struct ExtensionEntry {
     /// Absolute path of the module on disk.
     pub module: PathBuf,
     pub target: WasmTarget,
+    /// The package asked for one live instance across calls (`persistent = true`).
+    pub persistent: bool,
 }
 
 /// Something wrong with a declaration, kept rather than dropped.
@@ -156,7 +158,7 @@ impl ExtensionIndex {
             }
             entries.insert(
                 key.clone(),
-                ExtensionEntry { key, plugin: m.name.clone(), module, target: m.wasm.target },
+                ExtensionEntry { key, plugin: m.name.clone(), module, target: m.wasm.target, persistent: p.persistent },
             );
         }
 
@@ -233,6 +235,7 @@ mod tests {
                 version:   *ver,
                 id:        id.to_string(),
                 module:    module.to_string(),
+                persistent: false,
             });
         }
         m
@@ -264,7 +267,7 @@ mod tests {
         let mut m = pkg(&d, "studio-ini", &[]);
         m.provides.push(Provides {
             interface: "studio-format".into(), version: 1,
-            id: "ini".into(), module: "studio_ini.wasm".into(),
+            id: "ini".into(), module: "studio_ini.wasm".into(), persistent: false,
         });
         let idx = ExtensionIndex::build(&[m], &HashMap::new());
         assert!(idx.resolve("studio-format", 1, "ini").is_none());
@@ -352,4 +355,16 @@ mod tests {
         assert!(matches!(idx.problems()[0], IndexProblem::UnsupportedTarget { .. }));
         std::fs::remove_dir_all(&d).ok();
     }
+
+    #[test]
+    fn persistence_is_opt_in_and_travels_to_the_entry() {
+        let d = scratch("persistent");
+        let mut m = pkg(&d, "patina", &[("language-intel", 1, "ptn", "patina.wasm")]);
+        let idx = ExtensionIndex::build(&[m.clone()], &HashMap::new());
+        assert!(!idx.resolve("language-intel", 1, "ptn").unwrap().persistent, "a package that says nothing gets a fresh instance per call");
+        m.provides[0].persistent = true;
+        let idx = ExtensionIndex::build(&[m], &HashMap::new());
+        assert!(idx.resolve("language-intel", 1, "ptn").unwrap().persistent);
+    }
+
 }

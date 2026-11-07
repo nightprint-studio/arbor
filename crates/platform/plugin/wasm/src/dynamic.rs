@@ -100,6 +100,14 @@ impl WasmHost {
 }
 
 impl DynGuest {
+    /// Tell the guest's `fs` gate which repository is open, for the calls that follow.
+    ///
+    /// The host calls this before **every** call, so a persistent guest is never checked against
+    /// the repository that was open when it was created. See [`crate::fs`].
+    pub fn set_active_repo(&mut self, repo: Option<std::path::PathBuf>) {
+        self.store.data_mut().caps.set_repo(repo);
+    }
+
     /// Every interface this extension exports, and the functions in each.
     ///
     /// Read from the component's own type information rather than from a manifest: a package

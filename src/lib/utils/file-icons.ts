@@ -357,6 +357,41 @@ const hirundoIcon: IconifyIcon = {
     + '</g>',
 };
 
+/**
+ * `.ptn` — Patina, the Voriz mod language.
+ *
+ * A **cog** with a **P** in the middle, as Rust's mark is a cog with an R, and for the same kind of
+ * reason: Rust is iron oxide and a patina is copper oxide, so this is its twin — bare copper teeth
+ * with the green crust coming down from the top. Twelve teeth rather than Rust's twenty-four, so it
+ * does not read as a copy and the teeth survive at 16 px. The P is a single rounded stroke for the
+ * same reason: a filled glyph with a counter closes up at that size.
+ *
+ * The spare mark (a copper tile with the crust dripping) is kept in `docs/icone/` of the Patina
+ * repository, for anything that is not a file type.
+ */
+const patinaIcon: IconifyIcon = {
+  width: 32,
+  height: 32,
+  body:
+    '<defs>'
+    + '<clipPath id="ptn-clip">'
+    + '<path d="M14.13 4.55 L14.70 1.46 L17.30 1.46 L17.87 4.55 A11.6 11.6 0 0 1 20.10 5.15 L22.15 2.76 L24.40 4.06 L23.35 7.02 A11.6 11.6 0 0 1 24.98 8.65 L27.94 7.60 L29.24 9.85 L26.85 11.90 A11.6 11.6 0 0 1 27.45 14.13 L30.54 14.70 L30.54 17.30 L27.45 17.87 A11.6 11.6 0 0 1 26.85 20.10 L29.24 22.15 L27.94 24.40 L24.98 23.35 A11.6 11.6 0 0 1 23.35 24.98 L24.40 27.94 L22.15 29.24 L20.10 26.85 A11.6 11.6 0 0 1 17.87 27.45 L17.30 30.54 L14.70 30.54 L14.13 27.45 A11.6 11.6 0 0 1 11.90 26.85 L9.85 29.24 L7.60 27.94 L8.65 24.98 A11.6 11.6 0 0 1 7.02 23.35 L4.06 24.40 L2.76 22.15 L5.15 20.10 A11.6 11.6 0 0 1 4.55 17.87 L1.46 17.30 L1.46 14.70 L4.55 14.13 A11.6 11.6 0 0 1 5.15 11.90 L2.76 9.85 L4.06 7.60 L7.02 8.65 A11.6 11.6 0 0 1 8.65 7.02 L7.60 4.06 L9.85 2.76 L11.90 5.15 A11.6 11.6 0 0 1 14.13 4.55 Z"/>'
+    + '</clipPath>'
+    + '</defs>'
+    + '<path d="M14.13 4.55 L14.70 1.46 L17.30 1.46 L17.87 4.55 A11.6 11.6 0 0 1 20.10 5.15 L22.15 2.76 L24.40 4.06 L23.35 7.02 A11.6 11.6 0 0 1 24.98 8.65 L27.94 7.60 L29.24 9.85 L26.85 11.90 A11.6 11.6 0 0 1 27.45 14.13 L30.54 14.70 L30.54 17.30 L27.45 17.87 A11.6 11.6 0 0 1 26.85 20.10 L29.24 22.15 L27.94 24.40 L24.98 23.35 A11.6 11.6 0 0 1 23.35 24.98 L24.40 27.94 L22.15 29.24 L20.10 26.85 A11.6 11.6 0 0 1 17.87 27.45 L17.30 30.54 L14.70 30.54 L14.13 27.45 A11.6 11.6 0 0 1 11.90 26.85 L9.85 29.24 L7.60 27.94 L8.65 24.98 A11.6 11.6 0 0 1 7.02 23.35 L4.06 24.40 L2.76 22.15 L5.15 20.10 A11.6 11.6 0 0 1 4.55 17.87 L1.46 17.30 L1.46 14.70 L4.55 14.13 A11.6 11.6 0 0 1 5.15 11.90 L2.76 9.85 L4.06 7.60 L7.02 8.65 A11.6 11.6 0 0 1 8.65 7.02 L7.60 4.06 L9.85 2.76 L11.90 5.15 A11.6 11.6 0 0 1 14.13 4.55 Z" fill="#cf8450"/>'
+    + '<g clip-path="url(#ptn-clip)" fill="#3da58a">'
+    + '<rect x="0" y="0" width="32" height="10"/>'
+    + '<circle cx="5" cy="9.5" r="3"/>'
+    + '<circle cx="11" cy="10.5" r="3.3"/>'
+    + '<circle cx="19.5" cy="9.8" r="3.2"/>'
+    + '<circle cx="26.5" cy="9.6" r="3"/>'
+    + '<rect x="10" y="10" width="2.6" height="5" rx="1.3"/>'
+    + '<rect x="24.6" y="10" width="2.4" height="3.6" rx="1.2"/>'
+    + '</g>'
+    + '<circle cx="16" cy="16" r="9.4" fill="#1b4a42"/>'
+    + '<path d="M12.5 21.6V10.4h4.3c2.5 0 3.9 1.4 3.9 3.5s-1.4 3.5-3.9 3.5h-4.3" fill="none" stroke="#e7f8f2" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>',
+};
+
 /** lowercase extension → icon */
 const EXT_ICONS: Record<string, IconifyIcon> = {
   // Le tre di casa: vedi sopra.
@@ -415,6 +450,7 @@ const EXT_ICONS: Record<string, IconifyIcon> = {
   xz: zipIcon, rar: zipIcon, '7z': zipIcon, tgz: zipIcon,
   sql: sqlIcon, sqlite: sqlIcon, sqlite3: sqlIcon,
   ron: ronIcon,
+  ptn: patinaIcon,
   http: hirundoIcon, rest: hirundoIcon,
   wgsl: wgslIcon,
   glsl: glslIcon, vert: glslIcon, frag: glslIcon, comp: glslIcon,

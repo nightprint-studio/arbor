@@ -83,7 +83,7 @@ fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<Compl
         ),
         None => Vec::new(),
     };
-    let engine = crate::postfix_templates::merge(engine_completion(&args)?, postfix);
+    let engine = crate::postfix_templates::merge(engine_completion(_ctx, &args)?, postfix);
     Ok(match abbreviations.is_empty() {
         true => engine,
         false => abbreviations.into_iter().chain(engine).collect(),
@@ -91,7 +91,7 @@ fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<Compl
 }
 
 /// What the engine that owns the file answers — the half of completion that is not abbreviations.
-fn engine_completion(args: &CompletionArgs) -> Result<Vec<CompletionItem>, String> {
+fn engine_completion(ctx: &BennuState, args: &CompletionArgs) -> Result<Vec<CompletionItem>, String> {
     // A language server needs the live buffer to answer at all — the caret offset is in its
     // coordinates. Without one there is nothing to ask, and falling through to the Java index
     // for a `.rs` file would be worse than answering nothing.
@@ -115,6 +115,13 @@ fn engine_completion(args: &CompletionArgs) -> Result<Vec<CompletionItem>, Strin
     // a fragment shader.
     if let Some(items) =
         crate::wgsl_intel::completion(&args.file, args.offset, args.source.as_deref())
+    {
+        return Ok(items);
+    }
+    // A `.ptn`, answered by the `language-intel` extension that serves it. Before the index for the same reason
+    // as the shader: the Java engine would offer Java members inside a mod script.
+    if let Some(items) =
+        crate::patina_intel::completion(ctx, &args.file, args.offset, args.source.as_deref())
     {
         return Ok(items);
     }
@@ -202,7 +209,7 @@ pub(crate) fn bennu_diagnostics(
     };
     let file = args.file.clone();
     let source = args.source.clone();
-    let mut diags = route_diagnostics(args)?;
+    let mut diags = route_diagnostics(_ctx, args)?;
     diags.extend(naming);
     diags.extend(encoding);
 
@@ -220,7 +227,7 @@ pub(crate) fn bennu_diagnostics(
 
 /// The file's own diagnostics: whichever single route claims it (language server, manifest, shader,
 /// JSP actions, or the Java validator) answers, and the others are not consulted.
-fn route_diagnostics(args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
+fn route_diagnostics(ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
     // A language-server-backed file first. Its diagnostics are **pushed** by the server (for
     // Rust they arrive when `cargo check` finishes, seconds after a save), so this call reads the
     // last publish rather than computing anything — which is why it is cheap enough to sit on the
@@ -245,6 +252,10 @@ fn route_diagnostics(args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
     // `wgsl-analyzer` knows about the whole composed module and this knows about one file,
     // so when the server is installed it wins. This is what a shader gets without it.
     if let Some(diags) = crate::wgsl_intel::diagnostics(&args.file, args.source.as_deref()) {
+        return Ok(diags);
+    }
+    // A `.ptn`: syntax, names, types, contexts and capabilities, from the extension that serves it.
+    if let Some(diags) = crate::patina_intel::diagnostics(ctx, &args.file, args.source.as_deref()) {
         return Ok(diags);
     }
     // A `.ron`: syntax everywhere, and a check against the Rust type its directive names on the

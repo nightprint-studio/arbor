@@ -505,10 +505,12 @@ function createProjectStore() {
     const activeRoot = project?.root;
     // Mid-restore, demo and nothing-on-screen each have their own answer — see `composeSnapshot`.
     const early = composeSnapshot({ restoring, isDemo, activeRoot, live: [], unopened, wantedRoot, canon: canonPath });
-    if (restoring || isDemo || !activeRoot) return early;
+    if (restoring || isDemo) return early;
     // The ACTIVE root comes from the live flat state, the rest from their stashed sessions.
-    // `workspaceRoots` always includes the active root.
-    const roots = workspaceRoots.includes(activeRoot) ? workspaceRoots : [activeRoot];
+    // `workspaceRoots` always includes the active root. With nothing on screen the members can still
+    // be there (a project moved into an empty workspace is attached without taking the screen), and
+    // they are part of the session: leaving them out is how a move into one was lost.
+    const roots = !activeRoot ? workspaceRoots : workspaceRoots.includes(activeRoot) ? workspaceRoots : [activeRoot];
     // The carets ride alongside the tab list, one slot per tab — see `ProjectSession.open_carets`
     // for why it is a parallel array and not a table.
     const caretsFor = (paths: string[]) =>

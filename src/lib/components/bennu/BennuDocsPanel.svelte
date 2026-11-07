@@ -101,6 +101,7 @@
   import Bevy              from './docs/Bevy.svelte';
   import BevyRemote        from './docs/BevyRemote.svelte';
   import Shaders           from './docs/Shaders.svelte';
+  import Patina            from './docs/Patina.svelte';
   import Profiler          from './docs/Profiler.svelte';
   import Live              from './docs/Live.svelte';
   // Build, run & test
@@ -228,6 +229,7 @@
       { id: 'bevy',    label: 'Bevy ECS',       icon: Gamepad2 },
       { id: 'bevy-remote', label: 'Bevy Remote',  icon: Gamepad2 },
       { id: 'shaders', label: 'Shaders (WGSL)', icon: Palette  },
+      { id: 'patina',  label: 'Patina (Voriz mods)', icon: FileType2 },
     ] },
     { id: 'run', label: 'Build, run & test', icon: Play, items: [
       { id: 'running',      label: 'Building & running',     icon: Play         },
@@ -318,6 +320,7 @@
     'bevy':              Bevy,
     'bevy-remote':       BevyRemote,
     'shaders':           Shaders,
+    'patina':            Patina,
     'running':           Running,
     'profiler':          Profiler,
     'live':              Live,

@@ -38,6 +38,7 @@
   import BennuRunConfigSelect from './BennuRunConfigSelect.svelte';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { isPatinaPath } from '$lib/stores/bennu/patina-build';
   import McpProjectRuleModal from '$lib/components/shared/McpProjectRuleModal.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -124,7 +125,7 @@
    *  main action + Ctrl+F9. */
   function buildProject() {
     const root = projectStore.project?.root;
-    if (root) void bennuRunStore.runPreferred(root);
+    if (root) void bennuRunStore.runPreferred(root, projectStore.activeFilePath);
   }
   /** Pick a build type from the split dropdown: make it the default AND run it now. */
   function selectBuild(type: BuildType) {
@@ -140,7 +141,9 @@
   // plain button rather than offering a Java-only alternative next to it.
   const buildType = $derived(bennuRunStore.preferredBuildType);
   const buildLabel = $derived(
-    isCargo
+    isPatinaPath(projectStore.activeFilePath)
+      ? 'Build Patina mod'
+      : isCargo
       ? 'Check project (cargo check)'
       : buildType === 'validate'
         ? 'Validate project (no compile)'

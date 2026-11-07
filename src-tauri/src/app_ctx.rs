@@ -85,7 +85,7 @@ impl AppCtx for TauriAppCtx {
             .map_err(|e| format!("arbor.ext.call: {e}"))?;
         tracing::debug!("[{plugin}] ext.call {}@{}/{} {}",
             spec.interface, spec.version, spec.id, spec.method);
-        let out = crate::ext::call(&spec)?;
+        let out = crate::ext::call(&spec, crate::ext::active_repo(&self.handle))?;
         serde_json::to_string(&out).map_err(|e| e.to_string())
     }
 
@@ -98,7 +98,7 @@ impl AppCtx for TauriAppCtx {
         let (spec, file) = ext_file_specs("arbor.ext.call_to_file", spec_json, file_json)?;
         tracing::debug!("[{plugin}] ext.call_to_file {}@{}/{} {} -> {}",
             spec.interface, spec.version, spec.id, spec.method, file.path);
-        crate::ext::call_to_file(&spec, &file)
+        crate::ext::call_to_file(&spec, &file, crate::ext::active_repo(&self.handle))
     }
 
     fn ext_call_from_file(
@@ -110,7 +110,7 @@ impl AppCtx for TauriAppCtx {
         let (spec, file) = ext_file_specs("arbor.ext.call_from_file", spec_json, file_json)?;
         tracing::debug!("[{plugin}] ext.call_from_file {}@{}/{} {} <- {}",
             spec.interface, spec.version, spec.id, spec.method, file.path);
-        let out = crate::ext::call_from_file(&spec, &file)?;
+        let out = crate::ext::call_from_file(&spec, &file, crate::ext::active_repo(&self.handle))?;
         serde_json::to_string(&out).map_err(|e| e.to_string())
     }
 

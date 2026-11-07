@@ -926,6 +926,9 @@ input[type="radio"]:disabled {
    text on purpose: it IS a call, and it is not one you wrote. Same token as the editor's own
    `cm-tok-builtin`. */
 .token.builtin                      { color: var(--syntax-builtin, #8888c6); }
+/* A primitive type (`int`, `fx`, `bool` in Patina): apart from keywords and from other types. Same variable and
+   fallback as the editor's `primitiveType` tag in `bennu/patina-lang.ts`. */
+.token.primitive-type               { color: var(--syntax-primitive, color-mix(in srgb, var(--syntax-type, #4d78cc) 50%, var(--syntax-string, #6a9956))); }
 /* `$splice` in merula, `$VAR` in a shell fence, `@name` in others. */
 .token.variable                     { color: var(--syntax-field,   #9876aa); }
 /* A note name in a merula fence (`c3`, `eb2`, `~`) — the same warm colour the DAW's own

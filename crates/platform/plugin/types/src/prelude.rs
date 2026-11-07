@@ -27,6 +27,10 @@ pub use crate::credentials::{
     account as credential_account, account_for as credential_account_for,
     belongs_to as credential_belongs_to, CredentialError, PLUGIN_PREFIX,
 };
+pub use crate::fs_scope::{
+    allowed_roots as fs_allowed_roots, is_unrestricted as fs_is_unrestricted,
+    lexical_clean, resolve_in_scope as fs_resolve_in_scope, FsScopeDenial,
+};
 pub use crate::manifest::{Manifest, ManifestParseError, ManifestParseFailure};
 pub use crate::network::{
     check as network_check, host_allowed, host_of, NetworkDenial,

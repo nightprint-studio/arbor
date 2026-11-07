@@ -34,7 +34,7 @@ pub struct DeclarationArgs {
 /// the declaration lives in a JDK / dep-jar (no project source to open).
 #[arbor_rpc::handler]
 fn bennu_declaration(
-    _ctx: &BennuState,
+    ctx: &BennuState,
     args: DeclarationArgs,
 ) -> Result<Option<DeclarationTarget>, String> {
     // A language-server-backed file (a `.rs` in a Cargo workspace) is answered by its server.
@@ -48,6 +48,10 @@ fn bennu_declaration(
     // anything as Java, so an identifier that happens to exist in the Java index becomes a
     // confident jump into the wrong file.
     if let Some(target) = crate::wgsl_intel::declaration(&args.file, &args.source, args.offset) {
+        return Ok(target);
+    }
+    // A `.ptn`, across its mod. Before the index for the same reason as the shader.
+    if let Some(target) = crate::patina_intel::declaration(ctx, &args.file, &args.source, args.offset) {
         return Ok(target);
     }
     Ok(IndexService::global().declaration(&args.file, &args.source, args.offset))

@@ -91,6 +91,7 @@ import { isPomFile } from '$lib/ipc/bennu/maven';
 import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
 import { devLanguage } from './dig/dev-lang';
+import { patinaLanguage, patinaHighlight } from './patina-lang';
 import { merulaLanguage } from './merula-lang';
 import { jinjaExtension } from './jinja-lang';
 import { isJinjaFile, jinjaInnerLanguage } from '$lib/utils/jinja-words';
@@ -383,7 +384,12 @@ const jsonDesc = cmLang('json', jsonLang());
  * and its info string on its own; it simply has nothing to hand the body to unless it is given
  * languages.
  */
-const markdownDesc = cmLang('markdown', markdown({ codeLanguages: [...MARKDOWN_FENCE_LANGUAGES] }));
+const markdownDesc = cmLang('markdown', [
+  markdown({ codeLanguages: [...MARKDOWN_FENCE_LANGUAGES] }),
+  // Nested languages bring no extensions of their own: the style for Patina's custom tags (the italic associated call)
+  // has to be on the host, or a ```ptn fence would lose it.
+  patinaHighlight,
+]);
 /**
  * Dockerfile — matched by NAME, because that is how the file is written: `Dockerfile`, and then
  * `Dockerfile.dev` / `Dockerfile.jvm` once a project has more than one. `.dockerfile` as a suffix
@@ -508,6 +514,9 @@ function baseLanguageForPath(path: string | null): LanguageDescriptor {
     // geode's playtest scenarios: a batch of console commands, not a program. Shape from a local
     // stream mode, correctness from `nd-dig-lsp` — see `dig/dev-lang.ts`.
     case 'dev': return devLanguage;
+    // Patina, the Voriz mod language: shape from a local stream mode, everything else from the
+    // `language-intel` extension that serves `.ptn` — see `patina-lang.ts`.
+    case 'ptn': return patinaLanguage;
     // Merula's own grammar, not a second one — see `merula-lang.ts`. Highlight, folding and
     // comment toggle only: completion and hover need the DSL catalogue, which lives behind
     // `merula-be`, and spawning that backend to open a text file is a bigger decision than

@@ -131,6 +131,9 @@ mod ron_intel;
 // The profiler: record a JVM (JFR) / Node / native program, read the recording back as a call tree,
 // and serve per-file numbers to the editor's inline hints. Parsing lives in `bennu-profile`.
 mod profiler;
+// A `.ptn` (Patina, the Voriz mod language): every question goes to the `language-intel` extension that serves
+// the extension, with the whole mod in the request. See the module.
+mod patina_intel;
 mod shader_mesh;
 mod shader_render;
 mod shader_uniform;

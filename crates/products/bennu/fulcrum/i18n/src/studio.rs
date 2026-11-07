@@ -46,19 +46,60 @@ pub struct Bundle {
     pub root: String,
     /// The directory name — `it`, `en`.
     pub lang: String,
-    /// The file name without `.toml`, which is the label's category.
+    /// The file name without `.toml`, which is the label's category. For a document, the folder.
     pub category: String,
+    /// A `.md` document (`i18n/<lang>/<category>/…/<key>.md`) rather than a `.toml` category file.
+    /// Its whole content is one translation, taken literally.
+    pub document: bool,
+    /// The key within the category. Set for a document only: a `.toml` has many, found in the text.
+    pub key: Option<String>,
 }
 
-/// `Some` only for a **category** file, `i18n/<lang>/<category>.toml`.
+/// `Some` only for a **category** file, `i18n/<lang>/<category>.toml`, or a **document**,
+/// `i18n/<lang>/<category>/…/<key>.md`.
 ///
 /// `languages.toml`, `styles.toml` and `glossary.toml` are not translations: they declare what a
 /// translation may name. Nothing deeper than one level is either — the engine does not load it.
 pub fn bundle_of(path: &str) -> Option<Bundle> {
     let place = place_of(path)?;
     match place.kind {
-        FileKind::Category { lang, category } => Some(Bundle { root: place.root, lang, category }),
+        FileKind::Category { lang, category } => {
+            Some(Bundle { root: place.root, lang, category, document: false, key: None })
+        }
+        FileKind::Document { lang, category, key } => {
+            Some(Bundle { root: place.root, lang, category, document: true, key: Some(key) })
+        }
         _ => None,
+    }
+}
+
+/// Every translation `text` declares for the file at `path`: the strings of a `.toml`, or the one
+/// value a `.md` document is.
+pub fn values_of(path: &str, text: &str) -> Vec<LiveValue> {
+    match bundle_of(path) {
+        Some(Bundle { document: true, key: Some(key), .. }) => vec![document_value(key, text)],
+        Some(_) => live_values(text),
+        None => Vec::new(),
+    }
+}
+
+/// The translation under the caret in the file at `path`. In a document that is the whole file,
+/// wherever the caret is.
+pub fn value_at(path: &str, text: &str, at: usize) -> Option<LiveValue> {
+    match bundle_of(path)? {
+        Bundle { document: true, key: Some(key), .. } => Some(document_value(key, text)),
+        _ => live_value_at(text, at),
+    }
+}
+
+fn document_value(key: String, text: &str) -> LiveValue {
+    LiveValue {
+        key,
+        raw: text.to_string(),
+        content_start: Some(0),
+        value_start: 0,
+        value_end: text.len(),
+        line: 1,
     }
 }
 
@@ -264,6 +305,8 @@ pub struct StudioView {
     pub controls: Vec<String>,
     pub has_stylesheet: bool,
     pub has_glossary: bool,
+    /// The value is a whole `.md` document, taken literally: no markup to write, nothing to parse.
+    pub document: bool,
 }
 
 /// The panel's data for the caret at `at` in `path`, or `None` when that caret is not on a
@@ -274,9 +317,14 @@ pub struct StudioView {
 /// is selected. Distinguishing them would be three empty states for one gesture.
 pub fn studio_view(cat: &LabelCatalog, path: &str, source: &str, at: usize) -> Option<StudioView> {
     let bundle = bundle_of(path)?;
-    let live = live_value_at(source, at)?;
+    let live = value_at(path, source, at)?;
     let label = format!("{}:{}", bundle.category, live.key);
-    let parsed = markup::parse_markup(&live.raw);
+    // A document is shown as written: the engine does not run it through the markup parser, so a
+    // brace in a wiki page must not turn into a placeholder here.
+    let parsed = markup::Parsed {
+        segments: crate::catalog::literal_or_markup(&live.raw, bundle.document),
+        problems: if bundle.document { Vec::new() } else { markup::parse_markup(&live.raw).problems },
+    };
     let params = markup::placeholders(&parsed.segments);
 
     let decls = cat.declarations(&label);
@@ -293,7 +341,7 @@ pub fn studio_view(cat: &LabelCatalog, path: &str, source: &str, at: usize) -> O
         .take(MAX_SIBLINGS)
         .map(|l| match cat.declaration_in(&label, &l.code) {
             Some(d) => {
-                let segs = markup::parse_markup(&d.value).segments;
+                let segs = d.segments();
                 Sibling {
                     lang: l.code.clone(),
                     name: l.name.clone(),
@@ -317,7 +365,16 @@ pub fn studio_view(cat: &LabelCatalog, path: &str, source: &str, at: usize) -> O
                 params: Vec::new(),
                 // Where it would go. The layout is the engine's own, so this is a fact about the
                 // tree rather than a guess — and the file may not exist yet, which is the point.
-                file: format!("{}/{}/{}.toml", bundle.root, l.code, bundle.category),
+                file: match &bundle.key {
+                    Some(key) => format!(
+                        "{}/{}/{}/{}.md",
+                        bundle.root,
+                        l.code,
+                        bundle.category,
+                        key.replace('.', "/")
+                    ),
+                    None => format!("{}/{}/{}.toml", bundle.root, l.code, bundle.category),
+                },
                 offset: 0,
                 line: 0,
             },
@@ -345,6 +402,7 @@ pub fn studio_view(cat: &LabelCatalog, path: &str, source: &str, at: usize) -> O
         controls: cat.controls().to_vec(),
         has_stylesheet: cat.has_stylesheet(),
         has_glossary: cat.has_glossary_file(),
+        document: bundle.document,
     })
 }
 
@@ -387,6 +445,19 @@ enabled = true
             assert!(bundle_of(other).is_none(), "{other} declares, it does not translate");
         }
         assert!(bundle_of("/p/src/main.rs").is_none());
+    }
+
+    #[test]
+    fn a_markdown_document_in_a_language_folder_is_a_bundle_with_a_dotted_key() {
+        let b = bundle_of("/p/i18n/it/wiki/creature/ragno.md").expect("a document");
+        assert!(b.document);
+        assert_eq!((b.lang.as_str(), b.category.as_str()), ("it", "wiki"));
+        assert_eq!(b.key.as_deref(), Some("creature.ragno"));
+        // Hidden names are skipped by the engine; a `.md` outside a language folder is not loaded.
+        assert!(bundle_of("/p/i18n/it/wiki/.nota.md").is_none());
+        assert!(bundle_of("/p/i18n/it/.bozze/x.md").is_none());
+        assert!(bundle_of("/p/i18n/it/zaino.md").is_none());
+        assert!(bundle_of("/p/README.md").is_none());
     }
 
     #[test]
@@ -461,7 +532,8 @@ enabled = true
     fn a_glossary_key_the_project_lacks_is_coloured_as_unknown() {
         let cat = catalog("a = '@potion{una pozione} @elixir{x}'\n", "");
         let spans = markup_spans(&cat, "a = '@potion{una pozione} @elixir{x}'\n");
-        assert_eq!(spans.iter().filter(|s| s.kind == GLOSSARY).count(), 1);
+        // `super::GLOSSARY`: the test module's own `GLOSSARY` is the glossary FILE, and shadows the kind.
+        assert_eq!(spans.iter().filter(|s| s.kind == super::GLOSSARY).count(), 1);
         assert_eq!(spans.iter().filter(|s| s.kind == GLOSSARY_UNKNOWN).count(), 1);
     }
 

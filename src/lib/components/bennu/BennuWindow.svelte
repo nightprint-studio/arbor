@@ -211,6 +211,7 @@
   import BennuI18nPanel from './BennuI18nPanel.svelte';
   import { isI18nBundle } from './i18n/bundle-path';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { isPatinaPath } from '$lib/stores/bennu/patina-build';
   import { bennuCargoStore } from '$lib/stores/bennu/cargo.svelte';
   import { javaLevelStore } from '$lib/stores/bennu/java-level.svelte';
   import { emptyInvocation as emptyCargoInvocation } from '$lib/ipc/bennu/cargo';
@@ -707,10 +708,16 @@
   }
 
   // ── Build / Run triggers (mirror the titlebar; shared by keybindings + palette) ─
-  /** Ctrl+F9 / palette Build — runs the preferred build type (Maven compile or validation). */
+  /** Ctrl+F9 / palette Build — runs the preferred build type (Maven compile or validation); with a `.ptn` file active, the Patina mod's build. */
   function triggerBuild() {
     const root = projectStore.project?.root;
-    if (root) void bennuRunStore.runPreferred(root);
+    if (root) void bennuRunStore.runPreferred(root, projectStore.activeFilePath);
+  }
+  /** Palette "Build Patina mod" — the real compiler on the whole mod of the active `.ptn` file. */
+  function triggerBuildPatina() {
+    const root = projectStore.project?.root;
+    const file = projectStore.activeFilePath;
+    if (root && isPatinaPath(file)) void bennuRunStore.buildPatinaMod(root, file!);
   }
   /** Palette "Validate project" — the whole-project validation without compiling. */
   function triggerValidate() {
@@ -2319,6 +2326,8 @@
     const runItems = [
       { id: 'build', title: javaTools ? 'Build project' : 'Check project (cargo check)', icon: 'Hammer', shortcut: 'Ctrl+F9',
         action: () => run(triggerBuild), when: idle },
+      { id: 'build-patina', title: 'Build Patina mod', icon: 'Hammer',
+        action: () => run(triggerBuildPatina), when: idle && isPatinaPath(projectStore.activeFilePath) },
       { id: 'validate', title: 'Validate project (no compile)', icon: 'ListChecks',
         action: () => run(triggerValidate), when: idle && javaTools },
       { id: 'run', title: 'Run', icon: 'Play', shortcut: 'Shift+F10',

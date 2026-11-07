@@ -18,7 +18,7 @@
 import { bennu } from '../rpc';
 import type {
   ProjectInfo, TreeNode, ReadFileResult, CapabilitySet, CompletionItem, Diagnostic,
-  BuildResult, ProjectValidationResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats,
+  BuildResult, PatinaBuildReport, ProjectValidationResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats,
   FileDiagnostics, FileStamp, MainClassEntry, RunConfigSetDto, SourceEdit,
 } from '$lib/types/bennu';
 import type { HoverInfo } from './nav';
@@ -281,6 +281,15 @@ export function isSupersededError(err: unknown): boolean {
  *  `BuildArgs { root, module? }`. */
 export function build(root: string, module = ''): Promise<BuildResult> {
   return bennu('bennu_build', { args: { root, module } });
+}
+
+/** Compile a Patina mod with the real compiler and get everything it reports (checker and compiler diagnostics, counts,
+ *  capabilities, host imports, schemas, dependencies). `path` is a `.ptn` file of the mod or the mod folder; the nearest folder
+ *  above it with a `manifest.ron` and `.ptn` sources under `script/` is built. Nothing is produced: a mod is compiled from sources at every
+ *  load. The readable output streams as `arbor://bennu/build-output`. Rejects with a sentence when the Patina package is missing or
+ *  predates `build`. Wire: `bennu_patina_build` — `PatinaBuildArgs { path }`. */
+export function patinaBuild(path: string): Promise<PatinaBuildReport> {
+  return bennu('bennu_patina_build', { args: { path } });
 }
 
 /** Validate the WHOLE project without compiling: walk every `.java`, run the editor's per-file

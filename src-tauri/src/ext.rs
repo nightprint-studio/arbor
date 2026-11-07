@@ -31,11 +31,25 @@
 //! ## Cost
 //!
 //! Every call instantiates. The **compile** is cached by the engine, which is the expensive
-//! half; instantiating is cheap and gives each call a fresh store, which is the isolation. A
-//! caller that needs a hot instance across many calls is a caller that should be told about
-//! it, not one that should be served silently by a shared mutable guest.
+//! half; instantiating is cheap and gives each call a fresh store, which is the isolation.
+//!
+//! ## Unless the package asks to stay up
+//!
+//! `persistent = true` on a `[[provides]]` keeps **one** instance alive across calls, so a guest
+//! can keep work between them — a language backend keeps its index and re-reads only the files
+//! that changed, instead of rebuilding a whole project on every keystroke. Opt-in, and declared
+//! by the package, because a guest written for a fresh store may hold state it never expected to
+//! outlive a call: serving it silently from a shared mutable instance would change what it means.
+//!
+//! The live instance is the host's to drop, and the guest must answer correctly from a fresh one:
+//! it goes when the plugin set moves ([`forget_compiled`]), when a call fails (a trap can leave a
+//! store half-written, and telling a trap from the guest's own `Err` is not worth the risk), and
+//! when it has sat idle for [`IDLE`]. Calls to one instance are serialised by its lock.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use arbor_plugin_wasm::prelude::{
     DynGuest, ExtensionEntry, ExtensionIndex, GuestCaps, InterfaceSurface, Services,
@@ -137,6 +151,18 @@ fn envelope(
     Ok((caps, services))
 }
 
+/// The repository open in Arbor right now — what a guest's `fs` gate treats as its sandbox.
+///
+/// The shell's cached active-tab path, the same value the Lua host seeds `__arbor_current_repo__`
+/// from. Read here, per call, and handed to the guest by the caller: a guest cannot name it, and a
+/// persistent one is never judged against the repository it was created under.
+pub fn active_repo(app: &tauri::AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    let state = app.state::<crate::AppState>();
+    let path = state.active_repo_path.lock().ok()?.clone()?;
+    Some(PathBuf::from(path))
+}
+
 /// Every installed extension and the functions it exports.
 ///
 /// A module that will not instantiate is listed with empty `exports` rather than dropped:
@@ -213,12 +239,33 @@ fn resolve_export(
     }
 }
 
-/// Open the guest a spec addresses, and resolve which of its exports to look in.
+/// Bring up the guest an entry names, and resolve which of its exports to look in.
+fn open_entry(
+    entry: &ExtensionEntry,
+    manifests: &[arbor_plugin_types::prelude::Manifest],
+    spec: &CallSpec,
+) -> Result<(DynGuest, Option<String>), String> {
+    let (caps, services) = envelope(entry, manifests)?;
+    let host = crate::plugin_wasm::engine().map_err(|e| e.to_string())?;
+    let guest = host
+        .open_dynamic(&entry.module, caps, services)
+        .map_err(|e| format!("'{}' would not start: {e}", entry.plugin))?;
+
+    let exports = guest.surface(host.engine());
+    let export = resolve_export(&exports, &spec.interface, spec.export.as_deref())?;
+    Ok((guest, export))
+}
+
+/// Run `f` on the guest a spec addresses: a fresh one, or the live one of a persistent package.
 ///
 /// The three entry points below differ only in what they do with the call's bytes; getting to
 /// the call is the same every time, and a second copy of it would be a second place for the
 /// "not installed / would not start / which export" messages to drift.
-fn open(spec: &CallSpec) -> Result<(DynGuest, Option<String>), String> {
+fn with_guest<R>(
+    spec: &CallSpec,
+    repo: Option<PathBuf>,
+    f: impl FnOnce(&mut DynGuest, Option<&str>) -> Result<R, String>,
+) -> Result<R, String> {
     let (index, manifests) = index().ok_or("plugins could not be read")?;
     let entry = index
         .resolve(&spec.interface, spec.version, &spec.id)
@@ -228,22 +275,43 @@ fn open(spec: &CallSpec) -> Result<(DynGuest, Option<String>), String> {
                 spec.interface, spec.version, spec.id
             )
         })?;
+    if !entry.persistent {
+        let (mut guest, export) = open_entry(entry, &manifests, spec)?;
+        guest.set_active_repo(repo);
+        return f(&mut guest, export.as_deref());
+    }
 
-    let (caps, services) = envelope(entry, &manifests)?;
-    let host = crate::plugin_wasm::engine().map_err(|e| e.to_string())?;
-    let mut guest = host
-        .open_dynamic(&entry.module, caps, services)
-        .map_err(|e| format!("'{}' would not start: {e}", entry.plugin))?;
-
-    let exports = guest.surface(host.engine());
-    let export = resolve_export(&exports, &spec.interface, spec.export.as_deref())?;
-    Ok((guest, export))
+    let key = live_key(entry, spec);
+    let live = match live_get(&key) {
+        Some(l) => l,
+        // Brought up outside the table's lock: instantiating takes milliseconds, and every other
+        // extension call would wait on it. Two callers racing here each build one; the second
+        // insert wins and the first instance serves its one call and goes.
+        None => {
+            let (guest, export) = open_entry(entry, &manifests, spec)?;
+            let l = Arc::new(Live { slot: Mutex::new((guest, export)), last_used: Mutex::new(Instant::now()) });
+            live_table().lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), l.clone());
+            l
+        }
+    };
+    let result = {
+        let mut slot = live.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let (guest, export) = &mut *slot;
+        // Before every call, not only when the instance is created: a live guest outlives tab
+        // switches, and its `fs` gate must follow the repository that is open now.
+        guest.set_active_repo(repo);
+        f(guest, export.as_deref())
+    };
+    *live.last_used.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
+    if result.is_err() {
+        live_table().lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+    }
+    result
 }
 
 /// Call one function on one extension.
-pub fn call(spec: &CallSpec) -> Result<Json, String> {
-    let (mut guest, export) = open(spec)?;
-    guest.call(export.as_deref(), &spec.method, &spec.args)
+pub fn call(spec: &CallSpec, repo: Option<PathBuf>) -> Result<Json, String> {
+    with_guest(spec, repo, |guest, export| guest.call(export, &spec.method, &spec.args))
 }
 
 /// Call one function and write its bytes to a local file. Returns how many were written.
@@ -255,11 +323,10 @@ pub fn call(spec: &CallSpec) -> Result<Json, String> {
 ///
 /// It is also what keeps the host out of the domain. Arbor is not learning what a download is;
 /// it is writing the result of a call it knows nothing about into a path the caller named.
-pub fn call_to_file(spec: &CallSpec, file: &FileSpec) -> Result<u64, String> {
+pub fn call_to_file(spec: &CallSpec, file: &FileSpec, repo: Option<PathBuf>) -> Result<u64, String> {
     use std::io::Write;
 
-    let (mut guest, export) = open(spec)?;
-    let bytes = guest.call_to_bytes(export.as_deref(), &spec.method, &spec.args)?;
+    let bytes = with_guest(spec, repo, |guest, export| guest.call_to_bytes(export, &spec.method, &spec.args))?;
 
     let path = std::path::Path::new(&file.path);
     if let Some(parent) = path.parent() {
@@ -282,7 +349,7 @@ pub fn call_to_file(spec: &CallSpec, file: &FileSpec) -> Result<u64, String> {
 /// The upload direction of [`call_to_file`], and the same reasoning: an argument that is a blob
 /// has no business being a JSON array. `offset` / `length` are what make a chunked upload
 /// possible without the caller holding the whole file.
-pub fn call_from_file(spec: &CallSpec, file: &FileSpec) -> Result<Json, String> {
+pub fn call_from_file(spec: &CallSpec, file: &FileSpec, repo: Option<PathBuf>) -> Result<Json, String> {
     use std::io::{Read, Seek, SeekFrom};
 
     let bytes_at = byte_arg_index(file.file_arg, spec.args.len())?;
@@ -301,8 +368,44 @@ pub fn call_from_file(spec: &CallSpec, file: &FileSpec) -> Result<Json, String> 
     };
     read.map_err(|e| format!("arbor.ext.call_from_file {}: {e}", file.path))?;
 
-    let (mut guest, export) = open(spec)?;
-    guest.call_with_bytes(export.as_deref(), &spec.method, &spec.args, bytes_at, &bytes)
+    with_guest(spec, repo, |guest, export| guest.call_with_bytes(export, &spec.method, &spec.args, bytes_at, &bytes))
+}
+
+// ── live instances (`persistent = true`) ─────────────────────────────────────────
+
+/// How long a live instance may sit unused before it is dropped. Long enough to span a pause in
+/// typing; short enough that a package nobody is using does not keep its memory forever.
+pub(crate) const IDLE: Duration = Duration::from_secs(10 * 60);
+
+/// One live instance and when it last answered.
+struct Live {
+    slot: Mutex<(DynGuest, Option<String>)>,
+    last_used: Mutex<Instant>,
+}
+
+fn live_table() -> &'static Mutex<HashMap<String, Arc<Live>>> {
+    static LIVE: OnceLock<Mutex<HashMap<String, Arc<Live>>>> = OnceLock::new();
+    LIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The key is the provider **and the module path**: a package moved or reinstalled elsewhere is
+/// a different instance, never the old one answering for the new file.
+fn live_key(entry: &ExtensionEntry, spec: &CallSpec) -> String {
+    let module: &PathBuf = &entry.module;
+    format!("{}|{}|{}", entry.key, module.display(), spec.export.as_deref().unwrap_or(""))
+}
+
+/// The live instance for `key`, after dropping the ones that sat idle too long.
+fn live_get(key: &str) -> Option<Arc<Live>> {
+    let mut table = live_table().lock().unwrap_or_else(|e| e.into_inner());
+    table.retain(|_, l| l.last_used.lock().map(|t| t.elapsed() < IDLE).unwrap_or(false));
+    table.get(key).cloned()
+}
+
+/// Drop every live instance. Called with [`forget_compiled`]: a module rebuilt on disk must not
+/// be answered for by the instance of the previous build.
+pub fn forget_live() {
+    live_table().lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
 /// Turn the caller's 1-based `file_arg` into the 0-based position the bridge wants.

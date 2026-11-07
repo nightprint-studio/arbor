@@ -154,15 +154,15 @@ impl WasmHost {
 /// crate: those files are the public contract that third-party packages compile against, and
 /// a second copy is a second thing to keep in step.
 ///
-/// One generation per world, because a `bindgen!` call takes one. Only the cloud one is used
-/// for **linking** — it imports all three host interfaces, and a linker is keyed by interface
+/// One generation per world, because a `bindgen!` call takes one. Only `host-world` is used
+/// for **linking** — it imports all four host interfaces, and a linker is keyed by interface
 /// name rather than by generated type, so registering them once satisfies any world that
 /// imports a subset. The others exist only to call their exports.
 pub mod bindings {
-    pub mod cloud {
+    pub mod host {
         wasmtime::component::bindgen!({
             path: "../../../../wit",
-            world: "cloud-provider-world",
+            world: "host-world",
         });
     }
 
@@ -174,7 +174,7 @@ pub mod bindings {
     }
 }
 
-use bindings::cloud::arbor::extensions as host_api;
+use bindings::host::arbor::extensions as host_api;
 
 // ── The host interfaces, implemented on the guest's state ───────────────────────
 //
@@ -259,6 +259,49 @@ impl host_api::http::Host for GuestState {
     }
 }
 
+// ── fs (read-only) ──────────────────────────────────────────────────────────────
+
+impl host_api::fs::Host for GuestState {
+    fn read_file(&mut self, path: String) -> Result<String, host_api::fs::Error> {
+        GuestState::fs_read_file(self, &path).map_err(fs_error)
+    }
+
+    fn list_dir(&mut self, path: String) -> Result<Vec<host_api::fs::Entry>, host_api::fs::Error> {
+        GuestState::fs_list_dir(self, &path)
+            .map(|v| {
+                v.into_iter()
+                    .map(|e| host_api::fs::Entry {
+                        name: e.name,
+                        is_dir: e.is_dir,
+                        size: e.size,
+                        modified_ms: e.modified_ms,
+                    })
+                    .collect()
+            })
+            .map_err(fs_error)
+    }
+}
+
+/// Sort a read failure into the interface's variants. The message is the error's own `Display`,
+/// which already names the fix for the refusals.
+fn fs_error(e: crate::fs::FsError) -> host_api::fs::Error {
+    use crate::fs::FsError as E;
+    let msg = e.to_string();
+    match e {
+        E::NoPermission { .. } => host_api::fs::Error::NoPermission(msg),
+        E::NoRepo | E::OutsideScope { .. } | E::SymlinkEscape { .. } => {
+            host_api::fs::Error::OutsideScope(msg)
+        }
+        E::NotFound { .. } => host_api::fs::Error::NotFound(msg),
+        E::TooLarge { .. } => host_api::fs::Error::TooLarge(msg),
+        E::NotText { .. } => host_api::fs::Error::NotText(msg),
+        E::NotAFile { .. } | E::NotADirectory { .. } | E::TooManyEntries { .. } => {
+            host_api::fs::Error::Invalid(msg)
+        }
+        E::Io { .. } => host_api::fs::Error::Io(msg),
+    }
+}
+
 /// Wire the host imports onto a linker.
 pub fn link_host(linker: &mut Linker<GuestState>) -> Result<(), EngineError> {
     // WASI first, and empty. See `GuestState::wasi` for why it is here at all: the target
@@ -272,5 +315,7 @@ pub fn link_host(linker: &mut Linker<GuestState>) -> Result<(), EngineError> {
         .map_err(EngineError::wasm("linking arbor:extensions/secrets"))?;
     host_api::http::add_to_linker(linker, |s: &mut GuestState| s)
         .map_err(EngineError::wasm("linking arbor:extensions/http"))?;
+    host_api::fs::add_to_linker(linker, |s: &mut GuestState| s)
+        .map_err(EngineError::wasm("linking arbor:extensions/fs"))?;
     Ok(())
 }

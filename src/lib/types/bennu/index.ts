@@ -318,6 +318,61 @@ export interface BuildResult {
   diagnostics: BuildDiagnostic[];
 }
 
+/** One thing a Patina build reports (`bennu_patina_build`). Like {@link BuildDiagnostic} it has a 1-based line/col so the
+ *  Build panel and the editor can open the file; it also says where the problem came from. */
+export interface PatinaBuildDiagnostic {
+  /** `error` | `warning` | `note`. */
+  severity: string;
+  /** Who found it: `checker`, `compiler`, `dependency` or `build`. */
+  origin: string;
+  /** A stable code: `check.not_mut`, `compile.unsupported`, `build.dependency_not_found`… */
+  code: string;
+  file: string | null;
+  /** 1-based, when the file could be read and the report had a span. */
+  line: number | null;
+  col: number | null;
+  /** Byte span in the file, when the report had one. */
+  start: number | null;
+  end: number | null;
+  message: string;
+}
+
+/** A type that crosses the host boundary and is saved or carried by field name. */
+export interface PatinaBuildSchema {
+  /** The path of the type: `mymod::main::Charge`. */
+  name: string;
+  /** `state`, `state(per_player)`, `event`, `intent`… */
+  kind: string;
+}
+
+/** What a Patina build found (`bennu_patina_build`): the real compiler's report on the whole mod. Nothing is produced —
+ *  a mod is compiled from sources at every load. The readable form of the same report streams as `build-output`. */
+export interface PatinaBuildReport {
+  ok: boolean;
+  /** The mod's id from its `manifest.ron`. */
+  mod_id: string;
+  /** The mod folder that was built (the one with the manifest). */
+  mod_root: string;
+  diagnostics: PatinaBuildDiagnostic[];
+  files: number;
+  functions: number;
+  entries: number;
+  /** One per entry: `hook voriz::events::StepOn`, `command heal`… */
+  entry_list: string[];
+  schemas: number;
+  schema_list: PatinaBuildSchema[];
+  /** The capabilities the compiled functions use (what the manifest has to declare). */
+  capabilities: string[];
+  /** The host functions the module imports, by path. */
+  imports: string[];
+  /** The mods this one depends on that were found, each `id @ folder`. */
+  dependencies: string[];
+  warnings: string[];
+  elapsed_ms: number;
+  /** `3 file(s), 12 function(s), 1 entry, 2 schema(s) in 38 ms`. */
+  summary: string;
+}
+
 /** Per-file timing + counts from a project-wide validation (`bennu_validate_project`). */
 export interface FileValidationStat {
   /** Absolute path (forward slashes) of the validated file. */

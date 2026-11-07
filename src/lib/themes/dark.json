@@ -107,6 +107,7 @@
     "--syntax-function": "#ffc66d",
     "--syntax-number":   "#9876aa",
     "--syntax-type":     "#4d78cc",
+    "--syntax-primitive": "#2aacb8",
     "--radius-sm":       "4px",
     "--radius-md":       "6px",
     "--radius-lg":       "10px",

@@ -18,6 +18,7 @@
 
 pub mod credentials;
 pub mod dependency;
+pub mod fs_scope;
 pub mod hook_catalog;
 pub mod hook_names;
 pub mod hook_ns;

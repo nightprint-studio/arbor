@@ -944,6 +944,7 @@ mod tests {
     use super::*;
     use crate::pom;
 
+
     // A Struts / Entando-flavoured pom → the Struts / Spring-XML / JDBC / Tiles
     // capabilities on; MyBatis / JPA / Spring-Data / Lombok OFF (docs §10 validates
     // exactly this profile).

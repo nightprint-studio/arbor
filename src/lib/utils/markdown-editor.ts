@@ -27,6 +27,7 @@
 
 import Prism from 'prismjs';
 import { tooltip } from '$lib/actions/tooltip';
+import { fenceGrammarName, fenceLanguage } from './fence-info';
 import './prism-shared';        // side-effect: registers every grammar
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNodeRef } from '@lezer/common';
@@ -1810,14 +1811,15 @@ function highlightFencedCode(view: EditorView, node: SyntaxNodeRef, push: PushFn
   if (!cur.firstChild()) return;
   do {
     if (cur.name === 'CodeInfo') {
-      lang = view.state.sliceDoc(cur.from, cur.to).trim().toLowerCase();
+      // Only the first word names the language: ```ptn title="x" carries more after it.
+      lang = fenceLanguage(view.state.sliceDoc(cur.from, cur.to));
     } else if (cur.name === 'CodeText') {
       codeRanges.push({ from: cur.from, to: cur.to });
     }
   } while (cur.nextSibling());
 
   if (!lang || codeRanges.length === 0) return;
-  const grammarName = PRISM_LANG_ALIAS[lang] ?? lang;
+  const grammarName = PRISM_LANG_ALIAS[lang] ?? fenceGrammarName(lang) ?? lang;
   const grammar = Prism.languages[grammarName];
   if (!grammar) return;
 

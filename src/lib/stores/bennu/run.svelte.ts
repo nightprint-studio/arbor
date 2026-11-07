@@ -46,15 +46,16 @@ import { runTomcat as ipcRunTomcat } from '$lib/ipc/bennu/tomcat';
 import { coalesceBatch, coalesceLatest } from '$lib/utils/coalesce';
 import { appendLogLines, MAX_LOG_LINES } from './log-buffer';
 import {
-  build as ipcBuild, validateProject as ipcValidateProject, run as ipcRun,
+  build as ipcBuild, patinaBuild as ipcPatinaBuild, validateProject as ipcValidateProject, run as ipcRun,
   cancelRun as ipcCancelRun, cancelValidation as ipcCancelValidation,
   runInput as ipcRunInput,
   runScript as ipcRunScript, loadEnvFile as ipcLoadEnvFile,
 } from '$lib/ipc/bennu';
 import { getBennuConfig, setBennuConfig } from '$lib/ipc/bennu/config';
 import type {
-  BuildResult, BuildDiagnostic, ProjectValidationResult,
+  BuildResult, BuildDiagnostic, PatinaBuildReport, ProjectValidationResult,
 } from '$lib/types/bennu';
+import { isPatinaPath, toBuildDiagnostics, patinaHeadline } from './patina-build';
 import type { LogLevel, LogPiece } from '$lib/types/log';
 import { bennuUiStore } from './ui.svelte';
 import { bennuDiagnosticsStore } from './diagnostics.svelte';
@@ -701,6 +702,37 @@ function createBennuRunStore() {
     });
   }
 
+  /**
+   * Build a Patina mod: the real compiler runs on the whole mod (in the Patina package) and the Build panel shows what it said —
+   * checker and compiler problems with `file:line:col`, the counts, the capabilities and host functions the mod uses, and the
+   * schemas. Nothing is produced (a mod is compiled from sources at every load). `path` is a `.ptn` of the mod or its folder; `root`
+   * is the open project, whose build lane this takes so it does not overlap a Maven or Cargo build. Resolves with the report, or null
+   * on a hard failure (the package missing or older than `build`: the log says which).
+   */
+  async function buildPatinaMod(root: string, path: string, focus = true): Promise<PatinaBuildReport | null> {
+    return locks.run(rootKey(root), async () => {
+      ok = null;
+      tool = '';
+      diagnostics = [];
+      clearLog();
+      if (focus) bennuUiStore.showBottom('build');
+      push(`Building the Patina mod of ${path}…`, 'meta');
+      try {
+        const res = await ipcPatinaBuild(path);
+        tool = 'patina';
+        ok = res.ok;
+        diagnostics = toBuildDiagnostics(res);
+        diagnosticsAt = Date.now();
+        push(patinaHeadline(res), res.ok ? 'meta' : 'err');
+        return res;
+      } catch (e) {
+        ok = false;
+        push(`Build error: ${e instanceof Error ? e.message : String(e)}`, 'err');
+        return null;
+      }
+    });
+  }
+
   /** Validate the WHOLE project without compiling (the `validate` build type): stream progress,
    *  collect timing stats + diagnostics. Opens the Build dock. No-op while already busy. Shares the
    *  BE single-run guard with the Maven build, so a concurrent start is refused there too. */
@@ -765,7 +797,8 @@ function createBennuRunStore() {
   }
 
   /**
-   * Run the preferred build type for `root` (the split-button main action + Ctrl+F9).
+   * Run the preferred build type for `root` (the split-button main action + Ctrl+F9). With a `.ptn` file active
+   * (`activeFile`) it builds that file's Patina mod instead — see {@link buildPatinaMod}.
    *
    * "Validate (no compile)" is the whole-project **Java** analysis sweep, so on a Cargo
    * project it is not an alternative — it is a different language's feature. The
@@ -774,7 +807,12 @@ function createBennuRunStore() {
    * sweep instead of `cargo check`. The stored preference is left untouched: it still
    * applies to the Java projects it was chosen for.
    */
-  async function runPreferred(root: string): Promise<void> {
+  async function runPreferred(root: string, activeFile?: string | null): Promise<void> {
+    // A Patina file in the editor: the build is the mod's, whatever the project around it is (a Voriz checkout is a Cargo project).
+    if (isPatinaPath(activeFile)) {
+      await buildPatinaMod(root, activeFile!);
+      return;
+    }
     if (preferredBuildType === 'validate' && !projectStore.isCargo) {
       await validateProject(root);
     } else {
@@ -1556,6 +1594,7 @@ function createBennuRunStore() {
 
     attach,
     build,
+    buildPatinaMod,
     validateProject,
     cancelValidation,
     runPreferred,

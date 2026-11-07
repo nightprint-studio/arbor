@@ -228,6 +228,10 @@ impl FrameworkExtension for FulcrumI18nExtension {
 
         // ── a bundle's own markup ──────────────────────────────────────────────
         let Some(bundle) = studio::bundle_of(&path) else { return out };
+        // A document is taken literally by the engine: no markup, so no markup problems.
+        if bundle.document {
+            return out;
+        }
         // Read directly rather than through `resolved()`: an unclosed brace is wrong whether or not
         // the project has been scanned, and a brand-new bundle is exactly where the first one is
         // typed. An empty catalogue simply answers "no stylesheet, no glossary" below.
@@ -319,7 +323,7 @@ impl FrameworkExtension for FulcrumI18nExtension {
     /// Read from the **buffer**, not from the catalogue: see [`crate::studio`].
     fn highlights(&self, ctx: &FileCtx<'_>) -> Vec<ExtHighlight> {
         let path = ctx.path_str();
-        if studio::bundle_of(&path).is_none() {
+        if studio::bundle_of(&path).is_none_or(|b| b.document) {
             return Vec::new();
         }
         // Unlike the checks above this runs with an empty catalogue too — the colouring of a
@@ -343,7 +347,7 @@ impl FrameworkExtension for FulcrumI18nExtension {
                 file: d.file.clone(),
                 offset: d.content_start.unwrap_or(d.start),
                 label: format!("{} — {}", d.lang, file_name(&d.file)),
-                detail: markup::flatten(&markup::parse_markup(&d.value).segments),
+                detail: d.plain(),
             })
             .collect()
     }
@@ -362,16 +366,15 @@ impl FrameworkExtension for FulcrumI18nExtension {
                 doc: String::new(),
             });
         }
-        let flat = |raw: &str| markup::flatten(&markup::parse_markup(raw).segments);
-        let signature = flat(&decls[0].value);
+        let signature = decls[0].plain();
         let mut doc: Vec<String> =
-            decls.iter().map(|d| format!("{} — {}", d.lang, flat(&d.value))).collect();
+            decls.iter().map(|d| format!("{} — {}", d.lang, d.plain())).collect();
         let owed = cat.untranslated(&r.label);
         if !owed.is_empty() {
             doc.push(format!("untranslated in {}", owed.join(", ")));
         }
         // The placeholders it expects: a caller that forgets one renders `{amount}` on screen.
-        let params = markup::placeholders(&markup::parse_markup(&decls[0].value).segments);
+        let params = markup::placeholders(&decls[0].segments());
         if !params.is_empty() {
             doc.push(format!("parameters: {}", params.join(", ")));
         }
@@ -394,7 +397,7 @@ impl FrameworkExtension for FulcrumI18nExtension {
                 detail: cat
                     .declarations(l)
                     .first()
-                    .map(|d| markup::flatten(&markup::parse_markup(&d.value).segments)),
+                    .map(|d| d.plain()),
                 auto_import: None,
                 ..Default::default()
             })
@@ -406,7 +409,6 @@ impl FrameworkExtension for FulcrumI18nExtension {
         let Some(cat) = (kind == "labels").then(|| self.resolved()).flatten() else {
             return Vec::new();
         };
-        let flat = |raw: &str| markup::flatten(&markup::parse_markup(raw).segments);
         cat.labels()
             .map(|label| {
                 let decls = cat.declarations(label);
@@ -430,7 +432,7 @@ impl FrameworkExtension for FulcrumI18nExtension {
                     .map(|d| ExtEntry {
                         id: format!("{label}@{}", d.file),
                         primary: d.lang.clone(),
-                        secondary: flat(&d.value),
+                        secondary: d.plain(),
                         kind: "locale".to_string(),
                         file: Some(d.file.clone()),
                         offset: Some(d.content_start.unwrap_or(d.start)),
@@ -452,7 +454,7 @@ impl FrameworkExtension for FulcrumI18nExtension {
                 ExtEntry {
                     id: label.to_string(),
                     primary: label.to_string(),
-                    secondary: first.map(|d| flat(&d.value)).unwrap_or_default(),
+                    secondary: first.map(|d| d.plain()).unwrap_or_default(),
                     // The category, which is the grouping the panel offers.
                     kind: label.split_once(':').map(|(c, _)| c.to_string()).unwrap_or_default(),
                     file: first.map(|d| d.file.clone()),
@@ -722,6 +724,113 @@ enabled = true
         assert_eq!(view.styles.len(), 1, "the stylesheet reaches the picker");
         // A caret on a file that is not a bundle answers nothing at all.
         assert!(ext.studio("/p/Cargo.toml", source, at).is_none());
+    }
+
+    /// The layout Voriz has since its wiki moved into the i18n tree: `.md` documents in a folder of
+    /// a language, beside the `.toml` categories. The panel must answer on them — the whole file is
+    /// the value, taken literally — and the label must be declared so nothing reads it as missing.
+    #[test]
+    fn a_wiki_document_is_a_translation_the_panel_answers_on() {
+        let ext = FulcrumI18nExtension::new();
+        let resources = [
+            file("/p/i18n/languages.toml", LANGUAGES),
+            file("/p/i18n/it/ui.toml", "[avvio]\nsolo = 'Da solo'\n"),
+            file("/p/i18n/it/wiki/zaino.md", "# Lo zaino\nUsa {parentesi} e $ alla lettera.\n"),
+            file("/p/i18n/it/wiki/creature/ragno.md", "# Il ragno\n"),
+            file("/p/i18n/en/wiki/zaino.md", "# The backpack\n"),
+        ];
+        let ron = [file("/p/hud/a.ron", "(text: \"wiki:zaino\", other: \"wiki:creature.ragno\")")];
+        ext.reindex(&ProjectScan { resources: &resources, ron: &ron, ..ProjectScan::empty(Path::new("/p")) });
+
+        // The catalogue declares both keys, in the languages that have them.
+        let src = "(text: \"wiki:zaino\", other: \"wiki:creature.ragno\")";
+        let p = PathBuf::from("/p/hud/a.ron");
+        assert!(ext.diagnostics(&ctx(&p, src)).iter().all(|d| d.code != "fulcrum.i18n.unknown-label"));
+
+        // The caret anywhere in the document finds it, and the text is not parsed as markup.
+        let source = "# Lo zaino\nUsa {parentesi} e $ alla lettera.\n";
+        let view = ext.studio("/p/i18n/it/wiki/zaino.md", source, 3).expect("a view");
+        assert_eq!(view.label, "wiki:zaino");
+        assert!(view.document);
+        assert!(view.params.is_empty(), "a brace in a document is a brace");
+        assert!(view.problems.is_empty());
+        assert_eq!(view.raw, source);
+        assert_eq!(view.content_start, Some(0));
+        assert_eq!(view.siblings.iter().find(|s| s.lang == "en").map(|s| s.declares), Some(true));
+        // A language that owes the page is offered the file it would live in.
+        let nested_en = ext
+            .studio("/p/i18n/it/wiki/creature/ragno.md", "# Il ragno\n", 0)
+            .and_then(|v| v.siblings.into_iter().find(|s| s.lang == "en"))
+            .expect("an en row");
+        assert!(!nested_en.declares);
+        assert_eq!(nested_en.file, "/p/i18n/en/wiki/creature/ragno.md");
+
+        // A nested file's key joins the path with dots.
+        let nested = ext.studio("/p/i18n/it/wiki/creature/ragno.md", "# Il ragno\n", 0).expect("a view");
+        assert_eq!(nested.label, "wiki:creature.ragno");
+
+        // No markup colouring or markup diagnostics on a document.
+        let md = PathBuf::from("/p/i18n/it/wiki/zaino.md");
+        assert!(ext.highlights(&ctx(&md, source)).is_empty());
+        assert!(ext.diagnostics(&ctx(&md, "{ non chiuso $")).is_empty());
+    }
+
+    /// Reads every file under `dir` into scanned files, the way the backend's scan would.
+    fn read_tree(dir: &Path, out: &mut Vec<ScannedFile>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.path());
+        for e in entries {
+            let p = e.path();
+            if p.is_dir() {
+                read_tree(&p, out);
+            } else if p.extension().is_some_and(|x| x == "toml" || x == "md") {
+                if let Ok(text) = std::fs::read_to_string(&p) {
+                    out.push(ScannedFile { path: p, text });
+                }
+            }
+        }
+    }
+
+    /// Repro against the real Voriz project; skipped where the folder is absent.
+    #[test]
+    fn the_studio_answers_on_the_real_voriz_tree() {
+        let dir = Path::new(
+            "/Users/christian/sviluppo/mio/workspace/rust/games/voriz/progetti/voriz/presentazione/i18n",
+        );
+        if !dir.is_dir() {
+            return;
+        }
+        let mut files = Vec::new();
+        read_tree(dir, &mut files);
+        let ext = FulcrumI18nExtension::new();
+        ext.reindex(&ProjectScan { resources: &files, ..ProjectScan::empty(dir) });
+        let mut bundles = 0;
+        let mut empty = Vec::new();
+        for f in &files {
+            let path = f.path.to_string_lossy().replace('\\', "/");
+            if studio::bundle_of(&path).is_none() {
+                continue;
+            }
+            bundles += 1;
+            let n = studio::values_of(&path, &f.text).len();
+            // First, middle and last: enough to prove the file is read, without a parse per value.
+            let all = studio::values_of(&path, &f.text);
+            let picks = [all.first(), all.get(all.len() / 2), all.last()];
+            let silent = picks
+                .iter()
+                .flatten()
+                .filter(|v| {
+                    ext.studio(&path, &f.text, v.content_start.unwrap_or(v.value_start)).is_none()
+                })
+                .count();
+            if n == 0 || silent > 0 {
+                empty.push(format!("{path}: values={n} silent={silent}"));
+            }
+        }
+        eprintln!("bundles={bundles} problems={empty:#?}");
+        assert!(bundles > 10);
+        assert!(empty.is_empty(), "{empty:#?}");
     }
 
     #[test]

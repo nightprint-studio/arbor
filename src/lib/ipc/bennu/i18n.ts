@@ -158,6 +158,8 @@ export interface StudioView {
   controls: string[];
   has_stylesheet: boolean;
   has_glossary: boolean;
+  /** The value is a whole `.md` document, taken literally: nothing to parse, no toolbar. */
+  document: boolean;
 }
 
 /**

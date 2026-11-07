@@ -40,9 +40,12 @@ export function composeSnapshot(i: SnapshotInput): SessionSnapshot | null {
   if (i.restoring) return null;
   if (i.isDemo) return { active_project: '', projects: [] };
   if (!i.activeRoot) {
+    // Nothing on screen, but members may still be attached in the background (a project moved into an
+    // empty workspace): they belong to the session as much as the ones that did not open.
+    const wanted = [...i.live, ...i.unopened].some((u) => i.canon(u.root) === i.wantedRoot);
     return {
-      active_project: i.unopened.some((u) => i.canon(u.root) === i.wantedRoot) ? i.wantedRoot : '',
-      projects: [...i.unopened],
+      active_project: wanted ? i.wantedRoot : '',
+      projects: [...i.live, ...i.unopened],
     };
   }
   return { active_project: i.activeRoot, projects: [...i.live, ...i.unopened] };
@@ -76,4 +79,72 @@ export function shouldRememberCaret(user: boolean | undefined, restoredFor: stri
 export function inStoredOrder(roots: string[], stored: string[]): string[] {
   const rank = (r: string) => { const i = stored.indexOf(r); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
   return roots.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map((x) => x.r);
+}
+
+/**
+ * Run async operations strictly one after the other, each starting only once the previous settled
+ * (whether it resolved or threw). A failure does not poison the chain, and is still seen by the
+ * caller of that operation.
+ *
+ * What it is for: every workspace mutation reads the whole list, edits it and writes it back, with
+ * an `await` in the middle. Two of them interleaved — three quick drags in the manager — each edit a
+ * copy that the other has already changed.
+ */
+export function createSerial(): <T>(op: () => Promise<T>) => Promise<T> {
+  let chain: Promise<unknown> = Promise.resolve();
+  return <T>(op: () => Promise<T>) => {
+    const run = chain.then(op, op);
+    chain = run.catch(() => {});
+    return run;
+  };
+}
+
+/** The part of a workspace a move touches. */
+export interface MovableWorkspace {
+  id: string;
+  active_project: string;
+  projects: ProjectSession[];
+}
+
+/**
+ * Move project `root` from workspace `fromId` into `toId` at `toIndex` (a gap in the destination as it
+ * is now), as ONE step on `list`: the result has the project in the target or, when anything is
+ * missing, `list` unchanged — never in neither. Pure; returns new workspaces and leaves `list` alone.
+ *
+ * - same workspace: a reorder;
+ * - the target already holds the root: the source simply lets it go (no duplicate);
+ * - the source's `active_project` falls back to its first remaining project.
+ *
+ * `session` overrides the stored session being carried (the live one, fresher than what is stored).
+ */
+export function planMove<W extends MovableWorkspace>(
+  list: W[], fromId: string, root: string, toId: string, toIndex: number, session?: ProjectSession,
+): W[] {
+  const source = list.find((w) => w.id === fromId);
+  const target = list.find((w) => w.id === toId);
+  const carried = source?.projects.find((p) => p.root === root);
+  if (!source || !target || !carried) return list;
+  const moving = session ?? carried;
+  const clamp = (n: number, len: number) => Math.max(0, Math.min(len, n));
+
+  if (fromId === toId) {
+    const projects = [...source.projects];
+    const from = projects.findIndex((p) => p.root === root);
+    projects.splice(from, 1);
+    projects.splice(clamp(toIndex > from ? toIndex - 1 : toIndex, projects.length), 0, moving);
+    return list.map((w) => (w.id === fromId ? { ...w, projects } : w));
+  }
+
+  return list.map((w) => {
+    if (w.id === fromId) {
+      const projects = w.projects.filter((p) => p.root !== root);
+      return { ...w, projects, active_project: w.active_project === root ? (projects[0]?.root ?? '') : w.active_project };
+    }
+    if (w.id === toId && !w.projects.some((p) => p.root === root)) {
+      const projects = [...w.projects];
+      projects.splice(clamp(toIndex, projects.length), 0, moving);
+      return { ...w, projects };
+    }
+    return w;
+  });
 }

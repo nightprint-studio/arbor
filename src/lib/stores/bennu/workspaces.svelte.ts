@@ -20,7 +20,7 @@
 
 import { getBennuWorkspaces, setBennuWorkspaces } from '$lib/ipc/bennu/config';
 import type { BennuWorkspace, ProjectSession } from '$lib/ipc/bennu/config';
-import { createWriteQueue } from './session-snapshot';
+import { createSerial, createWriteQueue, planMove } from './session-snapshot';
 import { projectStore } from './project.svelte';
 
 /** Palette size — mirrors Corvus's `--ws-color-0 … --ws-color-11` theme vars. */
@@ -149,6 +149,52 @@ function createWorkspacesStore() {
     workspaces[i] = { ...workspaces[i], ...patch };
   }
 
+  // Every operation that reads the list, awaits, and writes it back goes through here, one at a time.
+  // Three quick drags in the manager used to run interleaved: each flushed the live session over the
+  // workspace another was still filling, and the last write left the target with nothing.
+  const serial = createSerial();
+
+  async function doSwitchTo(id: string) {
+    if (id === activeId || !workspaces.some((w) => w.id === id)) return;
+    flushLiveSession(); // flush current
+    activeId = id;
+    const target = workspaces.find((w) => w.id === id)!;
+    await projectStore.loadWorkspace($state.snapshot(target.projects) as ProjectSession[], target.active_project);
+    persist();
+  }
+
+  async function doMoveProject(fromId: string, root: string, toId: string, toIndex: number): Promise<void> {
+    if (!workspaces.some((w) => w.id === fromId) || !workspaces.some((w) => w.id === toId)) return;
+    // The live workspace's tabs and member order first, so what is moved is what is on screen.
+    flushLiveSession();
+    const source = workspaces.find((w) => w.id === fromId)!;
+    let session = source.projects.find((p) => p.root === root);
+    if (!session) return;
+
+    // The only step that can fail or yield is opening the project in the live workspace, so it
+    // happens FIRST and alone: if it fails nothing has changed, and once it succeeds everything
+    // below is synchronous. The project is in the source or in the target, never in neither.
+    const target = workspaces.find((w) => w.id === toId)!;
+    const alreadyThere = target.projects.some((p) => p.root === root);
+    if (fromId !== toId && toId === activeId && !alreadyThere) {
+      if (!(await projectStore.attachMember(session))) return;
+      // The attached member is now part of the live session. Take it from there (the freshest copy)
+      // and lift it out of the target list so `planMove` places it at the gap the user chose.
+      flushLiveSession();
+      const live = workspaces.find((w) => w.id === toId)?.projects.find((p) => p.root === root);
+      if (live) session = live;
+      patchWorkspace(toId, { projects: workspaces.find((w) => w.id === toId)!.projects.filter((p) => p.root !== root) });
+    }
+
+    // Re-read: the workspaces may have changed while the project was opening.
+    if (!workspaces.some((w) => w.id === fromId) || !workspaces.some((w) => w.id === toId)) return;
+    const next = planMove($state.snapshot(workspaces) as BennuWorkspace[], fromId, root, toId, toIndex, session);
+    workspaces = next;
+    if (fromId !== toId && fromId === activeId) projectStore.closeProject(root);
+    if (toId === activeId) projectStore.reorderMembers(next.find((w) => w.id === toId)!.projects.map((p) => p.root));
+    persist();
+  }
+
   return {
     /** Every workspace, in display order. */
     get workspaces() { return workspaces; },
@@ -213,41 +259,40 @@ function createWorkspacesStore() {
 
     /** Switch the active workspace to `id` — flushes the current live session into its workspace,
      *  then drives projectStore to reopen the target's project set. No-op if already active. */
-    async switchTo(id: string) {
-      if (id === activeId || !workspaces.some((w) => w.id === id)) return;
-      flushLiveSession(); // flush current
-      activeId = id;
-      const target = workspaces.find((w) => w.id === id)!;
-      await projectStore.loadWorkspace($state.snapshot(target.projects) as ProjectSession[], target.active_project);
-      persist();
+    switchTo(id: string): Promise<void> {
+      return serial(() => doSwitchTo(id));
     },
 
     /** Create a new empty workspace and switch to it. The active view is cleared; the user then
      *  opens / adds projects into it. Returns the new id. */
-    async create(name: string, colorIdx?: number): Promise<string> {
-      flushLiveSession(); // flush current
-      const id = newId();
-      workspaces = [
-        ...workspaces,
-        {
-          id,
-          name: name.trim() || 'Workspace',
-          color_idx: colorIdx ?? workspaces.length % WS_COLOR_COUNT,
-          active_project: '',
-          projects: [],
-        },
-      ];
-      activeId = id;
-      projectStore.clearAll();
-      persist();
-      return id;
+    create(name: string, colorIdx?: number): Promise<string> {
+      return serial(async () => {
+        flushLiveSession(); // flush current
+        const id = newId();
+        workspaces = [
+          ...workspaces,
+          {
+            id,
+            name: name.trim() || 'Workspace',
+            color_idx: colorIdx ?? workspaces.length % WS_COLOR_COUNT,
+            active_project: '',
+            projects: [],
+          },
+        ];
+        activeId = id;
+        projectStore.clearAll();
+        persist();
+        return id;
+      });
     },
 
     /** Switch to workspace `id` (if needed) and make project `root` its active project — the
      *  tree switcher's "click a project under a workspace" action. */
-    async switchToProject(id: string, root: string) {
-      if (id !== activeId) await this.switchTo(id);
-      await projectStore.switchProject(root);
+    switchToProject(id: string, root: string): Promise<void> {
+      return serial(async () => {
+        if (id !== activeId) await doSwitchTo(id);
+        await projectStore.switchProject(root);
+      });
     },
 
     /** Move workspace `id` so it sits at position `toIndex` (0-based, in the list as it is now — the
@@ -276,52 +321,17 @@ function createWorkspacesStore() {
      * project as a background member (it does not steal the screen), reordering within it reorders
      * the live members.
      */
-    async moveProject(fromId: string, root: string, toId: string, toIndex: number): Promise<void> {
-      if (!workspaces.some((w) => w.id === fromId) || !workspaces.some((w) => w.id === toId)) return;
-      // The live workspace's tabs and member order first, so what is moved is what is on screen.
-      flushLiveSession();
-      const source = workspaces.find((w) => w.id === fromId)!;
-      const session = source.projects.find((p) => p.root === root);
-      if (!session) return;
-
-      if (fromId === toId) {
-        const list = [...source.projects];
-        const from = list.indexOf(session);
-        list.splice(from, 1);
-        list.splice(Math.max(0, Math.min(list.length, toIndex > from ? toIndex - 1 : toIndex)), 0, session);
-        patchWorkspace(fromId, { projects: list });
-        if (fromId === activeId) projectStore.reorderMembers(list.map((p) => p.root));
-        persist();
-        return;
-      }
-
-      // Leave the source.
-      const remaining = source.projects.filter((p) => p.root !== root);
-      patchWorkspace(fromId, {
-        projects: remaining,
-        active_project: source.active_project === root ? (remaining[0]?.root ?? '') : source.active_project,
-      });
-      if (fromId === activeId) projectStore.closeProject(root);
-
-      // Enter the destination.
-      const target = workspaces.find((w) => w.id === toId)!;
-      if (!target.projects.some((p) => p.root === root)) {
-        const list = [...target.projects];
-        list.splice(Math.max(0, Math.min(list.length, toIndex)), 0, session);
-        patchWorkspace(toId, { projects: list });
-        if (toId === activeId) {
-          await projectStore.attachMember(session);
-          projectStore.reorderMembers(list.map((p) => p.root));
-        }
-      }
-      persist();
+    moveProject(fromId: string, root: string, toId: string, toIndex: number): Promise<void> {
+      return serial(() => doMoveProject(fromId, root, toId, toIndex));
     },
 
     /** Add a project (folder `dir`) to workspace `id`, switching to it first so the add always
      *  goes through projectStore's live path (opens the manifest, indexes, badges foreign tabs). */
-    async addProjectTo(id: string, dir: string) {
-      if (id !== activeId) await this.switchTo(id);
-      await projectStore.addProject(dir);
+    addProjectTo(id: string, dir: string): Promise<void> {
+      return serial(async () => {
+        if (id !== activeId) await doSwitchTo(id);
+        await projectStore.addProject(dir);
+      });
     },
 
     /** Remove project `root` from workspace `id`. For a live member of the active workspace this
@@ -357,7 +367,12 @@ function createWorkspacesStore() {
     },
 
     /** Delete a workspace. If it was active, switch to another (or clear when it was the last). */
-    async remove(id: string) {
+    remove(id: string): Promise<void> {
+      return serial(() => this.doRemove(id));
+    },
+
+    /** @internal body of {@link remove}, run inside the queue. */
+    async doRemove(id: string) {
       if (!workspaces.some((w) => w.id === id)) return;
       const wasActive = id === activeId;
       workspaces = workspaces.filter((w) => w.id !== id);

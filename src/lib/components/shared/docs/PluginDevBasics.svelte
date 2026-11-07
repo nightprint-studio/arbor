@@ -118,11 +118,45 @@
   contract rather than consuming one.
 </p>
 <p>
+  An interface can grow. A function added to it later is <strong>optional</strong>: Arbor asks for it by name, and a package that predates it answers
+  <em>has no function</em>, which the caller turns into "this backend cannot do that" instead of a failure — and a newer package on an older Arbor
+  just has an export nobody calls. The Patina language extension's <code>build</code> is one.
+</p>
+<p>
   An interface is drawn at whole answers, not at operations. A cloud provider is asked to list,
   to stat, and to read a byte range — so a download's progress bar, its Cancel button and its
   row in the job list stay Arbor's, and only the bytes come from the package. That is why an
   extension can be replaced or uninstalled without any of that changing: it never owned it.
 </p>
+
+<h3>What an extension may ask Arbor for</h3>
+<p>
+  An extension has no ambient capability — no sockets, no file system. It gets four narrow host
+  interfaces (<code>wit/host.wit</code>), each behind the same <code>[permissions]</code> the user
+  consented to at install time:
+</p>
+<table>
+  <thead><tr><th>Interface</th><th>What it does</th><th>Gate</th></tr></thead>
+  <tbody>
+    <tr><td><code>log</code></td><td>Write a line to the package's stream in Plugin Logs</td><td>none</td></tr>
+    <tr><td><code>http</code></td><td>Perform one request</td><td><code>network</code> allowlist</td></tr>
+    <tr><td><code>secrets</code></td><td>Read or write the package's own credential slots</td><td><code>[[credentials]]</code></td></tr>
+    <tr><td><code>fs</code></td><td><code>read-file(path)</code> as UTF-8 text, <code>list-dir(path)</code> with name, kind, size and modified time</td><td><code>fs = "read"</code> (or higher) and <code>fs_scope</code></td></tr>
+  </tbody>
+</table>
+<p>
+  <code>fs</code> is <strong>read-only</strong>, whatever level the manifest holds. Its sandbox is the one
+  <code>arbor.fs</code> gives a Lua plugin: the <strong>active repository</strong> plus the absolute paths in
+  <code>fs_scope</code> (<code>["*"]</code> lifts it). A relative path resolves against the repository. Paths are
+  canonicalised, so <code>..</code> and a symbolic link that leaves the area are refused; a file over 4&nbsp;MiB or
+  one that is not UTF-8 text is an error; a listing leaves out a link that points outside.
+</p>
+<div class="hint">
+  The guest never says which repository is active — the host sets it before every call. A
+  <code>persistent</code> extension that outlives a tab switch is therefore checked against the
+  repository open <em>now</em>. With no repository open, only the <code>fs_scope</code> roots are reachable.
+  A refusal is an error value the guest can answer for: Patina, for one, falls back to checking no ids.
+</div>
 
 <h2>plugin.toml</h2>
 <pre class="language-toml">{@html highlight(`[plugin]
@@ -171,6 +205,11 @@ env_read             = ["PATH", "JAVA_HOME"]
 #               version and of arbor_api: the three move for different reasons
 #   id        — which member of the interface this is
 #   module    — the compiled file, shipped as a release asset (never committed)
+#   persistent — optional, false by default: keep ONE instance alive across calls
+#               instead of a fresh one per call, so the guest can keep work between
+#               them (a language backend keeps its index). Calls never overlap, and
+#               the host drops the instance on reload, after an error, or when idle —
+#               the guest must still answer correctly from a fresh one.
 #
 # A package with any [[provides]] installs from a GitHub release instead of a
 # source archive, and every asset is verified against a digest the registry
@@ -389,7 +428,7 @@ optional = true`, 'toml')}</pre>
   <tbody>
     <tr><td><code>network</code></td><td>string[]</td><td>Allowed hostnames for <code>arbor.http.get</code>. Exact match or registrable suffix (<code>"maven.org"</code> permits <code>repo1.maven.org</code> and itself). Use <code>["*"]</code> for any host. Empty list = no network.</td></tr>
     <tr><td rowspan="3"><code>fs</code></td><td><code>"none"</code> <span class="badge badge-opt">default</span></td><td>No <code>arbor.fs.*</code> access</td></tr>
-    <tr><td><code>"read"</code></td><td>Read-only filesystem ops (<code>read / list / glob / exists / is_file / is_dir</code>)</td></tr>
+    <tr><td><code>"read"</code></td><td>Read-only filesystem ops (<code>read / list / glob / exists / is_file / is_dir</code>); for a wasm extension, the read-only <code>fs</code> host interface (<code>read-file</code>, <code>list-dir</code>) in the same scope</td></tr>
     <tr><td><code>"write"</code></td><td>Read + write (<code>write / append / touch / move / delete / copy / json_set / yaml_set / toml_set</code>)</td></tr>
     <tr><td rowspan="3"><code>fs_scope</code></td><td><code>[]</code> <span class="badge badge-opt">default</span></td><td>Sandboxed to the active repo's directory. <strong>Use <code>["*"]</code> instead when the plugin writes to user-picked paths via <code>arbor.ui.pick_file&#123; mode = "save" &#125;</code></strong> — the sandbox would otherwise reject anything outside the repo (e.g. <code>~/Downloads/foo.md</code>).</td></tr>
     <tr><td><code>["*"]</code></td><td>Unrestricted — any path on disk</td></tr>

@@ -52,6 +52,7 @@ import { css } from '@codemirror/lang-css';
 import { javascript } from '@codemirror/lang-javascript';
 import { sqlLanguage } from '$lib/components/shared/ui/code-editor';
 import { jinjaFenceLanguages } from './jinja-lang';
+import { patinaMode } from './patina-lang';
 
 /** A fence language backed by a legacy stream mode. */
 function streamFence(name: string, alias: string[], parser: StreamParser<unknown>) {
@@ -103,6 +104,9 @@ export const MARKDOWN_FENCE_LANGUAGES: readonly LanguageDescription[] = [
   // targets than a `.sql` file does, and `languages.ts` explains at length why guessing is worse
   // than the rules valid on every engine.
   fence('sql', [], new LanguageSupport(sqlLanguage('portable'))),
+  // Patina, the Voriz mod language: the same stream mode a `.ptn` file uses. Matching is by the first word of the
+  // info string and case-insensitive, so ```Patina and ```ptn title="x" both land here.
+  streamFence('patina', ['ptn'], patinaMode),
   // Bennu's code templates, alone or with the language they write: ```jinja, ```java.jinja.
   ...jinjaFenceLanguages(),
 ];

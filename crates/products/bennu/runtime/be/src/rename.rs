@@ -43,12 +43,19 @@ pub struct RenameArgs {
 /// `None` when no project owns the file, its semantic engine is still building, or the caret
 /// isn't on a renameable identifier.
 #[arbor_rpc::handler]
-fn bennu_rename_plan(_ctx: &BennuState, args: RenameArgs) -> Result<Option<RenamePreview>, String> {
+fn bennu_rename_plan(ctx: &BennuState, args: RenameArgs) -> Result<Option<RenamePreview>, String> {
     // A server-backed file plans through its own server. Its edits are never `inferred` — a
     // language server resolved them, so unlike the Java engine's same-name-method heuristic
     // there is no guesswork for the preview to flag.
     if let Some(preview) =
         crate::lsp_route::rename_plan(&args.file, &args.source, args.offset, &args.new_name)
+    {
+        return Ok(preview);
+    }
+    // A `.ptn`: the extension that serves it plans the rename across the mod; its edits are resolved, never
+    // inferred.
+    if let Some(preview) =
+        crate::patina_intel::rename_plan(ctx, &args.file, &args.source, args.offset, &args.new_name)
     {
         return Ok(preview);
     }
@@ -69,12 +76,17 @@ fn bennu_rename_plan(_ctx: &BennuState, args: RenameArgs) -> Result<Option<Renam
 /// called `Order.java` — which does not compile. The move is not a detail of the preview; it is
 /// half of what renaming a type *is*.
 #[arbor_rpc::handler]
-fn bennu_rename_apply(_ctx: &BennuState, args: RenameArgs) -> Result<RenameApplyResult, String> {
+fn bennu_rename_apply(ctx: &BennuState, args: RenameArgs) -> Result<RenameApplyResult, String> {
     // A server-backed file: the server's edits, and no move. A rename that has to move a file is a
     // Java rule (the public-type/filename tie), and LSP expresses file operations in a channel this
     // seam does not carry — inventing one here would be guessing on the server's behalf.
     if let Some(edits) =
         crate::lsp_route::rename_apply(&args.file, &args.source, args.offset, &args.new_name)
+    {
+        return Ok(RenameApplyResult { edits, file_rename: None });
+    }
+    if let Some(edits) =
+        crate::patina_intel::rename_apply(ctx, &args.file, &args.source, args.offset, &args.new_name)
     {
         return Ok(RenameApplyResult { edits, file_rename: None });
     }

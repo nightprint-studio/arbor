@@ -94,7 +94,7 @@ const DEFAULT_JDK: &str = "1.8";
 // ── event topics (the wire contract for the FE) ────────────────────────────────
 
 /// A line of build (mvn/javac) output.
-const EVT_BUILD_OUTPUT: &str = "arbor://bennu/build-output";
+pub(crate) const EVT_BUILD_OUTPUT: &str = "arbor://bennu/build-output";
 /// The build finished — carries `ok` + the parsed diagnostic count.
 const EVT_BUILD_DONE: &str = "arbor://bennu/build-done";
 /// A line of run (java) output.
@@ -183,6 +183,11 @@ fn compile_project_now(
         );
         let (ok, raw) = run_cargo_check(&root, root_path, module)?;
         finish_compile("cargo", ok, raw, &sink, &root)
+    } else if !root.join("pom.xml").is_file() && !is_gradle_root(&root) && crate::patina_intel::is_mod_root(&root) {
+        // A Patina mod opened as the project: no Maven, Cargo or Gradle build, but a `manifest.ron` with `.ptn` sources. The real compiler
+        // runs in the Patina package and its report becomes the parsed diagnostics; the output has already been streamed.
+        let (ok, diagnostics) = crate::patina_intel::build_mod_root(ctx, &root)?;
+        CompileOutcome { tool: "patina".into(), ok, diagnostics, raw: String::new() }
     } else if is_gradle_root(&root) {
         sink.progress(&format!("gradle {}", module.map(|m| format!("{m}:classes")).unwrap_or_else(|| "classes".to_string())), None, None);
         let (ok, raw) = run_gradle_compile(&root, module)?;
@@ -208,7 +213,7 @@ fn compile_project_now(
     // A REFRESH, never the manual rebuild: that one drops the dependency jar list and makes
     // Maven resolve the whole tree again, which a compile — no pom touched — has no reason to
     // ask for. See `IndexService::refresh_after_compile`.
-    if outcome.ok && outcome.tool != "cargo" && outcome.tool != "gradle" && outcome.tool != "up-to-date" {
+    if outcome.ok && outcome.tool != "cargo" && outcome.tool != "gradle" && outcome.tool != "patina" && outcome.tool != "up-to-date" {
         IndexService::global().refresh_after_compile(root_path, ctx.event_sink());
     }
 

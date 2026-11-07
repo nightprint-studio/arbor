@@ -72,7 +72,44 @@ const editorScene = (path: string, text: string, w = 1100, h = 760): ExtraScene[
   return { default: Frame as any };
 };
 
+/** A Patina mod script (the Voriz mod language): every token kind the stream mode draws. */
+const PATINA = `use voriz::prelude::*
+use crate::tally::Tally
+
+const POWER: int = 3
+
+/// Una mina: chi la calpesta senza accovacciarsi salta in aria.
+#[server]
+#[on(StepOn, block: "landmine")]
+fn arm(ev: StepOn, tally: &mut Tally) -> Result<(), WriteRefused> {
+    if ev.who.is_sneaking() {
+        return Ok(())
+    }
+    tally.count(ev.pos)
+    let mut near = world.players_near(ev.pos.center(), 8.0)
+        .filter(|p| p.name() != ev.who.name())
+        .count()
+    'outer: for p in world.players() {
+        match tally.mood {
+            Mood::Calm => break 'outer,
+            Mood::Scared { since } => near += 1,
+        }
+    }
+    world.set_block(ev.pos, block!("air"))?
+    ev.who.send(t!("marmo:boom", power: POWER * 2))
+    Ok(())
+}
+
+impl Tally {
+    pub fn count(&mut self, at: BlockPos) {
+        self.sprung += 1
+        self.last = Some(BlockPos::new(at.x, at.y + 1, at.z))
+    }
+}
+`;
+
 export const editorExtras: ExtraScene[] = [
   { id: 'bennu/editor/InjectedLanguages', load: editorScene('/demo/InjectedSamples.java', JAVA), settle: 1200 },
   { id: 'bennu/editor/JspScript', load: editorScene('/demo/notes.jsp', JSP, 1200, 520), settle: 1200 },
+  { id: 'bennu/editor/Patina', load: editorScene('/mods/marmo/script/mine.ptn', PATINA, 1100, 760), settle: 800 },
 ];

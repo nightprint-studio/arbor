@@ -90,3 +90,55 @@ interface log {
   /// having; this is where it says things.
   write: func(lvl: level, message: string);
 }
+
+interface fs {
+  /// One entry of a directory listing.
+  record entry {
+    name: string,
+    is-dir: bool,
+    /// Bytes for a file.
+    size: u64,
+    /// Milliseconds since the Unix epoch; none when the platform cannot say.
+    modified-ms: option<u64>,
+  }
+
+  /// Why a read was refused or failed. Every refusal carries a message that names the fix.
+  variant error {
+    /// The manifest does not say `[permissions] fs = "read"` (or higher).
+    no-permission(string),
+    /// The path is outside the active repository and the `fs_scope` roots — by name, by `..`,
+    /// or because a symbolic link resolves outside them.
+    outside-scope(string),
+    not-found(string),
+    /// A file read over the size limit (4 MiB).
+    too-large(string),
+    /// The file is not UTF-8 text.
+    not-text(string),
+    /// A directory where a file was asked for, or the reverse; a listing over the entry limit.
+    invalid(string),
+    io(string),
+  }
+
+  /// Read one file as UTF-8 text. **Read-only**: there is no write in this interface at all,
+  /// whatever `fs` level the manifest holds.
+  ///
+  /// The sandbox is the one `arbor.fs` gives a Lua plugin: the active repository, plus the
+  /// absolute paths in `[permissions] fs_scope`. A relative path resolves against the repository.
+  /// Paths are canonicalised, so `..` and symlinks cannot leave it. The guest does not say which
+  /// repository is active — the host knows, and re-reads it on every call.
+  read-file: func(path: string) -> result<string, error>;
+
+  /// List one directory, sorted by name. An entry that is a symlink out of the allowed area is
+  /// left out.
+  list-dir: func(path: string) -> result<list<entry>, error>;
+}
+
+/// Everything Arbor grants, as one world — for the host, which links all four interfaces once and
+/// satisfies whichever subset a guest's own world imports (a linker is keyed by interface name).
+/// Not something a guest targets.
+world host-world {
+  import secrets;
+  import http;
+  import log;
+  import fs;
+}

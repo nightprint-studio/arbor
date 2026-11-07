@@ -148,7 +148,8 @@
   {#snippet icon()}<Languages size={13} />{/snippet}
 
   {#snippet actions()}
-    {#if view}
+    <!-- A `.md` document is shown as written and has no markup to insert. -->
+    {#if view && !view.document}
       <I18nToolbar {view} {writable} onInsert={(what) => bennuI18nStore.insert(what)} />
     {/if}
     <IconButton tooltip="Close panel" size={22} onclick={() => bennuUiStore.toggleRight('i18n')}>

@@ -20,8 +20,10 @@
 //! this host" must not mean two different things depending on which language the package
 //! was written in.
 
+use std::path::{Path, PathBuf};
+
 use arbor_plugin_types::prelude::{
-    credential_account_for, network_check, CredentialError, Manifest, NetworkDenial,
+    credential_account_for, network_check, AccessLevel, CredentialError, Manifest, NetworkDenial,
 };
 
 /// The capability envelope of one instantiated guest.
@@ -37,6 +39,14 @@ pub struct GuestCaps {
     network: Vec<String>,
     /// Keys from `[[credentials]]`.
     slots: Vec<String>,
+    /// `[permissions] fs`. Read by the `fs` interface (`crate::fs`), which never writes.
+    fs: AccessLevel,
+    /// `[permissions] fs_scope`.
+    fs_scope: Vec<String>,
+    /// The repository open in Arbor for the call in flight. Not part of the manifest: the host
+    /// sets it per call (`set_repo`), so a persistent guest is checked against the repository
+    /// that is open *now*. See `crate::fs` for why the guest cannot name it.
+    repo: Option<PathBuf>,
 }
 
 impl GuestCaps {
@@ -45,12 +55,53 @@ impl GuestCaps {
             plugin:  m.name.clone(),
             network: m.permissions.network.clone(),
             slots:   m.credentials.iter().map(|c| c.key.clone()).collect(),
+            fs:      m.permissions.fs,
+            fs_scope: m.permissions.fs_scope.clone(),
+            repo:    None,
         }
     }
 
     /// Build one directly. For tests and for hosts that assemble the envelope themselves.
     pub fn new(plugin: impl Into<String>, network: Vec<String>, slots: Vec<String>) -> Self {
-        Self { plugin: plugin.into(), network, slots }
+        Self {
+            plugin: plugin.into(),
+            network,
+            slots,
+            fs: AccessLevel::None,
+            fs_scope: Vec::new(),
+            repo: None,
+        }
+    }
+
+    /// Set the filesystem permission and scope. For tests and for hosts that assemble the
+    /// envelope themselves; a manifest-built envelope already carries them.
+    pub fn with_fs(mut self, level: AccessLevel, scope: Vec<String>) -> Self {
+        self.fs = level;
+        self.fs_scope = scope;
+        self
+    }
+
+    /// Set the active repository (see [`GuestCaps::set_repo`]).
+    pub fn with_repo(mut self, repo: Option<PathBuf>) -> Self {
+        self.repo = repo;
+        self
+    }
+
+    /// Replace the active repository. The host calls this before each call into a guest.
+    pub fn set_repo(&mut self, repo: Option<PathBuf>) {
+        self.repo = repo;
+    }
+
+    pub fn fs_level(&self) -> AccessLevel {
+        self.fs
+    }
+
+    pub fn fs_scope(&self) -> &[String] {
+        &self.fs_scope
+    }
+
+    pub fn repo(&self) -> Option<&Path> {
+        self.repo.as_deref()
     }
 
     pub fn plugin(&self) -> &str {
@@ -135,5 +186,35 @@ mod tests {
     fn a_package_that_declared_no_network_reaches_nothing() {
         let c = GuestCaps::new("x", vec![], vec![]);
         assert!(c.allow_url("https://anything.com").is_err());
+    }
+
+    #[test]
+    fn the_manifests_fs_permission_and_scope_reach_the_envelope() {
+        let m = Manifest::from_toml_str(
+            "name = \"p\"\nversion = \"1\"\ndescription = \"d\"\nauthor = \"a\"\n\
+             [permissions]\nfs = \"read\"\nfs_scope = [\"/data\"]\n",
+            std::path::Path::new("/tmp"),
+        )
+        .unwrap();
+        let c = GuestCaps::from_manifest(&m);
+        assert_eq!(c.fs_level(), AccessLevel::Read);
+        assert_eq!(c.fs_scope(), ["/data".to_string()]);
+        assert!(c.repo().is_none(), "the repo is the host's to set per call, not the manifest's");
+    }
+
+    #[test]
+    fn a_package_that_declared_no_fs_reads_nothing() {
+        let c = GuestCaps::new("x", vec![], vec![]).with_repo(Some("/repo".into()));
+        assert_eq!(c.fs_level(), AccessLevel::None);
+        assert!(c.fs_read_file("/repo/a.txt").is_err());
+    }
+
+    #[test]
+    fn the_repo_can_change_between_calls() {
+        let mut c = GuestCaps::new("x", vec![], vec![]);
+        c.set_repo(Some("/a".into()));
+        assert_eq!(c.repo(), Some(std::path::Path::new("/a")));
+        c.set_repo(None);
+        assert!(c.repo().is_none());
     }
 }

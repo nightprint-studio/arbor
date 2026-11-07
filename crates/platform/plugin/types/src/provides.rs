@@ -88,6 +88,15 @@ pub struct Provides {
     /// The module file, relative to the package directory. Present in an installed package;
     /// in the repo it names what the release will carry.
     pub module:    String,
+    /// Keep one instance alive across calls instead of a fresh one per call.
+    ///
+    /// Opt-in, because a guest written for a fresh instance may hold state it never expected to
+    /// outlive one call. A guest that asks for it can keep work between calls (a language backend
+    /// keeps its index and re-reads only what changed); it must still answer correctly from a
+    /// fresh instance, because the host drops a live one whenever it likes — on reload, after an
+    /// error, after it sat idle. Calls to one instance never overlap.
+    #[serde(default)]
+    pub persistent: bool,
 }
 
 /// A credential slot a package owns.
@@ -123,6 +132,15 @@ mod tests {
         let s: LuaSection = toml::from_str("").unwrap();
         assert_eq!(s.entry, "main.lua");
         assert_eq!(LuaSection::default().entry, "main.lua");
+    }
+
+    #[test]
+    fn persistence_is_off_unless_the_package_asks() {
+        let p: Provides = toml::from_str("interface = \"mesh-source\"\nversion = 1\nid = \"x\"\nmodule = \"x.wasm\"").unwrap();
+        assert!(!p.persistent);
+        let p: Provides =
+            toml::from_str("interface = \"language-intel\"\nversion = 1\nid = \"ptn\"\nmodule = \"p.wasm\"\npersistent = true").unwrap();
+        assert!(p.persistent);
     }
 
     #[test]

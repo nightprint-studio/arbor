@@ -573,6 +573,16 @@ fn is_resource_file(lower: &str) -> bool {
     [".properties", ".yml", ".yaml", ".toml"].iter().any(|e| lower.ends_with(e))
 }
 
+/// Whether a file is a fulcrum i18n **document**: a `.md` somewhere under an `i18n` directory.
+///
+/// The wiki texts live there since the engine moved them into the i18n tree, and the catalogue needs
+/// them to declare `wiki:<key>`. Only under `i18n/`: reading every README of a workspace to throw it
+/// away would be a scan spent on nothing.
+fn is_i18n_document(path: &Path, lower: &str) -> bool {
+    lower.ends_with(".md")
+        && path.components().any(|c| c.as_os_str() == "i18n")
+}
+
 /// Walk the project for the file kinds an extension is handed: XML (any of them — the extension
 /// decides which are its own), property resources, and pages.
 fn collect_config_files(root: &Path, wants_sources: bool) -> WalkedFiles {
@@ -596,7 +606,7 @@ fn collect_config_files(root: &Path, wants_sources: bool) -> WalkedFiles {
             // not have to ask the host to widen a filter written for somebody else.
             let bucket = if lower.ends_with(".xml") {
                 &mut out.xml
-            } else if is_resource_file(&lower) {
+            } else if is_resource_file(&lower) || is_i18n_document(&p, &lower) {
                 &mut out.resources
             } else if is_page_file(&lower) {
                 &mut out.pages
@@ -2293,6 +2303,15 @@ mod tests {
         assert!(vantage_of("/elsewhere/pom.xml.bak", here).is_none());
         // And with no project open there is no vantage to lend.
         assert!(vantage_of("/elsewhere/pom.xml", None).is_none());
+    }
+
+    #[test]
+    fn only_markdown_under_an_i18n_directory_is_a_walked_document() {
+        let md = |p: &str| is_i18n_document(Path::new(p), &p.to_ascii_lowercase());
+        assert!(md("/p/presentazione/i18n/it/wiki/zaino.md"));
+        assert!(!md("/p/README.md"));
+        assert!(!md("/p/docs/design.md"));
+        assert!(!md("/p/i18n/it/menu.toml"));
     }
 
     #[test]

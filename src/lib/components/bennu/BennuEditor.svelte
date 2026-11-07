@@ -46,7 +46,7 @@
   import {
     isImageFile, isJavaFile as isJavaFileOf, isJspFile as isJspFileOf, isTestSource,
     isLspFile as isLspFileOf, isRustFile as isRustFileOf, isMarkdownFile,
-    isRunnableScript, isHtmlFile, hasPushedDiagnostics, supportsCodeNav, supportsDiagnostics,
+    isRunnableScript, isHtmlFile, isPatinaFile as isPatinaFileOf, hasPushedDiagnostics, supportsCodeNav, supportsDiagnostics,
     isSpringConfigFile,
   } from './file-kind';
   import BennuHtmlPreview from './BennuHtmlPreview.svelte';
@@ -169,6 +169,7 @@
   import { offerEdits, selectionAfterEdits } from './offer-selection';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
+  import { hasDeclarationEngine, opensReadOnly } from './patina-nav';
   // The gutter's breakpoints and the paused line — both are the debugger's state seen from
   // the editor, and both are read-only here: the store owns them and persists them.
   import { bennuDebugStore, canonFile } from '$lib/stores/bennu/debug.svelte';
@@ -4423,7 +4424,7 @@
       // A server-backed buffer skips this branch: `bennu_references` is the right call for it
       // (the backend routes it to the server), and the JSP resolvers below would be asked about
       // a page that does not exist.
-      if (!isJavaFile && !isLspBuffer) {
+      if (!isJavaFile && !isLspBuffer && !isPatinaBuffer) {
         // A MyBatis mapper has its own idea of a use: the references to a `<resultMap>` / `<sql>`
         // across the project's mappers, or the Java callers of a statement.
         if (activePath.toLowerCase().endsWith('.xml') && isMapperSource(source)) {
@@ -4646,7 +4647,9 @@
     // `action="viewTree"` matching a Java method), hijacking the gesture before the
     // config-graph resolver (`bennu_definition`) gets its turn — so those keep going through
     // the chain below instead.
-    const resolvable = path.toLowerCase().endsWith('.java') || isLspFileOf(path);
+    // A Patina script too: the backend answers it through the extension that serves `.ptn`. Leaving it out sent the gesture down the
+    // Java chain below, which has nothing to say about a `.ptn` and ended in silence.
+    const resolvable = hasDeclarationEngine(path, path.toLowerCase().endsWith('.java'), isLspFileOf(path));
     if (!resolvable) return false;
     const source = editorComp.getValue();
     const target = await timed('go-to: declaration', () => ipcDeclaration(path, source, offset).catch(() => null));
@@ -4658,6 +4661,11 @@
       if (isJavaFile && (await tryGoToMapperStatement(source, offset))) return true;
       await runFindUsages(source, offset, editorComp.coordsAtByteOffset(offset), word || null);
       return true;
+    }
+    // A Patina target that is not this project's to edit — a library view written out by the backend, or a mod this one depends on that
+    // sits outside the open folder — opens through the same read-only view a decompiled class does.
+    if (isPatinaBuffer && opensReadOnly(target.file, projectStore.project?.root)) {
+      decompiledStore.register(target.file, { originFile: path, originSource: '', name: '', canDownload: false });
     }
     await openAt(target.file, target.line, target.col ?? 1);
     return true;
@@ -5031,7 +5039,8 @@
     //    classpath resolver and open the target's source view (member-precise), chaining library →
     //    library. Runs BEFORE the project engine (a `/decompiled/` path ends in `.java` and would
     //    otherwise route into the project declaration and get nothing).
-    if (offset != null && isDecompiledView && (await tryGoToLibraryNav(offset))) return;
+    //    (Not for a Patina view: its library is not on any classpath, and the Java resolver would answer about the wrong language.)
+    if (offset != null && isDecompiledView && !isPatinaBuffer && (await tryGoToLibraryNav(offset))) return;
     // 1. BE go-to-declaration — any Java symbol (class/method/field/local) — when we have
     //    a byte offset to classify at. Authoritative + precise (jumps to the exact line).
     if (offset != null && (await tryGoToDeclarationBE(offset, action))) return;
@@ -5074,6 +5083,12 @@
           toastStore.show('Nothing to go to here', 'info');
         }
       }
+      return;
+    }
+    // 1b-ptn. A Patina script stops here as well. Its engine is the one step above (`tryGoToDeclarationBE`), and everything below is
+    //     Java-stack: a JSP variable, a Struts action, a classpath type named after whatever word the caret is on.
+    if (isPatinaBuffer) {
+      if (!silent) toastStore.show('Nothing to go to here', 'info');
       return;
     }
     // 1b. JSP page-scoped variable (a `<c:set var>`/`${var}` under the caret) — single-file,
@@ -5181,6 +5196,9 @@
    *  backend routes), so what this gates is the JSP/Struts/XML resolvers that must NOT be asked
    *  about it. */
   const isLspBuffer = $derived(isLspFileOf(activePath));
+  /** A Patina script. Its navigation is the backend's (`bennu_declaration` / `bennu_references`, answered by the extension that serves `.ptn`), and the
+   *  JSP/Struts/MyBatis resolvers must not be asked about it. */
+  const isPatinaBuffer = $derived(isPatinaFileOf(activePath));
   /** Struts is on this project at all. The `*-validation.xml` tooling means nothing without it —
    *  a toolbar button that would create a file no framework reads is a button that teaches the
    *  wrong thing about the project. */

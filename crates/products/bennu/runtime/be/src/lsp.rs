@@ -264,7 +264,7 @@ fn bennu_lsp_expand_macro(
 /// Args for [`bennu_lsp_workspace_symbols`].
 #[derive(Deserialize)]
 pub struct LspSearchArgs {
-    /// Any file inside the workspace — picks which server answers.
+    /// Any file inside the workspace — picks which server answers. A `.ptn` file (or a mod's folder) also asks the Patina extension.
     pub file: String,
     /// The query the user typed.
     pub query: String,
@@ -274,10 +274,14 @@ pub struct LspSearchArgs {
 /// language.
 #[arbor_rpc::handler]
 fn bennu_lsp_workspace_symbols(
-    _ctx: &BennuState,
+    ctx: &BennuState,
     args: LspSearchArgs,
 ) -> Result<Vec<LspSymbol>, String> {
-    Ok(lsp_route::workspace_symbols(&args.file, &args.query))
+    let mut out = lsp_route::workspace_symbols(&args.file, &args.query);
+    // A Patina mod (`.ptn`, no language server): the extension that serves it answers for the mod `file` is in, and its names join the
+    // servers' — a repository can hold Rust and the mods written for it.
+    out.extend(crate::patina_intel::workspace_symbols(ctx, &args.file, &args.query));
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -435,7 +439,7 @@ fn bennu_lsp_did_close(_ctx: &BennuState, args: LspCloseArgs) -> Result<bool, St
 /// Args for [`bennu_lsp_problems`].
 #[derive(Deserialize)]
 pub struct LspProblemsArgs {
-    /// Any file inside the workspace — picks which server answers.
+    /// Any file inside the workspace — picks which server answers. A `.ptn` file (or a mod's folder) also asks the Patina extension.
     pub file: String,
 }
 

@@ -24,6 +24,15 @@ describe('getFileIcon', () => {
     different('index.jsp', 'index.html');
   });
 
+  it('gives Patina scripts their own mark, apart from Rust, RON and plain text', () => {
+    same('mine.ptn', 'lib.ptn');
+    same('mine.ptn', 'MINE.PTN');
+    different('mine.ptn', 'mine.rs');
+    different('mine.ptn', 'mine.ron');
+    different('mine.ptn', 'notes.txt');
+    different('mine.ptn', 'notes.unknownextension');
+  });
+
   it('gives request files the Hirundo mark, one for both spellings', () => {
     same('requests.http', 'api.rest');
     different('requests.http', 'data.json');

@@ -138,7 +138,15 @@ function isAnalyzedFile(path: string | null | undefined): boolean {
  * action that is not offered, and only the catalogue knows which of the two this file is.
  */
 export function supportsCodeNav(path: string | null | undefined): boolean {
-  return isAnalyzedFile(path) || isLspFile(path) || isWgslFile(path);
+  return isAnalyzedFile(path) || isLspFile(path) || isWgslFile(path) || isPatinaFile(path);
+}
+
+/** A Patina mod script (`.ptn`). Navigation and diagnostics come from the `language-intel`
+ *  extension that serves the extension, through the backend's `patina_intel` route — not a
+ *  language server, so {@link isLspFile} never claims it. Without the package installed the
+ *  backend answers empty, which is the honest answer for a language nobody installed. */
+export function isPatinaFile(path: string | null | undefined): boolean {
+  return ext(path) === 'ptn';
 }
 
 /** A WGSL shader.
@@ -215,7 +223,7 @@ const PROSE_EXTS = new Set([
  */
 export function supportsDiagnostics(path: string | null | undefined): boolean {
   return isAnalyzedFile(path) || isLspFile(path) || isCargoManifest(path) || isWgslFile(path)
-    || isRonFile(path) || isToolConfigFile(path) || PROSE_EXTS.has(ext(path));
+    || isPatinaFile(path) || isRonFile(path) || isToolConfigFile(path) || PROSE_EXTS.has(ext(path));
 }
 
 /**

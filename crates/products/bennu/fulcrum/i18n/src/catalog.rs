@@ -72,6 +72,47 @@ pub struct Declaration {
     /// doc. `None` for a basic string carrying escapes.
     pub content_start: Option<usize>,
     pub line: u32,
+    /// A whole `.md` file, taken **literally** — the engine does not run it through the markup
+    /// parser, so neither may anything here: a `{` in a wiki page is a brace, not a placeholder.
+    pub document: bool,
+}
+
+impl Declaration {
+    /// The value as parsed segments: the markup parse for a string of a `.toml`, one literal text
+    /// segment for a document.
+    pub fn segments(&self) -> Vec<crate::markup::Segment> {
+        literal_or_markup(&self.value, self.document)
+    }
+
+    /// A one-line reading of the value — what a hover, a catalogue row or a sibling list shows.
+    ///
+    /// A document is long and its first line is its title, so that is what stands for it.
+    pub fn plain(&self) -> String {
+        if self.document {
+            return document_title(&self.value);
+        }
+        crate::markup::flatten(&self.segments())
+    }
+}
+
+/// `value` as segments: parsed markup, or — for a document — a single text segment with the
+/// text untouched.
+pub(crate) fn literal_or_markup(value: &str, document: bool) -> Vec<crate::markup::Segment> {
+    if !document {
+        return crate::markup::parse_markup(value).segments;
+    }
+    vec![crate::markup::Segment {
+        kind: crate::markup::SegmentKind::Text { text: value.to_string() },
+        start: 0,
+        end: value.len(),
+    }]
+}
+
+/// The first non-blank line of a document, without its heading marks and capped in length.
+pub(crate) fn document_title(value: &str) -> String {
+    let line = value.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+    let line = line.trim_start_matches('#').trim();
+    line.chars().take(120).collect()
 }
 
 /// A style `styles.toml` declares, and the fields the preview renders it with.
@@ -146,6 +187,11 @@ impl LabelCatalog {
                     // translations would invent a language the engine will never load.
                     if cat.languages.iter().any(|l| l.code == lang) {
                         cat.read_category(path, text, &lang, &category);
+                    }
+                }
+                FileKind::Document { lang, category, key } => {
+                    if cat.languages.iter().any(|l| l.code == lang) {
+                        cat.read_document(path, text, &lang, &category, &key);
                     }
                 }
             }
@@ -437,14 +483,35 @@ impl LabelCatalog {
                 end: e.value_end,
                 content_start: content_start.map(|off| e.value_start + off),
                 line: e.line,
+                document: false,
             };
-            let list = self.labels.entry(label).or_default();
-            // Later roots override the same language's earlier declaration, as the engine's
-            // `Translations::merge` does.
-            match list.iter().position(|d| d.lang == decl.lang) {
-                Some(i) => list[i] = decl,
-                None => list.push(decl),
-            }
+            self.declare(label, decl);
+        }
+    }
+
+    /// A `.md` document: the whole file is the value, and the file's path under its category is the
+    /// key. See [`FileKind::Document`].
+    fn read_document(&mut self, path: &str, text: &str, lang: &str, category: &str, key: &str) {
+        let decl = Declaration {
+            lang: lang.to_string(),
+            file: path.to_string(),
+            value: text.to_string(),
+            start: 0,
+            end: text.len(),
+            content_start: Some(0),
+            line: 1,
+            document: true,
+        };
+        self.declare(format!("{category}:{key}"), decl);
+    }
+
+    fn declare(&mut self, label: String, decl: Declaration) {
+        let list = self.labels.entry(label).or_default();
+        // Later roots override the same language's earlier declaration, as the engine's
+        // `Translations::merge` does.
+        match list.iter().position(|d| d.lang == decl.lang) {
+            Some(i) => list[i] = decl,
+            None => list.push(decl),
         }
     }
 }
@@ -458,6 +525,10 @@ pub(crate) enum FileKind {
     Styles,
     Glossary,
     Category { lang: String, category: String },
+    /// `<lang>/<folder>/…/<name>.md` — the first folder is the category, the rest of the path
+    /// (dots for slashes) the key, the whole file the value. The engine's rule since the wiki moved
+    /// into the i18n tree: a document is taken literally, never parsed as markup.
+    Document { lang: String, category: String, key: String },
 }
 
 pub(crate) struct Place {
@@ -469,7 +540,8 @@ pub(crate) struct Place {
 /// Where a path sits in an `i18n/` tree, or `None` when it is not in one.
 pub(crate) fn place_of(path: &str) -> Option<Place> {
     let path = path.replace('\\', "/");
-    if !path.ends_with(".toml") {
+    let is_toml = path.ends_with(".toml");
+    if !is_toml && !path.ends_with(".md") {
         return None;
     }
     // The LAST `i18n/` segment, so a project that happens to live under a directory called `i18n`
@@ -477,28 +549,44 @@ pub(crate) fn place_of(path: &str) -> Option<Place> {
     let at = path.rfind("/i18n/")?;
     let root = path[..at + 5].to_string();
     let rest = &path[at + 6..];
-    let name = rest.rsplit('/').next().unwrap_or(rest);
-    match (rest.contains('/'), name) {
-        (false, "languages.toml") => Some(Place { root, kind: FileKind::Languages }),
-        (false, "styles.toml") => Some(Place { root, kind: FileKind::Styles }),
-        (false, "glossary.toml") => Some(Place { root, kind: FileKind::Glossary }),
-        // A loose `.toml` at the root of `i18n/` is not a category — the category directory IS the
-        // language, and a file with no language cannot be a translation of anything.
-        (false, _) => None,
-        (true, _) => {
-            let (lang, tail) = rest.split_once('/')?;
-            // One level only: `it/menu.toml`. A deeper file is not something the engine loads.
-            if tail.contains('/') {
-                return None;
-            }
+    let segments: Vec<&str> = rest.split('/').collect();
+    let name = *segments.last()?;
+    // The engine skips a hidden folder on the way down, and a hidden file.
+    if segments.iter().any(|s| s.starts_with('.')) {
+        return None;
+    }
+    match (segments.len(), is_toml) {
+        (1, true) => match name {
+            "languages.toml" => Some(Place { root, kind: FileKind::Languages }),
+            "styles.toml" => Some(Place { root, kind: FileKind::Styles }),
+            "glossary.toml" => Some(Place { root, kind: FileKind::Glossary }),
+            // A loose `.toml` at the root of `i18n/` is not a category — the category directory IS
+            // the language, and a file with no language cannot be a translation of anything.
+            _ => None,
+        },
+        // One level only: `it/menu.toml`. A `.toml` deeper than that is not something the engine
+        // loads.
+        (2, true) => Some(Place {
+            root,
+            kind: FileKind::Category {
+                lang: segments[0].to_string(),
+                category: name.trim_end_matches(".toml").to_string(),
+            },
+        }),
+        // A `.md` is a document, and only inside a folder of a language: `it/wiki/zaino.md`.
+        (n, false) if n >= 3 => {
+            let mut key: Vec<&str> = segments[2..n - 1].to_vec();
+            key.push(name.trim_end_matches(".md"));
             Some(Place {
                 root,
-                kind: FileKind::Category {
-                    lang: lang.to_string(),
-                    category: tail.trim_end_matches(".toml").to_string(),
+                kind: FileKind::Document {
+                    lang: segments[0].to_string(),
+                    category: segments[1].to_string(),
+                    key: key.join("."),
                 },
             })
         }
+        _ => None,
     }
 }
 
@@ -509,7 +597,7 @@ pub(crate) fn place_of(path: &str) -> Option<Place> {
 fn harvest_controls(labels: &BTreeMap<String, Vec<Declaration>>) -> Vec<String> {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for decls in labels.values() {
-        for d in decls {
+        for d in decls.iter().filter(|d| !d.document) {
             for name in crate::markup::control_refs(&crate::markup::parse_markup(&d.value).segments)
             {
                 *counts.entry(name.text).or_default() += 1;

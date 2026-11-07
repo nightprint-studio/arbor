@@ -27,7 +27,7 @@
 //! answered.
 
 use bennu_core::prelude::BennuState;
-use bennu_fulcrum_i18n::prelude::{bundle_of, live_values, StudioView};
+use bennu_fulcrum_i18n::prelude::{bundle_of, values_of, StudioView};
 use bennu_project::prelude::normalize_newlines;
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +50,8 @@ pub struct StudioAnswer {
     /// The translation under the caret. `None` is the ordinary answer: most carets in a bundle are on
     /// a table header or a blank line.
     pub view: Option<StudioView>,
-    /// Whether the path is `i18n/<lang>/<category>.toml` at all. Decided from the path alone, so it
+    /// Whether the path is `i18n/<lang>/<category>.toml` — or a `.md` document under
+    /// `i18n/<lang>/<category>/` — at all. Decided from the path alone, so it
     /// is always answered.
     pub bundle: bool,
     /// Whether any open project owns this file. `false` for a file opened from outside every project
@@ -112,7 +113,7 @@ fn bennu_i18n_studio(_ctx: &BennuState, args: StudioArgs) -> Result<StudioAnswer
     // Both of these are pure functions of the path and the text, so they answer whether or not the
     // project carries the extension — which is precisely what makes "no model" distinguishable from
     // "no translations" from "not on one".
-    let translations = if bundle { live_values(&source).len() } else { 0 };
+    let translations = if bundle { values_of(&path, &source).len() } else { 0 };
 
     let ext = crate::frameworks::fulcrum_of_file(&args.file);
     let model = ext.is_some();

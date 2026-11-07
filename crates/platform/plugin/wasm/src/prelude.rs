@@ -5,6 +5,7 @@
 //! the prelude is the canonical call-site path.
 
 pub use crate::caps::GuestCaps;
+pub use crate::fs::{FsEntry, FsError, MAX_LIST_ENTRIES, MAX_READ_BYTES};
 pub use crate::guest::GuestState;
 pub use crate::registry::{ExtensionEntry, ExtensionIndex, ExtensionKey, IndexProblem};
 pub use crate::report::{ExtensionProblemRow, ExtensionRow, ExtensionsReport};

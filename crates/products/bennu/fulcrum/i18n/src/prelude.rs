@@ -18,8 +18,8 @@ pub use crate::markup::{
 
 // The bundle as the buffer has it — the editor panel's half.
 pub use crate::studio::{
-    bundle_of, live_value_at, live_values, markup_spans, studio_view, Bundle, LiveValue, MarkupSpan,
-    Sibling, StudioView,
+    bundle_of, live_value_at, live_values, markup_spans, studio_view, value_at, values_of, Bundle,
+    LiveValue, MarkupSpan, Sibling, StudioView,
 };
 
 // Where the project reads a label.

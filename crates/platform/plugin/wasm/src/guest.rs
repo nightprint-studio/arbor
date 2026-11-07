@@ -103,6 +103,16 @@ impl GuestState {
         self.services.credential_delete(&account)
     }
 
+    /// Read one file as text, gate first. See [`crate::fs`].
+    pub fn fs_read_file(&self, path: &str) -> Result<String, crate::fs::FsError> {
+        self.caps.fs_read_file(path)
+    }
+
+    /// List one directory, gate first. See [`crate::fs`].
+    pub fn fs_list_dir(&self, path: &str) -> Result<Vec<crate::fs::FsEntry>, crate::fs::FsError> {
+        self.caps.fs_list_dir(path)
+    }
+
     /// Append to the package's log stream. The one capability with no gate, because there is
     /// nothing to gate: a guest talking into its own log cannot reach anything.
     pub fn log(&self, level: &str, message: &str) {
@@ -197,6 +207,21 @@ mod tests {
         assert!(st.credential_delete("sneaky").is_err());
         assert!(spy.reads.lock().unwrap().is_empty());
         assert!(spy.writes.lock().unwrap().is_empty(), "a write happened for an undeclared slot");
+    }
+
+    #[test]
+    fn the_guests_state_reads_through_the_same_gate() {
+        // A state built from a package that never declared `fs` cannot read, whatever path it
+        // names — the guest-facing methods have no way around the caps.
+        let (st, _) = state();
+        assert!(matches!(
+            st.fs_read_file("/etc/hosts"),
+            Err(crate::fs::FsError::NoPermission { .. })
+        ));
+        assert!(matches!(
+            st.fs_list_dir("/"),
+            Err(crate::fs::FsError::NoPermission { .. })
+        ));
     }
 
     #[test]

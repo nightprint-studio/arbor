@@ -142,6 +142,8 @@ pub fn forget_compiled() {
     if let Some(Ok(host)) = ENGINE.get() {
         host.forget_all();
     }
+    // The live instances of persistent packages were built from those modules: they go too.
+    crate::ext::forget_live();
 }
 
 /// Bring one extension up and let it go again.

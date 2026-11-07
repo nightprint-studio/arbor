@@ -44,6 +44,7 @@ pub mod dispatch;
 pub mod dynamic;
 #[cfg(feature = "runtime")]
 pub mod engine;
+pub mod fs;
 pub mod guest;
 pub mod prelude;
 pub mod registry;

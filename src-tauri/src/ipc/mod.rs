@@ -688,7 +688,7 @@ fn host_dispatch(
             .map_err(|e| format!("arbor.ext.call: {e}"))?;
         tracing::debug!("[{plugin}] ext.call {}@{}/{} {}",
             spec.interface, spec.version, spec.id, spec.method);
-        return crate::ext::call(&spec);
+        return crate::ext::call(&spec, crate::ext::active_repo(app));
     }
     // The byte-shaped pair. Both run here rather than in the backend because this is where the
     // wasm engine lives, and both take the file by PATH: the two processes share a machine, so
@@ -697,13 +697,13 @@ fn host_dispatch(
         let (plugin, spec, file) = ext_file_params("arbor.ext.call_to_file", &params)?;
         tracing::debug!("[{plugin}] ext.call_to_file {}@{}/{} {} -> {}",
             spec.interface, spec.version, spec.id, spec.method, file.path);
-        return crate::ext::call_to_file(&spec, &file).map(|n| serde_json::json!(n));
+        return crate::ext::call_to_file(&spec, &file, crate::ext::active_repo(app)).map(|n| serde_json::json!(n));
     }
     if method == "__ext_call_from_file" {
         let (plugin, spec, file) = ext_file_params("arbor.ext.call_from_file", &params)?;
         tracing::debug!("[{plugin}] ext.call_from_file {}@{}/{} {} <- {}",
             spec.interface, spec.version, spec.id, spec.method, file.path);
-        return crate::ext::call_from_file(&spec, &file);
+        return crate::ext::call_from_file(&spec, &file, crate::ext::active_repo(app));
     }
 
     // The OAuth engine, driven by whichever plugin asked. `start` blocks only long enough to

@@ -92,6 +92,8 @@ const GLYPHS: Record<string, KindGlyph> = {
   constant:  { icon: Variable,       color: 'var(--warning)' },
   enummember: { icon: Variable,      color: 'var(--warning)' },
   'enum member': { icon: Variable,   color: 'var(--warning)' },
+  // Patina's spelling of the same thing (a variant of an `enum`).
+  'enum-member': { icon: Variable,   color: 'var(--warning)' },
   // ── what the index holds that is not a symbol ──
   // A jar, a bean, an action and a config edge are rows in the index inspector, and they belong in
   // this table for the same reason everything else does: the shape of a kind must not depend on
