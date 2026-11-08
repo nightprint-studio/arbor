@@ -498,6 +498,17 @@ pub trait TypeResolver {
         Vec::new()
     }
 
+    /// The value of the compile-time constant field `field` declared by `owner`, as a Java literal
+    /// (`42`, `30000L`, `"utf-8"`) — what a hover card shows beside a constant.
+    ///
+    /// Answered from a **library** class file's `ConstantValue` attribute; a project field's value is
+    /// its initializer, which the caller reads from the source it already holds. Kept out of
+    /// [`ClassMembers`] for the reason [`Self::class_annotations`] is: asked once per hover, it has no
+    /// business in a struct memoized for every class. Default `None` — "not known".
+    fn constant_value(&self, _owner: &str, _field: &str) -> Option<String> {
+        None
+    }
+
     /// Whether any type lives in `package` (slash form, `java/util`) or in a package below it.
     ///
     /// `Some(false)` is a definitive "nothing is there" — `import com.nowhere.*;` and

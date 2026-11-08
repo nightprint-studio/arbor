@@ -615,11 +615,13 @@ export interface HoverInfo {
   kind: string;
   /** Owning type's dotted FQCN for a member; `null` for a type. */
   container: string | null;
-  /** Javadoc / leading comment — `null` for now (extraction deferred on the BE). */
+  /** The documentation — Javadoc or markdown, as `doc_format` says. `null` when there is none. */
   doc: string | null;
   /** The dependency it came out of, as `groupId:artifactId:version`. `null` for the project's own
    *  code and for the JDK, neither of which is an artifact. */
   artifact?: string | null;
+  /** How `doc` is written: Javadoc (HTML) or markdown (a language server, Patina). Absent = Javadoc. */
+  doc_format?: 'javadoc' | 'markdown';
 }
 
 /** Resolve the hover info for the symbol at `file`:`offset` (UTF-8 byte offset).

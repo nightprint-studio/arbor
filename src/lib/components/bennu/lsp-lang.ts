@@ -298,7 +298,7 @@ export function backendHoverSource(
         above: true,
         // A server's doc is written in the language it serves, so a code block in it is that
         // language — read off the file rather than assumed, since one descriptor serves several.
-        create: () => ({ dom: hoverCardDom({ ...info, ...hoverLanguages(path) }) }),
+        create: () => ({ dom: hoverCardDom({ ...info, docFormat: info.doc_format, ...hoverLanguages(path) }) }),
       } as Tooltip;
     })
     .catch(() => null);

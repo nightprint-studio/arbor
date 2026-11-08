@@ -286,6 +286,13 @@ pub trait MemberIndex {
     fn package_exists(&self, _package: &str) -> Option<bool> {
         None
     }
+
+    /// The value of the compile-time constant field `field` of `binary_name`, as a Java literal
+    /// (`42`, `30000L`, `"utf-8"`) — see [`crate::constants`]. A separate lookup for the same reason
+    /// as [`Self::class_annotations`]. Default `None`: "not known", never "not a constant".
+    fn constant_value(&self, _binary_name: &str, _field: &str) -> Option<String> {
+        None
+    }
 }
 
 /// Adapt any [`ClassSource`](crate::source::ClassSource) into a [`MemberIndex`]: the
@@ -320,6 +327,10 @@ impl<S: crate::source::ClassSource> SourceMemberIndex<S> {
 impl<S: crate::source::ClassSource> MemberIndex for SourceMemberIndex<S> {
     fn class_annotations(&self, binary_name: &str) -> Option<crate::annotations::ClassAnnotations> {
         crate::annotations::class_annotations_of(&self.source, binary_name)
+    }
+
+    fn constant_value(&self, binary_name: &str, field: &str) -> Option<String> {
+        crate::constants::field_constant_of(&self.source, binary_name, field)
     }
 
     fn members_of(&self, binary_name: &str) -> Option<ClassMembers> {

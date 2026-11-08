@@ -37,6 +37,7 @@
 //! navigation, but the prelude is the canonical call-site path.
 
 pub mod annotations;
+pub mod constants;
 pub mod jdk;
 pub mod maven;
 pub mod members;

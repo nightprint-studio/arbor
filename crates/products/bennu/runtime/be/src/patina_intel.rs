@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::{
-    BuildDiagnostic, CompletionItem, DeclarationTarget, Diagnostic, HoverInfo, PatinaBuildDiagnostic, PatinaBuildReport, PatinaBuildSchema,
+    BuildDiagnostic, CompletionItem, DeclarationTarget, Diagnostic, DocFormat, HoverInfo, PatinaBuildDiagnostic, PatinaBuildReport, PatinaBuildSchema,
     LspSymbol, RenameEdit, RenameFileEdits, RenamePreview, SourceEdit, UsageHit, UsagesResult,
 };
 use serde::Deserialize;
@@ -320,7 +320,15 @@ pub(crate) fn hover(ctx: &BennuState, file: &str, source: &str, offset: usize) -
         return Some(None);
     }
     let out = call(ctx, "hover", vec![request(file, source), json!(offset)]).ok().and_then(|v| decode::<Option<WireHover>>("hover", v));
-    Some(out.flatten().map(|h| HoverInfo { signature: h.signature, kind: h.kind, container: h.container, doc: h.doc, artifact: None }))
+    // A `///` comment is markdown — backticks, fences, `**` — and the card renders it as such.
+    Some(out.flatten().map(|h| HoverInfo {
+        signature: h.signature,
+        kind: h.kind,
+        container: h.container,
+        doc: h.doc,
+        artifact: None,
+        doc_format: DocFormat::Markdown,
+    }))
 }
 
 /// Where the name at `offset` is declared. `None` for a file that is not Patina; `Some(None)` when there is no
@@ -343,10 +351,9 @@ pub(crate) fn declaration(ctx: &BennuState, file: &str, source: &str, offset: us
         let Some((view, text)) = library_view(ctx, &l.file) else { return Some(None) };
         return Some(Some(target_in(&text, view, &l.span)));
     }
-    // The caret already on the declaration: nothing to go to, and a jump onto itself reads as broken.
-    if l.file == here && offset >= l.span.start && offset <= l.span.end {
-        return Some(None);
-    }
+    // The caret already on the declaration is answered with the declaration itself, as Java and the language servers do: the editor
+    // reads "the target is where I stand" as the cue to show the usages instead (IntelliJ's Cmd+click on a declaration). Answering
+    // nothing here, as this did, left that gesture silent on every `.ptn` — the usages only came from the context menu.
     // Another file of the mod, or of a dependency (a real path, maybe outside the open project): read only as far as the package named it.
     let text = if l.file == here { Some(source.to_string()) } else { std::fs::read_to_string(&l.file).ok() };
     Some(Some(target_in(&text.unwrap_or_default(), l.file, &l.span)))

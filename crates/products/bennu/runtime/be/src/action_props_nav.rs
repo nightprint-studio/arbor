@@ -934,6 +934,7 @@ fn hover_in_chain(chain: &[(String, String)], simple: &str, prop: &str) -> Optio
                 container: Some(simple.to_string()),
                 doc: None,
                 artifact: None,
+                doc_format: Default::default(),
             });
         }
     }

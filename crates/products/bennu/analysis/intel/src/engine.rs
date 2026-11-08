@@ -1016,7 +1016,36 @@ impl SemanticEngine {
         // resolves to (None for a classpath-only / JDK symbol we can't read the source of) — the
         // declaration of the overload the call binds to, the same one go-to opens.
         info.doc = self.project_doc_for_key(key, overload);
+        // A constant's value beside its type — `int MAX = 42`. What a reader hovers a constant to
+        // find out, and the one thing its name and type do not say.
+        if let Some(value) = self.constant_value_for(key, info.owner.as_deref(), resolver) {
+            info.signature = format!("{} = {value}", info.signature);
+        }
         info
+    }
+
+    /// The value of the constant field `key` names, as source text: a project field's initializer
+    /// (read from the file declaring it), else a library field's `ConstantValue`. `None` for anything
+    /// that is not a field, or not a constant.
+    ///
+    /// Asked of the type that **declares** the field (`declaring`, from the card), not the one it was
+    /// reached through: `Sub.MAX` is written in `Base`, and so is its value.
+    fn constant_value_for(
+        &self,
+        key: &DeclKey,
+        declaring: Option<&str>,
+        resolver: &dyn TypeResolver,
+    ) -> Option<String> {
+        let DeclKey::Field { owner, name } = key else { return None };
+        let owner = declaring.unwrap_or(owner);
+        let declared = DeclKey::Field { owner: owner.to_string(), name: name.clone() };
+        let live = self.live();
+        if let Some(file) = live.index.file_declaring(owner) {
+            let source = project_source(&live.java_files, file)?;
+            return crate::constant_value::project_constant(source, &declared);
+        }
+        drop(live);
+        resolver.constant_value(owner, name)
     }
 
     /// Extract the leading Javadoc (`/** … */`) of the project declaration `key` names. `None` when

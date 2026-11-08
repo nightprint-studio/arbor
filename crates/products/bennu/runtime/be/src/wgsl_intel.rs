@@ -383,6 +383,7 @@ pub(crate) fn hover(file: &str, source: &str, offset: usize) -> Option<Option<Ho
             container: Some("WGSL attribute".to_string()),
             doc: Some(b.detail.to_string()),
             artifact: None,
+            doc_format: Default::default(),
         }));
     }
 
@@ -393,6 +394,7 @@ pub(crate) fn hover(file: &str, source: &str, offset: usize) -> Option<Option<Ho
             container: sym.container.clone(),
             doc: doc_above(source, sym.start),
             artifact: None,
+            doc_format: Default::default(),
         }));
     }
 
@@ -409,6 +411,7 @@ pub(crate) fn hover(file: &str, source: &str, offset: usize) -> Option<Option<Ho
             container: sym.container.clone().or_else(|| Some(sym.module.clone())),
             doc: sym.doc.clone(),
             artifact: None,
+            doc_format: Default::default(),
         }));
     }
 
@@ -426,6 +429,7 @@ pub(crate) fn hover(file: &str, source: &str, offset: usize) -> Option<Option<Ho
         container: Some("WGSL".to_string()),
         doc: Some(b.detail.to_string()),
         artifact: None,
+        doc_format: Default::default(),
     }))
 }
 

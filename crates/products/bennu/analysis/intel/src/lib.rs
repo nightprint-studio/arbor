@@ -30,6 +30,7 @@ pub mod class_names;
 pub mod create_in;
 pub mod config;
 pub mod conflict;
+mod constant_value;
 pub mod diag_cache;
 // The project's semantic model — the one view of the index + sources + type maps that rename,
 // find-usages, go-to, hover, inherited members and the hierarchies all answer from.

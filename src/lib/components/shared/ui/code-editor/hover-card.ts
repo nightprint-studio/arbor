@@ -22,6 +22,12 @@
  * definition list, because they are a table and prose is not. `@deprecated` is the one tag
  * that gets a colour, because it is the one that changes what you do next.
  *
+ * ### Markdown is the other half
+ *
+ * A language server and Patina's `///` write their documentation in markdown, not HTML. The
+ * producer says which ({@link HoverCard.docFormat}) and a markdown doc goes to `hover-markdown`
+ * instead — read as Javadoc, its backticks and fences came through as typed.
+ *
  * ### A tag we do not know is not a tag
  *
  * The element names below are a **closed list**, and that is load-bearing rather than
@@ -40,6 +46,8 @@
  */
 
 import { highlightToDom } from '$lib/utils/highlight';
+import { decodeEntities } from './doc-entities';
+import { renderMarkdown } from './hover-markdown';
 
 /** What the card renders. A view type, deliberately not any product's wire shape. */
 export interface HoverCard {
@@ -68,6 +76,12 @@ export interface HoverCard {
    * leaves the title as plain text, which is what a column's facts are.
    */
   signatureLanguage?: string | null;
+  /**
+   * How {@link doc} is written. `javadoc` (the default) is HTML with `{@code}` and `@param`;
+   * `markdown` is what a language server and Patina's `///` send, rendered by `hover-markdown`.
+   * Said by whoever produced the doc — the two cannot be told apart reliably from the text.
+   */
+  docFormat?: 'javadoc' | 'markdown' | null;
 }
 
 /** A signature longer than this gets one parameter per line. */
@@ -85,6 +99,8 @@ export function wrapSignature(sig: string): string {
   if (sig.length <= WRAP_SIGNATURE_AT) return sig;
   const open = sig.indexOf('(');
   if (open < 0) return sig;
+  // A `(` after an `=` is inside a constant's value (`String Q = "f(a, b)"`), not a parameter list.
+  if (sig.slice(0, open).includes('=')) return sig;
 
   const parts: string[] = [];
   let depth = 0;
@@ -200,50 +216,6 @@ const BLOCK_TAGS = new Set([
 
 /** Tags whose first word is a subject (`@param name …`) rather than part of the text. */
 const SUBJECT_TAGS = new Set(['param', 'throws', 'exception']);
-
-// ── Entities ─────────────────────────────────────────────────────────────────────
-
-/**
- * The named entities a doc comment actually uses. Not the full HTML set: a doc author
- * reaches for these and little else, and the numeric forms below cover the rest.
- *
- * `&#064;` earns its own mention — it is how every Javadoc author writes an `@` inside an
- * example so the tool does not read it as a tag, which is why an unrendered card is full of
- * them.
- */
-const NAMED_ENTITIES: Record<string, string> = {
-  lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: ' ',
-  hellip: '…', mdash: '—', ndash: '–', minus: '−',
-  ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’',
-  laquo: '«', raquo: '»', bull: '•', middot: '·',
-  copy: '©', reg: '®', trade: '™', deg: '°', times: '×',
-  larr: '←', rarr: '→', harr: '↔', rArr: '⇒',
-  le: '≤', ge: '≥', ne: '≠', infin: '∞', sum: '∑',
-  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ',
-  lambda: 'λ', mu: 'μ', pi: 'π', sigma: 'σ', tau: 'τ',
-  ensp: ' ', emsp: ' ', thinsp: ' ', shy: '',
-};
-
-/** Turn `&#064;` / `&#x40;` / `&nbsp;` into the characters they name, leaving anything
- *  unrecognised exactly as written — an `&` in prose is an `&`. */
-function decodeEntities(s: string): string {
-  return s.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, body: string) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X'
-        ? parseInt(body.slice(2), 16)
-        : parseInt(body.slice(1), 10);
-      // Reject the ranges that cannot be a character: a malformed entity stays as typed.
-      if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return whole;
-      try {
-        return String.fromCodePoint(code);
-      } catch {
-        return whole;
-      }
-    }
-    const named = NAMED_ENTITIES[body];
-    return named !== undefined ? named : whole;
-  });
-}
 
 // ── Tokenising ───────────────────────────────────────────────────────────────────
 
@@ -609,15 +581,20 @@ export function hoverCardDom(info: HoverCard): HTMLElement {
 
   if (!info.doc) return dom;
 
+  if (info.docFormat === 'markdown') {
+    if (!info.doc.trim()) return dom;
+    const body = docBody(dom);
+    const d = document.createElement('div');
+    d.className = 'cm-hc-doc';
+    renderMarkdown(d, info.doc, info.codeLanguage);
+    body.appendChild(d);
+    return dom;
+  }
+
   const { prose, tags } = parseDoc(info.doc);
   if (!prose && tags.length === 0) return dom;
 
-  const body = document.createElement('div');
-  body.className = 'cm-hc-body';
-  // Scrollable, therefore focusable: a pointer can reach it, and a keyboard should be able to
-  // as well. `tabindex="-1"` is what lets the browser scroll it without putting it in tab order.
-  body.tabIndex = -1;
-  dom.appendChild(body);
+  const body = docBody(dom);
 
   if (prose) {
     const d = document.createElement('div');
@@ -640,4 +617,15 @@ export function hoverCardDom(info: HoverCard): HTMLElement {
     body.appendChild(dl);
   }
   return dom;
+}
+
+/** The card's scrolling body, appended to `dom`. */
+function docBody(dom: HTMLElement): HTMLElement {
+  const body = document.createElement('div');
+  body.className = 'cm-hc-body';
+  // Scrollable, therefore focusable: a pointer can reach it, and a keyboard should be able to
+  // as well. `tabindex="-1"` is what lets the browser scroll it without putting it in tab order.
+  body.tabIndex = -1;
+  dom.appendChild(body);
+  return body;
 }

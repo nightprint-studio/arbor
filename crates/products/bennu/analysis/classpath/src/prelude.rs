@@ -15,6 +15,10 @@ pub use crate::annotations::{
     MemberAnnotations,
 };
 
+// The value of a compile-time constant field (`ConstantValue`), as a Java literal — asked once per
+// hover, so a separate lookup like the annotations above.
+pub use crate::constants::{field_constant, field_constant_of};
+
 // The shared-seam structured member index: TypeRef / Member / ClassMembers /
 // MemberIndex, plus the ClassSource→MemberIndex adapter.
 pub use crate::members::{

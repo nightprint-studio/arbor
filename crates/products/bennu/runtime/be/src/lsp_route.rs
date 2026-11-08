@@ -21,7 +21,7 @@
 
 use bennu_lsp::prelude::{LspError, LspSession, SpanTarget};
 use bennu_proto::prelude::{
-    CompletionItem, DeclarationTarget, Diagnostic, HoverInfo, LspAction, LspSignature, LspSymbol,
+    CompletionItem, DeclarationTarget, Diagnostic, DocFormat, HoverInfo, LspAction, LspSignature, LspSymbol,
     LspToken, RenameEdit, RenameFileEdits, RenamePreview, SourceEdit, UsageHit, UsagesResult,
 };
 use bennu_proto::prelude::{
@@ -807,60 +807,65 @@ fn rename_preview(
 ///
 /// rust-analyzer's hover is a module path in a code fence, then the item's signature in a
 /// second fence, then prose after a `---` rule. The card renders `signature` as its title,
-/// `container` as a muted meta line and `doc` as body text — which maps onto that almost
+/// `container` as a muted meta line and `doc` as its body — which maps onto that almost
 /// exactly, and degrades sensibly for a server that only sends prose.
+///
+/// Only the fences that **open** the hover are its header. A fence further down is an example
+/// inside the documentation, and it stays there: taking every fence out made a doc with an
+/// example lose it, and promoted the example to the card's title. The body is passed on as the
+/// markdown it is, and the card renders it.
 fn hover_wire(markdown: &str) -> HoverInfo {
-    let (fences, prose) = split_fences(markdown);
-    let (container, signature) = match fences.len() {
-        0 => (None, first_line(&prose)),
-        1 => (None, fences[0].clone()),
+    let (header, body) = split_header(markdown);
+    let (container, signature) = match header.len() {
+        0 => (None, first_line(&body)),
+        1 => (None, header[0].clone()),
         // Two or more: the first is the path the item lives at, the last is the item.
-        _ => (Some(fences[0].clone()), fences[fences.len() - 1].clone()),
+        _ => (Some(header[0].clone()), header[header.len() - 1].clone()),
     };
+    let doc = without_leading_rules(&body);
     HoverInfo {
         signature,
         // Left empty on purpose: a server sends no kind, and inventing one ("rust") would put
         // a tag on every card that says nothing the file extension does not.
         kind: String::new(),
         container,
-        doc: (!prose.trim().is_empty()).then(|| plainish(&prose)),
+        doc: (!doc.is_empty()).then_some(doc),
         artifact: None,
+        doc_format: DocFormat::Markdown,
     }
 }
 
-/// Split markdown into its fenced code blocks and everything else.
-fn split_fences(markdown: &str) -> (Vec<String>, String) {
-    let mut fences: Vec<String> = Vec::new();
-    let mut prose = String::new();
-    let mut current: Option<String> = None;
-    for line in markdown.lines() {
-        if line.trim_start().starts_with("```") {
-            match current.take() {
-                Some(block) => fences.push(block.trim().to_string()),
-                None => current = Some(String::new()),
-            }
+/// The code fences a hover opens with, and the markdown after them, untouched.
+fn split_header(markdown: &str) -> (Vec<String>, String) {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut header: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].trim_start();
+        if line.trim().is_empty() {
+            i += 1;
             continue;
         }
-        match current.as_mut() {
-            Some(block) => {
-                block.push_str(line);
-                block.push('\n');
-            }
-            None => {
-                prose.push_str(line);
-                prose.push('\n');
-            }
+        if !line.starts_with("```") {
+            break;
         }
-    }
-    // An unterminated fence: keep what it held rather than losing it.
-    if let Some(block) = current {
+        let mut block = String::new();
+        i += 1;
+        while i < lines.len() && !lines[i].trim_start().starts_with("```") {
+            block.push_str(lines[i]);
+            block.push('\n');
+            i += 1;
+        }
+        // Past the closing fence; an unterminated one simply ran to the end, and what it held is
+        // kept rather than lost — servers send those when they truncate a long hover.
+        i += 1;
         let block = block.trim();
         if !block.is_empty() {
-            fences.push(block.to_string());
+            header.push(block.to_string());
         }
     }
-    fences.retain(|f| !f.is_empty());
-    (fences, prose)
+    let body = lines.get(i..).map(|rest| rest.join("\n")).unwrap_or_default();
+    (header, body)
 }
 
 /// The first non-empty line of `text`.
@@ -868,28 +873,12 @@ fn first_line(text: &str) -> String {
     text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string()
 }
 
-/// Markdown reduced to something that reads correctly as plain text.
-///
-/// The hover card sets `textContent`, so a heading's `#` and a horizontal rule's `---` would
-/// otherwise show up literally. Deliberately light: this is not a markdown renderer, it just
-/// removes the marks that read as noise.
-fn plainish(prose: &str) -> String {
-    let mut out = String::with_capacity(prose.len());
-    for line in prose.lines() {
-        let trimmed = line.trim_end();
-        // A rule is a paragraph break, not three dashes.
-        if trimmed.trim() == "---" || trimmed.trim() == "***" {
-            if !out.ends_with("\n\n") && !out.is_empty() {
-                out.push('\n');
-            }
-            continue;
-        }
-        let stripped = trimmed.trim_start();
-        let body = stripped.strip_prefix("#").map(|s| s.trim_start_matches('#').trim_start());
-        out.push_str(body.unwrap_or(trimmed));
-        out.push('\n');
-    }
-    out.trim().to_string()
+/// `text` without the rules and blank lines it opens with — the `---` that separates
+/// rust-analyzer's header from its prose is the card's own headline/body split already.
+fn without_leading_rules(text: &str) -> String {
+    let is_rule = |l: &str| matches!(l.trim(), "" | "---" | "***" | "___");
+    let lines: Vec<&str> = text.lines().skip_while(|l| is_rule(l)).collect();
+    lines.join("\n").trim_end().to_string()
 }
 
 /// The identifier around `offset`, for the labels a server does not provide.
@@ -953,9 +942,20 @@ mod tests {
         let info = hover_wire(md);
         assert_eq!(info.signature, "pub struct Vec<T, A = Global>");
         assert_eq!(info.container.as_deref(), Some("std::vec"));
+        assert_eq!(info.doc_format, DocFormat::Markdown);
         let doc = info.doc.unwrap();
-        assert!(doc.contains("contiguous growable array"));
-        assert!(!doc.contains("---"), "a rule is a paragraph break, not three dashes: {doc:?}");
+        assert_eq!(doc, "A contiguous growable array type.");
+    }
+
+    #[test]
+    fn an_example_in_the_doc_stays_in_the_doc_and_is_not_the_signature() {
+        let md = "```rust\nstd::vec::Vec\n```\n\n```rust\npub fn push(&mut self, value: T)\n```\n\n---\n\nAppends an element.\n\n# Examples\n\n```rust\nlet mut v = vec![1];\nv.push(2);\n```\n";
+        let info = hover_wire(md);
+        assert_eq!(info.signature, "pub fn push(&mut self, value: T)");
+        assert_eq!(info.container.as_deref(), Some("std::vec::Vec"));
+        let doc = info.doc.unwrap();
+        assert!(doc.contains("# Examples"), "markdown is kept for the card to render: {doc:?}");
+        assert!(doc.contains("```rust\nlet mut v = vec![1];"), "{doc:?}");
     }
 
     #[test]
@@ -978,14 +978,7 @@ mod tests {
         // Servers do send these when they truncate a long hover.
         let info = hover_wire("```rust\nfn f()\n");
         assert_eq!(info.signature, "fn f()");
-    }
-
-    #[test]
-    fn headings_lose_their_hashes() {
-        let info = hover_wire("prose\n\n### Safety\n\nDon't.\n");
-        let doc = info.doc.unwrap();
-        assert!(doc.contains("Safety"), "{doc:?}");
-        assert!(!doc.contains('#'), "{doc:?}");
+        assert!(info.doc.is_none());
     }
 
     #[test]

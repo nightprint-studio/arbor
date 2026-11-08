@@ -108,6 +108,13 @@ impl MemberIndex for DepTier {
         }
     }
 
+    fn constant_value(&self, binary_name: &str, field: &str) -> Option<String> {
+        match self {
+            DepTier::Single(i) => i.constant_value(binary_name, field),
+            DepTier::Blocks(b) => b.constant_value(binary_name, field),
+        }
+    }
+
     fn package_exists(&self, package: &str) -> Option<bool> {
         match self {
             DepTier::Single(i) => i.package_exists(package),
@@ -228,6 +235,12 @@ impl MemberIndex for ClasspathIndex {
         self.jdk
             .class_annotations(binary_name)
             .or_else(|| self.deps.as_ref().and_then(|d| d.class_annotations(binary_name)))
+    }
+
+    fn constant_value(&self, binary_name: &str, field: &str) -> Option<String> {
+        self.jdk
+            .constant_value(binary_name, field)
+            .or_else(|| self.deps.as_ref().and_then(|d| d.constant_value(binary_name, field)))
     }
 
     /// Present in either tier is present. Absent needs every tier to have enumerated and found

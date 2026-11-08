@@ -42,6 +42,10 @@ const ROW = `${POPUP} > ul > li`;
 /** A row's height, in `em` of the list font, so it follows the user's font scale. At the default
  *  13px it comes to about 24px. */
 const ROW_EM = 1.85;
+/** The class the popup carries when its opening is animated (the `animate` completion preference).
+ *  On the popup and not on the editor root, because the popup is mounted on the shared tooltip layer. */
+export const COMPLETION_MOTION_CLASS = 'cm-completion-motion';
+
 /** How many rows the popup shows before it scrolls. */
 const VISIBLE_ROWS = 13;
 
@@ -61,7 +65,7 @@ export const completionThemeSpec: Record<string, StyleRule | Record<string, Styl
   // ── Opening ── a fade when the popup appears (opt-in, see `CompletionPreferences.animate`). The tooltip element
   // lives from open to close and is updated in place while typing, so this plays once per opening, not per key.
   '@keyframes cm-completion-in': { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
-  [`&[data-motion~="completion"] ${POPUP}`]: {
+  [`${POPUP}.${COMPLETION_MOTION_CLASS}`]: {
     animation: 'cm-completion-in var(--anim-dur-fast, 0ms) ease-out',
   },
   // ── Container ──
@@ -80,6 +84,10 @@ export const completionThemeSpec: Record<string, StyleRule | Record<string, Styl
     maxWidth: 'min(760px, 92vw)',
     // The 8px is the list's own top and bottom padding.
     maxHeight: `calc(${VISIBLE_ROWS} * ${ROW_EM}em + 8px)`,
+    // When the popup does not fit, CodeMirror gives the container an explicit height and the list
+    // `height: 100%` of it. Content-box, that 100% plus the padding ran past the container's
+    // `overflow: hidden`, and the last row came out cut in half.
+    boxSizing: 'border-box',
     scrollbarWidth: 'thin',
   },
 

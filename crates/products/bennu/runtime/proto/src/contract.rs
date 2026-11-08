@@ -762,6 +762,24 @@ pub struct HoverInfo {
     /// `#[serde(default)]` so a payload from before this existed still deserializes.
     #[serde(default)]
     pub artifact: Option<String>,
+    /// The language [`Self::doc`] is written in, so the card renders it instead of showing its
+    /// marks. Javadoc is HTML; a language server and the Patina package answer in markdown.
+    #[serde(default)]
+    pub doc_format: DocFormat,
+}
+
+/// How a hover card's documentation is written.
+///
+/// Said by the engine that produced it rather than guessed by the card: a doc string can hold
+/// `<T>` and `**` alike, and only the producer knows which of the two is markup.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DocFormat {
+    /// Javadoc — HTML with `{@code}` / `@param`. Plain prose reads correctly as this too.
+    #[default]
+    Javadoc,
+    /// CommonMark, as rustdoc, a language server and Patina's `///` write it.
+    Markdown,
 }
 
 // ── inherited members (Structure panel's "Inherited" bucket) ─────────────────

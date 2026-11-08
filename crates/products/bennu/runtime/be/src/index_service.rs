@@ -5815,7 +5815,7 @@ fn split_classpath_entries(raw: &str) -> Vec<String> {
 /// arity. That is working state for this layer (it is how a library's documentation is found, see
 /// [`IndexService::library_doc`]) and stops here: the editor draws a card, it does not resolve one.
 fn hover_info_of(h: IntelHoverInfo) -> HoverInfo {
-    HoverInfo { signature: h.signature, kind: h.kind, container: h.container, doc: h.doc, artifact: None }
+    HoverInfo { signature: h.signature, kind: h.kind, container: h.container, doc: h.doc, artifact: None, doc_format: Default::default() }
 }
 
 /// The local Maven repository, resolved once.

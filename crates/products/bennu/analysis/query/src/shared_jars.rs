@@ -91,6 +91,10 @@ impl MemberIndex for JarBlocks {
         self.holder(binary_name)?.class_annotations(binary_name)
     }
 
+    fn constant_value(&self, binary_name: &str, field: &str) -> Option<String> {
+        self.holder(binary_name)?.constant_value(binary_name, field)
+    }
+
     /// Present in any jar is present; absent needs every jar to have said so, and one that cannot list its classes leaves it open.
     fn package_exists(&self, package: &str) -> Option<bool> {
         let mut all_no = true;

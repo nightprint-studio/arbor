@@ -16,7 +16,7 @@
  */
 
 import {
-  EditorView, lineNumbers, keymap, hoverTooltip, highlightWhitespace,
+  EditorView, lineNumbers, keymap, hoverTooltip, highlightWhitespace, tooltips,
   highlightActiveLine, highlightActiveLineGutter, drawSelection,
   ViewPlugin, Decoration, type DecorationSet, type KeyBinding, type PluginValue, type ViewUpdate,
 } from '@codemirror/view';
@@ -35,6 +35,8 @@ import {
 } from '@codemirror/autocomplete';
 
 import { matchesName } from './name-match';
+import { COMPLETION_MOTION_CLASS } from './completion-theme';
+import { tooltipHost } from './tooltip-host';
 import { documentHighlights, foldRangesChanged, serverFolding, unusedDeclarations } from './server-layers';
 import { foldAnimation } from './fold-animation';
 import { inlayHints } from './inlay-hints';
@@ -308,6 +310,9 @@ function completionExtension(
       // Standing (own / inherited / implicit) and deprecated are properties of the WHOLE row — the
       // label's weight, the icon's strike — so they are classes on the `li`.
       optionClass: (option) => rowClass(option as RichOption),
+      // On the popup itself, not on the editor root: the popup lives on the tooltip layer (see
+      // `tooltips` above), out of reach of a selector that starts at the editor.
+      tooltipClass: () => (prefs?.animate ? COMPLETION_MOTION_CLASS : ''),
     }),
     // Member-access trigger: CodeMirror's `activateOnTyping` only auto-opens the popup on
     // identifier characters, so a bare `receiver.` never queries the source. Fire completion
@@ -433,13 +438,18 @@ export function createCodeEditorExtensions(
       : [],
     // After the numbers and the fold arrows, where the unconditional one used to sit.
     prefs.problemMarkers === false ? [] : diagnosticGutter,
-    // A marker on the editor root that the popup and ghost-text themes key their animations on.
+    // A marker on the editor root that the ghost-text theme keys its animation on (the popup carries
+    // its own class, `tooltipClass` above: it is mounted on the tooltip layer, outside the root).
     prefs.completion?.animate ? EditorView.editorAttributes.of({ 'data-motion': 'completion' }) : [],
   ];
 
   const exts: Extension[] = [
     codeEditorTheme,
     codeEditorHighlightStyle,
+    // Every tooltip — completion popup, hover card, signature hint, lint — is mounted on the shared
+    // tooltip layer, not inside the editor, whose panel cut a long completion list at its edge. Not
+    // on `document.body` itself: see `tooltip-host` for the layout it broke.
+    typeof document !== 'undefined' ? tooltips({ parent: tooltipHost() }) : [],
     // The settings-driven half of the surface (line numbers, active line, whitespace glyphs,
     // wrap, folding, completion behaviour). Here rather than anywhere else because it holds the
     // line-number gutter, and gutter order follows extension order — earlier is further left,

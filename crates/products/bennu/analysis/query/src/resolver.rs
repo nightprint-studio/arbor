@@ -522,6 +522,17 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         found.class.iter().map(convert_annotation).collect()
     }
 
+    fn constant_value(&self, owner: &str, field: &str) -> Option<String> {
+        // A project type's constant is its initializer, read from the source by the caller; and a
+        // project-only resolver has no class files to read at all.
+        if self.project_only || self.project_contains(owner) {
+            return None;
+        }
+        self.jdk.constant_value(owner, field).or_else(|| {
+            nested_bytecode_name(owner).and_then(|alt| self.jdk.constant_value(&alt, field))
+        })
+    }
+
     fn nested_types(&self, binary_name: &str) -> Vec<String> {
         // The index files every declared type under its BINARY name, so a nested type of `p/Outer`
         // is literally the key `p/Outer/Inner` — a prefix scan on the fst, which costs the matches

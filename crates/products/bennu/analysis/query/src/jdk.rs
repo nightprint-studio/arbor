@@ -181,6 +181,11 @@ impl MemberIndex for JdkMemberIndex {
         guard.source.class_annotations(binary_name)
     }
 
+    fn constant_value(&self, binary_name: &str, field: &str) -> Option<String> {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.source.constant_value(binary_name, field)
+    }
+
     fn package_exists(&self, package: &str) -> Option<bool> {
         if let Some(hit) = self.packages.read().unwrap_or_else(|p| p.into_inner()).get(package) {
             return *hit;
