@@ -10,7 +10,8 @@
    * screen when there is no conversation open — and the composer with the choices that shape the next answer.
    */
   import { onDestroy, onMount } from 'svelte';
-  import { BookUser, SquarePen, Trash2, Ellipsis, KeyRound, Eye, FlaskConical, Bot, MessageSquare, WandSparkles, Maximize2, Minimize2 } from 'lucide-svelte';
+  import { BookUser, SquarePen, Trash2, Ellipsis, KeyRound, Eye, FlaskConical, Bot, MessageSquare, WandSparkles, Maximize2, Minimize2, CalendarClock } from 'lucide-svelte';
+  import { bennuImberSchedules } from '$lib/stores/bennu/imber-schedules.svelte';
   import { assistantLayoutStore } from '$lib/stores/bennu/assistant-layout.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import ImberChatPanel from '$lib/components/shared/internal/imber/ImberChatPanel.svelte';
@@ -88,6 +89,10 @@
     {
       kind: 'item', id: 'skills', label: 'Skills…', subtitle: `${store.skillCounts.on} of ${store.skillCounts.total} enabled`,
       icon: WandSparkles, onclick: () => store.openSkills(),
+    },
+    {
+      kind: 'item', id: 'schedules', label: 'Schedules…', subtitle: 'Prompts Imber runs on a timetable',
+      icon: CalendarClock, onclick: () => bennuImberSchedules.show(),
     },
     {
       kind: 'item', id: 'preview', label: 'Show what would be sent…', subtitle: 'The request for the next message, nothing sent',

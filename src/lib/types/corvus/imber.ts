@@ -68,43 +68,6 @@ export type ImberEvent = { run_id: string; conversation_id: string } & (
   | { kind: 'done'; ended: 'done' | 'cancelled' | 'too_many_steps' | 'incomplete' | 'failed'; cost_usd: number; conversation_cost_usd: number; priced: boolean }
 );
 
-// ── Schedules ────────────────────────────────────────────────────────────────────────────────────
-
-/** Mirrors `arbor_scheduler::calendar::Recurrence`. Weekdays are 0 = Monday … 6 = Sunday; times are local. */
-export type ImberRecurrence =
-  | { kind: 'once'; at_ms: number }
-  | { kind: 'interval'; secs: number; anchor_ms: number }
-  | { kind: 'daily'; hour: number; minute: number }
-  | { kind: 'weekly'; days: number[]; hour: number; minute: number }
-  | { kind: 'cron'; expr: string };
-
-export type ImberScheduleAction =
-  | { kind: 'awake'; conversation_id: string | null; prompt: string }
-  | { kind: 'prompt'; prompt: string }
-  | { kind: 'fetch'; remote: string | null };
-
-export interface ImberLastRun { at_ms: number; ok: boolean; detail: string }
-
-export interface ImberJob {
-  id: string;
-  name: string;
-  enabled: boolean;
-  recurrence: ImberRecurrence;
-  /** What to do with a run missed while Corvus was closed. */
-  missed: 'skip' | 'run_once';
-  action: ImberScheduleAction;
-  root: string;
-  /** What it may do with nobody to approve: `manual` is read-only. Destructive actions never run unattended. */
-  mode: ImberMode;
-  created_ms: number;
-  next_run_ms: number | null;
-  last_run: ImberLastRun | null;
-  runs: number;
-}
-
-/** What the Schedules window sends to save a job (`id` absent creates). */
-export type ImberJobInput = Pick<ImberJob, 'name' | 'enabled' | 'recurrence' | 'missed' | 'action' | 'root' | 'mode'> & { id?: string };
-
 // ── What Imber did, and undoing it ───────────────────────────────────────────────────────────────
 
 /** How an action is taken back (mirrors `undo::UndoOp`; the window only needs to know *whether*). */

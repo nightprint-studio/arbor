@@ -41,6 +41,13 @@
 <p>
   It shows the <em>buffer</em>, not the file on disk, so an edit and <kbd>⟳</kbd> is the loop, and the page's stylesheets and images load from beside it.
 </p>
+<p>
+  An <strong>Angular template</strong> is coloured on top of the HTML, locally and with no language server needed: control-flow blocks (<code>@if</code>, <code>@else</code>,
+  <code>@for</code>, <code>@switch</code>/<code>@case</code>, <code>@defer</code>, <code>@let</code>…), <code>&#123;&#123; value | pipe &#125;&#125;</code> interpolations,
+  and the values of <code>[prop]</code>, <code>(event)</code>, <code>[(model)]</code> and <code>*directive</code> attributes read like TypeScript — strings, numbers,
+  <code>?.</code>, operators, calls and the pipe's name. It only colours syntax that means something in Angular, so an ordinary page looks exactly as before.
+  An expression that contains a bare <code>&lt;</code> (<code>@if (a &lt; b)</code>) is read by the HTML grammar as a tag; write it as <code>b &gt; a</code>.
+</p>
 <Callout variant="info" title="Rendering asks nothing">
   The frame is sandboxed and has <em>no origin of its own</em>: it cannot read Arbor's window, its storage, or anything the application holds, whatever the page
   contains. A dialog in front of every preview would be one nobody reads.
@@ -189,8 +196,18 @@
   <strong>Folding</strong> collapses a call's arguments — so a whole track inside <code>tracks(…)</code> folds away — a <code>meta &#123; … &#125;</code> block, and a
   block comment. <kbd>Ctrl</kbd> + <kbd>/</kbd> toggles a <code>//</code> comment.
 </p>
+<p>
+  <strong>Structure</strong> lists the file the way Merula's Outline does: imports, <code>let</code> constants and <code>fn</code>s, then each <code>track</code> with its
+  <code>section</code>s nested under it; click a row to jump.
+</p>
+<p>
+  <strong>Play</strong> runs the open file on Merula's audio engine: the ▶ in the gutter's first line, <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd> or
+  <kbd>Shift</kbd> + <kbd>F10</kbd>, or <em>Merula: Play this file</em> in the palette. The buffer is what plays, saved or not. The engine starts on the first play and
+  ends with this window. Each play is a Run console tab: the engine's log, evaluation errors as <code>file:line:col</code> links, and how it ended. ■ in the gutter,
+  the same chord, <em>Merula: Stop</em> or the console's Stop ends it. One file plays at a time — playing another replaces it, and so does anything Merula's own window is playing.
+</p>
 <Callout variant="info" title="Completion and hover are Merula's">
-  They come from the DSL catalogue the audio backend serves, which Bennu does not start. Open the file in Merula for those; edit it here beside the rest of the project.
+  They come from the DSL catalogue the audio backend serves, which Bennu does not keep running while you edit. Open the file in Merula for those; play it from here beside the rest of the project.
 </Callout>
 
 <h2>geode <code>.dig</code> scripts</h2>

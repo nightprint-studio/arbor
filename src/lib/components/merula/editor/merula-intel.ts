@@ -257,8 +257,8 @@ export function merulaCompletion(src: MerulaIntelSource): CompletionSource {
 /** The hover tooltip extension: signature + summary + params + example for the
  *  identifier under the cursor, resolved against the catalogue (or, failing that,
  *  the file's local declarations). */
-export function merulaHover(src: MerulaIntelSource): Extension {
-  return hoverTooltip((view, pos): Tooltip | null => {
+export function merulaHoverSource(src: MerulaIntelSource): (view: EditorView, pos: number) => Tooltip | null {
+  return (view, pos): Tooltip | null => {
     const tree = getMerulaTree(view);
     if (!tree) return null;
     const name = identifierAt(tree, pos);
@@ -283,7 +283,12 @@ export function merulaHover(src: MerulaIntelSource): Extension {
         return { dom };
       },
     };
-  });
+  };
+}
+
+/** The hover as a ready-made extension (for hosts that are not the shared code editor). */
+export function merulaHover(src: MerulaIntelSource): Extension {
+  return hoverTooltip(merulaHoverSource(src));
 }
 
 /** The identifier range covering `pos` (a-z, 0-9, _, .), for tooltip anchoring. */

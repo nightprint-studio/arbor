@@ -72,6 +72,10 @@ pub fn unknown_members_in(
 /// Stays conservative in the type branch the same way the rest of the module does: the name has to
 /// resolve to a type whose members are actually READABLE. A type from an un-indexed jar answers
 /// `None` and nothing is said about it.
+///
+/// The `bool` in the return is `true` when the receiver was resolved as a **type name** (not
+/// inferred as a value expression) — the caller uses this to flag instance methods called through
+/// a type rather than through an instance.
 #[allow(clippy::too_many_arguments)]
 fn receiver_type(
     root: &Node,
@@ -81,9 +85,9 @@ fn receiver_type(
     resolver: &dyn TypeResolver,
     cache: &InferCache,
     receiver: &Node,
-) -> Option<bennu_java::prelude::TypeRef> {
+) -> Option<(bennu_java::prelude::TypeRef, bool)> {
     if let Some(ty) = infer_node_type_cached(root, source, symbols, receiver, resolver, cache) {
-        return Some(ty);
+        return Some((ty, false));
     }
     let text = receiver.utf8_text(bytes).ok()?;
     let scope = crate::support::resolve::enclosing_scope(*receiver, bytes, symbols);
@@ -95,7 +99,7 @@ fn receiver_type(
     resolver
         .members_of(&binary)
         .is_some()
-        .then(|| bennu_java::prelude::TypeRef::simple(binary))
+        .then(|| (bennu_java::prelude::TypeRef::simple(binary), true))
 }
 
 /// `Qualifier::member` — flag when the qualifier's type is KNOWN and declares no such method.
@@ -123,7 +127,7 @@ fn check_reference(
     }
     let Ok(method) = name.utf8_text(bytes) else { return };
     // The qualifier as a VALUE (`obj::run`), else as a TYPE (`Util::create`).
-    let Some(ty) = receiver_type(root, source, bytes, symbols, resolver, cache, qualifier) else {
+    let Some((ty, _)) = receiver_type(root, source, bytes, symbols, resolver, cache, qualifier) else {
         return;
     };
     if resolver.members_of(&ty.binary_name).is_none() || crate::support::nodes::is_type_var(simple_name(&ty.binary_name)) {
@@ -166,7 +170,7 @@ fn check_call(
     }
 
     // The receiver as a VALUE, else as a TYPE — see `receiver_type`.
-    let Some(ty) = receiver_type(root, source, bytes, symbols, resolver, cache, &obj) else {
+    let Some((ty, is_type_ref)) = receiver_type(root, source, bytes, symbols, resolver, cache, &obj) else {
         return;
     };
     if ty.binary_name.is_empty() {
@@ -189,6 +193,11 @@ fn check_call(
     // Shared, memoized hierarchy walk (see `InferCache::resolve_methods`): one traversal per
     // `(receiver type, method)` feeds this check + arity + argument-type, across every call site.
     let res = cache.resolve_methods(resolver, &ty.binary_name, method);
+    let has_super_child = {
+        let mut cursor = n.walk();
+        let found = n.children(&mut cursor).any(|child| child.kind() == "super");
+        found
+    };
     // Conservative: a match anywhere in the hierarchy, OR an incomplete hierarchy (an unknown
     // supertype — including the receiver type itself being unknown — might declare the method).
     let has = !res.candidates.is_empty() || !res.complete;
@@ -196,6 +205,22 @@ fn check_call(
         out.push(crate::engine::check_id::CheckId::UnknownMember.at(
             name,
             format!("Cannot resolve method `{method}` in `{}`", simple_name(&ty.binary_name)),
+        ));
+    } else if is_type_ref
+        && res.complete
+        && res.candidates.iter().all(|m| !m.is_static)
+        // `Iface.super.m()` / `Outer.super.m()` names a type but calls on an instance.
+        && !has_super_child
+    {
+        // The method exists but every overload is an instance method, yet the receiver was read as
+        // a type name (e.g. `Builder.matcher("..")`). That's javac's "non-static method cannot be
+        // referenced from a static context". Only flag when the hierarchy is FULLY KNOWN (`complete`)
+        // and NO overload is static — an unknown supertype or a static overload could change the picture.
+        out.push(crate::engine::check_id::CheckId::StaticContextAccess.at(
+            name,
+            format!(
+                "Non-static member `{method}` cannot be referenced from a static context",
+            ),
         ));
     }
 }
@@ -555,6 +580,73 @@ mod tests {
         let d: Vec<String> =
             unknown_members(src, &resolver).into_iter().map(|x| x.message).collect();
         assert!(d.is_empty(), "expected no cannot-resolve on the stream chain, got {d:?}");
+    }
+
+    #[test]
+    fn instance_method_on_type_name_is_flagged() {
+        // `Builder.matcher("..")` — `matcher` is an instance method; the receiver is a type name
+        // (inference declines on a type, so receiver_type falls back to type-name resolution and
+        // sets `is_type_ref = true`). The check must flag StaticContextAccess.
+        let mut members = HashMap::new();
+        members.insert(
+            "org/springframework/Builder".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: vec![Member::method(
+                    "matcher",
+                    TypeRef::simple("org/springframework/Builder"),
+                    vec![TypeRef::simple("java/lang/String")],
+                )],
+                fields: Vec::new(),
+                flags: Default::default(),
+            },
+        );
+        let simple = [("Builder", "org/springframework/Builder")]
+            .iter()
+            .map(|(s, b)| (s.to_string(), b.to_string()))
+            .collect();
+        let r = MapResolver { members, simple };
+        let d: Vec<String> =
+            unknown_members("class C { void m() { Builder.matcher(\"..\"); } }", &r)
+                .into_iter()
+                .map(|d| d.message)
+                .collect();
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("static") && d[0].contains("matcher"), "{d:?}");
+    }
+
+    #[test]
+    fn static_method_on_type_name_is_not_flagged() {
+        // `Builder.create()` — `create` IS a static method on Builder; must stay silent.
+        let mut members = HashMap::new();
+        members.insert(
+            "org/springframework/Builder".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: vec![Member::method(
+                    "create",
+                    TypeRef::simple("org/springframework/Builder"),
+                    vec![],
+                )
+                .stat()],
+                fields: Vec::new(),
+                flags: Default::default(),
+            },
+        );
+        let simple = [("Builder", "org/springframework/Builder")]
+            .iter()
+            .map(|(s, b)| (s.to_string(), b.to_string()))
+            .collect();
+        let r = MapResolver { members, simple };
+        let d: Vec<String> = unknown_members("class C { void m() { Builder.create(); } }", &r)
+            .into_iter()
+            .map(|d| d.message)
+            .collect();
+        assert!(d.is_empty(), "{d:?}");
     }
 
     #[test]

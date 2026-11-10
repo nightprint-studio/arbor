@@ -258,6 +258,9 @@ reqwest    = { workspace = true }
 # Package renamed `imber-core` (shared with Corvus); the alias keeps every `bennu_assistant::` path in this crate valid.
 bennu-assistant = { package = "imber-core", path = "../../../../platform/imber/core" }
 imber-transport = { path = "../../../../platform/imber/transport" }
+# Imber's schedules: the schedule_* tools and the loop (imber-schedule) on top of the job, its store and the calendar (arbor-scheduler).
+imber-schedule = { path = "../../../../platform/imber/schedule" }
+arbor-scheduler = { path = "../../../../platform/scheduler" }
 regex      = { workspace = true }
 # New Project: a downloaded project skeleton is extracted with `unzip_limited` (zip-slip guard,
 # entry/size caps). A workspace-internal crate that already owns the `zip` dependency — Bennu does

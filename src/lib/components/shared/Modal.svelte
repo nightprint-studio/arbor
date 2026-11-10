@@ -57,6 +57,7 @@
     padBody         = true,
     bodyBorder      = true,
     topGap          = false,
+    tinted          = false,
     zIndex,
     ariaLabel,
     /** Stamped on the modal root as `data-scope-id`.
@@ -113,6 +114,11 @@
      *  between the header and the body — the body's rounded top corners then
      *  read clearly. Off by default to keep existing modals flush. */
     topGap?:          boolean;
+    /** Paint the modal chrome (header, rails, footer, strips around the body) with the host
+     *  product's veil — the same `--product-tint` gradient as the window title bar — and let
+     *  the body float on it without its own card. For modals that mirror a window's chrome
+     *  (the file explorer / pickers). Off by default: flat `--bg-elevated`. */
+    tinted?:          boolean;
     /** Override the backdrop z-index. Pass a CSS value (e.g.
      *  `"var(--z-modal-picker)"`) when a modal must float ABOVE other
      *  modals — file/folder pickers spawned from another dialog use this
@@ -349,7 +355,7 @@
      transition:fade={{ duration: animStore.dBase }}
      onoutrostart={() => { closing = true; }}
 >
-  <div class="modal" data-size={size} data-scope-id={scopeId} style={sizeStyle}
+  <div class="modal" class:tinted data-size={size} data-scope-id={scopeId} style={sizeStyle}
        role="presentation"
        tabindex="-1"
        bind:this={modalEl}
@@ -371,7 +377,7 @@
           {#snippet top()}{@render leftRail()}{/snippet}
         </ActivityBar>
       {/if}
-      <div class="modal-body" class:has-footer={!!footer} class:no-pad={!padBody} class:no-border={!bodyBorder} class:top-gap={topGap}>
+      <div class="modal-body" class:has-footer={!!footer} class:no-pad={!padBody} class:no-border={!bodyBorder} class:top-gap={topGap} class:tinted>
         {@render children()}
       </div>
       {#if rightRail && showRightRail !== false}
@@ -452,6 +458,17 @@
   .modal[data-size="md"]   { width:     520px; max-width: 92vw; }
   .modal[data-size="lg"]   { width:     720px; max-width: 92vw; }
   .modal[data-size="full"] { width: 92vw; height: 92vh; }
+
+  /* Tinted chrome: ONE veil on the modal, header/footer/rails transparent over it, so the
+     gradient runs continuously top to bottom instead of restarting per bar. */
+  .modal.tinted {
+    --chrome-fill: transparent;
+    background: var(--bg-elevated) var(--chrome-bg) no-repeat;
+  }
+  .modal.tinted .modal-header,
+  .modal.tinted .modal-footer { background: transparent; }
+  /* The body paints no card — its content floats directly on the veil. */
+  .modal-body.tinted { background: transparent; border-color: transparent; border-radius: 0; }
 
   /* Header chrome — content lives in the snippet (typically <ModalHeader>). */
   .modal-header {

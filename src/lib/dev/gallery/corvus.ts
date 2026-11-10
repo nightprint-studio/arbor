@@ -6,8 +6,9 @@ import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
 import { pipelinesStore } from '$lib/stores/corvus/pipelines.svelte';
 import { uiStore } from '$lib/stores/ui.svelte';
 import { plansStore } from '$lib/stores/corvus/plans.svelte';
-import { imberSchedulesStore } from '$lib/stores/corvus/imber-schedules.svelte';
-import type { ImberAction, ImberJob } from '$lib/types/corvus/imber';
+import { corvusImberSchedules } from '$lib/stores/corvus/imber-schedules.svelte';
+import type { ImberAction } from '$lib/types/corvus/imber';
+import type { ImberJob } from '$lib/types/imber-schedule';
 import type { Plan } from '$lib/types/corvus/plan';
 import { imberStore } from '$lib/stores/corvus/imber.svelte';
 import { securityStore } from '$lib/stores/corvus/security.svelte';
@@ -75,6 +76,9 @@ const imberJobs: ImberJob[] = [
   { id: 's4', name: 'Friday digest', enabled: false, recurrence: { kind: 'cron', expr: '0 0 17 * * 5' }, missed: 'skip',
     action: { kind: 'prompt', prompt: 'Summarise this week’s merged work.' }, root: REPO_PATH, mode: 'manual', created_ms: NOW - 20 * 86_400_000, next_run_ms: null,
     last_run: { at_ms: NOW - 4 * 86_400_000, ok: true, detail: 'Five merge requests landed this week.' }, runs: 3 },
+  { id: 's5', name: 'Nightly fetch', enabled: true, recurrence: { kind: 'daily', hour: 2, minute: 30 }, missed: 'skip',
+    action: { kind: 'fetch', remote: 'origin' }, root: REPO_PATH, mode: 'manual', created_ms: NOW - 6 * 86_400_000, next_run_ms: NOW + 9 * 3_600_000,
+    last_run: { at_ms: NOW - 12 * 3_600_000, ok: true, skipped: true, detail: 'Missed while Corvus was closed.' }, runs: 5 },
 ];
 
 /** A plan Imber built and started: one phase done, the MR open, the next phase waiting for it to be merged, a failed step to retry. */
@@ -120,7 +124,7 @@ export const corvusOverrides: Record<string, SceneOverride> = {
     props: { onClose: noop, onCreated: noop, currentBranch: 'feature/bennu', initialTargetBranch: 'main', initialTitle: 'gradle support & attachment on Imber chat' },
   }),
   'corvus/imber/ImberActionsModal': withTab({ props: { onClose: noop }, setup: () => imberStore.seedActions(imberActionLog) }),
-  'corvus/imber/ImberSchedulesModal': withTab({ props: { onClose: noop }, setup: () => imberSchedulesStore.seed(imberJobs) }),
+  'shared/ImberSchedulesModal': withTab({ props: { store: corvusImberSchedules, onClose: noop }, setup: () => corvusImberSchedules.seed(imberJobs) }),
   'corvus/plan/PlanModal': withTab({
     settle: 900,
     setup: async () => { await plansStore.load(); plansStore.openModal('plan-release'); },
@@ -171,7 +175,7 @@ export const corvusExtras: ExtraScene[] = [
   { id: 'corvus/plan/PlansTab', load: () => import('$lib/components/corvus/plan/PlansTab.svelte'), setup: async () => { seedTab(); await plansStore.load(); }, props: {}, settle: 600 },
   { id: 'corvus/mr/CreateMrModal[plan]', load: () => import('$lib/components/corvus/mr/CreateMrModal.svelte'), setup: seedTab, props: { planMode: true, onClose: noop, onCreated: noop, onPlan: noop, currentBranch: 'feature/bennu', initialTargetBranch: 'main', initialTitle: 'Add OAuth2 PKCE flow' } },
   { id: 'corvus/imber/ImberPlanCard', load: () => import('$lib/components/corvus/imber/ImberPlanCard.svelte'), setup: seedTab, props: { snapshot: imberPlan } },
-  { id: 'corvus/imber/ImberSchedulesModal[new]', load: () => import('$lib/components/corvus/imber/ImberSchedulesModal.svelte'), setup: () => { seedTab(); imberSchedulesStore.seed(imberJobs); imberSchedulesStore.edit('new'); }, props: { onClose: noop } },
+  { id: 'shared/ImberSchedulesModal[corvus new]', load: () => import('$lib/components/shared/ImberSchedulesModal.svelte'), setup: () => { seedTab(); corvusImberSchedules.seed(imberJobs); corvusImberSchedules.edit('new'); }, props: { store: corvusImberSchedules, onClose: noop } },
   { id: 'corvus/stage/CommitForm', load: () => import('$lib/components/corvus/stage/CommitForm.svelte'), setup: seedTab, props: {} },
   { id: 'corvus/security/SecurityPanel', load: () => import('$lib/components/corvus/security/SecurityPanel.svelte'), setup: seedTab, props: {} },
   { id: 'corvus/BranchSwitchPopup', load: () => import('$lib/components/corvus/BranchSwitchPopup.svelte'), props: { x: 300, y: 200, branches: [{ name: 'main', is_head: false }, { name: 'feature/bennu', is_head: true }], onSelect: noop, onClose: noop } },

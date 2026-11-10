@@ -150,7 +150,7 @@ async fn merula_eval(
             // Also flag speech controls (`.pitch`/`.rate`/…) chained onto a
             // non-speech source — a silent no-op, so a warning, not an error.
             errors.extend(validate::lint_speech_knobs(&source));
-            let diagnostics = MerulaDiagnostics { errors };
+            let diagnostics = MerulaDiagnostics::staged(errors);
             // Publish diagnostics to the editor *before* the (possibly slow) sample
             // staging below. Decoding newly-referenced sample voices can take a
             // while (a large `gm_` pack especially); if the emit waited for it, a

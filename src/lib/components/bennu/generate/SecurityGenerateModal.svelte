@@ -41,6 +41,7 @@
     jwt_source: string;
     issuers: Issuer[];
     rules: Rule[];
+    ignored_paths: string[];
     any_request: string;
     authority_prefix: string;
   }
@@ -67,6 +68,8 @@
   const ACCESS = ['permitAll()', 'authenticated()', 'denyAll()', 'hasRole("ADMIN")', 'hasRole("USER")', 'hasAuthority("SCOPE_read")'];
   const accessOptions = (current: string) =>
     (ACCESS.includes(current) || !current ? ACCESS : [current, ...ACCESS]).map((a) => ({ value: a, label: a }));
+  /** Mirrors `STATIC_RESOURCE_PATHS` in the generator. */
+  const STATIC_PATHS = ['/css/**', '/js/**', '/images/**', '/webjars/**', '/favicon.ico'];
   const JWT_SOURCES = [
     { value: 'issuer', label: 'Issuer URI (discovery)' },
     { value: 'jwk', label: 'JWK set URI' },
@@ -100,6 +103,10 @@
     o.csrf = !stateless;
     o.cors = stateless || value === 'webapi';
     if (value === 'multi' && o.issuers.length < 2) addIssuer();
+    // A server-rendered UI serves its own assets; an API has none to exclude.
+    const hasUi = value === 'form' || value === 'webapi';
+    const untouched = o.ignored_paths.length === 0 || o.ignored_paths.every((p) => STATIC_PATHS.includes(p));
+    if (untouched) o.ignored_paths = hasUi ? [...STATIC_PATHS] : [];
   }
 </script>
 
@@ -172,6 +179,12 @@
         </div>
         <FormField label="Everything else">
           <Select bind:value={o.any_request} options={accessOptions(o.any_request).slice(0, 4)} size="sm" />
+        </FormField>
+      </FormSection>
+
+      <FormSection label="Excluded from security">
+        <FormField label="Ignored paths" hint="Ant patterns that skip the filter chain (web.ignoring()) — static resources. Use a permitAll() rule above for anything else.">
+          <StringListEditor bind:items={o.ignored_paths} placeholder="/css/**" addLabel="Path" ariaLabel="Ignored path" />
         </FormField>
       </FormSection>
 

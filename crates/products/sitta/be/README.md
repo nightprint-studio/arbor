@@ -11,13 +11,13 @@ A file manager keeps almost no backend domain state of its own:
 
 - **filesystem I/O** → [`arbor-fs`](../../foundation/fs), served by the shell's
   `platform` broker;
-- **git-awareness** → [`corvus-git`](../../corvus/git), shared with `corvus-be`.
+- **git-awareness** → none here: the explorer borrows `corvus-be` (`fs_git_*`, by path), started
+  on demand only when the git switch is on and the folder is inside a repository.
 
 ## Domains served
 
 | Module | Methods |
 |--------|---------|
-| `fs_git` | the File Explorer git awareness (`fs_git_status` / `_changes` / `_branches` / `_remote_url` / `_stage` / `_unstage` / `_discard` / `_ignore` / `_checkout`) over [`corvus_git::explorer`] |
 | `config_cmds` | `get_sitta_config` / `set_sitta_config` (the explorer's own UX preferences, see [`sitta-core`](../core)) |
 | `workspace` | read-only `list_workspaces` / `list_registry_repos` — parses corvus's `repos.json` / `workspaces.json` directly (sitta-be has the active profile, so it composes the corvus product paths itself) so the Projects sidebar lists projects without spawning corvus-be |
 | `selftest` | `be_ping` / `be_echo` |

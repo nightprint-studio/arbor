@@ -255,7 +255,7 @@ impl ToolHost {
             effort,
             long_cache: setup.long_cache,
         };
-        let guard = self.guard.as_ref().map(|g| Guard { limits: g.limits, periods: g.periods, session_base: g.session_base, model: model.clone() });
+        let guard = self.guard.as_ref().map(|g| Guard { limits: g.limits, periods: g.periods, session_base: g.session_base, model: model.clone(), run_cap_usd: None });
         let (cap_eur, eur_per_usd) = self.guard.as_ref().map_or((child_cap_eur(0.0), 1.0), |g| (child_cap_eur(g.limits.session_eur), g.limits.eur_per_usd));
 
         let base_cost = resume.as_ref().map_or(0.0, |r| r.started_before);

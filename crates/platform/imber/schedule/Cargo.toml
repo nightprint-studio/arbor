@@ -1,0 +1,14 @@
+[package]
+name         = "imber-schedule"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Imber's schedules, product-neutral: the schedule_* tools (specs and runner), the words an approval card shows, the helpers the Schedules window's handlers share and the loop that fires what is due. The job, its store and the calendar are arbor-scheduler's `jobs` and `calendar`; each product brings its own action and how a run starts."
+
+[dependencies]
+arbor-scheduler = { path = "../../scheduler" }
+imber-core      = { path = "../core" }
+serde          = { workspace = true }
+serde_json      = { workspace = true }

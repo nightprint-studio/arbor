@@ -80,7 +80,7 @@ projects) is in the profile: `hirundo/config.toml`, served by `get_hirundo_confi
 * **Workspaces** like Bennu's and Corvus's: `config.toml` holds workspaces (name, colour, projects) and the active one; the title bar has the switcher.
 * **Detected from code**: `bennu-be` serves `endpoints_detected(root)` (the Spring model the HTTP-client generator already reads); Hirundo asks
   only for the Bennu projects chosen in the panel (`detected_roots`), default the project it is on. An endpoint opens as an unsaved request.
-* **Schedules** (`hirundo-be/schedules.rs`): data in the profile, recurrence / next run / missed-run policy from `arbor-scheduler::calendar`;
+* **Schedules** (`hirundo-be/schedules.rs`): data in the profile (`state/<project-hash>/schedules.json`), kept as `arbor-scheduler::jobs` jobs (recurrence / next run / missed-run policy / last result) whose action is "run this collection in this environment"; a file in the earlier format (a bare array) is still read;
   the window ticks every 30 s (`schedules_due`), runs with the runner it has and reports (`schedule_ran`). Nothing fires with the window closed.
 * **Runner history** (`runs.rs`): the last 50 runs per project, in the profile.
 * Toolbar: Go to the controller (only for a request that matches a detected endpoint). Save / Save as live in the title bar, bulk edit in each table, Copy Path in the tab and tree menus. Ask Imber was removed (it only opened Bennu with a prompt on the clipboard).

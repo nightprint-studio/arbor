@@ -17,7 +17,8 @@ pub fn project_tag(project: &str) -> String {
     format!("{hash:016x}")
 }
 
-fn path_of(project: &str, name: &str) -> PathBuf {
+/// The file a project's `name` state lives in.
+pub fn path_of(project: &str, name: &str) -> PathBuf {
     arbor_core::prelude::product_path("hirundo", format!("state/{}/{name}.json", project_tag(project)))
 }
 

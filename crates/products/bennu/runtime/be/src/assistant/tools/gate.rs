@@ -3,6 +3,43 @@
 
 use super::*;
 
+use crate::assistant::schedule::request::creation_card;
+use crate::assistant::schedule::unattended::{needs_a_person, verdict as unattended_verdict, Kind as UnattendedKind};
+use imber_schedule::prelude::{is_schedule_tool, unattended_may_call};
+
+/// What a call is, for the table of what a scheduled run may do (`schedule::unattended`). `safety` is the
+/// catalogue's word for the tool; `None` for the assistant's own tools, which are named here.
+fn classify_unattended(name: &str, safety: Option<Safety>) -> UnattendedKind {
+    match name {
+        "ask_user" => UnattendedKind::Question,
+        "delete_file" => UnattendedKind::Delete,
+        // All of these end in the proposal door in manual mode: a card, never a write.
+        "edit_file" | "edit_files" | "replace_in_files" | "create_file" | "rename_symbol" | "add_parameter" | "structural_replace" | "local_history" => UnattendedKind::Propose,
+        n if is_schedule_tool(n) && unattended_may_call(n) => UnattendedKind::ScheduleList,
+        n if is_schedule_tool(n) => UnattendedKind::ScheduleChange,
+        n if spawn::is_agent_tool(n) => UnattendedKind::Agent,
+        n if live::is_live_tool(n) || debug::is_debug_tool(n) || brp::is_brp_tool(n) || screenshot::is_screenshot_tool(n) || profile::is_profile_tool(n) => UnattendedKind::Process,
+        n => match safety {
+            Some(Safety::Write) => UnattendedKind::CatalogWrite,
+            Some(Safety::Destructive) if bennu_assistant::prelude::is_own_command(n) => UnattendedKind::OwnCommand,
+            Some(Safety::Destructive) => UnattendedKind::CatalogDestructive,
+            // Reads, searches, the help, the plan, a skill, a diagram.
+            Some(Safety::Read) | None => UnattendedKind::Read,
+        },
+    }
+}
+
+/// The confirmation a schedule tool needs from the user, as a title and a text. Creating one is asked in every
+/// mode; changing or deleting one follows the write rule (asked unless edits are applied as they are made).
+fn schedule_approval(call: &ToolCall, applies_edits: bool) -> Option<(String, String)> {
+    match call.name.as_str() {
+        "schedule_create" => Some(creation_card(&call.input)),
+        "schedule_update" if !applies_edits => Some(("Change this schedule?".into(), format!("Schedule {}: {}", call.input.get("id").and_then(Value::as_str).unwrap_or("?"), "its time, prompt or on/off state changes."))),
+        "schedule_delete" if !applies_edits => Some(("Delete this schedule?".into(), format!("Schedule {} is removed. Nothing it already did is undone.", call.input.get("id").and_then(Value::as_str).unwrap_or("?")))),
+        _ => None,
+    }
+}
+
 impl ToolHost {
     // ── Gate ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -36,6 +73,7 @@ impl ToolHost {
             n if brp::is_brp_tool(n) || screenshot::is_screenshot_tool(n) => {}
             "local_history" => out.extend(self.history_touched(input).into_iter().map(|(p, write)| (p, if write { Op::Write } else { Op::Read }))),
             "ask_user" | "bennu_help" | "update_plan" | "open_ui" | "load_skill" | "show_diagram" => {}
+            n if is_schedule_tool(n) => {}
             // Showing a picture from a file is a read of that file; one the model wrote itself touches nothing.
             "show_image" => out.extend(str_of("path").map(|p| (p, Op::Read))),
             // A sub-agent's own calls cross this gate under its own, narrower policy; starting one touches nothing here.
@@ -98,6 +136,9 @@ impl ToolHost {
     /// `upgrade` is the question of writing in a folder already opened for reading: anything but a yes leaves the
     /// folder read-only, and the model is told to adapt.
     pub(super) fn ask_access(&self, folder: &Path, file: &Path, reason: &str, upgrade: bool) -> Result<(), String> {
+        if self.session.unattended {
+            return Err(format!("this is a scheduled run and nobody can allow access to {}: stay inside the project, or say that this needs a person", folder.display()));
+        }
         // Unique per question, not per folder: asking again for the same folder (reading first, then writing) puts a
         // second card in the thread, and both the panel and the view find a card by this id — with a repeated one the
         // answer goes to the first card, which nothing waits on any more, and the run stays parked on the second.
@@ -146,6 +187,9 @@ impl ToolHost {
 
     /// A yes/no question. `Err` is the model-facing reason when the answer is no (or the run ended).
     pub(super) fn confirm(&self, title: &str, detail: &str, danger: bool) -> Result<(), String> {
+        if self.session.unattended {
+            return Err("this is a scheduled run: nobody is there to approve it, so it was not done".into());
+        }
         let id = unique_id("cf");
         let block = json!({ "type": "confirm", "confirm": { "id": id, "title": title, "detail": detail, "danger": danger } });
         let answer = self.session.ask(block, "/confirm/id", &id, |b, a| {
@@ -182,9 +226,25 @@ impl ToolHost {
             || debug::is_debug_tool(&call.name)
             || brp::is_brp_tool(&call.name)
             || screenshot::is_screenshot_tool(&call.name)
-            || profile::is_profile_tool(&call.name);
+            || profile::is_profile_tool(&call.name)
+            || is_schedule_tool(&call.name);
         if !known {
             return Gate::Refuse(format!("`{}` is not a tool you have", call.name));
+        }
+        // A scheduled run has nobody to approve anything: the table decides, before any path is looked at.
+        if self.session.unattended {
+            let kind = classify_unattended(&call.name, self.descriptor(&call.name).map(|d| d.safety));
+            if let Err(why) = unattended_verdict(kind) {
+                if kind == UnattendedKind::Question {
+                    self.session.set_end_note(needs_a_person(&call.input));
+                }
+                return Gate::Refuse(why.into());
+            }
+        } else if let Some((title, detail)) = schedule_approval(call, self.session.applies_edits()) {
+            // What Imber schedules happens later with nobody there, so the user reads it first.
+            if let Err(why) = self.confirm(&title, &detail, false) {
+                return Gate::Refuse(why);
+            }
         }
         for (path, op) in self.touches(call) {
             if let Err(why) = self.authorize(&path, op) {
@@ -298,6 +358,38 @@ fn catalog_path_args(input: &Value) -> Vec<(String, PathRole)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_scheduled_run_can_read_and_propose_and_nothing_that_needs_a_person() {
+        let allowed = |name: &str, safety: Option<Safety>| unattended_verdict(classify_unattended(name, safety)).is_ok();
+        for ok in ["search_text", "find_files", "bennu_read_file", "read_files", "file_outline", "bennu_help", "update_plan", "load_skill", "show_diagram", "schedule_list"] {
+            assert!(allowed(ok, None), "{ok}");
+        }
+        for proposal in ["edit_file", "edit_files", "replace_in_files", "create_file", "rename_symbol", "add_parameter", "structural_replace", "local_history"] {
+            assert!(allowed(proposal, None), "{proposal} becomes a card");
+        }
+        assert!(allowed("bennu_references", Some(Safety::Read)), "the catalogue's reads");
+        for refused in ["ask_user", "delete_file", "run_start", "spawn_agent", "schedule_create", "schedule_update", "schedule_delete"] {
+            assert!(!allowed(refused, None), "{refused}");
+        }
+        assert!(!allowed("bennu_rename_apply", Some(Safety::Write)), "a catalogue write");
+        assert!(!allowed("bennu_build", Some(Safety::Destructive)), "the project's own build");
+        assert!(!allowed("bennu_test_run", Some(Safety::Destructive)));
+        assert!(!allowed("bennu_delete_paths", Some(Safety::Destructive)));
+        assert_eq!(classify_unattended("ask_user", None), UnattendedKind::Question);
+        assert_eq!(classify_unattended("bennu_build", Some(Safety::Destructive)), UnattendedKind::OwnCommand);
+    }
+
+    #[test]
+    fn creating_a_schedule_always_asks_and_changing_one_follows_the_write_rule() {
+        let call = |name: &str| ToolCall { id: "t".into(), name: name.into(), input: json!({"id": "sch-1", "name": "Check", "action": "prompt", "when": {"kind": "daily", "time": "09:00"}}) };
+        for applies in [false, true] {
+            assert!(schedule_approval(&call("schedule_create"), applies).is_some(), "applies_edits = {applies}");
+            assert!(schedule_approval(&call("schedule_list"), applies).is_none());
+        }
+        assert!(schedule_approval(&call("schedule_update"), false).is_some() && schedule_approval(&call("schedule_update"), true).is_none());
+        assert!(schedule_approval(&call("schedule_delete"), false).is_some() && schedule_approval(&call("schedule_delete"), true).is_none());
+    }
 
     #[test]
     fn under_this_file_only_the_file_local_tools_stay_inside_it() {

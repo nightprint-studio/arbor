@@ -185,6 +185,9 @@ members = [
     # policy, models, message view) and the HTTP transport it streams through.
     "crates/platform/imber/core",
     "crates/platform/imber/transport",
+    # Imber's schedules on top of `arbor-scheduler::jobs`: the `schedule_*` tools, the words for an approval card and the
+    # loop that fires what is due. Shared by Bennu and Corvus; the product brings its own action and its run.
+    "crates/platform/imber/schedule",
     # What a Cargo workspace IS, read off its manifests: the crate graph, the manifest
     # schema behind Cargo.toml validation + completion, and the cargo command catalogue.
     "crates/products/bennu/build/cargo",

@@ -7,7 +7,59 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **Bennu: `flatMap` whose function returns a plain value is flagged** — `Optional.flatMap(it -> repo.find(it))` (or `Stream.flatMap`) with a `find` that does not return an `Optional` is reported as `flat-map-return`, naming `map` as the fix, instead of leaving javac's "cannot infer type-variable(s) U" for the build.
+- **Bennu: `.merula` outline and playback** — Structure lists a Merula file's imports, constants, functions and tracks with their sections; ▶ in the gutter, `Ctrl+Shift+C`, `Shift+F10` or the palette plays the open file on Merula's engine, with its log and errors in the Run console.
+- **Merula: syntax-tree panel** — the right rail shows how the parser reads the open file (the same panel as Picus and Bennu); click a node to select its text, the caret reveals its node. `Ctrl+Shift+Y`.
+- **Bennu: run arrow on test suites and on the outer class of `@Nested` tests** — a class with no `@Test` of its own now gets its ▶ in the gutter and in the tests panel.
+- **Sitta: Devices list updates when a USB drive is plugged or removed** — drives and volumes appear/disappear in the sidebar on their own, with an optional discreet toast (setting: Drive notifications).
+- **Bennu: Imber schedules** — run an Imber prompt at a time or on a repeat ("every weekday at 09:00, what changed on `main`?"), from Imber › Schedules or by asking Imber. A scheduled run is read-only: it reads and searches the project and leaves proposed edits in its conversation, never changes the project, runs commands or asks questions. Runs only while Arbor is open.
+- **Imber: toast when a schedule starts** — Bennu and Corvus show a discreet toast with the schedule's name when a scheduled run begins, and one when a run fails after a good one.
+- **Imber: scheduled-run limits** — a cap on what one scheduled run may spend and on how many start in a day (Settings › Imber › Spending limits).
+
 ### Changed
+- **Run configurations are coloured by kind** — in the title bar's selector, the + menu and the Run Configurations window, each kind (Spring Boot, Application, JUnit, Cargo and its subcommands, Tomcat, scripts, Attach) has its own hue, and the window's rows now carry their icon.
+- **Window controls: crisper glyphs on the mac-style trio** — thicker close and minimize strokes, and zoom/restore triangles redrawn with a clear gap (restore no longer fuses into one shape).
+- **Picus, Bennu: SQL highlighting rebuilt on one shared lexer** — types, function calls, bind parameters, quoted identifiers, optimizer hints, columns after a dot and each engine's string rules now have their own colours; a table called `order` is no longer coloured as a keyword. The same colours apply to SQL/JPQL inside Java strings and text blocks.
+- **Bennu: SQL completion in native queries without a database** — inside `@Query(nativeQuery = true)`, `createNativeQuery` and `// language=sql` strings, tables and columns are offered from the entities' mapping; with a Picus connection the live schema still wins.
+- **Imber: creating a schedule always asks** — when Imber proposes a schedule, an approval card spells out when it runs and what it does, in every mode.
+- **Hirundo and Imber schedules share one engine** — Hirundo's saved schedules are read as before; a missed run now leaves a "Missed…" note as the schedule's last result.
+- **Sitta: file/folder pickers now match the standalone explorer** — the sidebar shows your Projects in every product (Bennu, Merula, …), and the header, rails and footer carry the host product's colour gradient.
+- **Merula: the editor is now the shared one Bennu uses** — same gutters, find bar, lint and completion popup; the DSL highlight, hover docs, live hap highlight, occurrence marks and refactors carry over. Scratch uses it too.
+- **Merula: the Files sidebar is now the Project tree** — the same shared tree as Bennu (folders, git marks, filter, rename/delete/copy/paste/duplicate/drag-to-move), shown with `.merula` files and the manifest. `Alt+1`.
+- **Merula: workspace switcher and manager now match Bennu** — the title-bar dropdown and the manager board are the shared ones, with theme-token colours instead of the off-pattern brown/black menu.
+- **Merula: right-rail icons** — the inspector and the language reference have their own icons, no longer the ones Picus/Bennu use for other things.
+- **Sitta: git badges and actions now come from the Corvus backend** — the explorer carries no git engine of its own and starts Corvus only when git awareness is on and the folder is in or beside a repository.
+- **Sitta: slimmer status bar and smoother sidebar** — the explorer footer is a compact IntelliJ-style status strip, and the sidebar labels fade in as it expands (respects reduced-motion).
+- **Bennu: test sources are green in Find in files and Go to** — test classes and files take the same colour as in the project tree and the tab strip.
+- **Bennu: find and go-to-line overlays slide in** — a short slide/fade from the top when opened; go-to-line also slides out (respects reduced-motion).
+
+### Fixed
+- **Bennu: playing a `.merula` file works from the title-bar ▷, and no longer stops on an unknown instrument** — ▷ on an open `.merula` plays it (and stops it), as the gutter ▶ and `Shift+F10` already did; a file that only references an instrument the sound registry lacks plays on the engine's synth, as it does in the Merula window, with the finding in the console instead of aborting the run.
+- **Bennu: Angular templates are fully coloured** — the expressions in `@if`/`@for`/`@switch`/`@defer`/`@let` headers, `{{ x | pipe }}` (even wrapped over lines) and `[prop]`/`(event)`/`[(ngModel)]`/`*ngFor` values now read like TypeScript (strings, `?.`, `!=`, calls, pipe names), with or without the language server.
+- **Bennu: query completion in text blocks and after `:`** — completion inside a JPQL/SQL string never fired on the second line of a text block, and `:` did not open the parameter list; a native query with no Picus connection returned nothing instead of falling back to the project's mapping.
+- **Corvus: the Staging Area opens and switches file much faster on big changesets** — only the file you are looking at is diffed, instead of every changed file each time the panel opens or a row is clicked.
+- **Corvus: a tag deleted and re-created on the remote is updated on fetch** — it used to keep pointing at the old commit locally; tags are now fetched with force (local-only tags are never removed).
+- **Bennu: raw `Optional` in method return / field / local is now a warning** — `Optional lookup(…)` without a type argument now shows "Raw `Optional` — add a type argument" so the root cause of javac's "cannot infer type-variable(s)" at the call site is visible where the method is declared.
+- **Bennu: JPQL autocomplete after `JOIN` now offers entity names** — typing `INNER JOIN ` now suggests both existing aliases (for standard path-joins like `join o.items i`) and entity names (for Hibernate cross-joins like `join Order o on …`); before, only existing aliases were listed.
+- **Bennu: import section can be re-collapsed after expanding** — clicking the fold gutter to expand imports and then clicking again to collapse now works; the gutter marker was not refreshing after a manual unfold.
+- **Bennu: validation and autocomplete now work alongside a parse error** — adding a field or method while another member has a syntax error no longer suppresses type-inference, autocomplete and import hints for the rest of the file; the broken member is quarantined and everything else is checked normally.
+- **Bennu: log console column customizer now works immediately** — changing Time, Level, Thread, Logger, MDC or Dedupe in the settings panel now auto-enables Clean View if it was off, so the change is visible at once without first hunting for the Eye button in the toolbar.
+- **Bennu: multi-line SQL in the log console is now grouped** — Hibernate / MyBatis queries formatted with `format_sql=true` that place `FROM`, `WHERE`, `AND`, `JOIN`, `ORDER BY` etc. at column 0 are now recognised as continuations of the preceding line.
+- **Bennu: calling an instance method via a type name is now flagged** — `Builder.matcher("..")` where `matcher` is not static now reports "Non-static method cannot be referenced from a static context", matching javac's error.
+- **Bennu: clicking a stack-frame link now navigates to project classes not yet indexed at streaming time** — the backend index may have finished building while the console was streaming; a click on an unresolved frame now retries resolution against the current index before falling back to JAR decompilation.
+- **Bennu: Ctrl+click on enum constants now works** — go-to on `MyEnum.VALUE` jumps to the constant's declaration; Ctrl+click on a constant's own name inside the enum triggers find-usages, matching IntelliJ's behaviour. Both were silently doing nothing before.
+- **Sidebar: submodule ahead/behind indicators now work** — the ↑/↓ commit badges on submodule entries compare the submodule's actual HEAD against the commit the parent repo records, so they correctly show when you need to run `git submodule update` (behind) or stage a new pointer in the parent (ahead).
+- **Sitta: title bar and footer now use the product chrome tint** — the File Explorer window's top bar and footer now render `--chrome-fill` (the same gradient used by all other Arbor windows) instead of the flat `--bg-elevated`, so the colour is consistent with Bennu, Corvus, Picus and all others.
+
+### Added
+- **Bennu: impossible `equals()` calls are now flagged** — `Boolean.TRUE.equals(someString)` and similar calls where the receiver and argument types are provably disjoint (one is final/enum, neither extends the other) are reported as a warning with code `impossible-equals`.
+- **Bennu: Spring Security generator can exclude paths** — a new "Excluded from security" list (Ant patterns such as `/css/**`) is written as a `WebSecurityCustomizer` that skips the filter chain; web scenarios start with the usual static resources.
+
+### Changed
+- **Bennu: tab-strip context menu uses distinct icons** — Close Others and Close All now show a circle-X and square-X respectively instead of repeating the same X as Close, so the three items are visually distinguishable at a glance.
+- **Bennu: rename and copy are now available for directories** — right-click on a folder in the Project sidebar now offers Rename and Copy in the quick-action bar; F2 also works. Copy is a filesystem duplicate without package-declaration rewriting (a full package rename remains a separate refactoring).
+- **Bennu: goto-line/column overlay is now accented** — the overlay gets an accent-colour border and a soft outer glow so it stands out from the editor background.
 - **Plugins: `arbor.fs` folds `..` before checking the sandbox** — a path such as `<repo>/../elsewhere/file` used to pass because it began with the repository's path; it is now outside, like the equivalent absolute path.
 - **Bennu: first validation after opening a project** no longer waits for the framework models (Spring, JPA, validation…): they are built in the background as the project opens. On a 1,000-file project the first file went from about 6 s to under 1 s.
 - **Bennu: faster validation of annotation-heavy classes** — a 1,500-line Lombok/Jackson class validates in about a third of the time (660 ms → 235 ms measured on a real project).

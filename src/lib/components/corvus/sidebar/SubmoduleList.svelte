@@ -155,21 +155,21 @@
             </span>
           {/if}
 
-          <!-- Ahead/behind -->
+          <!-- Ahead/behind vs parent-recorded commit -->
           {#if sub.ahead > 0}
-            <span class="badge-ahead" use:tooltip={`${sub.ahead} commit${sub.ahead !== 1 ? 's' : ''} ahead of remote`}>
+            <span class="badge-ahead" use:tooltip={`${sub.ahead} commit${sub.ahead !== 1 ? 's' : ''} ahead of parent repo — stage the new pointer`}>
               <ArrowUp size={9} />
               {sub.ahead}
             </span>
           {/if}
           {#if sub.behind > 0}
-            <span class="badge-behind" use:tooltip={`${sub.behind} commit${sub.behind !== 1 ? 's' : ''} behind remote`}>
+            <span class="badge-behind" use:tooltip={`${sub.behind} commit${sub.behind !== 1 ? 's' : ''} behind parent repo — run git submodule update`}>
               <ArrowDown size={9} />
               {sub.behind}
             </span>
           {/if}
-          {#if sub.ahead === 0 && sub.behind === 0 && sub.branch}
-            <span class="badge-synced" use:tooltip={'In sync with remote'}></span>
+          {#if sub.ahead === 0 && sub.behind === 0 && sub.head_hash}
+            <span class="badge-synced" use:tooltip={'In sync with parent repo'}></span>
           {/if}
         {/if}
       </div>

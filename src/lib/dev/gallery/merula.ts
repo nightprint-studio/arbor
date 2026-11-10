@@ -25,7 +25,7 @@ export const merulaOverrides: Record<string, SceneOverride> = {
   'merula/shell/RecentProjectsModal': { props: { onClose: noop }, setup: openProject },
   'merula/shell/RenameFileModal': { props: { path: `${PROJECT}/intro.merula`, currentName: 'intro.merula', onClose: noop }, setup: openProject },
   'merula/shell/RenameProjectModal': { props: { onClose: noop }, setup: openProject },
-  'merula/shell/WorkspacesModal': { props: { onClose: noop }, setup: openProject },
+  'merula/shell/MerulaWorkspaceManagerModal': { props: { onClose: noop }, setup: openProject },
 };
 
 export const merulaExtras: ExtraScene[] = [];

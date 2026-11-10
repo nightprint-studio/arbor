@@ -32,6 +32,7 @@ import type { Activity } from '$lib/components/bennu/assistant/assistant-activit
 import type { RetryStatus } from '$lib/components/bennu/assistant/assistant-retry';
 import { projectStore } from './project.svelte';
 import { bennuWorktreeStore } from './assistant-worktree.svelte';
+import { bennuImberSchedules } from './imber-schedules.svelte';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import { contextChange, modelChange, type CostChange } from '$lib/components/bennu/assistant/assistant-cost-change';
 import { DEFAULT_DECISION_LEVEL, MAX_DECISION_NOTES, MAX_GENERAL_CONTEXT, parseDecisionLevel, type DecisionLevel } from '$lib/components/bennu/assistant/assistant-decision';
@@ -118,7 +119,7 @@ function createAssistantStore() {
   let gitEnabled = $state(false);
   let hideAuthors = $state(true);
   let instructions = $state<{ name: string; bytes: number; truncated: boolean }[]>([]);
-  let limits = $state<BennuAssistantLimits>({ session_eur: 5, day_eur: 10, week_eur: 0, month_eur: 50, eur_per_usd: 0.92, warn_percent: 80 });
+  let limits = $state<BennuAssistantLimits>({ session_eur: 5, day_eur: 10, week_eur: 0, month_eur: 50, eur_per_usd: 0.92, warn_percent: 80, schedule_run_eur: 1, schedule_runs_per_day: 24 });
   let spend = $state<SpendStatus | null>(null);
 
   /** The proposal open in the review window, if any. */
@@ -335,6 +336,8 @@ function createAssistantStore() {
       putMessage(e.conversation_id, e.message as AssistantMessage);
       checkDiagrams(e.message as AssistantMessage);
     } else if (e.kind === 'done') {
+      // A scheduled run may belong to a conversation the panel never opened; the schedule list still wants to know it ended.
+      bennuImberSchedules.runEnded();
       update(e.conversation_id, (c) => ({
         ...c, cost: e.cost, context: e.context, title: e.title || c.title, updatedAt: e.updated_at,
       }));

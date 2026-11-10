@@ -43,6 +43,7 @@
    */
   import { Filter, FolderTree } from 'lucide-svelte';
   import BennuFileIcon from './BennuFileIcon.svelte';
+  import { isTestSource } from './file-kind';
   import { untrack } from 'svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -359,6 +360,7 @@
           badge: jar ? jar.artifact : (modules.moduleOf(hit.file) ?? ''),
           tooltip: hit.file,
           external: !!jar,
+          test: !jar && isTestSource(hit.file),
           hits: [],
         };
         out.push(group);

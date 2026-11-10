@@ -58,7 +58,7 @@
   import { lspWorkspaceSymbols, type LspSymbol } from '$lib/ipc/bennu/lsp';
   import { libraryClasses, libraryFiles, openLibraryFile } from '$lib/ipc/bennu/library';
   import { openLibraryClass } from './log-link';
-  import { isPatinaFile } from './file-kind';
+  import { isPatinaFile, isTestSource } from './file-kind';
   import type { TreeNode } from '$lib/types/bennu';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -210,6 +210,7 @@
               // declares, everything else its file type.
               icon: BennuFileIcon,
               iconProps: { path: node.path },
+              test: isTestSource(node.path),
               facet: where,
               origin: where,
               onOpen: () => go(node.path, null),
@@ -287,6 +288,7 @@
               icon: SymbolKindIcon,
               iconProps: { kind: c.kind },
               tag: c.kind && c.kind !== 'class' ? c.kind : undefined,
+              test: isTestSource(c.file),
               // A foreign project has its own module list, which this one has not read — so its
               // rows are filed under the project rather than under a module resolved against the
               // wrong tree, which is how a class ends up filed in a module it is not in.

@@ -84,6 +84,22 @@
   and doubling a quote there would corrupt the value instead of protecting it.
 </p>
 
+<h2>Syntax colours</h2>
+<p>
+  One lexer colours every SQL buffer, in the dialect of the <b>folder</b> the file is in
+  (PostgreSQL, Oracle, or portable for a script that must run on both). Keywords, data types
+  (<code>varchar</code>, <code>::jsonb</code>), function calls (<code>count(…)</code>), string
+  literals, numbers, comments, bind parameters (<code>:name</code>, <code>$1</code>, <code>?</code>,
+  Oracle's <code>&amp;var</code>) and operators each have their own colour, and a name after a dot
+  (<code>o.total</code>) reads as a column.
+</p>
+<ul>
+  <li>A word right after <code>FROM</code>, <code>JOIN</code>, <code>UPDATE</code>, <code>INTO</code> or <code>TABLE</code> is a name, not a keyword — a table called <code>order</code> or <code>group</code> stays a table.</li>
+  <li>String rules follow the engine: <code>''</code> inside a literal, PostgreSQL's <code>E'…
+…'</code> and <code>$tag$…$tag$</code>, Oracle's <code>q'[…]'</code>; a backslash is only an escape where the engine says so, so <code>'C:	emp'</code> does not swallow the rest of the file.</li>
+  <li>A <code>$ … $</code> body is code, not one long string; an Oracle optimizer hint (<code>/*+ … */</code>) is coloured as code, not as a comment.</li>
+</ul>
+
 <h2>Very long lines lose their colour</h2>
 <p>
   Past about <b>10 000 characters on a single line</b> the highlighting stops and the rest of

@@ -22,8 +22,8 @@ There are two kinds of conversation, kept apart by the **Agent / Chat** switch i
 - **Bennu's tools, never a shell.** Imber reads and changes the project through the same engine you use: the index, usages, rename, structural replace, build, tests, Local History. It cannot type arbitrary commands.
 - **You decide how much it decides.** Three modes (Manual, Accept edits, Autonomous), four reaches (this file, this project, all open projects, anywhere on disk) and a matrix of what asks when. See [Imber › Permissions and modes](03-permissions.md).
 - **Everything it changes can be reviewed and undone.** Proposals, a diff window, Undo on applied changes, Local History, and an isolated copy for risky work. See [Imber › Reviewing changes](04-reviewing-changes.md).
-- **The cost is visible and capped.** Every conversation shows what it cost, and limits in euros stop a runaway run. See [Imber › Cost and context](13-cost-and-context.md).
-- **Your key stays on your machine.** It lives in a credential vault of its own and goes only to Anthropic. See [Imber › Privacy and safety](17-privacy-and-safety.md).
+- **The cost is visible and capped.** Every conversation shows what it cost, and limits in euros stop a runaway run. See [Imber › Cost and context](14-cost-and-context.md).
+- **Your key stays on your machine.** It lives in a credential vault of its own and goes only to Anthropic. See [Imber › Privacy and safety](18-privacy-and-safety.md).
 
 ## Where to read next
 
@@ -41,12 +41,12 @@ There are two kinds of conversation, kept apart by the **Agent / Chat** switch i
 | **[Imber › Skills](10-skills.md)** | Teaching Imber how you want a kind of task done. |
 | **[Imber › Sub-agents](11-sub-agents.md)** | Helpers with a clean context for side tasks. |
 | **[Imber › Decisions and questions](12-decisions-and-questions.md)** | How much it decides alone and how it asks you. |
-| **[Imber › Cost and context](13-cost-and-context.md)** | Tokens, the cache, compaction, limits in euros. |
-| **[Imber › Working from the editor](14-editor.md)** | The sparkle in the margin, comments, stack traces, pasted code, the expanded panel. |
-| **[Imber › Settings reference](15-settings.md)** | Every setting: what it does, its default, where it is stored. |
-| **[Imber › Keyboard and palette](16-keyboard-and-palette.md)** | Shortcuts and Command Palette verbs. |
-| **[Imber › Privacy and safety](17-privacy-and-safety.md)** | What leaves the machine, what is masked, what is never allowed. |
-| **[Imber › Troubleshooting](18-troubleshooting.md)** | Common messages and what to do about them. |
+| **[Imber › Cost and context](14-cost-and-context.md)** | Tokens, the cache, compaction, limits in euros. |
+| **[Imber › Working from the editor](15-editor.md)** | The sparkle in the margin, comments, stack traces, pasted code, the expanded panel. |
+| **[Imber › Settings reference](16-settings.md)** | Every setting: what it does, its default, where it is stored. |
+| **[Imber › Keyboard and palette](17-keyboard-and-palette.md)** | Shortcuts and Command Palette verbs. |
+| **[Imber › Privacy and safety](18-privacy-and-safety.md)** | What leaves the machine, what is masked, what is never allowed. |
+| **[Imber › Troubleshooting](19-troubleshooting.md)** | Common messages and what to do about them. |
 
 ## Pages in other parts of the manual
 

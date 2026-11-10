@@ -36,6 +36,8 @@ export interface FindGroup {
   count?: number;
   /** Read-only content (a dependency): tinted, because you can read it and not change it. */
   external?: boolean;
+  /** A test source: the name takes the green the project tree gives a test file. */
+  test?: boolean;
   hits: FindHitItem[];
 }
 

@@ -17,6 +17,9 @@ use crate::registry::{Generator, GeneratorMeta, Target};
 
 pub struct SpringSecurity;
 
+/// What a server-rendered web app serves without logging in; offered as the `ignored_paths` default.
+const STATIC_RESOURCE_PATHS: [&str; 5] = ["/css/**", "/js/**", "/images/**", "/webjars/**", "/favicon.ico"];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Rule {
@@ -65,6 +68,9 @@ pub struct SecurityOptions {
     pub jwt_source: String,
     pub issuers: Vec<Issuer>,
     pub rules: Vec<Rule>,
+    /// Ant patterns kept out of the filter chain altogether (`web.ignoring()`): static resources and the like.
+    /// Anything that needs headers or a security context belongs in `rules` with `permitAll()` instead.
+    pub ignored_paths: Vec<String>,
     /// What `anyRequest()` gets.
     pub any_request: String,
     /// Prefix added to each role taken from the token.
@@ -108,6 +114,7 @@ impl Default for SecurityOptions {
                 Rule { method: String::new(), path: "/public/**".into(), access: "permitAll()".into() },
                 Rule { method: String::new(), path: "/admin/**".into(), access: "hasRole(\"ADMIN\")".into() },
             ],
+            ignored_paths: Vec::new(),
             any_request: "authenticated()".into(),
             authority_prefix: "ROLE_".into(),
         }
@@ -143,6 +150,7 @@ impl Generator for SpringSecurity {
         if options.scenario == "form" {
             options.cors = false;
             options.csrf = true;
+            options.ignored_paths = STATIC_RESOURCE_PATHS.iter().map(|p| p.to_string()).collect();
         }
         serde_json::to_value(options).unwrap_or(Value::Null)
     }
@@ -190,6 +198,9 @@ fn validate(o: &SecurityOptions) -> Result<(), String> {
     for r in &o.rules {
         require_inline(&r.path, "A path")?;
         require_inline(&r.access, "An access rule")?;
+    }
+    for p in &o.ignored_paths {
+        require_inline(p, "An ignored path")?;
     }
     require_inline(&o.any_request, "The default rule")?;
     for i in &o.issuers {
@@ -333,6 +344,10 @@ fn write_members(l: &mut crate::code::Lines, im: &mut crate::code::Imports, o: &
         write_chain(l, im, o, plan, Chain::Single);
     }
 
+    if !ignored_patterns(o).is_empty() {
+        l.gap();
+        write_ignored_paths(l, im, o, plan);
+    }
     if o.cors {
         l.gap();
         write_cors(l, im, o);
@@ -559,6 +574,39 @@ fn authorize_directive(im: &mut crate::code::Imports, o: &SecurityOptions, plan:
     }
     chained.push(format!("    .anyRequest().{any}"));
     Directive { lambda, chained }
+}
+
+/// Trimmed, non-empty, de-duplicated ignored patterns, in the order given.
+fn ignored_patterns(o: &SecurityOptions) -> Vec<&str> {
+    let mut seen: Vec<&str> = Vec::new();
+    for p in o.ignored_paths.iter().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+        if !seen.contains(&p) {
+            seen.push(p);
+        }
+    }
+    seen
+}
+
+/// `web.ignoring()`: the request never reaches the filter chain (no security headers, no context).
+fn write_ignored_paths(l: &mut crate::code::Lines, im: &mut crate::code::Imports, o: &SecurityOptions, plan: &Plan) {
+    // `antMatchers` is the only form before 5.8, and the adapter overrides `configure(WebSecurity)`.
+    let matchers = ignored_patterns(o).into_iter().map(java_string).collect::<Vec<_>>().join(", ");
+    let call = plan.matcher_call();
+    l.line("// Skips the filter chain entirely; use a `permitAll()` rule for anything that needs security headers.");
+    if plan.adapter {
+        im.add("org.springframework.security.config.annotation.web.builders.WebSecurity");
+        l.line("@Override");
+        l.block("public void configure(WebSecurity web)", |l| {
+            l.line(format!("web.ignoring().{call}({matchers});"));
+        });
+        return;
+    }
+    im.add("org.springframework.context.annotation.Bean");
+    im.add("org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer");
+    l.line("@Bean");
+    l.block("public WebSecurityCustomizer webSecurityCustomizer()", |l| {
+        l.line(format!("return web -> web.ignoring().{call}({matchers});"));
+    });
 }
 
 fn write_cors(l: &mut crate::code::Lines, im: &mut crate::code::Imports, o: &SecurityOptions) {
@@ -921,6 +969,50 @@ mod tests {
             &sample_context(),
         );
         assert!(out.files[0].text.contains("public JwtDecoder jwtDecoder("), "{}", out.files[0].text);
+    }
+
+    #[test]
+    fn no_ignored_paths_writes_no_customizer() {
+        let text = &run(serde_json::json!({}), &sample_context()).files[0].text;
+        assert!(!text.contains("WebSecurityCustomizer"), "{text}");
+        assert!(!text.contains("ignoring()"), "{text}");
+    }
+
+    #[test]
+    fn one_ignored_path_writes_a_customizer_bean() {
+        let text = &run(serde_json::json!({ "ignored_paths": ["/static/**"] }), &sample_context()).files[0].text;
+        assert!(text.contains("public WebSecurityCustomizer webSecurityCustomizer()"), "{text}");
+        assert!(text.contains("return web -> web.ignoring().requestMatchers(\"/static/**\");"), "{text}");
+        assert!(text.contains("import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;"), "{text}");
+    }
+
+    #[test]
+    fn several_ignored_paths_are_trimmed_deduplicated_and_blank_ones_dropped() {
+        let text = &run(
+            serde_json::json!({ "ignored_paths": [" /css/** ", "", "/js/**", "/css/**", "   "] }),
+            &sample_context(),
+        )
+        .files[0]
+            .text;
+        assert!(text.contains("web.ignoring().requestMatchers(\"/css/**\", \"/js/**\");"), "{text}");
+    }
+
+    #[test]
+    fn ignored_paths_are_escaped_as_java_strings_and_inline_only() {
+        let text = &run(serde_json::json!({ "ignored_paths": ["/a\"b", "/c\\d"] }), &sample_context()).files[0].text;
+        assert!(text.contains("requestMatchers(\"/a\\\"b\", \"/c\\\\d\")"), "{text}");
+        let bad = SpringSecurity.generate(&serde_json::json!({ "ignored_paths": ["/x\n/y"] }), &sample_context());
+        assert!(bad.is_err());
+    }
+
+    #[test]
+    fn the_adapter_ignores_paths_in_configure_web_security_with_ant_matchers() {
+        let mut ctx = sample_context();
+        ctx.project = ProjectInfoBuilder::legacy_56();
+        let text = &run(serde_json::json!({ "scenario": "basic", "ignored_paths": ["/img/**"] }), &ctx).files[0].text;
+        assert!(text.contains("public void configure(WebSecurity web)"), "{text}");
+        assert!(text.contains("web.ignoring().antMatchers(\"/img/**\");"), "{text}");
+        assert!(!text.contains("WebSecurityCustomizer"), "{text}");
     }
 
     /// Project fixtures with a chosen Spring Security version.

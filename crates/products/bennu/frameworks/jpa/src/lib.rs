@@ -64,3 +64,5 @@ pub mod prelude;
 pub mod roles;
 // The scan (shared) plus JPA's own relevance markers.
 pub mod scan;
+// Completion in a native SQL string — tables and columns as the code maps them.
+pub mod sql_complete;

@@ -402,7 +402,7 @@ pub const TABLE: &[(&str, Coverage)] = &[
     ("compiler.err.preview.feature.disabled.plural", Coverage::Missing),
     ("compiler.err.preview.not.latest", Coverage::Missing),
     ("compiler.err.preview.without.source.or.release", Coverage::Missing),
-    ("compiler.err.prob.found.req", Coverage::Check(&[CheckId::IncompatibleType, CheckId::ArgumentType, CheckId::LossyConversion, CheckId::NonBooleanCondition, CheckId::AnnotationValueType, CheckId::LambdaArity, CheckId::IncompatibleInstanceof, CheckId::ReturnValueFromVoid, CheckId::NonAutoCloseableResource, CheckId::IncompatibleCaseLabel])),
+    ("compiler.err.prob.found.req", Coverage::Check(&[CheckId::IncompatibleType, CheckId::ArgumentType, CheckId::LossyConversion, CheckId::NonBooleanCondition, CheckId::AnnotationValueType, CheckId::LambdaArity, CheckId::IncompatibleInstanceof, CheckId::ReturnValueFromVoid, CheckId::NonAutoCloseableResource, CheckId::IncompatibleCaseLabel, CheckId::FlatMapReturn])),
     ("compiler.err.proc.bad.config.file", Coverage::OutOfScope(why::PROCESSING)),
     ("compiler.err.proc.cant.access", Coverage::OutOfScope(why::PROCESSING)),
     ("compiler.err.proc.cant.access.1", Coverage::OutOfScope(why::PROCESSING)),

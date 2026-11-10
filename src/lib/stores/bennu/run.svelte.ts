@@ -182,7 +182,26 @@ interface GradleRunSpec {
 }
 
 type RunSpec =
-  | JvmRunSpec | CargoRunSpec | ScriptRunSpec | MavenRunSpec | GradleRunSpec | AttachRunSpec | TomcatRunSpec;
+  | JvmRunSpec | CargoRunSpec | ScriptRunSpec | MavenRunSpec | GradleRunSpec | AttachRunSpec | TomcatRunSpec
+  | ExternalRunSpec;
+
+/**
+ * A run owned by another store — Merula playing a `.merula` file. The console only hosts its
+ * transcript; what Stop and ⟳ mean is the {@link ExternalRunner} registered under `runner`.
+ */
+interface ExternalRunSpec {
+  kind: 'external';
+  runner: string;
+  /** What the runner needs to repeat the run (a file path). */
+  payload: string;
+}
+
+/** The verbs of a run this store does not own. */
+export interface ExternalRunner {
+  rerun(payload: string): Promise<void>;
+  /** Stop the run; the runner then reports the end through `endExternal`. */
+  stop(): Promise<void>;
+}
 
 /** A web module run on Tomcat. The whole configuration is kept: the backend regenerates the
  *  server's base from it at every launch, so a rerun repeats exactly what was configured. */
@@ -1459,6 +1478,10 @@ function createBennuRunStore() {
       await launchTomcat(from.spec);
       return;
     }
+    if (from.spec.kind === 'external') {
+      await externalRunners.get(from.spec.runner)?.rerun(from.spec.payload);
+      return;
+    }
     await launch(from.spec);
   }
 
@@ -1500,6 +1523,10 @@ function createBennuRunStore() {
     const tab = targetTab();
     if (!tab?.runId) return;
     patchTab(tab.id, { stopping: true });
+    if (tab.spec.kind === 'external') {
+      await externalRunners.get(tab.spec.runner)?.stop();
+      return;
+    }
     if (tab.spec.kind === 'attach') {
       // Nothing of ours to kill: Stop is a detach, and the program carries on without a debugger.
       await bennuDebugStore.detachSession(tab.runId);
@@ -1514,6 +1541,44 @@ function createBennuRunStore() {
     }
   }
 
+  // ── runs owned by another store ─────────────────────────────────────────────
+  const externalRunners = new Map<string, ExternalRunner>();
+
+  /** Register the verbs behind an `external` tab (Stop, ⟳). Idempotent per name. */
+  function registerExternalRunner(name: string, runner: ExternalRunner) {
+    externalRunners.set(name, runner);
+  }
+
+  /** Open a live console tab for a run another store drives; returns the tab id to write to. */
+  function beginExternal(runner: string, payload: string, label: string, subject: string): string {
+    const id = openTab({ kind: 'external', runner, payload }, label, subject);
+    // `runId` only marks the tab as stoppable (Stop needs one); the runner owns the real thing.
+    patchTab(id, { live: true, startedAt: Date.now(), runId: `external:${runner}` });
+    return id;
+  }
+
+  /** One line into an external tab's transcript. */
+  function externalLine(id: string, text: string, stream: RunLogLine['stream'] = 'out', log?: LogAnnotation) {
+    pushTo(id, text, stream, log);
+  }
+
+  /** An external run ended. `stopped` = the user asked for it, which the console words differently. */
+  function endExternal(id: string, opts: { stopped?: boolean; failed?: boolean } = {}) {
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab || !tab.live) return;
+    const durationMs = tab.startedAt ? Date.now() - tab.startedAt : null;
+    patchTab(id, {
+      live: false, runId: null, finished: true, durationMs, stopping: false,
+      exitCode: opts.failed ? 1 : null,
+    });
+    const took = durationMs === null ? '' : ` after ${formatMs(durationMs)}`;
+    pushTo(
+      id,
+      opts.failed ? `Stopped on an error${took}.` : opts.stopped ? `Stopped${took}.` : `Finished${took}.`,
+      opts.failed ? 'err' : 'meta',
+    );
+  }
+
   /** Close a tab. A LIVE one is stopped first — closing the only window onto a program you
    *  started, and leaving it running, is how an orphan happens. */
   async function closeTab(id: string): Promise<void> {
@@ -1523,6 +1588,8 @@ function createBennuRunStore() {
       // Closing the window onto a program we only attached to must not kill it.
       patchTab(tab.id, { stopping: true });
       await bennuDebugStore.detachSession(tab.runId);
+    } else if (tab.live && tab.runId && tab.spec.kind === 'external') {
+      await externalRunners.get(tab.spec.runner)?.stop();
     } else if (tab.live && tab.runId) {
       try {
         await ipcCancelRun(tab.runId);
@@ -1593,6 +1660,10 @@ function createBennuRunStore() {
     get preferredBuildType() { return preferredBuildType; },
 
     attach,
+    registerExternalRunner,
+    beginExternal,
+    externalLine,
+    endExternal,
     build,
     buildPatinaMod,
     validateProject,

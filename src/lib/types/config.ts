@@ -257,6 +257,8 @@ export interface SittaConfig {
   /** Additionally allow http/https links from the address bar to open in the
    *  browser. Gated behind `open_external_links`; off by default. */
   open_web_links: boolean;
+  /** Show a discreet toast when a drive / USB volume is plugged in or removed. */
+  notify_drive_changes: boolean;
   /** Schemes (lower-cased) the user chose to remember, so they open without
    *  prompting (e.g. ["vscode", "https"]). */
   remembered_external_schemes: string[];

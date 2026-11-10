@@ -140,22 +140,28 @@ pub fn check_file_resolved_incremental(
     let mut out = check_file_in(root, &nodes, source, ctx);
     stats.pure_us = lap(&mut since);
 
-    // A file that did not PARSE gets its syntax error and nothing else — same rule, and the same
-    // reason, as the whole-file path (`check::check_file_resolved`).
+    // Same rule as the whole-file path (`check::check_file_resolved`): a parse error is charged to the
+    // smallest declaration that contains it and only that member is left out; an error that escapes
+    // every member (an unbalanced brace at class level) gets the syntax error and nothing else.
     //
-    // The cache is KEPT, not dropped. Half-typed code — an open parenthesis, a trailing `.` — is the
-    // normal state of a buffer while it is being edited, and dropping the cache there meant that every
-    // pause mid-expression threw away the work for the whole file: the next clean parse found nothing
-    // to reuse and re-checked every method. Keeping it is sound because an entry is only ever replayed
-    // when the structure, the resolver revision and the body's own text all hash the same as when it
-    // was stored (see the module docs), and entries are only ever stored from a clean parse — so what
-    // sits in the cache is correct for exactly the inputs it is keyed by, however many broken buffers
-    // came in between.
-    if root.has_error() {
+    // The cache is KEPT in both cases. Half-typed code is the normal state of a buffer while it is being
+    // edited, and dropping the cache on every pause mid-expression threw away the work for the whole
+    // file. Keeping it is sound because an entry is replayed only when the structure, the resolver
+    // revision and the body's own text hash the same as when it was stored, and a body with an error in
+    // it cannot hash the same once the error is fixed.
+    let quarantine = crate::engine::quarantine::quarantine(root);
+    if quarantine == crate::engine::quarantine::Quarantine::WholeFile {
         stats.syntax_error = true;
         cache.stats = stats;
         return finish(out);
     }
+    let nodes: Vec<tree_sitter::Node<'_>> = match &quarantine {
+        crate::engine::quarantine::Quarantine::Clean => nodes,
+        _ => {
+            stats.syntax_error = true;
+            nodes.into_iter().filter(|n| !quarantine.hides_node(n)).collect()
+        }
+    };
 
     // No JDK → the resolver checks would all resolve to "unknown" and stay silent; skip them (and drop
     // any stale cache, so a later JDK-available run rebuilds from scratch).

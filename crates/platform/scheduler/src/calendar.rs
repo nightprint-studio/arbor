@@ -181,10 +181,42 @@ pub fn due(next_ms: i64, now_ms: i64, policy: MissedPolicy) -> Due {
     }
 }
 
+/// Where today, this week (Monday) and this month began, in `tz`, as unix ms — what a spending window is summed
+/// from. The backend has no calendar of its own; a scheduled run asks for them here.
+pub fn period_starts_in<Tz: TimeZone>(now_ms: i64, tz: &Tz) -> (i64, i64, i64) {
+    let Some(now) = tz.timestamp_millis_opt(now_ms).single() else { return (now_ms, now_ms, now_ms) };
+    let today = now.date_naive();
+    let start_of = |d: chrono::NaiveDate| {
+        d.and_hms_opt(0, 0, 0).and_then(|t| tz.from_local_datetime(&t).earliest()).map(|t| t.timestamp_millis()).unwrap_or(now_ms)
+    };
+    let week = today - ChronoDuration::days(i64::from(today.weekday().num_days_from_monday()));
+    let month = today.with_day(1).unwrap_or(today);
+    (start_of(today), start_of(week), start_of(month))
+}
+
+/// [`period_starts_in`] in the local time zone.
+pub fn period_starts(now_ms: i64) -> (i64, i64, i64) {
+    period_starts_in(now_ms, &Local)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::{FixedOffset, Utc};
+
+    #[test]
+    fn the_periods_begin_at_midnight_monday_and_the_first() {
+        // Tuesday 10 November 2026, 15:00.
+        let now = Utc.with_ymd_and_hms(2026, 11, 10, 15, 0, 0).unwrap().timestamp_millis();
+        let at = |y, m, d| Utc.with_ymd_and_hms(y, m, d, 0, 0, 0).unwrap().timestamp_millis();
+        assert_eq!(period_starts_in(now, &Utc), (at(2026, 11, 10), at(2026, 11, 9), at(2026, 11, 1)));
+        // A Sunday belongs to the week that began the Monday before; the 1st is its own day, week and month.
+        let sunday = Utc.with_ymd_and_hms(2026, 11, 8, 23, 59, 0).unwrap().timestamp_millis();
+        assert_eq!(period_starts_in(sunday, &Utc).1, at(2026, 11, 2));
+        let first = Utc.with_ymd_and_hms(2026, 12, 1, 0, 30, 0).unwrap().timestamp_millis();
+        assert_eq!(period_starts_in(first, &Utc).2, at(2026, 12, 1));
+    }
+
 
     const MIN: i64 = 60_000;
     const HOUR: i64 = 60 * MIN;

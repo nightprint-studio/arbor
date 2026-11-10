@@ -40,5 +40,10 @@ pub(crate) fn report(state: &CorvusState) -> MemoryReport {
         corvus_git_provider_api::prelude::avatar_cache_len(),
     ));
 
+    // The git status behind the File Explorer's overlay badges, one entry per repository browsed.
+    for (root, files, bytes) in corvus_git::explorer::status_cache_footprint() {
+        items.push(MemoryItem::estimate(root, "Git status behind the explorer badges", files, bytes));
+    }
+
     MemoryReport { items }
 }

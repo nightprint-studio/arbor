@@ -31,6 +31,7 @@ mod prompt_agents;
 mod pseudonyms;
 mod read_memory;
 mod runs;
+mod schedule;
 mod session;
 mod side_jobs;
 mod skills;
@@ -421,6 +422,12 @@ fn spend_json(limits: &Limits, spent: &Spent) -> Value {
 /// Start a run (or, with `dry_run`, show the request it would make).
 #[arbor_rpc::handler]
 async fn assistant_send(ctx: &BennuState, args: SendArgs) -> Result<Value, String> {
+    send(ctx, args, None).await
+}
+
+/// The send behind the panel's and a schedule's runs. `scheduled` is present for a run nobody is watching: it adds
+/// the note to the message, the cost cap, the unattended gate and the hook that records how the run ended.
+async fn send(ctx: &BennuState, args: SendArgs, scheduled: Option<schedule::Scheduled>) -> Result<Value, String> {
     if args.text.trim().is_empty() && !args.retry && args.attachments.is_empty() {
         return Err("the message is empty".into());
     }
@@ -544,6 +551,10 @@ async fn assistant_send(ctx: &BennuState, args: SendArgs) -> Result<Value, Strin
             user_text = format!("{user_text}\n\n{note}");
         }
     }
+    // A scheduled run says first what is different about it: nobody to answer, nothing written, short answers.
+    if scheduled.is_some() {
+        user_text = format!("{}\n\n{user_text}", schedule::request::SCHEDULED_NOTE);
+    }
     // A retry sends what the conversation already holds: the user's message (or the tool results) is its last turn.
     if args.retry {
         if !matches!(transcript.last(), Some(m) if m.role == Role::User) {
@@ -620,6 +631,7 @@ async fn assistant_send(ctx: &BennuState, args: SendArgs) -> Result<Value, Strin
         View::new(format!("a{now}"), args.model.clone(), now),
     );
     session.hide_authors = hide;
+    session.unattended = scheduled.is_some();
     session.ask_cap = bennu_assistant::prelude::question_cap(args.decision_level_effective());
     session.debug_idle_minutes = args.debug_idle_minutes;
     session.projects = set;
@@ -643,11 +655,14 @@ async fn assistant_send(ctx: &BennuState, args: SendArgs) -> Result<Value, Strin
         worktree: args.worktree.as_deref().and_then(bennu_assistant::prelude::WorktreeMode::parse),
     });
 
+    // A run nobody watches has a cap of its own on top of the limits (and says so when it hits it).
+    let run_cap_usd = scheduled.as_ref().and_then(|_| schedule::budget::run_cap_usd(&bennu_core::config::load().assistant.limits));
+    let on_done = scheduled.map(|s| s.on_done);
     std::thread::Builder::new()
         .name(format!("assistant-{run_id}"))
         .spawn(move || {
-            let guard = tools::Guard { limits, periods: args.periods, session_base, model: model.clone() };
-            execute(session, handle, key, request, conv, RunOptions { model, max_context: args.max_context, periods: args.periods, guard, chat: args.chat, git: git_tools, plan: args.plan, off: tools::families_off(&args.families_off), skills: enabled_skills, agents: agent_setup });
+            let guard = tools::Guard { limits, periods: args.periods, session_base, model: model.clone(), run_cap_usd };
+            execute(session, handle, key, request, conv, RunOptions { model, max_context: args.max_context, periods: args.periods, guard, chat: args.chat, git: git_tools, plan: args.plan, off: tools::families_off(&args.families_off), skills: enabled_skills, agents: agent_setup, on_done });
         })
         .map_err(|e| format!("could not start the run: {e}"))?;
 
@@ -667,6 +682,8 @@ struct RunOptions {
     skills: Vec<skills::Skill>,
     /// Present when the run may start sub-agents.
     agents: Option<tools::AgentSetup>,
+    /// Present for a scheduled run: told once, at the very end, how it went.
+    on_done: Option<schedule::DoneHook>,
 }
 
 /// Ends a run's bookkeeping when `execute` is left, however it is left.
@@ -694,7 +711,7 @@ fn execute(
     mut conv: Conversation,
     options: RunOptions,
 ) {
-    let RunOptions { model, max_context, periods, guard, chat, git, plan, off, skills, agents } = options;
+    let RunOptions { model, max_context, periods, guard, chat, git, plan, off, skills, agents, on_done } = options;
     let skills_index = skills::render_index(&skills);
     // Whatever way this function is left — a panic included — the run's reservations and cancel flag go.
     let _cleanup = RunCleanup(session.run_id.clone(), session.conversation_id.clone());
@@ -716,6 +733,8 @@ fn execute(
         Err(e) => assistant::Outcome::failed_to_start(request.messages.clone(), assistant::ProviderError::local(e)),
     };
 
+    // For a scheduled run: the last thing it said, before the outcome is taken apart.
+    let last_said = on_done.as_ref().and_then(|_| outcome.added.iter().rev().map(Message::text).find(|t| !t.trim().is_empty()));
     // Priced request by request: a long prompt costs more per token, which a total cannot tell. A request that
     // failed after being billed is one of them.
     let mut requests: Vec<Usage> = outcome.requests;
@@ -813,6 +832,10 @@ fn execute(
         }),
     );
     runs::finish(&session.run_id);
+    if let Some(hook) = on_done {
+        let (ok, detail) = schedule::outcome_line(ended, error.as_ref().map(|e| e.friendly()), last_said, session.end_note());
+        hook(ok, detail);
+    }
 }
 
 /// The notice a failed run leaves in the thread: what happened and what to do in plain words, the provider's own

@@ -10,6 +10,8 @@ import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
 import { bennuRunConfigStore } from '$lib/stores/bennu/run-config.svelte';
 import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
 import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+import { bennuImberSchedules } from '$lib/stores/bennu/imber-schedules.svelte';
+import type { ImberJob } from '$lib/types/imber-schedule';
 import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
 import type { NamingFixPlan, NamingTarget, RenamedName } from '$lib/ipc/bennu/naming';
 
@@ -298,7 +300,23 @@ const FILE_DIAGS = [
   ] },
 ];
 
+/** Imber's schedules in Bennu: read-only runs, awake and prompt only — one that ended well, one skipped while closed, one failed. */
+const NOW = Date.now();
+const bennuImberJobs: ImberJob[] = [
+  { id: 'b1', name: 'Morning review', enabled: true, recurrence: { kind: 'weekly', days: [0, 1, 2, 3, 4], hour: 9, minute: 0 }, missed: 'run_once',
+    action: { kind: 'prompt', prompt: 'What changed on main since yesterday? Point out risky changes.' }, root: DEMO, mode: 'manual',
+    created_ms: NOW - 9 * 86_400_000, next_run_ms: NOW + 14 * 3_600_000, last_run: { at_ms: NOW - 10 * 3_600_000, ok: true, detail: 'Three new commits; one touches the batch scheduler.' }, runs: 7 },
+  { id: 'b2', name: 'Weekly dependency check', enabled: true, recurrence: { kind: 'cron', expr: '0 0 8 * * 1' }, missed: 'skip',
+    action: { kind: 'awake', conversation_id: 'c-1', prompt: 'Look for outdated dependencies and list the ones worth upgrading.' }, root: DEMO, mode: 'manual',
+    created_ms: NOW - 20 * 86_400_000, next_run_ms: NOW + 3 * 86_400_000, last_run: { at_ms: NOW - 4 * 86_400_000, ok: true, skipped: true, detail: 'Missed while Bennu was closed.' }, runs: 2 },
+  { id: 'b3', name: 'Hourly TODO scan', enabled: false, recurrence: { kind: 'interval', secs: 3600, anchor_ms: 0 }, missed: 'skip',
+    action: { kind: 'prompt', prompt: 'List the new TODO comments.' }, root: DEMO, mode: 'manual',
+    created_ms: NOW - 2 * 86_400_000, next_run_ms: null, last_run: { at_ms: NOW - 3_600_000, ok: false, detail: 'The spending limit for scheduled runs was reached.' }, runs: 4 },
+];
+
 export const bennuExtras: ExtraScene[] = [
+  { id: 'shared/ImberSchedulesModal[bennu]', load: () => import('$lib/components/shared/ImberSchedulesModal.svelte'), setup: () => { seedProject(); bennuImberSchedules.seed(bennuImberJobs); }, props: { store: bennuImberSchedules, onClose: noop } },
+  { id: 'shared/ImberSchedulesModal[bennu new]', load: () => import('$lib/components/shared/ImberSchedulesModal.svelte'), setup: () => { seedProject(); bennuImberSchedules.seed(bennuImberJobs); bennuImberSchedules.edit('new'); }, props: { store: bennuImberSchedules, onClose: noop } },
   { id: 'bennu/panels/BennuProblemsPanel', load: framed(() => import('$lib/components/bennu/BennuProblemsPanel.svelte'), 900, 320), setup: () => { seedProject(); bennuDiagnosticsStore.setProjectDiagnostics(FILE_DIAGS as never); }, settle: 800 },
   { id: 'bennu/panels/BennuBuildProblemsPanel', load: framed(() => import('$lib/components/bennu/BennuBuildProblemsPanel.svelte'), 900, 320), setup: () => { seedProject(); bennuDiagnosticsStore.setProjectDiagnostics(FILE_DIAGS as never); }, settle: 800 },
   { id: 'bennu/panels/BennuSidebar', load: framed(() => import('$lib/components/bennu/BennuSidebar.svelte'), 360, 700), setup: seedProject, settle: 1000 },

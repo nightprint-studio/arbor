@@ -54,6 +54,9 @@ export interface MerulaDiagnostic {
 /** `merula:diagnostics` payload (also the `merula_eval` return). Empty = success. */
 export interface MerulaDiagnostics {
   errors: MerulaDiagnostic[];
+  /** The evaluation produced an arrangement and staged it — an `error` may then be a validation
+   *  finding (an unknown instrument) that does not stop playback. `false` = nothing was staged. */
+  staged: boolean;
 }
 
 /** `merula:transport` payload: playhead position, tempo, run state. */

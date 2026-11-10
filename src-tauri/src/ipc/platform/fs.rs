@@ -144,6 +144,12 @@ fn fs_delete_many(_state: &AppState, paths: Vec<String>) -> Result<(), AppError>
 // Listing + search
 // ---------------------------------------------------------------------------
 
+/// Whether `path` is inside a git repository or holds one — the explorer's gate for starting `corvus-be`.
+#[platform::handler(program = "platform")]
+fn fs_near_git_repo(_state: &AppState, path: String) -> Result<bool, AppError> {
+    Ok(arbor_fs::prelude::gitmarker::near_git_repo(&path))
+}
+
 #[platform::handler(program = "platform")]
 fn fs_read_dir(
     _state: &AppState,

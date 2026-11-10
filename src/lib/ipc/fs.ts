@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { platform, sitta } from './rpc';
+import { platform, corvus, ensureBackend } from './rpc';
 import { getRepoRoot } from './corvus/treeStatus';
 
 /**
@@ -238,18 +238,40 @@ export interface FsGitStatus {
   repos: Record<string, GitRepoMarker>;
 }
 
+/** Git is Corvus's, borrowed by path (as Bennu does): `corvus-be` is started on first use, never by
+ *  the explorer opening. */
+async function explorerGit<R>(method: string, params: Record<string, unknown>): Promise<R> {
+  await ensureBackend('corvus');
+  return corvus<R>(method, params);
+}
+
+/** Cheap FS-side probe (a few `stat`s, no git): is `path` inside a repository, or a folder of them? */
+export const fsNearGitRepo = (path: string) => platform<boolean>('fs_near_git_repo', { path });
+
+/** Run `fetch` only when `path` is near a repository; otherwise answer `fallback` and leave
+ *  `corvus-be` stopped. A failing probe counts as "not near" — badges are never worth an error. */
+async function ifNearRepo<R>(path: string, fallback: R, fetch: () => Promise<R>): Promise<R> {
+  const near = await fsNearGitRepo(path).catch(() => false);
+  return near ? fetch() : fallback;
+}
+
+const NO_GIT_STATUS: FsGitStatus = {
+  in_repo: false, repo_root: null, branch: null, detached: false, ahead: 0, behind: 0, badges: {}, repos: {},
+};
+const NO_GIT_CHANGES: GitChanges = { repo_root: null, branch: null, staged: [], unstaged: [] };
+
 /** Git status for `dir`'s entries (badges + branch / ahead-behind). Cached per
  *  repo-root; pass `refresh = true` (off the fs watcher) to recompute. */
 export const fsGitStatus = (dir: string, refresh = false) =>
-  sitta<FsGitStatus>('fs_git_status', { dir, refresh });
+  ifNearRepo(dir, NO_GIT_STATUS, () => explorerGit<FsGitStatus>('fs_git_status', { dir, refresh }));
 /** Stage paths (files / folders / deletions) in their enclosing repo. */
-export const fsGitStage   = (paths: string[]) => sitta<void>('fs_git_stage',   { paths });
+export const fsGitStage   = (paths: string[]) => explorerGit<void>('fs_git_stage',   { paths });
 /** Unstage paths (reset to HEAD). */
-export const fsGitUnstage = (paths: string[]) => sitta<void>('fs_git_unstage', { paths });
+export const fsGitUnstage = (paths: string[]) => explorerGit<void>('fs_git_unstage', { paths });
 /** Discard working-tree changes for paths (snapshots to Recovery first). */
-export const fsGitDiscard = (paths: string[]) => sitta<void>('fs_git_discard', { paths });
+export const fsGitDiscard = (paths: string[]) => explorerGit<void>('fs_git_discard', { paths });
 /** Append paths to the repo's `.gitignore` (anchored, folders get a trailing slash). */
-export const fsGitIgnore  = (paths: string[]) => sitta<void>('fs_git_ignore',  { paths });
+export const fsGitIgnore  = (paths: string[]) => explorerGit<void>('fs_git_ignore',  { paths });
 /** Resolve the repo containing `path` (via corvus-be), then take the user to it in **Corvus** — the heavy git
  *  operations (diff / log / blame / MR) live in its UI. It goes through the same door as every other "open a
  *  project in a product" (`openProjectIn`): with Corvus already open, as a window or as a tab of the
@@ -280,15 +302,18 @@ export interface GitChanges {
   unstaged: GitChange[];
 }
 /** Full staged/unstaged change list for the repo enclosing `dir`. */
-export const fsGitChanges = (dir: string) => sitta<GitChanges>('fs_git_changes', { dir });
+export const fsGitChanges = (dir: string) =>
+  ifNearRepo(dir, NO_GIT_CHANGES, () => explorerGit<GitChanges>('fs_git_changes', { dir }));
 
 /** One local branch of a repo. */
 export interface FsBranch { name: string; is_head: boolean; }
 /** Local branches of the repo enclosing `path` (sorted, case-insensitive). */
-export const fsGitBranches = (path: string) => sitta<FsBranch[]>('fs_git_branches', { path });
+export const fsGitBranches = (path: string) =>
+  ifNearRepo(path, [] as FsBranch[], () => explorerGit<FsBranch[]>('fs_git_branches', { path }));
 /** Switch the repo enclosing `path` to `branch` (safe checkout — fails on
  *  conflicting uncommitted changes). */
-export const fsGitCheckout = (path: string, branch: string) => sitta<void>('fs_git_checkout', { path, branch });
+export const fsGitCheckout = (path: string, branch: string) => explorerGit<void>('fs_git_checkout', { path, branch });
 /** Remote URL (origin, else first remote) of the repo enclosing `path`, or
  *  `null` when there's no repo / no remote. Used to build "Copy project link". */
-export const fsGitRemoteUrl = (path: string) => sitta<string | null>('fs_git_remote_url', { path });
+export const fsGitRemoteUrl = (path: string) =>
+  ifNearRepo(path, null as string | null, () => explorerGit<string | null>('fs_git_remote_url', { path }));

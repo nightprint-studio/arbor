@@ -14,6 +14,8 @@ path = "src/main.rs"
 [dependencies]
 arbor-ipc  = { path = "../../../foundation/ipc" }
 arbor-rpc  = { path = "../../../foundation/rpc" }
+# Mounted-volume snapshot + diff for the removable-media watcher (`mounts`).
+arbor-fs   = { path = "../../../foundation/fs" }
 # The Model-D backend runtime scaffold: `BackendIo` (framed-stdio plumbing +
 # runtime) + the `App` builder (pre-serve inits, serve loop). Like merula-be,
 # sitta-be uses the slim path — no plugin host, no API installer, no scheduler.
@@ -26,12 +28,6 @@ arbor-core = { path = "../../../foundation/core" }
 # domain `#[arbor_rpc::handler]`s stay here in sitta-be and drive against
 # `sitta_core::prelude::*`. Tauri-free by construction.
 sitta-core = { path = "../core" }
-# The shared local-git library. sitta-be drives the File Explorer's git awareness
-# (overlay badges + light inline actions) through `corvus_git::explorer` — the pure
-# git2 logic shared with `corvus-be`, so the explorer's git works even when the git
-# client isn't running. Pulls in vendored libgit2 (the accepted standalone cost;
-# a future gix-backed plugin would swap this out behind the same boundary).
-corvus-git = { path = "../../corvus/git" }
 # Host-pure plugin host, taken ready-made from the prelude:
 # `host_pure_hook_dispatcher` + `host_pure_api_installer`. sitta-be publishes no
 # product namespace and fires no vetoable hook, so it names no `mlua` type and

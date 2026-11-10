@@ -57,7 +57,9 @@
 </p>
 <p>
   The <strong>selector in the title bar</strong>, left of ▷, says which one those buttons start, and opens the list, grouped by category. Picking one makes it
-  <strong>active</strong> — it does not launch it. Choosing what ▷ means and pressing ▷ are separate acts.
+  <strong>active</strong> — it does not launch it. Choosing what ▷ means and pressing ▷ are separate acts. Each category has its own colour (Spring Boot green, Application blue, tests purple,
+  Tomcat amber, Cargo rust — and inside Cargo the subcommand decides: run green, test purple, check teal), in the selector, the + menu and the Run Configurations window, so a list of mixed
+  targets reads by colour before it reads by name.
 </p>
 
 <h3>Categories</h3>

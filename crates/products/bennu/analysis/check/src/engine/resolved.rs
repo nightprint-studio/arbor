@@ -96,6 +96,7 @@ pub(crate) fn whole_file<'a>(run: &mut Run, subject: &Subject<'a, '_>, nodes: &[
     run.check("unresolved_static_imports", || crate::source::imports::unresolved_static_imports_at(root, source, resolver, ctx.classpath_complete, ctx.jdk_is_behind()));
     run.check("unresolved_types", || crate::typing::types::unresolved_types_in(nodes, source, symbols, resolver, ctx.classpath_complete));
     run.check("type_arg_arity", || crate::typing::type_arg_arity::type_arg_arity_errors_in(nodes, source, symbols, resolver));
+    run.check("raw_optional", || crate::typing::raw_optional::raw_optional_errors_in(nodes, source, symbols, resolver));
     run.check("type_bounds", || crate::typing::bounds::bound_errors_in(nodes, source, symbols, resolver));
     run.check("undefined_var", || crate::calls::undefined_var::undefined_var_errors_in(root, nodes, source, symbols, resolver, ctx.classpath_complete));
     run.check("unresolved_call", || crate::calls::unresolved_call::unresolved_call_errors_in(root, nodes, source, symbols, resolver));
@@ -145,4 +146,6 @@ pub(crate) fn per_body<'a>(run: &mut Run, subject: &Subject<'a, '_>, nodes: &[No
     run.check("dead_catch", || crate::throwing::dead_catch::dead_catch_errors_in(root, nodes, source, symbols, resolver, infer));
     run.check("static_via_instance", || crate::hierarchy::static_via_instance::static_via_instance_warnings_in(root, nodes, source, symbols, resolver, infer));
     run.check("visibility", || crate::hierarchy::visibility::visibility_errors_in(root, nodes, source, symbols, resolver, infer));
+    run.check("flat_map_return", || crate::calls::flat_map::flat_map_return_errors_in(root, nodes, source, symbols, resolver, infer));
+    run.check("impossible_equals", || crate::calls::equals_mismatch::impossible_equals_in(root, nodes, source, symbols, resolver, infer));
 }

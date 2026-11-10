@@ -224,29 +224,12 @@ pub fn unresolved_types_in(
         if name == "__" && lombok_on_x_value(n, bytes) && imports_lombok(symbols) {
             continue;
         }
-        // Resolvable via imports, the file's OWN package (no import needed), or the global lookup.
-        // Uses the shared `type_binary` so a bare same-package type (`C` referencing a sibling class in
-        // `com.acme`) resolves to `com/acme/C` instead of being falsely flagged.
-        //
-        // …and then the scoping question, which is a DIFFERENT one. `type_binary` answers what the
-        // name would mean, and it answers generously by design: the project index is keyed by simple
-        // name, so `Foo` finds `com.acme.a.Foo` from any package in the project — which is what
-        // completion, hover and go-to want, and is exactly wrong here. A class used across a package
-        // boundary with no `import` resolved and read as clean while javac refused the file. So what
-        // resolved is asked whether this compilation unit could actually have named it.
-        //
-        // Declared-in-file types and type parameters were excluded by `known` above, and an
-        // inherited member type is the check right below — the three cases `simple_name_reaches`
-        // deliberately does not know about.
-        if let Some(binary) = crate::support::resolve::type_binary(name, symbols, resolver) {
-            if bennu_java::prelude::simple_name_reaches(
-                &binary,
-                name,
-                symbols.package.as_deref(),
-                &symbols.imports,
-            ) {
-                continue;
-            }
+        // Bound by an import, the file's OWN package (no import needed) or `java.lang` — the shared
+        // scoping rule, not "some class of that name exists somewhere in the project". Declared-in-file
+        // types and type parameters were excluded by `known` above, and an inherited member type is the
+        // check right below.
+        if crate::support::resolve::type_binary_in_file_scope(name, symbols, resolver).is_some() {
+            continue;
         }
         // A member type inherited from a supertype is in scope by its simple name with no
         // import (JLS §8.1.5) — `class Sub extends Base` writes `Inner` for `Base.Inner`,

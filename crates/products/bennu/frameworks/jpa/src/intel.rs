@@ -65,19 +65,15 @@ pub fn native_sites(path: &str, source: &str) -> Vec<crate::model::QueryDef> {
 
 /// The whole query gets a tint, so it reads as a different language at a glance; the kind carries
 /// whether it is JPQL or SQL, because they are not the same thing and the theme is entitled to say so.
+///
+/// Only the span and the language: the tokens inside it are cut by the editor with the lexer Picus
+/// shares, so a query is coloured the same wherever it is written.
 fn push_query_highlights(q: &crate::model::QueryDef, out: &mut Vec<ExtHighlight>) {
     out.push(ExtHighlight {
         start: q.start,
         end: q.end,
         kind: if q.native { "jpa.query.native".into() } else { "jpa.query".into() },
     });
-    for t in crate::hql::tokens(&q.text, q.native) {
-        out.push(ExtHighlight {
-            start: q.start + t.start,
-            end: q.start + t.end,
-            kind: format!("jpa.query.{}", t.kind),
-        });
-    }
 }
 
 /// What can be typed at `offset` when it is inside a JPQL string: a repository method's `@Query`,
@@ -439,12 +435,58 @@ mod tests {
     }
 
     #[test]
+    fn completions_work_inside_a_text_block_query() {
+        // A repository with a text block @Query("""...""") — the byte offsets of the inner content
+        // must land correctly so the completion engine can resolve the caret position.
+        let order = src(ORDER);
+        let repo = src(
+            "interface R extends JpaRepository<Order, Long> {\n\
+             @Query(\"\"\"\n\
+             SELECT o FROM Order o WHERE o.total\n\
+             \"\"\")\n\
+             Object m();\n\
+             }\n",
+        );
+        let model = model_of(&[order, repo.clone()]);
+        // Position the caret just after `o.` (before `total`) inside the text block.
+        let caret = repo.find("o.total").map(|i| i + "o.".len()).unwrap();
+        let items = completions(&model, "/p/R.java", &repo, caret);
+        let labels: Vec<&str> = items.iter().map(|c| c.label.as_str()).collect();
+        assert!(labels.contains(&"total"), "field completion must work inside a text block @Query; got: {labels:?}");
+    }
+
+    #[test]
+    fn a_native_query_completes_tables_and_columns_from_the_mapping() {
+        let order = src(ORDER);
+        let repo = src(
+            "interface R extends JpaRepository<Order, Long> {\n\
+             @Query(value = \"select * from ord\", nativeQuery = true)\n\
+             Object a();\n\
+             @Query(value = \"\"\"\n\
+             select o.total from ORDER o where o.\n\
+             \"\"\", nativeQuery = true)\n\
+             Object b();\n\
+             }\n",
+        );
+        let model = model_of(&[order, repo.clone()]);
+        let labels = |caret: usize| -> Vec<String> {
+            completions(&model, "/p/R.java", &repo, caret).into_iter().map(|c| c.label).collect()
+        };
+        // A table named by the mapping, completed in a one-line native query…
+        assert_eq!(labels(repo.find("from ord").unwrap() + "from ord".len()), ["order"]);
+        // …and its columns after an alias, inside a text block.
+        let caret = repo.find("where o.").unwrap() + "where o.".len();
+        assert_eq!(labels(caret), ["id", "total"]);
+    }
+
+    #[test]
     fn a_query_is_coloured_and_says_which_language_it_is() {
         let repo = src("interface R extends JpaRepository<Order, Long> {\n  @Query(\"select o from Order o\") Object a();\n  @Query(value = \"select * from ORDINI\", nativeQuery = true) Object b();\n}\n");
         let hs = highlights("/p/R.java", &repo);
         assert!(hs.iter().any(|h| h.kind == "jpa.query"));
         assert!(hs.iter().any(|h| h.kind == "jpa.query.native"));
-        assert!(hs.iter().any(|h| h.kind == "jpa.query.keyword" && &repo[h.start..h.end] == "select"));
+        // The tokens inside are the editor's to cut; the backend states only where and in what language.
+        assert!(hs.iter().all(|h| h.kind.starts_with("jpa.query") && !h.kind.ends_with("keyword")));
     }
 
     #[test]

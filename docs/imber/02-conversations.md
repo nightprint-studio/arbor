@@ -29,7 +29,7 @@ The **Agent / Chat** switch in the header chooses between two kinds of conversat
 | --- | --- | --- |
 | **Works in the project** | Yes: reads, searches, edits, builds, runs, debugs through Bennu's tools | No. It cannot read, search or change anything |
 | **What it sees** | The project, the open file, the selection, the instruction files | Only what you type or select |
-| **Tools** | All the families you left on | Three: the help about Bennu, opening a panel, drawing a diagram |
+| **Tools** | All the families you left on | Four: the help about Bennu, opening a panel, drawing a diagram, showing a picture |
 | **Modes and reach** | Mode menu and Reach apply | Not shown: nothing to ask |
 | **Good for** | Anything about the project | A question unrelated to the project, or when you want to be sure nothing is touched |
 

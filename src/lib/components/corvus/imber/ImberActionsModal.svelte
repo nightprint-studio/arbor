@@ -18,7 +18,7 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { imberStore as store } from '$lib/stores/corvus/imber.svelte';
-  import { relativeTime } from './imber-schedule';
+  import { relativeTime } from '$lib/utils/imber-schedule';
 
   let { onClose }: { onClose: () => void } = $props();
 

@@ -41,6 +41,10 @@ export interface BennuAssistantLimits {
   /** Euros per dollar: prices are in dollars. */
   eur_per_usd: number;
   warn_percent: number;
+  /** Cost cap of one scheduled run in euros; 0 = no cap. */
+  schedule_run_eur: number;
+  /** Scheduled runs allowed per day; 0 = no cap. */
+  schedule_runs_per_day: number;
 }
 
 export interface BennuAssistantConfig {

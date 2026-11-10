@@ -64,15 +64,17 @@ events: arbor://corvus/imber  { run_id, conversation_id, kind: message | status 
 ## Schedules
 
 Imber can run at a time (once, every N minutes, daily, on weekdays, cron) and wake a conversation with a saved prompt
-("awake"), start a new one, or fetch.
+("awake"), start a new one, or fetch. Bennu has the same schedules (actions `awake` / `prompt`, always read-only; see
+`docs/imber-schedules-bennu.md`); the code below the product line is shared.
 
 | Piece | Where |
 |---|---|
 | Recurrence, `next_after`, parsing of times/weekdays, the missed-run rule (`due`, `MissedPolicy`) — pure, tested | `arbor-scheduler::calendar` |
-| A job as data and its life (`schedule_from`, `tick`, `started`, `finished`) — pure, tested | `corvus-be/src/assistant/schedule/model.rs` |
-| The list, persisted to `<corvus config dir>/imber-schedules.json` (temp file + rename) | `schedule/store.rs` |
-| Handlers for the window (`imber_schedule_*`), tools for Imber (`schedule_*`), MCP tools (`corvus_imber_schedules`, `corvus_imber_schedule_create`), the loop (every 20 s) | `schedule/mod.rs` |
-| Window, form, store | `ImberSchedulesModal`, `ImberScheduleForm`, `stores/corvus/imber-schedules.svelte.ts`, `imber-schedule.ts` |
+| A job as data and its life (`Job<A>`: `schedule_from`, `tick`, `started`, `finished`), the store (one atomically-written JSON file), `when_to_recurrence` — pure, tested | `arbor-scheduler::jobs` (Hirundo's runner schedules use it too) |
+| The `schedule_*` tool specs and runner, the approval-card words, the window helpers, the 20 s loop, the start/failure events — written once against a `Flavour` | `imber-schedule` |
+| The `Action` enum (`awake` / `prompt` / `fetch`), the wording of the tools | `corvus-be/src/assistant/schedule/action.rs` |
+| Handlers for the window (`imber_schedule_*`), MCP tools (`corvus_imber_schedules`, `corvus_imber_schedule_create`), what a run does when it fires; the list lives in `<corvus config dir>/imber-schedules.json` | `schedule/mod.rs` |
+| Window, form, store | `shared/ImberSchedulesModal`, `shared/internal/ImberScheduleForm`, the shared schedules store (one instance per product) |
 
 **Why not register jobs in the engine's in-memory `Scheduler`?** A job must be listed, edited, persisted and answer
 "next run / last result"; the engine's entries are opaque closures without those, and its handle lives inside
@@ -84,13 +86,20 @@ Imber can run at a time (once, every N minutes, daily, on weekdays, cron) and wa
 `mode` is `auto`; destructive never; `schedule_*` writes never (no schedule creates schedules). A job created by Imber
 gets `min(requested, conversation mode)`; one created over MCP is always read-only. Runs reuse `begin_run` (the same
 path as the panel), including the one-run-per-conversation guard and the per-conversation spending limit.
+**Creating a schedule from a conversation always shows an approval card**, in manual and in auto mode: it makes
+behaviour that happens later with nobody there.
 
-**Missed runs.** The loop exists only while Corvus runs; the first look is at start-up. Past the 2-minute grace a run is
-dropped (`skip`, default) or run once (`run_once`); a missed one-time job records "Missed…" and turns itself off.
-Start-up of the loop is triggered by the first `imber_schedule_list`, which the shell window does at mount.
+**Missed runs.** The loop exists only while Corvus runs (there is no daemon). The first look is at start-up. Past the
+2-minute grace a run is dropped (`skip`, default) or run once (`run_once`); a dropped run leaves a "Missed…" line as
+the schedule's last result, and a missed one-time job turns itself off. Start-up of the loop is triggered by the first
+`imber_schedule_list`, which the shell window does at mount.
+
+**What the user is told.** A discreet toast when a run starts (`arbor://corvus/imber-schedule`, `kind: started`, with
+the schedule's name) and one when a run fails after a good one — one per failure episode, not one per tick. The
+outcome of the last run also shows on the schedule.
 
 Not done: schedules for other repositories than the one of the creating conversation from the tool (the window can
-edit any), notifications on failure (the outcome shows on the schedule), a run history beyond the last result.
+edit any), a run history beyond the last result.
 
 ## Plans and undo
 

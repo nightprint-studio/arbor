@@ -47,12 +47,22 @@ pub struct Diagnostic {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct MerulaDiagnostics {
     pub errors: Vec<Diagnostic>,
+    /// Whether the evaluation produced an arrangement and staged it. An evaluation failure stages
+    /// nothing (the previous arrangement stays); a *validation* finding — an instrument the sound
+    /// registry does not know — leaves the arrangement staged and playable, the renderer falling back
+    /// to its synth. A caller that decides whether to start playback reads this, not the severity.
+    pub staged: bool,
 }
 
 impl MerulaDiagnostics {
-    /// A single-error result.
+    /// A single-error result of an evaluation that staged nothing.
     pub fn one(d: Diagnostic) -> Self {
-        MerulaDiagnostics { errors: vec![d] }
+        MerulaDiagnostics { errors: vec![d], staged: false }
+    }
+
+    /// The findings of an evaluation that did stage its arrangement.
+    pub fn staged(errors: Vec<Diagnostic>) -> Self {
+        MerulaDiagnostics { errors, staged: true }
     }
 }
 

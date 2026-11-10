@@ -73,6 +73,12 @@ pub(super) struct Session {
     /// and the agent's title, which labels them. None for a conversation's own run.
     pub prompt_via: Option<(Arc<Session>, String)>,
     asked: std::sync::atomic::AtomicU32,
+    /// A scheduled run: nobody is there to approve, answer or undo, so what needs a person is refused (see
+    /// `schedule::unattended`).
+    pub unattended: bool,
+    /// Why a scheduled run did not finish what it set out to (it needed a person, or it reached its cost cap):
+    /// the first reason wins, and it becomes the outcome line of the schedule.
+    end_note: Mutex<Option<String>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -119,7 +125,18 @@ impl Session {
             debug_idle_minutes: 0,
             prompt_via: None,
             asked: std::sync::atomic::AtomicU32::new(0),
+            unattended: false,
+            end_note: Mutex::new(None),
         }
+    }
+
+    /// Say why this (scheduled) run cannot be called finished. Only the first reason is kept.
+    pub(super) fn set_end_note(&self, line: String) {
+        lock(&self.end_note).get_or_insert(line);
+    }
+
+    pub(super) fn end_note(&self) -> Option<String> {
+        lock(&self.end_note).clone()
     }
 
     /// The conversation the work belongs to: this run's own, or for a sub-agent its parent's. File reservations,

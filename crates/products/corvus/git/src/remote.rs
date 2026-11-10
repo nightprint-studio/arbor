@@ -177,7 +177,7 @@ pub fn fetch(
     let stored = resolve_stored(&url, credential_resolver);
 
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.credentials(make_credentials_cb(stored));
+    callbacks.credentials(make_credentials_cb(stored.clone()));
 
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.remote_callbacks(callbacks);
@@ -193,13 +193,32 @@ pub fn fetch(
     // on a normal clone.
     let all_heads = format!("+refs/heads/*:refs/remotes/{remote_name}/*");
     remote.fetch(&[all_heads.as_str()], Some(&mut fetch_opts), None)?;
-
     let stats = remote.stats();
-    Ok(FetchResult {
+    let result = FetchResult {
         remote: remote_name.to_string(),
         received_objects: stats.received_objects(),
         indexed_objects: stats.indexed_objects(),
         received_bytes: stats.received_bytes(),
+    };
+
+    // Tags in a pass of their own, forced. `download_tags(Auto)` only brings tags that are NEW:
+    // a tag deleted and re-created on the remote keeps pointing at the old commit locally, and a
+    // plain fetch (like `git fetch` itself) never moves it. Pruning stays off here — it would
+    // delete the local tags that were simply never pushed.
+    let mut tag_callbacks = RemoteCallbacks::new();
+    tag_callbacks.credentials(make_credentials_cb(stored));
+    let mut tag_opts = FetchOptions::new();
+    tag_opts.remote_callbacks(tag_callbacks);
+    tag_opts.download_tags(git2::AutotagOption::None);
+    tag_opts.prune(FetchPrune::Off);
+    remote.fetch(&["+refs/tags/*:refs/tags/*"], Some(&mut tag_opts), None)?;
+
+    let tag_stats = remote.stats();
+    Ok(FetchResult {
+        received_objects: result.received_objects + tag_stats.received_objects(),
+        indexed_objects: result.indexed_objects + tag_stats.indexed_objects(),
+        received_bytes: result.received_bytes + tag_stats.received_bytes(),
+        ..result
     })
 }
 

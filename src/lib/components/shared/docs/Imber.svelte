@@ -36,7 +36,7 @@
 <p>The sparkle in the corner of the commit box, <Kbd action="imber_commit_message" size="sm" /> in the box, or <strong>Imber: Generate Commit Message</strong> writes a message from what is staged. It reads the style of the repository's recent commits (Conventional Commits, a ticket prefix, or plain sentences), follows <code>commit.template</code> when there is one, and uses the ticket in the branch name. If the box already holds text, that text is treated as a hint and improved. The message is only put in the box: you edit it, and commit as usual. <Kbd keys={['Esc']} size="sm" /> stops it. It uses the cheaper side-job model chosen in Imber's settings.</p>
 
 <h2>Schedules</h2>
-<p>Imber can do things at a time you choose: once, every N minutes, every day, on chosen weekdays, or on a cron expression (6 fields: sec min hour day month weekday; times are local). <strong>Imber: Schedules…</strong> in the palette, or the clock in the panel header, opens the window that lists <em>every</em> schedule — what it does, when, whether it is on, its next run and how the last one ended — and creates, edits, turns on or off, runs now, and deletes them. You can also ask Imber: "every weekday at 9, check what changed on main" (with approval in Manual mode).</p>
+<p>Imber can do things at a time you choose: once, every N minutes, every day, on chosen weekdays, or on a cron expression (6 fields: sec min hour day month weekday; times are local). <strong>Imber: Schedules…</strong> in the palette, or the clock in the panel header, opens the window that lists <em>every</em> schedule — what it does, when, whether it is on, its next run and how the last one ended — and creates, edits, turns on or off, runs now, and deletes them. <strong>Imber: Schedule this prompt…</strong> turns what is typed in the composer into a schedule. You can also ask Imber: "every weekday at 9, check what changed on main"; Imber always shows the schedule in words and waits for your approval before it is created, in every mode.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Action</th><th>What it does at the time</th></tr></thead>
   <tbody>
@@ -49,6 +49,7 @@
 <ul>
   <li><strong>Nobody is there to approve.</strong> A scheduled run is <em>read-only</em> unless the schedule has <em>Let it make changes</em> on, in which case stage, commit, pull and the like run without asking. Force pushes and deletions never run unattended, and a scheduled run cannot create or change schedules. A schedule Imber creates can be no freer than the conversation that created it.</li>
   <li><strong>Only while Corvus is open.</strong> A run whose time passed while it was closed is <em>skipped</em> (the default) or <em>run once</em> on the next start, per schedule. A one-time schedule that was missed and skipped says so and turns itself off.</li>
+  <li><strong>You are told when one runs.</strong> A small toast says "Schedule … started" at every start, <em>Run now</em> included, and a failure is reported once per episode with its reason. A run skipped because it was missed while Corvus was closed is shown as <em>Skipped</em>, not as a failure.</li>
   <li>Schedules are saved in the Corvus config folder and survive restarts. AI clients over MCP can list schedules and create read-only ones.</li>
 </ul>
 

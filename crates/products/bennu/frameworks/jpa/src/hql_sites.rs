@@ -14,13 +14,15 @@ const QUERY_CALLS: &[&str] = &["createQuery", "createSelectionQuery", "createMut
 /// Calls whose first argument is a native SQL string.
 const NATIVE_CALLS: &[&str] = &["createNativeQuery", "createSQLQuery"];
 
-/// The JPQL literal the caret is inside, with its span in `source`.
+/// The query literal the caret is inside, with its span in `source` and its language (`native`).
 pub fn query_at(source: &str, offset: usize) -> Option<QueryDef> {
     let lit = literals(source).into_iter().find(|l| (l.start..=l.end).contains(&offset))?;
-    (language_of(source, lit.open) == Some(false)).then(|| QueryDef {
+    let native = language_of(source, lit.open)?;
+    Some(QueryDef {
         text: source[lit.start..lit.end].to_string(),
         start: lit.start,
         end: lit.end,
+        native,
         ..QueryDef::default()
     })
 }
@@ -238,20 +240,23 @@ mod tests {
     }
 
     #[test]
-    fn a_native_query_is_not() {
-        assert!(at(r#"em.createNativeQuery("select * from t|");"#).is_none());
+    fn a_native_query_is_found_too_and_says_so() {
+        let src = r#"em.createNativeQuery("select * from t");"#;
+        let q = query_at(src, src.find("from t").unwrap()).unwrap();
+        assert!(q.native);
+        assert_eq!(q.text, "select * from t");
     }
 
     #[test]
     fn a_query_in_a_language_comment_is_found_by_the_caret_too() {
         assert!(at("// language=jpaql\nString q = \"select o from O|\";").is_some());
-        assert!(at("// language=sql\nString q = \"select o from O|\";").is_none());
+        assert!(at("// language=sql\nString q = \"select o from O|\";").is_some());
     }
 
     #[test]
     fn a_named_query_value_is_a_query_but_a_named_native_one_is_not() {
         assert!(at(r#"@NamedQuery(name = "A.all", query = "select a from A| a")"#).is_some());
-        assert!(at(r#"@NamedNativeQuery(name = "A.all", query = "select * from A|")"#).is_none());
+        assert!(at(r#"@NamedNativeQuery(name = "A.all", query = "select * from A|")"#).is_some());
     }
 
     #[test]

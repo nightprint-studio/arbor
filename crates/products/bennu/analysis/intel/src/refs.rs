@@ -2072,6 +2072,15 @@ fn decl_name_key(
             let owner = enclosing_type_binary(&gp, bytes, project_types)?;
             Some(DeclKey::Field { owner, name })
         }
+        // An enum constant declaration — `VALUE` in `enum E { VALUE, OTHER; }` — is a static final
+        // field of the enum, keyed like any other field declaration.
+        "enum_constant" => {
+            if parent.child_by_field_name("name")?.id() != node.id() {
+                return None;
+            }
+            let owner = enclosing_type_binary(&parent, bytes, project_types)?;
+            Some(DeclKey::Field { owner, name })
+        }
         _ => None,
     }
 }

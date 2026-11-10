@@ -9,6 +9,8 @@ pub mod generic_args;
 pub mod lambda_body;
 pub mod lambdas;
 pub mod pattern_scope;
+pub mod equals_mismatch;
+pub mod flat_map;
 pub mod members;
 pub mod undefined_var;
 pub mod unresolved_call;

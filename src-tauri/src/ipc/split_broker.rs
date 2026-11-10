@@ -89,6 +89,14 @@ pub fn retain(program: &str, holder: &str) {
     }
 }
 
+/// The windows borrowing `program`'s backend — for fanning a backend event out to them.
+pub fn holders(program: &str) -> Vec<String> {
+    HOLDERS
+        .lock()
+        .map(|g| g.get(program).map(|h| h.iter().cloned().collect()).unwrap_or_default())
+        .unwrap_or_default()
+}
+
 /// Whether any window other than the owner is using `program`'s backend.
 pub fn is_borrowed(program: &str) -> bool {
     HOLDERS.lock().map(|g| g.get(program).is_some_and(|h| !h.is_empty())).unwrap_or(false)

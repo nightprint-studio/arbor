@@ -11,7 +11,7 @@
    *
    * Imports only shared/ui + merula-local.
    */
-  import { Crosshair, Disc3, Volume2 } from 'lucide-svelte';
+  import { ScanSearch, Disc3, Volume2 } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
@@ -64,7 +64,7 @@
 </script>
 
 <PanelShell title="Inspector">
-  {#snippet icon()}<Crosshair size={13} />{/snippet}
+  {#snippet icon()}<ScanSearch size={13} />{/snippet}
 
   {#if !track}
     <EmptyState message="Select a track (in the mixer or arrangement) to inspect it." />

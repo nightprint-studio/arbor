@@ -55,6 +55,8 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // Bennu's own window handles it, so Corvus's Ctrl+Shift+L (Pull) is a different window's.
   console_clean_view:  { key: 'l',    ctrl: true,  shift: true,  description: 'Toggle the console clean view (Bennu)', group: 'Navigation' },
   switch_project_prev:{ key: 'Tab',  ctrl: true,  shift: true,  description: 'Switch project, backwards (Bennu)', group: 'Navigation' },
+  // Play / stop the open `.merula` file (Bennu). C for "composition"; the other free Ctrl+Shift letters are paste / redo.
+  merula_play_toggle:  { key: 'c',    ctrl: true,  shift: true,  description: 'Play or stop the open .merula file (Bennu)', group: 'Navigation' },
   // Generic IDE-style left-rail expand/collapse — closes whatever section is
   // open or restores the last one. The explicit "open Branches" shortcut is
   // `toggle_branches_sidebar` (Alt+Shift+1) under the Sidebar Sections group.

@@ -46,6 +46,7 @@
   import { javaStructureEntries } from '$lib/ipc/bennu/java-structure';
   import { markupOutline, type MarkupNode } from './markup-outline';
   import { lspDocumentSymbols, type LspSymbol } from '$lib/ipc/bennu/lsp';
+  import { merulaOutline, type MerulaOutlineRow } from './merula-outline';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import { detectAccessors, flagsFor } from './java-accessors';
 
@@ -64,7 +65,9 @@
   /** A file a language server owns — its outline comes from the server rather than from a local
    *  scan, which is why this branch is asynchronous and the other two are not. */
   const isLsp    = $derived(bennuLspStore.servesFile(activePath));
-  const supported = $derived(isJava || isMarkup || isLsp);
+  /** `.merula` — outline from Merula's own Tree-sitter parse (tracks → sections, lets, fns), in the WebView. */
+  const isMerula = $derived(!!activePath && /\.merula$/i.test(activePath));
+  const supported = $derived(isJava || isMarkup || isLsp || isMerula);
 
   // ── Node model ──────────────────────────────────────────────────────────────
   // A single tree-node shape the shared `Tree` renders. `java` nodes come from
@@ -110,6 +113,19 @@
     }));
   }
 
+  /** A Merula outline row, in the same shape as a server symbol so the tree renders it unchanged. */
+  function tagMerula(nodes: MerulaOutlineRow[]): LspRow[] {
+    return nodes.map((n) => ({
+      flavour: 'lsp' as const,
+      id: `${n.kind}:${n.name}:${n.offset}`,
+      name: n.name,
+      kind: n.kind,
+      detail: n.detail,
+      line: n.line,
+      children: n.children?.length ? tagMerula(n.children) : undefined,
+    }));
+  }
+
   function tagMarkup(nodes: MarkupNode[]): (MarkupNode & { flavour: 'markup'; kind: 'element' })[] {
     return nodes.map((n) => ({
       ...n,
@@ -132,8 +148,9 @@
     const java = isJava;
     const markup = isMarkup;
     const lsp = isLsp;
+    const merula = isMerula;
     if (timer) clearTimeout(timer);
-    if (!path || !(java || markup || lsp)) { roots = []; return; }
+    if (!path || !(java || markup || lsp || merula)) { roots = []; return; }
     const mine = ++seq;
     timer = setTimeout(() => {
       if (java) {
@@ -144,6 +161,8 @@
           .catch(() => { if (mine === seq) roots = tagJava(javaStructure(src)); });
       } else if (markup) {
         roots = tagMarkup(markupOutline(src));
+      } else if (merula) {
+        void merulaOutline(src).then((rows) => { if (mine === seq) roots = tagMerula(rows); });
       } else {
         void lspDocumentSymbols(path, src)
           .then((syms) => { if (mine === seq) roots = tagLsp(syms); })
@@ -338,7 +357,7 @@
   {#if !activePath}
     <EmptyState message="Open a file to see its structure." />
   {:else if !supported}
-    <EmptyState message="Structure is available for Java, XML/JSP, and any language with a server behind it." />
+    <EmptyState message="Structure is available for Java, XML/JSP, Merula, and any language with a server behind it." />
   {:else if roots.length === 0}
     <EmptyState message="No symbols found in this file." />
   {:else}

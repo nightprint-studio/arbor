@@ -43,6 +43,16 @@ function point(doc: EditorState['doc'], pos: number) {
  * rebuilds decorations from a single tree walk. The parser loads asynchronously;
  * until then the document renders plain (no crash, no flash).
  */
+/** The highlighter of each live view — so a host's own extensions (occurrence marks, go-to) can read the
+ *  tree this editor already maintains instead of parsing a second copy. */
+const HIGHLIGHTERS = new WeakMap<EditorView, TreeSitterHighlighter>();
+
+/** The live syntax tree of an editor built from a tree-sitter descriptor (null until the grammar has loaded
+ *  and the first parse has run, or for a `cmExtension` language). */
+export function highlightTreeOf(view: EditorView): Tree | null {
+  return HIGHLIGHTERS.get(view)?.tree ?? null;
+}
+
 class TreeSitterHighlighter {
   decorations: DecorationSet = Decoration.none;
   tree: Tree | null = null;
@@ -56,6 +66,7 @@ class TreeSitterHighlighter {
     private view: EditorView,
     private lang: LanguageDescriptor,
   ) {
+    HIGHLIGHTERS.set(view, this);
     // Async grammar load; once ready, do the first full parse via a self-effect.
     lang.createParser()
       .then((parser) => {
@@ -66,7 +77,7 @@ class TreeSitterHighlighter {
       .catch(() => { /* grammar wasm missing — stays plain text */ });
   }
 
-  destroy() { this.destroyed = true; }
+  destroy() { this.destroyed = true; HIGHLIGHTERS.delete(this.view); }
 
   update(u: ViewUpdate) {
     if (!this.parser) return;

@@ -15,6 +15,14 @@ export const findThemeSpec = {
     position: 'absolute', top: '6px', right: '20px', left: 'auto', width: 'auto',
     background: 'transparent', border: 'none', zIndex: '20',
   },
+  // Short slide/fade in from the top. Transform + opacity only (compositor-driven, no layout).
+  // CodeMirror detaches the panel the moment it closes, so there is no exit animation to play.
+  '.arbor-find-host': { animation: 'arbor-find-in var(--anim-dur-base, 150ms) cubic-bezier(.16,1,.3,1) both' },
+  '@keyframes arbor-find-in': {
+    from: { opacity: '0', transform: 'translateY(-8px)' },
+    to: { opacity: '1', transform: 'none' },
+  },
+  '@media (prefers-reduced-motion: reduce)': { '.arbor-find-host': { animation: 'none' } },
   // Matches must read at a glance in a screenful of text: a fill alone at ~20% disappears into
   // the selection and the syntax colours, so each carries an outline as well. The occurrences of
   // a selected word (`selectionMatch`) are the quiet tier; find-panel hits are louder, and the

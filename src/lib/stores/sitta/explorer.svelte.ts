@@ -20,6 +20,7 @@ const DEFAULT: ExplorerConfig & SittaConfig = {
   sidebar_sections:      [],
   open_external_links:   false,
   open_web_links:        false,
+  notify_drive_changes:  true,
   remembered_external_schemes: [],
   reveal_in_builtin:     false,
   columns:               [],
@@ -133,6 +134,7 @@ function createExplorerStore() {
   let sidebarSections     = $state<ExplorerSectionConfig[]>([]);
   let openExternalLinks   = $state<boolean>(DEFAULT.open_external_links);
   let openWebLinks        = $state<boolean>(DEFAULT.open_web_links);
+  let notifyDriveChanges  = $state<boolean>(DEFAULT.notify_drive_changes);
   let rememberedSchemes   = $state<string[]>([]);
   let revealInBuiltin     = $state<boolean>(DEFAULT.reveal_in_builtin);
   let columns             = $state<ExplorerColumnConfig[]>([]);
@@ -184,6 +186,7 @@ function createExplorerStore() {
         savedSearches       = Array.isArray(sittaCfg.saved_searches) ? sittaCfg.saved_searches : [];
         openExternalLinks   = !!sittaCfg.open_external_links;
         openWebLinks        = !!sittaCfg.open_web_links;
+        notifyDriveChanges  = sittaCfg.notify_drive_changes !== false;
         rememberedSchemes   = Array.isArray(sittaCfg.remembered_external_schemes)
           ? sittaCfg.remembered_external_schemes.filter((s): s is string => typeof s === 'string').map(s => s.toLowerCase())
           : [];
@@ -218,6 +221,7 @@ function createExplorerStore() {
       max_recents:           maxRecents,
       open_external_links:   openExternalLinks,
       open_web_links:        openWebLinks,
+      notify_drive_changes:  notifyDriveChanges,
       remembered_external_schemes: rememberedSchemes,
       pinned_favourites:     pinnedFavourites,
       sidebar_sections:      sidebarSections,
@@ -298,6 +302,7 @@ function createExplorerStore() {
   // ── Generic external-link opening (address bar) ──────────────────────────
   function setOpenExternalLinks(on: boolean) { if (openExternalLinks === on) return; openExternalLinks = on; persist(); }
   function setOpenWebLinks(on: boolean)      { if (openWebLinks === on) return;      openWebLinks = on;      persist(); }
+  function setNotifyDriveChanges(on: boolean) { if (notifyDriveChanges === on) return; notifyDriveChanges = on; persist(); }
   /** Route app-wide "Open / Reveal in File Explorer" actions into the built-in
    *  explorer window instead of the OS file manager. */
   function setRevealInBuiltin(on: boolean)   { if (revealInBuiltin === on) return;   revealInBuiltin = on;   persist(); }
@@ -353,6 +358,7 @@ function createExplorerStore() {
     get savedSearches()       { return savedSearches; },
     get openExternalLinks()   { return openExternalLinks; },
     get openWebLinks()        { return openWebLinks; },
+    get notifyDriveChanges()  { return notifyDriveChanges; },
     get rememberedSchemes()   { return rememberedSchemes; },
     get revealInBuiltin()     { return revealInBuiltin; },
     get loaded()              { return loaded; },
@@ -378,6 +384,7 @@ function createExplorerStore() {
     renameSavedSearch,
     setOpenExternalLinks,
     setOpenWebLinks,
+    setNotifyDriveChanges,
     setRevealInBuiltin,
     isSchemeRemembered,
     rememberScheme,

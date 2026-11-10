@@ -48,10 +48,42 @@ pub fn java_continues(text: &str) -> bool {
         return true;
     }
     let t = text.trim_start();
-    t.starts_with("at ")
+    if t.starts_with("at ")
         || t.starts_with("Caused by:")
         || t.starts_with("Suppressed:")
         || t.starts_with("... ")
+    {
+        return true;
+    }
+    // Hibernate / MyBatis format_sql=true prints multi-line SQL where clauses land at column 0
+    // (or lightly indented, already caught above). Uppercase keywords are very unlikely to open
+    // a natural-language log message, so this is safe. Lowercase ones are included for the common
+    // SQL keywords that rarely begin a sentence: `from`, `where`, `join`, `order by`, `group by`.
+    // `and` / `or` lowercase are intentionally excluded — they are ordinary English conjunctions.
+    sql_keyword_continues(text)
+}
+
+fn sql_keyword_continues(text: &str) -> bool {
+    // Uppercase clause keywords only. Statement openers (`UPDATE`, `SET`, `INSERT INTO`, `DELETE FROM`)
+    // are left out: they can head a log line of their own, and a statement's first line carries
+    // the log prefix anyway.
+    const UPPER: &[&str] = &[
+        "FROM ", "WHERE ", "AND ", "OR ", "JOIN ", "LEFT JOIN", "INNER JOIN", "RIGHT JOIN",
+        "OUTER JOIN", "CROSS JOIN", "ORDER BY", "GROUP BY", "HAVING ", "UNION ", "UNION ALL",
+        "INTERSECT", "EXCEPT", "LIMIT ", "OFFSET ", "VALUES(", "VALUES (",
+    ];
+    // Lowercase: only the keywords that rarely start a natural-language log line.
+    const LOWER: &[&str] = &[
+        "from ", "where ", "join ", "left join", "inner join", "right join",
+        "outer join", "cross join", "order by", "group by", "having ", "union ",
+        "limit ", "offset ",
+    ];
+    for kw in UPPER.iter().chain(LOWER.iter()) {
+        if text.starts_with(kw) {
+            return true;
+        }
+    }
+    false
 }
 
 /// The class a frame's qualified method reference belongs to — module prefix and method
@@ -251,6 +283,20 @@ mod tests {
 
     fn links(text: &str) -> Vec<Link> {
         interpret(&RuleSet::java(), text).links().cloned().collect()
+    }
+
+    #[test]
+    fn sql_clause_lines_at_column_zero_continue_the_statement() {
+        for line in ["from orders o", "where o.id = ?", "WHERE o.id = ?", "AND o.x = 1", "ORDER BY o.id", "left join t on 1=1"] {
+            assert!(java_continues(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn statement_openers_and_prose_do_not_continue() {
+        for line in ["UPDATE complete", "SET up done", "INSERT INTO t", "and then it failed", "or maybe not", "fromage"] {
+            assert!(!java_continues(line), "{line}");
+        }
     }
 
     #[test]

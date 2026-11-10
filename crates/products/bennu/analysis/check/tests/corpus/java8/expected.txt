@@ -403,6 +403,11 @@ corpus/lambda/LambdaBad.java:57:50: compiler.err.cant.resolve.location.args
 corpus/lambda/LambdaBad.java:61:37: compiler.err.invalid.mref
 corpus/lambda/LambdaBad.java:65:25: compiler.err.prob.found.req
 corpus/lambda/LambdaBad.java:69:40: compiler.err.prob.found.req
+corpus/lambda/LambdaFlatMapBad.java:25:48: compiler.err.prob.found.req
+corpus/lambda/LambdaFlatMapBad.java:29:48: compiler.err.prob.found.req
+corpus/lambda/LambdaFlatMapBad.java:33:48: compiler.err.prob.found.req
+corpus/lambda/LambdaFlatMapBad.java:37:48: compiler.err.prob.found.req
+corpus/lambda/LambdaFlatMapBad.java:41:29: compiler.err.prob.found.req
 corpus/mref/MrefBad.java:13:44: compiler.err.invalid.mref
 corpus/mref/MrefBad.java:17:44: compiler.err.invalid.mref
 corpus/mref/MrefBad.java:21:54: compiler.err.prob.found.req
@@ -446,6 +451,8 @@ corpus/resolve/ResolveMethodBad.java:56:32: compiler.err.cant.resolve.location.a
 corpus/resolve/ResolveMethodBad.java:60:14: compiler.err.cant.resolve.args
 corpus/resolve/ResolveMethodBad.java:64:13: compiler.err.cant.resolve.args
 corpus/resolve/ResolveMethodBad.java:68:13: compiler.err.cant.resolve.location.args
+corpus/resolve/ResolveScopeBad.java:6:16: compiler.err.cant.resolve.location
+corpus/resolve/ResolveScopeBad.java:10:16: compiler.err.cant.resolve.location
 corpus/resolve/ResolveSupertypeBad.java:4:42: compiler.err.cant.resolve
 corpus/resolve/ResolveSupertypeBad.java:5:38: compiler.err.cant.resolve.location
 corpus/resolve/ResolveSupertypeBad.java:9:47: compiler.err.cant.resolve

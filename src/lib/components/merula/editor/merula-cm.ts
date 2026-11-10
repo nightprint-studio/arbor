@@ -1,164 +1,42 @@
 /**
- * merula ↔ CodeMirror 6 glue. Turns the Tree-sitter bridge (`merula-lang.ts`)
- * into a set of editor extensions:
+ * merula ↔ CodeMirror 6 glue, on top of the shared code editor (`shared/ui/code-editor`):
  *
- *   - **Syntax highlight** — a ViewPlugin that owns the parser + live tree,
- *     re-parses incrementally on every edit, and walks the tree into per-token
- *     decorations (replacing the Step-0 regex tokenizer).
- *   - **Active-hap highlight** — a StateField fed live from `activeHapsStore`;
- *     each sounding source range is tinted with its track colour.
- *   - **Diagnostics** — a helper that maps the backend's UTF-8 byte spans onto
- *     CodeMirror's UTF-16 offsets, for the lint gutter + underlines.
- *   - **Go-to-declaration** — a Ctrl/Cmd+Click handler that reads the word under
- *     the cursor from the tree (`merula-lang`) and hands it to the host.
+ *   - **Active-hap highlight** — a StateField fed live from `activeHapsStore`; each sounding source
+ *     range is tinted with its track colour.
+ *   - **Advisory underlines** — out-of-scale notes and clip risks, with hover messages.
+ *   - **Occurrence marks** — every use of the `let` / `fn` under the caret, reported to the arrangement.
+ *   - **Diagnostics** — a helper that maps the backend's UTF-8 byte spans onto UTF-16 offsets.
+ *   - **Feature bundle** — `createMerulaFeatureExtensions`, what the language descriptor's `editing` slot carries.
  *
- * Theme: every colour is an Arbor CSS variable, so a theme overlay re-skins the
- * editor for free — and the pane sits on `--bg-base` like the Step-0 editor.
+ * Parsing, highlighting, gutters, search, lint, completion and go-to-declaration are the shared
+ * editor's; this file adds only what is merula's. Every colour is an Arbor CSS variable.
  */
 
-import { EditorView, ViewPlugin, Decoration, lineNumbers, hoverTooltip } from '@codemirror/view';
+import { EditorView, ViewPlugin, Decoration, hoverTooltip } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 import {
-  EditorState, StateField, StateEffect, RangeSetBuilder, type Extension,
+  StateField, StateEffect, RangeSetBuilder, Prec, type Extension,
 } from '@codemirror/state';
-import {
-  highlightActiveLine, highlightActiveLineGutter, drawSelection, keymap,
-} from '@codemirror/view';
-import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { bracketMatching, indentOnInput } from '@codemirror/language';
-import { lintGutter, lintKeymap, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
-import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import type { Diagnostic as CmDiagnostic } from '@codemirror/lint';
+import { parserReady, highlightTreeOf } from '$lib/components/shared/ui/code-editor/highlight';
 
 import { laneColor } from '../palette';
 import type { MerulaDiagnostic } from '$lib/ipc/merula/merula';
 import {
-  classifyToken, makeByteToU16, identifierAt, identifierUsages, instrumentNameAt,
-  extractSymbols, createMerulaParser,
-  type MerulaTokenClass, type Tree, type Node, type Parser,
+  makeByteToU16, identifierAt, identifierUsages, instrumentNameAt, extractSymbols, type Tree,
 } from './merula-lang';
-import { merulaLanguageIntel, type MerulaIntelSource } from './merula-intel';
-import { merulaEditingExtensions } from './merula-ergonomics';
 
 // ── Syntax-highlight ViewPlugin ────────────────────────────────────────────────
 
-/** Fired once the (async) grammar load completes, to kick the first full parse. */
-export const merulaParserReady = StateEffect.define<void>();
+/** Fired once the (async) grammar load completes — the shared editor's own event, re-exported under the
+ *  name the merula plugins already use. */
+export const merulaParserReady = parserReady;
 
-/** One cached mark decoration per token class (`cm-grv-<class>`). */
-const TOKEN_MARKS = new Map<MerulaTokenClass, Decoration>();
-function tokenMark(cls: MerulaTokenClass): Decoration {
-  let m = TOKEN_MARKS.get(cls);
-  if (!m) { m = Decoration.mark({ class: `cm-grv-${cls}` }); TOKEN_MARKS.set(cls, m); }
-  return m;
-}
-
-function point(doc: EditorState['doc'], pos: number) {
-  const line = doc.lineAt(pos);
-  return { row: line.number - 1, column: pos - line.from };
-}
-
-/**
- * Owns the parser + the live syntax tree for one editor. Re-parses incrementally
- * (Tree-sitter `edit` + reparse with the previous tree) so typing stays cheap,
- * and rebuilds decorations from a single tree walk. The parser loads
- * asynchronously; until then the document renders plain (no crash, no flash).
- */
-class MerulaHighlighter {
-  decorations: DecorationSet = Decoration.none;
-  tree: Tree | null = null;
-  private parser: Parser | null = null;
-  private destroyed = false;
-
-  constructor(view: EditorView) {
-    // Async grammar load; once ready, do the first full parse via a self-effect.
-    createMerulaParser()
-      .then((parser) => {
-        if (this.destroyed) return; // editor torn down before the wasm loaded
-        this.parser = parser;
-        view.dispatch({ effects: merulaParserReady.of() });
-      })
-      .catch(() => { /* grammar wasm missing — stays plain text */ });
-  }
-
-  destroy() { this.destroyed = true; }
-
-  update(u: ViewUpdate) {
-    if (!this.parser) return;
-    const forced = u.transactions.some((tr) =>
-      tr.effects.some((e) => e.is(merulaParserReady)));
-
-    if (u.docChanged) {
-      // Incremental Tree-sitter editing is only coordinate-correct for a SINGLE
-      // contiguous change (the typing case): there `fromA === fromB`, so the
-      // old/new offsets map cleanly onto one `tree.edit`. A transaction with
-      // *several* changes (a refactor like inline/rename, a multi-span undo, a
-      // knob→source commit) mixes the old- and new-document coordinate frames
-      // across edits and corrupts the incremental tree — the highlight then reads
-      // garbage until the next full reparse. So for multi-change transactions we
-      // skip the incremental edit and reparse from scratch (rare + user-initiated,
-      // so the cost is negligible), keeping per-keystroke typing incremental.
-      let changeCount = 0;
-      u.changes.iterChanges(() => { changeCount += 1; });
-      const incremental = changeCount === 1 && this.tree !== null;
-      if (incremental) {
-        u.changes.iterChanges((fromA, toA, fromB, toB) => {
-          this.tree!.edit({
-            startIndex: fromA, oldEndIndex: toA, newEndIndex: toB,
-            startPosition: point(u.startState.doc, fromA),
-            oldEndPosition: point(u.startState.doc, toA),
-            newEndPosition: point(u.state.doc, toB),
-          });
-        });
-      }
-      this.reparse(u.state, incremental);
-    } else if (forced || (!this.tree && this.parser)) {
-      this.reparse(u.state, false);
-    }
-  }
-
-  private reparse(state: EditorState, incremental: boolean) {
-    const text = state.doc.toString();
-    try {
-      const old = incremental ? (this.tree ?? undefined) : undefined;
-      const next = this.parser!.parse(text, old);
-      if (next) this.tree = next;
-    } catch {
-      // Incremental bookkeeping went inconsistent — recover with a fresh parse.
-      const next = this.parser!.parse(text);
-      if (next) this.tree = next;
-    }
-    this.decorations = this.buildDecorations();
-  }
-
-  private buildDecorations(): DecorationSet {
-    if (!this.tree) return Decoration.none;
-    const builder = new RangeSetBuilder<Decoration>();
-    const visit = (node: Node, parentType: string | null, field: string | null) => {
-      if (node.childCount === 0) {
-        const cls = classifyToken(node.type, node.isNamed, field, parentType);
-        if (cls && node.endIndex > node.startIndex) {
-          builder.add(node.startIndex, node.endIndex, tokenMark(cls));
-        }
-        return;
-      }
-      for (let i = 0; i < node.childCount; i++) {
-        const child = node.child(i);
-        if (child) visit(child, node.type, node.fieldNameForChild(i));
-      }
-    };
-    visit(this.tree.rootNode, null, null);
-    return builder.finish();
-  }
-}
-
-const merulaHighlight = ViewPlugin.fromClass(MerulaHighlighter, {
-  decorations: (v) => v.decorations,
-});
-
-/** Read the live syntax tree of an editor (null until the grammar has loaded
- *  and the first parse has run). Used by go-to-decl + the outline derivation. */
+/** Read the live syntax tree of an editor (null until the grammar has loaded and the first parse has
+ *  run) — the tree the shared editor's highlighter already maintains. Used by go-to-decl, the
+ *  occurrence plugin and the outline derivation. */
 export function getMerulaTree(view: EditorView): Tree | null {
-  return view.plugin(merulaHighlight)?.tree ?? null;
+  return highlightTreeOf(view);
 }
 
 // ── Active-hap decorations (live, per-track colour) ────────────────────────────
@@ -401,90 +279,11 @@ export function toCmDiagnostics(errors: MerulaDiagnostic[], src: string): CmDiag
 
 // ── Theme ──────────────────────────────────────────────────────────────────────
 
+/** Merula's additions to the shared editor theme: the DSL's own token colours, the autocomplete/hover docs
+ *  block, and the live layers (active haps, occurrence marks, advisory underlines). The editor chrome
+ *  (gutters, caret, selection, search) is the shared theme's. */
 export const merulaTheme = EditorView.theme(
   {
-    '&': {
-      height: '100%',
-      backgroundColor: 'var(--bg-base)',
-      color: 'var(--text-primary)',
-      fontFamily: 'var(--font-code)',
-      fontSize: '12.5px',
-    },
-    '&.cm-focused': { outline: 'none' },
-    '.cm-scroller': { fontFamily: 'var(--font-code)', lineHeight: '1.55', overflow: 'auto' },
-    '.cm-content': { padding: '6px 0', caretColor: 'var(--text-primary)' },
-    '.cm-line': { padding: '0 12px' },
-    '.cm-gutters': {
-      backgroundColor: 'var(--bg-base)',
-      color: 'var(--text-disabled)',
-      border: 'none',
-      fontFamily: 'var(--font-code)',
-    },
-    '.cm-lineNumbers .cm-gutterElement': { padding: '0 8px 0 14px', minWidth: '34px' },
-    '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--text-secondary)' },
-    // Fold gutter (collapse arrows) + the inline placeholder for a folded block.
-    '.cm-foldGutter .cm-gutterElement': { padding: '0 2px', color: 'var(--text-disabled)', cursor: 'pointer' },
-    '.cm-foldGutter .cm-gutterElement:hover': { color: 'var(--text-primary)' },
-    '.cm-foldPlaceholder': {
-      backgroundColor: 'var(--bg-hover)', color: 'var(--text-muted)',
-      border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
-      margin: '0 2px', padding: '0 4px',
-    },
-    // Current line: a touch warmer than plain hover and tinted with the accent so
-    // the caret's row is easy to re-find at a glance (the bare caret alone was too
-    // easy to lose). Kept subtle — it must not fight the syntax colours.
-    '.cm-activeLine': {
-      backgroundColor: 'color-mix(in srgb, var(--accent) 9%, var(--bg-hover) 55%)',
-    },
-    // Caret: a 2px bright accent bar (the default 1px text-primary sliver was hard
-    // to spot against the code). Both the steady and the drop cursor track it.
-    '.cm-cursor, .cm-dropCursor': {
-      borderLeftColor: 'var(--accent)',
-      borderLeftWidth: '2px',
-    },
-    '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--accent)' },
-    '.cm-selectionBackground, .cm-content ::selection': {
-      backgroundColor: 'var(--accent-subtle) !important',
-    },
-    '&.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--accent-subtle) !important' },
-    '.cm-matchingBracket': {
-      outline: '1px solid var(--accent-strong, var(--accent))', borderRadius: '2px',
-    },
-    '.cm-tooltip': {
-      backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)',
-      border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
-    },
-    '.cm-tooltip.cm-tooltip-lint': { padding: '2px 6px' },
-
-    // ── Search panel (Ctrl+F) — themed to match Arbor's inputs/buttons ──
-    '.cm-panels': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)' },
-    '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--border-subtle)' },
-    '.cm-panel.cm-search': {
-      padding: '6px 8px', fontFamily: 'var(--font-ui-sans)', fontSize: '12px',
-      display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px',
-    },
-    '.cm-panel.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '11px', color: 'var(--text-muted)' },
-    '.cm-panel.cm-search input, .cm-panel.cm-search input[type=text]': {
-      backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)',
-      border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
-      padding: '3px 6px', fontFamily: 'var(--font-code)', fontSize: '12px', outline: 'none',
-    },
-    '.cm-panel.cm-search input:focus': { borderColor: 'var(--border-focus, var(--accent))' },
-    '.cm-panel.cm-search button, .cm-panel.cm-search .cm-button': {
-      backgroundColor: 'var(--bg-input)', color: 'var(--text-secondary)',
-      border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
-      backgroundImage: 'none', padding: '3px 8px', cursor: 'pointer', fontSize: '11px',
-    },
-    '.cm-panel.cm-search button:hover, .cm-panel.cm-search .cm-button:hover': {
-      backgroundColor: 'var(--bg-hover)', color: 'var(--text-primary)',
-    },
-    '.cm-panel.cm-search .cm-button:active': { backgroundImage: 'none' },
-    '.cm-panel.cm-search [name=close]': { color: 'var(--text-muted)', fontSize: '16px' },
-    '.cm-panel.cm-search [name=close]:hover': { color: 'var(--text-primary)' },
-    '.cm-searchMatch': { backgroundColor: 'color-mix(in srgb, var(--warning) 28%, transparent)', borderRadius: '2px' },
-    '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'color-mix(in srgb, var(--accent) 45%, transparent)' },
-    '.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--accent) 18%, transparent)' },
-
     // ── Token palette ──
     //
     // Deliberate, hierarchical colouring rather than one-accent-per-token:
@@ -499,28 +298,28 @@ export const merulaTheme = EditorView.theme(
 
     // Host scaffolding (quiet, conventional — same `--syntax-*` vars + fallbacks
     // the rest of Arbor's highlighting uses, so a theme overlay re-skins it too).
-    '.cm-grv-comment': { color: 'var(--syntax-comment, #7a7d85)', fontStyle: 'italic' },
-    '.cm-grv-string': { color: 'var(--syntax-string, #6a9956)' },
-    '.cm-grv-number': { color: 'var(--syntax-number, #9876aa)' },
-    '.cm-grv-keyword': { color: 'var(--syntax-keyword, #cc7832)', fontWeight: '600' },
-    '.cm-grv-def': { color: 'var(--syntax-type, #4d78cc)' },
-    '.cm-grv-ident': { color: 'var(--text-primary)' },
+    '.cm-tok-comment': { color: 'var(--syntax-comment, #7a7d85)', fontStyle: 'italic' },
+    '.cm-tok-string': { color: 'var(--syntax-string, #6a9956)' },
+    '.cm-tok-number': { color: 'var(--syntax-number, #9876aa)' },
+    '.cm-tok-keyword': { color: 'var(--syntax-keyword, #cc7832)', fontWeight: '600' },
+    '.cm-tok-def': { color: 'var(--syntax-type, #4d78cc)' },
+    '.cm-tok-ident': { color: 'var(--text-primary)' },
 
     // Structure: function/method calls (combinators, transforms) + island heads.
-    '.cm-grv-fn': { color: 'var(--syntax-function, #ffc66d)' },
-    '.cm-grv-island': { color: 'var(--accent, #56b6c2)', fontWeight: '700' },
-    '.cm-grv-splice': { color: 'var(--accent, #56b6c2)', fontWeight: '600' },
+    '.cm-tok-fn': { color: 'var(--syntax-function, #ffc66d)' },
+    '.cm-tok-island': { color: 'var(--accent, #56b6c2)', fontWeight: '700' },
+    '.cm-tok-splice': { color: 'var(--accent, #56b6c2)', fontWeight: '600' },
 
     // Music content (the bright layer): notes warm, chords italic, sounds cool
     // teal. Merula-local vars (default to the music palette) keep them distinct
     // from host scaffolding while still theme-overridable.
-    '.cm-grv-note': { color: 'var(--grv-syntax-note, #e5c07b)' },
-    '.cm-grv-chord': { color: 'var(--grv-syntax-note, #e5c07b)', fontStyle: 'italic', fontWeight: '600' },
-    '.cm-grv-sound': { color: 'var(--grv-syntax-sound, #56b6c2)' },
+    '.cm-tok-note': { color: 'var(--grv-syntax-note, #e5c07b)' },
+    '.cm-tok-chord': { color: 'var(--grv-syntax-note, #e5c07b)', fontStyle: 'italic', fontWeight: '600' },
+    '.cm-tok-sound': { color: 'var(--grv-syntax-sound, #56b6c2)' },
 
     // Mini-notation operators (~ _ * / ! @ …) — muted, so rhythm reads clean.
-    '.cm-grv-mininote': { color: 'var(--text-muted)' },
-    '.cm-grv-op': { color: 'var(--text-secondary)' },
+    '.cm-tok-mininote': { color: 'var(--text-muted)' },
+    '.cm-tok-op': { color: 'var(--text-secondary)' },
 
     // ── Autocomplete + hover docs ──
     '.cm-tooltip-autocomplete': {
@@ -609,16 +408,10 @@ export const merulaTheme = EditorView.theme(
 
 // ── Extensions factory ─────────────────────────────────────────────────────────
 
-export interface MerulaExtensionsOptions {
-  readOnly?: boolean;
-  /** Ctrl/Cmd+Click on an identifier — host resolves + jumps (go-to-decl). */
-  onGoto?: (word: string, view: EditorView) => void;
-  /** Ctrl/Cmd+Click on an instrument name (`inst("…")` / `s("…")`) — host opens
-   *  the preview/audition modal. Takes precedence over `onGoto` at that spot. */
+export interface MerulaFeatureOptions {
+  /** Ctrl/Cmd+Click on an instrument name (`inst("…")` / `s("…")`) — host opens the preview/audition
+   *  modal. Takes precedence over the editor's own go-to-declaration at that spot. */
   onPreview?: (name: string) => void;
-  /** The DSL catalogue source for autocomplete + hover docs. When omitted, the
-   *  editor still works (highlight, lint, go-to-decl) without language hints. */
-  intel?: MerulaIntelSource;
   /** Called when the identifier under the caret changes (null when off a name) —
    *  drives the editor↔arrangement symbol highlight. */
   onSymbol?: (name: string | null, view: EditorView) => void;
@@ -627,72 +420,25 @@ export interface MerulaExtensionsOptions {
   onSelection?: (range: { from: number; to: number } | null) => void;
 }
 
-/** The search keymap minus its open binding: the MerulaShell owns `Ctrl+F` so it
- *  can route it to the editor (when the pane is focused) or the Console search
- *  (otherwise). The in-panel navigation (next / previous / replace / close) stays
- *  so the search panel is fully keyboard-driven once opened. */
-const merulaSearchKeymap = searchKeymap.filter((b) => b.key !== 'Mod-f');
-
 /**
- * The full merula editor extension set. CodeMirror's search panel IS wired (so
- * `Ctrl+F` searches the buffer when the editor is focused), but its *open*
- * binding is removed from the keymap — the MerulaShell decides whether `Ctrl+F`
- * opens the editor search (pane focused) or the Console search (otherwise) and
- * calls `openSearch()` imperatively, keeping one authoritative router.
+ * What merula adds on top of the shared code editor, as one extension to hand to the language
+ * descriptor's `editing` slot: its token theme, the live layers (active haps, occurrence marks,
+ * advisory underlines) and the instrument-preview click. Everything generic — history, gutters,
+ * search, lint, completion, go-to-declaration — is the shared editor's.
  */
-/** Minimal read-only viewer extensions — just the merula theme + syntax highlight,
- *  no gutters / line numbers / active-line / search / lint. For rendering inert
- *  `.merula` snippets (the in-app Docs code samples) with the SAME colours as the
- *  editor, so the docs can never drift from the live highlighter. */
-export function createMerulaViewerExtensions(): Extension {
-  return [
-    merulaTheme,
-    merulaHighlight,
-    EditorView.lineWrapping,
-    EditorView.editable.of(false),
-    EditorState.readOnly.of(true),
-  ];
-}
-
-export function createMerulaExtensions(opts: MerulaExtensionsOptions = {}): Extension {
+export function createMerulaFeatureExtensions(opts: MerulaFeatureOptions = {}): Extension {
   const exts: Extension[] = [
-    merulaTheme,
-    lineNumbers(),
-    history(),
-    drawSelection(),
-    indentOnInput(),
-    bracketMatching(),
-    highlightActiveLine(),
-    highlightActiveLineGutter(),
-    highlightSelectionMatches(),
-    search({ top: true }),
-    merulaHighlight,
-    // After merulaHighlight so it reads the freshly-updated tree (plugin update
-    // order follows registration order).
+    // Above the shared theme, whose generic `cm-tok-*` rules it refines.
+    Prec.highest(merulaTheme),
+    // Reads the live tree the shared highlighter keeps; registered after it, so it sees the fresh parse.
     occurrenceHighlight({ onSymbol: opts.onSymbol, onSelection: opts.onSelection }),
     activeHapsField,
     offScaleLayer.field,
     clipRiskLayer.field,
     warnHover,
-    lintGutter(),
-    // Editing ergonomics (comments, autoclose, the IntelliJ editing keys, soft wrap,
-    // folding). Placed before the base keymap so its `Ctrl-y` / `Cmd-⌫` / `Mod-/` win
-    // over the history and default bindings that claim the same chords.
-    merulaEditingExtensions(),
   ];
-  // Language intelligence (autocomplete + hover) — only when a catalogue source
-  // is provided and the pane is editable (no completions in a read-only viewer).
-  // Added BEFORE the base keymap so its completion keymap (Enter / ↑↓ / Esc while
-  // the popup is open) takes precedence over the editor defaults.
-  if (opts.intel && !opts.readOnly) {
-    exts.push(merulaLanguageIntel(opts.intel));
-  }
-  exts.push(
-    keymap.of([...defaultKeymap, ...historyKeymap, ...lintKeymap, ...merulaSearchKeymap, indentWithTab]),
-    EditorState.readOnly.of(!!opts.readOnly),
-  );
-  if (opts.onGoto || opts.onPreview) {
-    const { onGoto, onPreview } = opts;
+  if (opts.onPreview) {
+    const { onPreview } = opts;
     exts.push(EditorView.domEventHandlers({
       mousedown(event, view) {
         if (!(event.ctrlKey || event.metaKey)) return false;
@@ -700,25 +446,11 @@ export function createMerulaExtensions(opts: MerulaExtensionsOptions = {}): Exte
         if (pos == null) return false;
         const tree = getMerulaTree(view);
         if (!tree) return false;
-        // An instrument name (`inst("…")` / `s("…")`) opens the preview; otherwise
-        // an identifier resolves to its declaration.
-        if (onPreview) {
-          const sound = instrumentNameAt(tree, pos);
-          if (sound) {
-            event.preventDefault();
-            onPreview(sound);
-            return true;
-          }
-        }
-        if (onGoto) {
-          const word = identifierAt(tree, pos);
-          if (word) {
-            event.preventDefault();
-            onGoto(word, view);
-            return true;
-          }
-        }
-        return false;
+        const sound = instrumentNameAt(tree, pos);
+        if (!sound) return false;
+        event.preventDefault();
+        onPreview(sound);
+        return true;
       },
     }));
   }

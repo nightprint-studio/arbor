@@ -57,7 +57,7 @@
     type RunConfig, type EnvVar, type RunConfigKind, type TestScopeKind,
   } from '$lib/stores/bennu/run-config.svelte';
   import { springStore } from '$lib/stores/bennu/spring.svelte';
-  import { runConfigIcon, runKindIcon } from './run-kinds';
+  import { runConfigColor, runConfigIcon, runKindColor, runKindIcon } from './run-kinds';
   import BennuCargoRunForm from './BennuCargoRunForm.svelte';
   import BennuScriptRunForm from './BennuScriptRunForm.svelte';
   import BennuAttachRunForm from './BennuAttachRunForm.svelte';
@@ -237,6 +237,7 @@
       id: k.id,
       label: k.label,
       icon: runKindIcon(k.id),
+      iconColor: runKindColor(k.id),
       onclick: () => createConfig(k.id),
     })),
   );
@@ -520,11 +521,12 @@
             {#each groups as group (group.kind)}
               {@const GroupIcon = runKindIcon(group.kind)}
               <li class="cfg-group" role="presentation">
-                <GroupIcon size={12} />
+                <span class="cfg-ic" style:color={runKindColor(group.kind)}><GroupIcon size={12} /></span>
                 <span>{group.label}</span>
                 <span class="cfg-group-n">{group.configs.length}</span>
               </li>
               {#each group.configs as cfg (cfg.id)}
+                {@const RowIcon = runConfigIcon(cfg)}
                 <li role="option" aria-selected={cfg.id === selectedId}>
                   <button
                     class="cfg-row"
@@ -541,6 +543,7 @@
                         <Circle size={13} />
                       {/if}
                     </span>
+                    <span class="cfg-ic" style:color={runConfigColor(cfg)}><RowIcon size={13} /></span>
                     <span class="cfg-name">{cfg.name || 'Unnamed'}</span>
                     <!-- Which module it is for. On a reactor, four configurations called
                          "Application" are otherwise indistinguishable in this list. -->
@@ -570,7 +573,7 @@
                      changing an Application into a JUnit run is not an edit, it is a
                      different configuration — make that one and delete this. -->
                 {@const KindIcon = runConfigIcon(selected)}
-                <span class="kind-pill"><KindIcon size={11} />{runKindLabel(selected.kind)}</span>
+                <span class="kind-pill" style:--kind-color={runConfigColor(selected)}><KindIcon size={11} />{runKindLabel(selected.kind)}</span>
               {/snippet}
               <Input
                 value={selected.name}
@@ -942,6 +945,10 @@
      glance rather than only after reading the words. */
   .cfg-list :global(li[role='option']) { padding-left: 10px; }
 
+  /* A kind's hue (`run-kinds.ts`), on the group heading and on each row: the list reads by colour
+     before it reads by name. */
+  .cfg-ic { display: inline-flex; flex-shrink: 0; }
+
   .cfg-mark { display: inline-flex; color: var(--text-muted); flex-shrink: 0; }
   .cfg-mark.active { color: var(--success); }
   .cfg-name {
@@ -988,8 +995,8 @@
     display: inline-flex; align-items: center; gap: 4px;
     padding: 1px 7px;
     border-radius: var(--radius-sm);
-    background: var(--bg-overlay);
-    color: var(--text-muted);
+    background: color-mix(in srgb, var(--kind-color, var(--text-muted)) 14%, var(--bg-overlay));
+    color: var(--kind-color, var(--text-muted));
     font-size: var(--font-size-2xs);
   }
 

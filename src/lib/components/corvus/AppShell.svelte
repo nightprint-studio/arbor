@@ -156,8 +156,9 @@
   import PlanHost from '$lib/components/corvus/plan/PlanHost.svelte';
   import ImberPanel from '$lib/components/corvus/imber/ImberPanel.svelte';
   import { imberStore } from '$lib/stores/corvus/imber.svelte';
-  import { imberSchedulesStore } from '$lib/stores/corvus/imber-schedules.svelte';
-  import ImberSchedulesModal from '$lib/components/corvus/imber/ImberSchedulesModal.svelte';
+  import { corvusImberSchedules } from '$lib/stores/corvus/imber-schedules.svelte';
+  import { listenImberScheduleEvents } from '$lib/stores/imber-schedule-events';
+  import ImberSchedulesModal from '$lib/components/shared/ImberSchedulesModal.svelte';
   import ImberActionsModal from '$lib/components/corvus/imber/ImberActionsModal.svelte';
   import { linkedWorktreesStore } from '$lib/stores/corvus/linkedWorktrees.svelte';
   import { openRepo, checkIsGitRepo, initRepo } from '$lib/ipc/corvus/graph';
@@ -1645,7 +1646,8 @@
     // Imber (the assistant): the run's streamed message, approvals and `done`
     const unlistenImber = imberStore.setupListeners();
     // Starting the schedule loop is the backend's first list call: do it now, so schedules fire without the window ever opening.
-    imberSchedulesStore.load();
+    corvusImberSchedules.load();
+    const unlistenImberSchedules = listenImberScheduleEvents('corvus', corvusImberSchedules);
 
     // Linked Worktrees (cross-project sync) events + initial load
     const unlistenLinks = linkedWorktreesStore.setupListeners();
@@ -1674,6 +1676,7 @@
       unlistenPipelines();
       unlistenPlans();
       unlistenImber();
+      unlistenImberSchedules();
       unlistenLinks();
       unlistenSync();
       unlistenStats();
@@ -2446,8 +2449,8 @@
   {#if imberStore.actionsOpen}
     <ImberActionsModal onClose={() => imberStore.hideActions()} />
   {/if}
-  {#if imberSchedulesStore.open}
-    <ImberSchedulesModal onClose={() => imberSchedulesStore.hide()} />
+  {#if corvusImberSchedules.open}
+    <ImberSchedulesModal store={corvusImberSchedules} onClose={() => corvusImberSchedules.hide()} />
   {/if}
 
   {#if workspaceManagerOpen}

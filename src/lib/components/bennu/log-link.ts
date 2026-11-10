@@ -20,7 +20,7 @@
 
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { LogLink } from '$lib/types/log';
-import { frameSource, methodLine } from '$lib/ipc/bennu/nav';
+import { frameSource, methodLine, typeShape } from '$lib/ipc/bennu/nav';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
 import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
@@ -57,6 +57,22 @@ export async function openLogLink(link: LogLink): Promise<void> {
       const line = link.line ?? (link.method ? await methodLine(path, link.method) : null);
       if (line) bennuUiStore.requestGoto(line);
       return;
+    }
+    // `kind: 'source'` means the backend did not resolve this class at streaming time.
+    // The index may have finished building since, so try it now before paying for a JAR scan.
+    const root = projectStore.project?.root;
+    if (root && link.line) {
+      // Use any open project file as context (needed to pick the classpath resolver).
+      // For a FQCN the import context does not matter — the backend resolves it by name.
+      const contextFile = projectStore.activeFilePath ?? root;
+      try {
+        const shape = await typeShape(root, contextFile, link.class);
+        if (shape?.file) {
+          await projectStore.openFile(shape.file);
+          bennuUiStore.requestGoto(link.line);
+          return;
+        }
+      } catch { /* project lookup failed — fall through to library resolution */ }
     }
     await openLibraryClass(link.class, link.method, link.line);
   } catch {

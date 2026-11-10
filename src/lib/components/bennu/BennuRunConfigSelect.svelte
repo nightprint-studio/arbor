@@ -20,7 +20,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunConfigStore, type RunConfig } from '$lib/stores/bennu/run-config.svelte';
-  import { runConfigIcon } from './run-kinds';
+  import { runConfigColor, runConfigIcon } from './run-kinds';
 
   const root = $derived(projectStore.project?.root ?? null);
   const groups = $derived(root ? bennuRunConfigStore.groupedFor(root) : []);
@@ -49,6 +49,7 @@
         // the same row four times.
         meta: isMultiModule ? moduleOf(c) || undefined : undefined,
         icon: runConfigIcon(c),
+        iconColor: runConfigColor(c),
         // A check, not a highlight: this is a single-choice list and the check is what says
         // "this is the one ▷ will run".
         active: c.id === active?.id,
@@ -84,7 +85,7 @@
     >
       {#if active}
         {@const Ic = runConfigIcon(active)}
-        <Ic size={13} />
+        <span class="rcs-ic" style:color={runConfigColor(active)}><Ic size={13} /></span>
         <span class="rcs-name">{active.name || 'Unnamed'}</span>
         {#if isMultiModule && moduleOf(active)}
           <span class="rcs-mod">{moduleOf(active)}</span>
@@ -125,6 +126,8 @@
   .rcs:disabled { opacity: 0.45; cursor: default; }
   /* Nothing configured yet: quieter, because it is an invitation and not a value. */
   .rcs.empty { background: transparent; border-color: var(--border-subtle); color: var(--text-muted); }
+  /* The kind's hue (see `run-kinds.ts`): the chip says WHAT ▷ will start before its name is read. */
+  .rcs-ic { display: inline-flex; flex-shrink: 0; }
   .rcs-name {
     min-width: 0;
     overflow: hidden;

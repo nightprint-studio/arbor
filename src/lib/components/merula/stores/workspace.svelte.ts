@@ -15,19 +15,11 @@ import {
   getMerulaState, setMerulaState,
   type MerulaLayoutState, type MerulaWorkspaceState, type MerulaProjectWorkspace,
 } from '$lib/ipc/merula/merula';
+import { WS_COLOR_COUNT } from '$lib/utils/workspace-colors';
 
 const RECENTS_CAP = 10;
 const RECENT_SOUNDS_CAP = 16;
 const LAYOUT_PERSIST_DELAY = 400;
-
-/** Neon-ish workspace accent palette (Arbor-style coloured groups), kept merula-local
- *  so a workspace colour is stable across themes. Indexed by `color_idx`. */
-export const WORKSPACE_COLORS = [
-  '#4ea6ff', '#3ddc97', '#ff9e3d', '#ff5d8f', '#b388ff', '#ffd23d', '#4dd2ff', '#d46bff',
-];
-export function workspaceColor(idx: number): string {
-  return WORKSPACE_COLORS[((idx % WORKSPACE_COLORS.length) + WORKSPACE_COLORS.length) % WORKSPACE_COLORS.length];
-}
 
 const DEFAULT_LAYOUT: MerulaLayoutState = {
   left_panel:    'files',
@@ -138,7 +130,7 @@ function createWorkspaceStore() {
      *  Returns its id. */
     createWorkspace(name: string): string {
       const id = crypto.randomUUID();
-      workspaces = [...workspaces, { id, name: name.trim() || 'Workspace', color_idx: workspaces.length, project_paths: [] }];
+      workspaces = [...workspaces, { id, name: name.trim() || 'Workspace', color_idx: workspaces.length % WS_COLOR_COUNT, project_paths: [] }];
       activeWorkspace = id;
       persist();
       return id;
@@ -171,6 +163,39 @@ function createWorkspaceStore() {
           ? { ...w, project_paths: [...w.project_paths, path] }
           : w,
       );
+      persist();
+    },
+    /** Move a project between workspaces (or reorder it inside one). `toIndex` is a gap in the
+     *  destination list as it is now, so a same-workspace move accounts for the removal. Persists. */
+    moveProject(fromId: string, path: string, toId: string, toIndex: number) {
+      const from = workspaces.find(w => w.id === fromId);
+      const to = workspaces.find(w => w.id === toId);
+      if (!from || !to || !from.project_paths.includes(path)) return;
+      const fromIdx = from.project_paths.indexOf(path);
+      workspaces = workspaces.map(w => {
+        if (w.id === fromId && w.id === toId) {
+          const rest = w.project_paths.filter(p => p !== path);
+          const at = Math.max(0, Math.min(rest.length, toIndex > fromIdx ? toIndex - 1 : toIndex));
+          return { ...w, project_paths: [...rest.slice(0, at), path, ...rest.slice(at)] };
+        }
+        if (w.id === fromId) return { ...w, project_paths: w.project_paths.filter(p => p !== path) };
+        if (w.id === toId) {
+          const rest = w.project_paths.filter(p => p !== path);
+          const at = Math.max(0, Math.min(rest.length, toIndex));
+          return { ...w, project_paths: [...rest.slice(0, at), path, ...rest.slice(at)] };
+        }
+        return w;
+      });
+      persist();
+    },
+    /** Move a workspace to `index` in the list. Persists. */
+    moveWorkspace(id: string, index: number) {
+      const from = workspaces.findIndex(w => w.id === id);
+      if (from < 0) return;
+      const next = [...workspaces];
+      const [w] = next.splice(from, 1);
+      next.splice(Math.max(0, Math.min(next.length, index)), 0, w);
+      workspaces = next;
       persist();
     },
     /** Remove a project folder from a workspace. Persists. */

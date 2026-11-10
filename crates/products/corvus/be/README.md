@@ -203,7 +203,9 @@ the API key is the shell vault's (`__assistant_key` over the reverse channel). W
 manual vs auto, destructive always asks), `prompt`, `host` (the agent loop's host + the approval card),
 `commit_message` / `diff_text` (the commit-message request), `history` (log filters, ranges, show).
 
-`src/assistant/schedule/` holds Imber's schedules (once / interval / daily / weekly / cron): the job model and its
-rules (pure), the persisted list, the handlers of the Schedules window, the `schedule_*` tools and the loop that fires
-what is due. The calendar arithmetic is `arbor-scheduler::calendar`. Unattended runs follow
-`permission::unattended_allows`. See `docs/imber-corvus.md`.
+`src/assistant/schedule/` holds what is Corvus's own in Imber's schedules (once / interval / daily / weekly / cron): the `Action` enum
+(`awake` / `prompt` / `fetch`), the handlers of the Schedules window, the MCP pair, and what a run does when it fires (it
+also emits the start / first-failure toast events on `arbor://corvus/imber-schedule`). The job, its store and the
+calendar are `arbor-scheduler` (`jobs`, `calendar`); the `schedule_*` tools, the window helpers and the loop are
+`imber-schedule`. Unattended runs follow `permission::unattended_allows`; creating a schedule from a conversation always
+shows an approval card. See `docs/imber-corvus.md`.

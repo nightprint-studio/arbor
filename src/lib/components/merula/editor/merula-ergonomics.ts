@@ -19,18 +19,13 @@
  *     driven by a self-contained bracket scanner (no Lezer tree needed; it skips
  *     strings + `//` / `/* *​/` comments).
  *
- * Everything is bundled by {@link merulaEditingExtensions}, dropped into the
+ * Everything is bundled by {@link merulaLanguageEditing}, carried by the language descriptor to the
  * editor's extension list AHEAD of the base keymap so the IntelliJ keys / `Mod-/`
  * win over the history and default bindings that claim the same chords.
  */
 
-import { EditorView, keymap } from '@codemirror/view';
 import { EditorState, type Extension } from '@codemirror/state';
-import { toggleComment } from '@codemirror/commands';
-import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-import { codeFolding, foldGutter, foldKeymap, foldService } from '@codemirror/language';
-
-import { intellijEditingKeymap } from '$lib/components/shared/ui/code-editor/intellij-keymap';
+import { foldService } from '@codemirror/language';
 
 // ── Language data (comment + autoclose config) ─────────────────────────────────
 
@@ -96,26 +91,9 @@ const merulaFold = foldService.of((state, lineStart, lineEnd) => {
 
 // ── Bundle ─────────────────────────────────────────────────────────────────────
 
-/** Editing ergonomics: comments, autoclose, the IntelliJ editing keys, soft wrap, folding.
- *  Returned as a single `Extension` so the editor factory can place it ahead of the base
- *  keymap (giving `Ctrl-y` / `Cmd-⌫` / `Mod-/` precedence over history/defaults). */
-export function merulaEditingExtensions(): Extension {
-  return [
-    merulaLanguageData,
-    EditorView.lineWrapping,
-    closeBrackets(),
-    codeFolding(),
-    foldGutter(),
-    merulaFold,
-    keymap.of([
-      { key: 'Mod-/', run: toggleComment },
-      // Delete-line, duplicate, multi-cursor, move-line, redo — the same list the shared
-      // code editor binds, so a key cannot mean one thing in a `.merula` buffer and another
-      // in a `.java` one. It also brings the redo Windows had lost: delete-line takes
-      // `Ctrl+Y`, which is the only redo `historyKeymap` gives that platform.
-      ...intellijEditingKeymap(),
-      ...closeBracketsKeymap,
-      ...foldKeymap,
-    ]),
-  ];
+/** What is merula's in the editing layer: the restricted autoclose pair set and the bracket-scanner
+ *  fold. The rest (comments, the IntelliJ editing keys, soft wrap, the fold gutter) is the shared
+ *  editor's, so a key cannot mean one thing in a `.merula` buffer and another in a `.java` one. */
+export function merulaLanguageEditing(): Extension {
+  return [merulaLanguageData, merulaFold];
 }

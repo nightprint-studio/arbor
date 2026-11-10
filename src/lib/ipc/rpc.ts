@@ -99,9 +99,9 @@ const ensured = new Set<Program>();
  * backend on open; a borrower has no window to do that, and `rpc` alone fails on a backend
  * that isn't up. Idempotent, and the shell runs the spawn off the UI thread.
  *
- * Only `corvus`, `picus` and `voice` are borrowable.
+ * Borrowable: `corvus`, `picus`, `voice`, `hirundo`, `bennu` and `merula` (Bennu playing a `.merula` file).
  */
-export async function ensureBackend(program: 'corvus' | 'picus' | 'voice' | 'bennu' | 'hirundo'): Promise<void> {
+export async function ensureBackend(program: 'corvus' | 'picus' | 'voice' | 'bennu' | 'hirundo' | 'merula'): Promise<void> {
   if (ensured.has(program)) return;
   // The shell records this window as a borrower, so the owner's window closing leaves the backend
   // running. A backend that died and came back is a new one with no borrowers: forget that it was

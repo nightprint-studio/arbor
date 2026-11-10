@@ -82,6 +82,8 @@ impl Family {
 pub fn family_of(tool: &str) -> Option<Family> {
     match tool {
         "ask_user" | "bennu_help" | "update_plan" | "open_ui" | "load_skill" | "show_diagram" => None,
+        // Imber's own schedule tools: always there, like the plan; a scheduled run is refused the ones that change them.
+        other if imber_schedule::prelude::is_schedule_tool(other) => None,
         // A structural search only reads, so it lives with the other searches and not with the rewrite.
         "search_text" | "find_files" | "structural_search" | "bennu_read_file" | "read_files" | "file_outline" => Some(Family::Read),
         // Showing an image file is reading it; a chat (which has no families) shows SVG it wrote.

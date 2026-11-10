@@ -48,6 +48,8 @@
     <tr><td><strong>Per month</strong></td><td>From the first.</td><td>50</td><td><code>limits.month_eur</code></td><td>No</td></tr>
     <tr><td><strong>Exchange rate</strong></td><td>Euros per dollar, kept by hand.</td><td>0.92</td><td><code>limits.eur_per_usd</code></td><td>No</td></tr>
     <tr><td><strong>Warn from</strong></td><td>The composer flags a limit at this percentage of it (10 to 99).</td><td>80</td><td><code>limits.warn_percent</code></td><td>No</td></tr>
+    <tr><td><strong>Scheduled run cap (EUR)</strong></td><td>The most one scheduled run may cost, in euros; it ends as incomplete when it gets there. 0 = no cap.</td><td>1</td><td><code>limits.schedule_run_eur</code></td><td>No</td></tr>
+    <tr><td><strong>Scheduled runs per day</strong></td><td>How many scheduled runs may start in a day. 0 = no cap.</td><td>24</td><td><code>limits.schedule_runs_per_day</code></td><td>No</td></tr>
   </tbody>
 </table>
 <p>Each limit field also shows how much has been spent against it.</p>

@@ -188,33 +188,42 @@ function createProjectStore() {
       return !!project?.files.some(f => f.path === path);
     },
 
-    /** Move a `.merula` file to the OS trash (recoverable), close its tab, drop its
-     *  cached buffer and refresh the file list. No-op when nothing is open. */
-    async deleteFile(path: string) {
-      await fsTrash([path]);
+    /** Forget a file the tree already removed from disk: close its tab, drop its cached
+     *  buffer and refresh the file list. */
+    async dropFile(path: string) {
       this.closeFile(path);
       sources.delete(path);
       await this.refreshFiles();
     },
 
+    /** Move a `.merula` file to the OS trash (recoverable), then forget it. */
+    async deleteFile(path: string) {
+      await fsTrash([path]);
+      await this.dropFile(path);
+    },
+
+    /** Follow a file the tree already renamed/moved on disk: migrate the cached buffer, any
+     *  open tab and the selection to the new path, then refresh the list. */
+    async adoptRenamed(oldPath: string, newPath: string) {
+      if (sources.has(oldPath)) { sources.set(newPath, sources.get(oldPath) ?? ''); sources.delete(oldPath); }
+      openFilePaths = openFilePaths.map(p => (p === oldPath ? newPath : p));
+      if (activeFilePath === oldPath) activeFilePath = newPath;
+      schedulePersistTabs();
+      await this.refreshFiles();
+    },
+
     /** Rename a `.merula` file in place (same folder). `newName` is a bare file name
-     *  (extension optional — `.merula` is appended when missing). Migrates the cached
-     *  buffer + any open tab to the new path and refreshes the list. Returns the new
+     *  (extension optional — `.merula` is appended when missing). Returns the new
      *  absolute path, or null when the rename was a no-op / invalid. */
     async renameFile(path: string, newName: string): Promise<string | null> {
       const trimmed = newName.trim();
       if (!trimmed || /[\\/]/.test(trimmed)) return null;
       const finalName = trimmed.toLowerCase().endsWith('.merula') ? trimmed : `${trimmed}.merula`;
-      const idx = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+      const idx = Math.max(path.lastIndexOf('\\'),path.lastIndexOf('/'));
       const newPath = `${path.slice(0, idx)}${path[idx]}${finalName}`;
       if (newPath === path) return null;
       await fsRename(path, newPath);
-      // Migrate the cached source + open tab + selection to the new path.
-      if (sources.has(path)) { sources.set(newPath, sources.get(path) ?? ''); sources.delete(path); }
-      openFilePaths = openFilePaths.map(p => (p === path ? newPath : p));
-      if (activeFilePath === path) activeFilePath = newPath;
-      schedulePersistTabs();
-      await this.refreshFiles();
+      await this.adoptRenamed(path, newPath);
       return newPath;
     },
   };

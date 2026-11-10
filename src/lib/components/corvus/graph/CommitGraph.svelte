@@ -33,7 +33,7 @@
   import { matchesBinding } from '$lib/utils/keybindings';
   import { getStatus } from '$lib/ipc/corvus/stage';
   import { validateRepoPath, reportRepoMissing } from '$lib/ipc/corvus/missing';
-  import { getCommitDiffMeta, getCommitsRangeDiffMeta, getWorkdirDiff } from '$lib/ipc/corvus/diff';
+  import { getCommitDiffMeta, getCommitsRangeDiffMeta } from '$lib/ipc/corvus/diff';
   import { createBranch, createTag, checkoutBranch, stashSave } from '$lib/ipc/corvus/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
   import { getBranchPolicy, assertBranchNameAllowed } from '$lib/utils/branch-policy';
@@ -1507,23 +1507,12 @@
     if (!tab) return;
     // Workdir view doesn't use lazy commit-file loading.
     diffStore.clearCommitContext();
-    try {
-      const [staged, unstaged] = await Promise.all([
-        getWorkdirDiff(tab.id, true),
-        getWorkdirDiff(tab.id, false),
-      ]);
-      const seen = new Set<string>();
-      const all = [...staged, ...unstaged].filter(f => {
-        if (seen.has(f.path)) return false;
-        seen.add(f.path);
-        return true;
-      });
-      diffStore.setFiles(all);
-      graphStore.setWorkdirMode();
-      uiStore.setActiveBottomSection('stage');
-    } catch (err) {
-      uiStore.showToast(`Failed to load changes: ${err}`, 'error');
-    }
+    // The Staging Area diffs only the file it shows, so nothing is loaded here: it picks the first
+    // changed file itself (on mount, or on this event when it is already open).
+    diffStore.setFiles([]);
+    graphStore.setWorkdirMode();
+    uiStore.setActiveBottomSection('stage');
+    window.dispatchEvent(new CustomEvent('arbor:stage-select-first'));
   }
 
   // Re-load the currently visible diff when the user toggles "Show full file"
@@ -1554,20 +1543,8 @@
         getCommitDiffMeta(tab.id, graphStore.selectedStash.oid)
           .then(files => { diffStore.setFiles(files); restore(files); })
           .catch(() => {});
-      } else if (graphStore.panelMode === 'workdir') {
-        Promise.all([getWorkdirDiff(tab.id, true), getWorkdirDiff(tab.id, false)])
-          .then(([staged, unstaged]) => {
-            const seen = new Set<string>();
-            const all = [...staged, ...unstaged].filter(f => {
-              if (seen.has(f.path)) return false;
-              seen.add(f.path);
-              return true;
-            });
-            diffStore.setFiles(all);
-            restore(all);
-          })
-          .catch(() => {});
       }
+      // `workdir` mode: the Staging Area owns its own reload (one file, not the whole working tree).
     }
     window.addEventListener('arbor:reload-diff', onReload);
     return () => window.removeEventListener('arbor:reload-diff', onReload);

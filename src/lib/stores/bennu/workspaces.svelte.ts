@@ -22,16 +22,11 @@ import { getBennuWorkspaces, setBennuWorkspaces } from '$lib/ipc/bennu/config';
 import type { BennuWorkspace, ProjectSession } from '$lib/ipc/bennu/config';
 import { createSerial, createWriteQueue, planMove } from './session-snapshot';
 import { projectStore } from './project.svelte';
+import { WS_COLOR_COUNT, wsColorVar } from '$lib/utils/workspace-colors';
 
-/** Palette size — mirrors Corvus's `--ws-color-0 … --ws-color-11` theme vars. */
-export const WS_COLOR_COUNT = 12;
-
-/** CSS var reference for a palette index (clamped) — feeds `<Monogram color=…>`. Reuses the SAME
- *  global `--ws-color-N` vars as Corvus, so the two products stay visually consistent. */
-export function wsColorVar(idx: number): string {
-  const i = Number.isFinite(idx) ? Math.max(0, Math.min(WS_COLOR_COUNT - 1, Math.floor(idx))) : 0;
-  return `var(--ws-color-${i})`;
-}
+// The palette lives in `$lib/utils/workspace-colors` (shared with the other products); re-exported so
+// Bennu call sites keep importing it from the store.
+export { WS_COLOR_COUNT, wsColorVar };
 
 /** The name of the workspace that always exists. Mirrors Corvus's scratch workspace: you never
  *  have to create one before opening something, and there is always somewhere for a project to

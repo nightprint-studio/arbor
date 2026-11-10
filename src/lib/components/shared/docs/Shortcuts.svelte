@@ -78,6 +78,7 @@
     <tr><td><Kbd action="goto_project" size="sm" /></td><td>Bennu: go to any project by typing — every workspace plus recents</td></tr>
     <tr><td><Kbd action="regex_tester" size="sm" /></td><td>Bennu: open the Regex Tester on the string literal under the caret, the selection, or empty</td></tr>
     <tr><td><Kbd action="console_clean_view" size="sm" /></td><td>Bennu: turn the console's clean view on or off — columns, lines and stack frames you chose not to read</td></tr>
+    <tr><td><Kbd action="merula_play_toggle" size="sm" /></td><td>Bennu: play the open .merula file, or stop it if it is the one playing (Shift+F10 does the same)</td></tr>
     <tr><td><Kbd action="assistant_review_apply" size="sm" /></td><td>Bennu's Imber (focus in the panel): review the isolated copy's combined diff, then apply it to the project</td></tr>
     <tr><td><Kbd action="assistant_next_mode" size="sm" /></td><td>Bennu's Imber (focus in the panel): next permission mode — Manual, Accept edits, Autonomous</td></tr>
     <tr><td><Kbd action="voice_push_to_talk" size="sm" /></td><td>Bennu voice: hold to talk to Imber and release to send, or tap once to start and again to stop — opens the voice overlay with the selected code attached</td></tr>

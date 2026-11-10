@@ -77,13 +77,19 @@ pub fn needs_approval(mode: Mode, risk: Risk) -> bool {
     }
 }
 
+/// [`needs_approval`] for a named call. Creating a schedule is asked in every mode: it makes behaviour that will
+/// happen later with nobody there to approve it, so the user sees it spelled out first.
+pub fn needs_approval_for(tool: &str, mode: Mode, risk: Risk) -> bool {
+    tool == "schedule_create" || needs_approval(mode, risk)
+}
+
 
 /// Whether a call may run in a scheduled run, where nobody is there to approve it. The user's grant is the
 /// job's `mode`, given when the job was created (and approved): `auto` lets writes run, `manual` leaves the job
 /// read-only. A destructive action never runs unattended whatever the mode, and a scheduled run cannot change
 /// schedules — a job that could schedule more jobs would outlive anyone's say in it.
 pub fn unattended_allows(mode: Mode, risk: Risk, tool: &str) -> Result<(), String> {
-    if tool.starts_with("schedule_") && tool != "schedule_list" {
+    if imber_schedule::prelude::is_schedule_tool(tool) && !imber_schedule::prelude::unattended_may_call(tool) {
         return Err("A scheduled run cannot create or change schedules. Say so in your answer if one is needed.".into());
     }
     match (risk, mode) {
@@ -199,19 +205,8 @@ pub fn preview(tool: &str, input: &Value) -> Preview {
 }
 
 
-/// The `when` of a schedule tool call in a few words, for the approval card.
-fn describe_when(when: Option<&Value>) -> String {
-    let Some(w) = when else { return "(no time given)".into() };
-    let s = |k: &str| w.get(k).and_then(Value::as_str).unwrap_or("?");
-    match s("kind") {
-        "once" => format!("once, {}", s("at")),
-        "daily" => format!("every day at {}", s("time")),
-        "weekly" => format!("every {} at {}", w.get("days").and_then(Value::as_array).map(|d| d.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default(), s("time")),
-        "every" => format!("every {} min", w.get("minutes").and_then(Value::as_u64).unwrap_or(0)),
-        "cron" => format!("cron {}", s("expr")),
-        other => other.to_string(),
-    }
-}
+use imber_schedule::prelude::describe_when;
+
 fn text<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
     input.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
 }
@@ -334,6 +329,8 @@ mod tests {
             assert_eq!(classify(t, &json!({})), Risk::Write, "{t}");
             assert!(needs_approval(Mode::Manual, Risk::Write));
         }
+        assert!(needs_approval_for("schedule_create", Mode::Auto, Risk::Write), "a new schedule is asked about in every mode");
+        assert!(!needs_approval_for("schedule_update", Mode::Auto, Risk::Write), "editing one follows the write rule");
         let p = preview("schedule_create", &json!({"name": "Morning check", "action": "awake", "mode": "auto", "when": {"kind": "weekly", "days": ["mon", "fri"], "time": "09:00"}}));
         assert!(p.commands[0].contains("\"Morning check\"") && p.commands[0].contains("every mon, fri at 09:00") && p.commands[0].contains("may change things unattended"), "{:?}", p.commands);
         assert!(preview("schedule_create", &json!({"name": "x", "when": {"kind": "once", "at": "2026-11-05T09:00"}})).commands[0].contains("read-only"));

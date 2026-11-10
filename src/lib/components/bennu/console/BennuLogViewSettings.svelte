@@ -21,7 +21,7 @@
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import { bennuLogViewStore as store } from '$lib/stores/bennu/log-view.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
-  import type { LogViewRule } from './log-view';
+  import type { LogViewRule, LogViewSettings } from './log-view';
 
   let tab = $state('columns');
   const s = $derived(store.settings);
@@ -60,6 +60,11 @@
     store.addRule({ on: true, field: 'logger', op: 'starts', value: '', action: 'hide', color: '#d29922' });
   }
   const patchRule = (i: number, p: Partial<LogViewRule>) => store.updateRule(i, p);
+
+  /** Patch a column-visible setting and auto-enable clean view when it is off — same pattern as addRuleFrom. */
+  function colPatch(p: Partial<LogViewSettings>) {
+    store.patch(s.clean ? p : { clean: true, ...p });
+  }
 </script>
 
 <aside class="lvs" aria-label="Log view settings">
@@ -78,33 +83,33 @@
             : 'No logback, log4j2, log4j or Spring configuration names a console pattern, so the columns are guessed from the shape of each line. Logger and Thread need a layout.'} />
       {/if}
       <FormField label="Time">
-        <Select size="sm" fill value={s.time} onchange={(v) => store.patch({ time: v as typeof s.time })}
+        <Select size="sm" fill value={s.time} onchange={(v) => colPatch({ time: v as typeof s.time })}
           options={[{ value: 'time', label: 'Time of day' }, { value: 'hide', label: 'Hidden' }]} />
       </FormField>
       <FormField label="Level">
-        <Select size="sm" fill value={s.level} onchange={(v) => store.patch({ level: v as typeof s.level })}
+        <Select size="sm" fill value={s.level} onchange={(v) => colPatch({ level: v as typeof s.level })}
           options={[{ value: 'text', label: 'Word' }, { value: 'letter', label: 'Letter only' }, { value: 'hide', label: 'Hidden (row colour only)' }]} />
       </FormField>
       <FormField label="Thread">
-        <Select size="sm" fill disabled={guessing} value={s.thread} onchange={(v) => store.patch({ thread: v as typeof s.thread })}
+        <Select size="sm" fill disabled={guessing} value={s.thread} onchange={(v) => colPatch({ thread: v as typeof s.thread })}
           options={[{ value: 'hide', label: 'Hidden' }, { value: 'short', label: 'Shortened' }, { value: 'full', label: 'Full' }]} />
       </FormField>
       <FormField label="Logger" hint="Only on lines whose layout Bennu could read from the project’s logging configuration.">
-        <Select size="sm" fill disabled={guessing} value={s.logger} onchange={(v) => store.patch({ logger: v as typeof s.logger })}
+        <Select size="sm" fill disabled={guessing} value={s.logger} onchange={(v) => colPatch({ logger: v as typeof s.logger })}
           options={[
             { value: 'abbr', label: 'Abbreviated (c.a.d.FooDao)' }, { value: 'last', label: 'Class name only' },
             { value: 'full', label: 'Full name' }, { value: 'hide', label: 'Hidden' },
           ]} />
       </FormField>
       <FormField label="MDC" hint="The key=value entries a layout prints for each line (tenant, trace id, user). Needs a layout read from the project’s logging configuration.">
-        <Select size="sm" fill disabled={guessing} value={s.mdc} onchange={(v) => store.patch({ mdc: v as typeof s.mdc })}
+        <Select size="sm" fill disabled={guessing} value={s.mdc} onchange={(v) => colPatch({ mdc: v as typeof s.mdc })}
           options={[{ value: 'show', label: 'Shown' }, { value: 'hide', label: 'Hidden' }]} />
       </FormField>
       <FormField label="Hidden MDC keys" hint="Hide only these entries, key and value. Quickest: right-click a line and pick the key.">
         <TokenListInput ariaLabel="Hidden MDC keys" placeholder="trace_id" values={s.hidden_mdc}
-          onchange={(v) => store.patch({ hidden_mdc: v })} />
+          onchange={(v) => colPatch({ hidden_mdc: v })} />
       </FormField>
-      <Toggle checked={s.dedupe} label="Collapse repeated lines (×N)" onchange={(v) => store.patch({ dedupe: v })} />
+      <Toggle checked={s.dedupe} label="Collapse repeated lines (×N)" onchange={(v) => colPatch({ dedupe: v })} />
       <p class="note">Only what is drawn changes. Copy, save and the assistant still get the text the program wrote.</p>
 
     {:else if tab === 'rules'}
@@ -131,7 +136,7 @@
       <Button variant="secondary" size="sm" onclick={addRule}>{#snippet iconStart()}<Plus size={13} />{/snippet}Add rule</Button>
 
     {:else}
-      <Toggle checked={s.fold_frames} label="Fold frames that are not mine" onchange={(v) => store.patch({ fold_frames: v })} />
+      <Toggle checked={s.fold_frames} label="Fold frames that are not mine" onchange={(v) => colPatch({ fold_frames: v })} />
       <FormField label="My packages" hint="Read from the project’s sources. Frames from anywhere else fold into one row; “Caused by:” never does. With no package known, nothing folds.">
         {#if store.detected.length}
           <div class="chips">{#each store.detected as p (p)}<Badge variant="tone" tone="neutral" size="sm" label={p} />{/each}</div>
@@ -141,7 +146,7 @@
       </FormField>
       <FormField label="Also mine">
         <TokenListInput ariaLabel="Additional packages" placeholder="com.acme.shared" values={s.extra_own_packages}
-          onchange={(v) => store.patch({ extra_own_packages: v })} />
+          onchange={(v) => colPatch({ extra_own_packages: v })} />
       </FormField>
     {/if}
   </div>

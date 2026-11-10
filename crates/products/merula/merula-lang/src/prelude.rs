@@ -20,7 +20,7 @@ pub use crate::config::EvalConfig;
 pub use crate::env::Env;
 pub use crate::eval::{evaluate, Ctx};
 pub use crate::inject::{LogLevel, LogSink, NoImports, SilentLog, SourceLoader};
-pub use crate::parse::parse;
+pub use crate::parse::{language, parse};
 pub use crate::value::{EvalOutput, Func, Scene, Transform, Value};
 
 // ── Emit / materialise (AST → source, haps → mini-notation) ──────────────────

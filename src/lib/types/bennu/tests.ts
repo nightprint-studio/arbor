@@ -48,6 +48,8 @@ export interface DiscoveredTest {
   is_abstract: boolean;
   disabled: boolean;
   methods: TestMethodInfo[];
+  /** Runs other tests without declaring one: a suite, or the outer class of `@Nested` tests. */
+  container: boolean;
   /** Maven module relative to the project root; `null` for the root module. */
   module: string | null;
 }

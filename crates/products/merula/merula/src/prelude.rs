@@ -31,7 +31,7 @@ pub use merula_pattern::prelude::{
 // `SourceSpan`/`TimeSpan` are re-exported by lang too, but listed above (identical
 // items); `Result` omitted; `LangError`/`LangErrorKind` kept by name.
 pub use merula_lang::prelude::{
-    emit, emit_expr, evaluate, materialize_island, materialize_source, parse, reference, BinOp, Ctx,
+    emit, emit_expr, evaluate, language, materialize_island, materialize_source, parse, reference, BinOp, Ctx,
     DslEntry, DslKind, DslParam, Env, EvalConfig, EvalOutput, Expr, ExprKind, FnDef, Func, Ident,
     Import, Island, IslandKind, Item, LangError, LangErrorKind, Leaf, LetBind, LogLevel, LogSink,
     MetaBlock, MetaField, MetaValue, Mini, MiniArg, MiniKind, NoImports, Postfix, Program, Scene,

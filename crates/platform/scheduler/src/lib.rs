@@ -10,6 +10,7 @@
 pub mod action;
 pub mod calendar;
 pub mod error;
+pub mod jobs;
 pub mod key;
 pub mod opts;
 pub mod prelude;

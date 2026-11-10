@@ -12,6 +12,7 @@ asked of the shell's keyring per request (`__hirundo_secret`), never held.
 | `envs` | `env_state`, `env_types_save`, `environment_save`, `environment_delete`, `local_save` |
 | `send` | `request_preview`, `request_send` (async, cancellable, protected environments ask first), `request_cancel` |
 | `convert` | `curl_import`, `curl_export`, `kv_parse`, `kv_format` |
+| `schedules` | `schedules_list`, `schedule_save`, `schedule_delete`, `schedules_due`, `schedule_ran` — jobs of `arbor-scheduler::jobs` (action: run a collection in an environment), a project's list in the profile |
 
 `context::build` is the one place a request meets its surroundings (collection and folders above it, the
 environment and its type, local values, secrets); preview, copy-as-cURL and send all use the `Prepared` it

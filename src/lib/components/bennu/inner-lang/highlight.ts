@@ -15,7 +15,7 @@ import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { html, xml } from '@codemirror/legacy-modes/mode/xml';
 import { yaml } from '@codemirror/legacy-modes/mode/yaml';
 import { javascriptStream } from '$lib/components/shared/ui/code-editor/js-mode';
-import { sqlTokens } from '$lib/utils/sql-tokens';
+import { sqlStream } from '$lib/components/shared/ui/code-editor/sql-lexer';
 import { highlightRegex } from '../regex/tokens';
 import type { Flavour } from '../regex/types';
 import type { InnerLang } from './detect';
@@ -105,14 +105,8 @@ export function highlightInner(lang: InnerLang, text: string, opts: InnerHighlig
   return parser ? streamSpans(parser, text) : [];
 }
 
-const SQL_CLASS = { keyword: 'keyword', string: 'string', number: 'number', comment: 'comment', param: 'field' } as const;
-
 function sqlSpans(text: string): InnerSpan[] {
-  const out: InnerSpan[] = [];
-  let at = 0;
-  for (const t of sqlTokens(text)) {
-    if (t.kind !== 'text') out.push({ from: at, to: at + t.text.length, cls: SQL_CLASS[t.kind] });
-    at += t.text.length;
-  }
-  return out;
+  // The same lexer the Picus editor and the `.sql` files use; `portable` because a string in Java does not
+  // say which database it will meet.
+  return streamSpans(sqlStream('portable') as StreamParser<unknown>, text);
 }

@@ -40,6 +40,12 @@ pub enum CheckId {
     UnresolvedSymbol,
     /// A generic type given the wrong number of type arguments (`List<A, B>`).
     WrongTypeArgumentCount,
+    /// A raw `Optional` (no type argument) in a method return / field / local declaration.
+    /// Causes javac's "cannot infer type-variable(s)" at every `.flatMap()` / `.map()` call site.
+    RawOptional,
+    /// `Optional.flatMap` / `Stream.flatMap` whose lambda returns a plain value instead of an `Optional` /
+    /// `Stream` — javac's "cannot infer type-variable(s) U" (`map` was meant).
+    FlatMapReturn,
     /// An inconvertible cast, or an assignment / return of an incompatible type.
     IncompatibleType,
     /// A lossy primitive narrowing without a cast (`int x = aLong`).
@@ -215,6 +221,9 @@ pub enum CheckId {
     // ── pure-AST: expressions (lints) ────────────────────────────────────────────
     /// `x = x` — a self-assignment with no effect. *Warning.*
     SelfAssignment,
+    /// `receiver.equals(arg)` where the receiver type and arg type are provably disjoint, so the call
+    /// can never return `true` (e.g. `Boolean.TRUE.equals(someString)`). *Warning.*
+    ImpossibleEquals,
     /// A constant division (or modulo) by zero. *Warning.*
     DivisionByZero,
     /// A stray `;` empty statement. *Warning.*
@@ -276,6 +285,8 @@ impl CheckId {
             UnresolvedType => "unresolved-type",
             UnresolvedSymbol => "unresolved-symbol",
             WrongTypeArgumentCount => "wrong-type-argument-count",
+            RawOptional => "raw-optional",
+            FlatMapReturn => "flat-map-return",
             IncompatibleType => "incompatible-type",
             LossyConversion => "lossy-conversion",
             NonBooleanCondition => "non-boolean-condition",
@@ -344,6 +355,7 @@ impl CheckId {
             SwitchExpressionIncomplete => "switch-expression-incomplete",
             DuplicateCaseLabel => "duplicate-case-label",
             SelfAssignment => "self-assignment",
+            ImpossibleEquals => "impossible-equals",
             DivisionByZero => "division-by-zero",
             EmptyStatement => "empty-statement",
             StringReferenceEquality => "string-reference-equality",
@@ -371,7 +383,8 @@ impl CheckId {
             // Style / hygiene lints — not compile errors.
             RedundantImport | DuplicateImport | UnusedImport | MethodNamedLikeConstructor
             | SwitchFallthrough | FinallyAbrupt | SelfAssignment | DivisionByZero | EmptyStatement
-            | StringReferenceEquality | ConstantCondition | DeadStore | UnusedMember | EmptyIfBody | StaticViaInstance => "warning",
+            | StringReferenceEquality | ImpossibleEquals | ConstantCondition | DeadStore
+            | UnusedMember | EmptyIfBody | StaticViaInstance | RawOptional => "warning",
             // Everything else is a compile-level error.
             _ => "error",
         }
@@ -417,6 +430,8 @@ impl CheckId {
             UnresolvedType,
             UnresolvedSymbol,
             WrongTypeArgumentCount,
+            RawOptional,
+            FlatMapReturn,
             IncompatibleType,
             LossyConversion,
             NonBooleanCondition,
@@ -485,6 +500,7 @@ impl CheckId {
             SwitchExpressionIncomplete,
             DuplicateCaseLabel,
             SelfAssignment,
+            ImpossibleEquals,
             DivisionByZero,
             EmptyStatement,
             StringReferenceEquality,

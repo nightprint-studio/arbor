@@ -9,7 +9,7 @@
    */
   import { Search } from 'lucide-svelte';
   import {
-    Braces, Hash, WandSparkles, Music, Waves, Dice5, Brackets, FileCode2, Terminal,
+    Braces, BookOpen, Hash, WandSparkles, Music, Waves, Dice5, Brackets, FileCode2, Terminal,
   } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
@@ -68,7 +68,7 @@
 </script>
 
 <PanelShell title="Language reference">
-  {#snippet icon()}<Braces size={13} />{/snippet}
+  {#snippet icon()}<BookOpen size={13} />{/snippet}
   {#snippet toolbar()}
     <div class="docs-search">
       <Input bind:value={query} placeholder="Search the language…" size="sm">

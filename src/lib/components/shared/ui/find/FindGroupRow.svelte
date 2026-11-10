@@ -13,7 +13,7 @@
   let { group, lead }: Props = $props();
 </script>
 
-<div class="fg" class:ext={group.external} use:tooltip={group.tooltip ?? group.label}>
+<div class="fg" class:ext={group.external} class:test={group.test} use:tooltip={group.tooltip ?? group.label}>
   {#if lead}{@render lead(group)}{/if}
   <span class="fg-name">{group.label}</span>
   {#if group.detail}<span class="fg-detail">{group.detail}</span>{/if}
@@ -53,6 +53,8 @@
     background: var(--bg-elevated); border-radius: var(--radius-sm); padding: 0 5px;
   }
   .fg-badge + .fg-count { margin-left: 0; }
+
+  .fg.test .fg-name { color: var(--success); }
 
   .fg.ext {
     background: color-mix(in srgb, var(--warning) 7%, transparent);

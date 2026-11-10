@@ -20,9 +20,15 @@ extern "C" {
     fn tree_sitter_merula() -> *const ();
 }
 
+/// The Tree-sitter grammar of `.merula` — for tooling that walks the concrete
+/// syntax tree itself (the syntax-tree panel) instead of going through [`parse`].
+pub fn language() -> tree_sitter::Language {
+    unsafe { tree_sitter::Language::from_raw(tree_sitter_merula().cast()) }
+}
+
 /// Parse `.merula` source into an AST.
 pub fn parse(source: &str) -> Result<Program> {
-    let language = unsafe { tree_sitter::Language::from_raw(tree_sitter_merula().cast()) };
+    let language = language();
     let mut parser = Parser::new();
     parser
         .set_language(&language)

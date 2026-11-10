@@ -1478,6 +1478,12 @@ pub fn find_member_name_spans(source: &str, key: &DeclKey) -> Vec<(usize, usize)
                     None
                 }
             }
+            // An enum constant (`VALUE` in `enum E { VALUE, OTHER; }`) is indexed as a
+            // static-final field of the enum type. Without this arm go-to on an enum constant
+            // reference found nothing (find_member_name_spans returned empty), so ipcDeclaration
+            // returned null and the gesture silently did nothing — both from a reference outside
+            // the enum and from the constant's own declaration inside it.
+            "enum_constant" if want_field => n.child_by_field_name("name"),
             // A record component IS the field's declaration — the JLS says the header declares a
             // `private final` field, and there is nowhere else in the source it is written.
             "formal_parameter" if want_field && is_record_component(&n) => {

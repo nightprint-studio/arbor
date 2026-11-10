@@ -20,6 +20,7 @@ import { createAbbrevIntel } from '$lib/components/picus/sql-intel/abbrev';
 import { bennuPicusStore } from '$lib/stores/bennu/picus.svelte';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import type { TableInfo } from '$lib/types/picus';
+import { insideJavaString } from '../java-completion-trigger';
 
 /** What the statement says about its tables: alias (or bare name) → table, in the order written. */
 export function referencedTables(sql: string, tables: TableInfo[]): Map<string, TableInfo> {
@@ -162,14 +163,13 @@ const NATIVE_CALL = /createNativeQuery\s*\(|createSQLQuery\s*\(|@NamedNativeQuer
 /** IntelliJ's own way of saying a string is SQL: `// language=sql`, `/* language=PostgreSQL *\/`, `@Language("SQL")`. */
 const SQL_LANGUAGE_HINT = /(?:\/\/|\/\*)\s*language\s*=\s*"?\w*(?:sql|oracle)\b|@Language\s*\(\s*(?:value\s*=\s*)?"\w*sql"/i;
 
+/** A string literal's contents: a text block (`"""…"""`, group 1) or a plain `"…"` (group 2). */
+const JAVA_STRING = /"""([\s\S]*?)"""|"((?:[^"\\\n]|\\.)*)"/g;
+
 /** The SQL of the native query the caret is inside, or `null` when it is in no such string. */
 export function nativeQueryAt(text: string, pos: number): string | null {
   const before = text.slice(Math.max(0, pos - 1500), pos);
   const after = text.slice(pos, pos + 800);
-
-  // The caret has to be inside a string literal: an odd number of unescaped quotes on its line.
-  const lineBefore = before.slice(before.lastIndexOf('\n') + 1);
-  if ((lineBefore.replace(/\\./g, '').match(/"/g)?.length ?? 0) % 2 === 0) return null;
 
   // The call or annotation the literal belongs to starts after the last statement boundary.
   const boundary = Math.max(before.lastIndexOf(';'), before.lastIndexOf('}'));
@@ -180,7 +180,11 @@ export function nativeQueryAt(text: string, pos: number): string | null {
     (/@Query\s*\(/.test(head) && /nativeQuery\s*=\s*true/.test(head + tail));
   if (!isNative) return null;
 
-  return [...(head + tail).matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]).join(' ');
+  // And the caret has to be inside a string literal — a text block counts, whatever line of it. Asked
+  // last: the lexer reads the whole text before the caret, and most carets are nowhere near a query.
+  if (!insideJavaString(text.slice(0, pos))) return null;
+
+  return [...(head + tail).matchAll(JAVA_STRING)].map((m) => m[1] ?? m[2]).join(' ');
 }
 
 /** For Java: SQL completion inside a native query's string, `inner` (the Java source) everywhere else. */
@@ -188,13 +192,16 @@ export function nativeQueryCompletion(inner: CompletionSource): CompletionSource
   return async (ctx) => {
     const statement = nativeQueryAt(ctx.state.doc.toString(), ctx.pos);
     if (statement === null) return inner(ctx);
+    // The live schema is the better answer when there is one; without a connection (or when it has
+    // nothing to say here) the Java source takes over, and its framework extensions offer the tables
+    // and columns the project's own mapping names. Returning `null` here instead is what silenced them.
     const tables = await schemaTables();
-    if (!tables.length) return null;
+    if (!tables.length) return inner(ctx);
     const line = ctx.state.doc.lineAt(ctx.pos);
     // Only the text of the current literal counts as "before the caret" for the keyword test.
     const lineBefore = line.text.slice(0, ctx.pos - line.from);
     const literalBefore = lineBefore.slice(lineBefore.lastIndexOf('"') + 1);
-    return resultFor(ctx, sqlSuggestions(literalBefore, statement, tables, ctx.explicit));
+    return resultFor(ctx, sqlSuggestions(literalBefore, statement, tables, ctx.explicit)) ?? inner(ctx);
   };
 }
 

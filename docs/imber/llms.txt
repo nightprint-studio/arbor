@@ -20,12 +20,13 @@ Read the pages in this order, or open ALL.md for everything in one file. Each pa
 - [Imber: Skills](10-skills.md): SKILL.md folders that teach Imber a kind of task: format, locations, the manager, limits.
 - [Imber: Sub-agents](11-sub-agents.md): Clean-context helpers for side tasks: when to use them, permissions, cost cap, how to watch and stop them.
 - [Imber: Decisions and questions](12-decisions-and-questions.md): How much Imber decides alone (ask at forks, only big decisions, decide itself) and how its questions work.
-- [Imber: Cost and context](13-cost-and-context.md): Context meter, models and prices, cache, compaction, confirm-on-change and spending limits in euros.
-- [Imber: Working from the editor](14-editor.md): The sparkle in the margin, doc comments, Markdown selections, stack traces, pasted code and the expanded panel.
-- [Imber: Settings reference](15-settings.md): Every Imber setting: what it does, its default, the config key and whether a conversation can override it.
-- [Imber: Keyboard and palette](16-keyboard-and-palette.md): Shortcuts and Command Palette verbs for Imber.
-- [Imber: Privacy and safety](17-privacy-and-safety.md): What leaves the machine, what is masked, what is never granted, and the safeguards in place.
-- [Imber: Troubleshooting](18-troubleshooting.md): Common messages and what to do about them.
+- [Imber: Schedules](13-schedules.md): Ask Imber something on a timetable: how to create a schedule, what a scheduled run may do, missed runs, cost limits and the MCP tools.
+- [Imber: Cost and context](14-cost-and-context.md): Context meter, models and prices, cache, compaction, confirm-on-change and spending limits in euros.
+- [Imber: Working from the editor](15-editor.md): The sparkle in the margin, doc comments, Markdown selections, stack traces, pasted code and the expanded panel.
+- [Imber: Settings reference](16-settings.md): Every Imber setting: what it does, its default, the config key and whether a conversation can override it.
+- [Imber: Keyboard and palette](17-keyboard-and-palette.md): Shortcuts and Command Palette verbs for Imber.
+- [Imber: Privacy and safety](18-privacy-and-safety.md): What leaves the machine, what is masked, what is never granted, and the safeguards in place.
+- [Imber: Troubleshooting](19-troubleshooting.md): Common messages and what to do about them.
 
 ## Optional
 - [All pages in one file](ALL.md): the same content, concatenated in reading order

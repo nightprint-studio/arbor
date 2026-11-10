@@ -63,7 +63,7 @@ use crate::support::scopes::{
 };
 
 use crate::support::nodes::{child_field_name, generated_names};
-use crate::support::resolve::type_binary;
+use crate::support::resolve::{type_binary, type_binary_in_file_scope};
 use crate::support::walk::{for_each_supertype, hierarchy_fully_known};
 
 /// The bare `java.lang` type names available without an import. A standalone bare identifier matching
@@ -257,11 +257,12 @@ pub fn undefined_var_errors_in(
             field_names.contains(name)
                 // 4: an enum constant of the enclosing enum.
                 || enum_constants.contains(name)
-                // 3: a resolvable TYPE name — a bare `Foo` legally heads `Foo.BAR` (static field /
-                // nested-type access). A type declared in THIS file is also a valid bare head
-                // (`Helper.CONST`): `type_binary` consults same-file `symbols.types` before the resolver.
-                || resolver.resolve_simple_name(name, &symbols.imports).is_some()
-                || type_binary(name, symbols, resolver).is_some()
+                // 3: a TYPE name this file can actually name — a bare `Foo` legally heads `Foo.BAR` (static
+                // field / nested-type access). A type declared in THIS file is also a valid bare head
+                // (`Helper.CONST`). "Can name" is a scoping question, not "does such a class exist" — see
+                // `type_binary_in_file_scope`.
+                || declared_types.contains(name)
+                || type_binary_in_file_scope(name, symbols, resolver).is_some()
                 // …and so is a nested type INHERITED from a supertype (JLS §8.1.5): a subclass writes
                 // `Inner.CONST` for `Base.Inner.CONST`, with no import, because the name is in scope by
                 // inheritance — which neither lookup above can see, since they do not know which type the
@@ -1012,6 +1013,60 @@ mod tests {
             .collect();
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(d[0].contains("`Nowhere`"), "{d:?}");
+    }
+
+    /// `undefined_var_errors_in` on a complete classpath, over `src` — what the editor runs, as opposed to
+    /// [`diags`], which keeps uppercase heads out of reach.
+    fn on_complete_classpath(src: &str, r: &MapResolver) -> Vec<String> {
+        let tree = bennu_java::prelude::parse_java(src).unwrap();
+        let symbols = extract_symbols(src);
+        let nodes = crate::engine::check::collect_nodes(tree.root_node());
+        undefined_var_errors_in(tree.root_node(), &nodes, src, &symbols, r, true).into_iter().map(|d| d.message).collect()
+    }
+
+    /// A project class of ANOTHER package, never imported: javac's `cannot find symbol`, though the resolver
+    /// (and so go-to) knows the class by its simple name.
+    fn resolver_with_other_package_type() -> MapResolver {
+        let mut r = resolver();
+        r.members.insert(
+            "com/other/Util".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: vec![field("LIMIT", "int")],
+                flags: Default::default(),
+            },
+        );
+        r.simple.insert("Util".to_string(), "com/other/Util".to_string());
+        r
+    }
+
+    #[test]
+    fn a_type_of_another_package_used_without_an_import_is_flagged() {
+        let src = "package com.acme;\nclass C extends Base { int count; void m() { int y = Util.LIMIT; } }";
+        let d = on_complete_classpath(src, &resolver_with_other_package_type());
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`Util`"), "{d:?}");
+    }
+
+    #[test]
+    fn the_same_type_is_fine_once_imported() {
+        let src = "package com.acme;\nimport com.other.Util;\nclass C extends Base { int count; void m() { int y = Util.LIMIT; } }";
+        assert!(on_complete_classpath(src, &resolver_with_other_package_type()).is_empty());
+    }
+
+    #[test]
+    fn the_same_type_is_fine_through_an_import_on_demand() {
+        let src = "package com.acme;\nimport com.other.*;\nclass C extends Base { int count; void m() { int y = Util.LIMIT; } }";
+        assert!(on_complete_classpath(src, &resolver_with_other_package_type()).is_empty());
+    }
+
+    #[test]
+    fn a_type_of_the_files_own_package_needs_no_import() {
+        let src = "package com.acme;\nclass C extends Base { int count; void m() { int y = Helper.CONST; } }";
+        assert!(on_complete_classpath(src, &resolver()).is_empty());
     }
 
     #[test]

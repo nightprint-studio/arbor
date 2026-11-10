@@ -32,7 +32,7 @@ import {
   type InlineCompletionSource,
 } from '$lib/components/shared/ui/code-editor';
 import { toCompletion } from './completion-item';
-import { offersFallbackWords, shouldAskForCompletion } from './java-completion-trigger';
+import { insideJavaString, offersFallbackWords, shouldAskForCompletion } from './java-completion-trigger';
 import { timed } from './perf';
 import { javaKeywordsAt } from './java-keywords';
 import {
@@ -397,24 +397,15 @@ function appendFallbackCompletions(
 }
 
 /**
- * Whether the caret sits inside a `"…"` string literal, by counting unescaped quotes on
- * the line before it.
+ * Whether the caret sits inside a string literal — a `"…"` or a text block, across lines.
  *
- * Deliberately a line-local character count rather than a tree query: it runs on every
- * completion keystroke, it only gates an optional extra request, and the failure mode is
- * benign in both directions (a missed framework list, or one extra call that returns
- * nothing). A text block spanning lines reads as "outside", which is correct often enough
- * and never wrong in a way that costs the user anything.
+ * A lexer over the document up to the caret (`insideJavaString`) rather than a line-local quote count:
+ * a query written as a text block is exactly where the framework extensions have something to say, and
+ * every line of one used to read as "outside". It runs once per completion request, never per
+ * keystroke that does not ask for one.
  */
 function insideStringLiteral(ctx: CompletionContext): boolean {
-  const line = ctx.state.doc.lineAt(ctx.pos);
-  const before = line.text.slice(0, ctx.pos - line.from);
-  let quotes = 0;
-  for (let i = 0; i < before.length; i++) {
-    if (before[i] === '\\') { i++; continue; }
-    if (before[i] === '"') quotes++;
-  }
-  return quotes % 2 === 1;
+  return insideJavaString(ctx.state.sliceDoc(0, ctx.pos));
 }
 
 const javaCompletionSource: CompletionSource = async (
@@ -424,7 +415,10 @@ const javaCompletionSource: CompletionSource = async (
   // `java-completion-trigger`, where the rule lives so it can be tested.
   const line = ctx.state.doc.lineAt(ctx.pos);
   const textBefore = line.text.slice(0, ctx.pos - line.from);
-  if (!shouldAskForCompletion(textBefore, ctx.explicit)) {
+  // One lexer pass per request, shared by the trigger rule and the framework branch below.
+  let inString: boolean | undefined;
+  const insideString = () => (inString ??= insideStringLiteral(ctx));
+  if (!shouldAskForCompletion(textBefore, ctx.explicit, insideString)) {
     return null;
   }
 
@@ -460,10 +454,9 @@ const javaCompletionSource: CompletionSource = async (
 
   // Inside a string literal the Java resolver has nothing to offer by construction — and
   // that is exactly where `@Value("${app.…}")` and `@Qualifier("…")` live. Ask the
-  // framework extensions there, and only there: the string test is a character count on
-  // the current line, so the common case costs nothing and no extra round-trip happens
-  // while typing ordinary code.
-  if ((items?.length ?? 0) === 0 && insideStringLiteral(ctx)) {
+  // framework extensions there, and only there: the string test is a single pass over the
+  // text before the caret, and no extra round-trip happens while typing ordinary code.
+  if (insideString()) {
     const extItems = await extCompletion(path, src, byteOffset).catch(() => []);
     if (!completionRequests.isCurrent(seq)) return null;
     if (extItems.length > 0) {

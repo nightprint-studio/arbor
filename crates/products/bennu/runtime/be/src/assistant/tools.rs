@@ -102,6 +102,7 @@ pub(super) fn all_specs() -> Vec<ToolSpec> {
     specs.extend(spawn::specs());
     specs.extend(structural::specs());
     specs.extend(ui::specs());
+    specs.extend(super::schedule::specs());
     specs.extend(tools_for("").into_iter().filter(offered).map(|d| ToolSpec {
         name: d.name,
         description: d.description,
@@ -130,7 +131,8 @@ pub(super) fn families_off(ids: &[String]) -> Off {
 fn offered(d: &ToolDescriptor) -> bool {
     let n = d.name.as_str();
     // The assistant has its own, encoding-safe edit tools; a raw write would bypass the proposal step.
-    !(n == "bennu_write_file" || n.starts_with("bennu_shader") || n.contains("wgsl") || n.contains("dtolab"))
+    // Imber has its own schedule tools (with an approval card); the MCP pair is for outside clients.
+    !(n == "bennu_write_file" || n.starts_with("bennu_shader") || n.contains("wgsl") || n.contains("dtolab") || n.starts_with("bennu_imber_schedule"))
 }
 
 /// When and how a conversation that has grown too large is made smaller on its own.
@@ -151,6 +153,8 @@ pub(super) struct Guard {
     pub session_base: f64,
     /// The model's prices; without them the run's cost is unknown and nothing is enforced mid-run.
     pub model: Option<ModelInfo>,
+    /// What this one run may spend, in dollars, when it is a scheduled one (nobody is watching it): reaching it stops the run.
+    pub run_cap_usd: Option<f64>,
 }
 
 /// What the run has used so far: the requests finished, and the one in progress.
@@ -256,7 +260,7 @@ impl ToolHost {
 
     /// Stop the run, before the next request, if it has taken the spending to a limit.
     fn enforce_limits(&self) {
-        let Some(Guard { limits, periods, session_base, model: Some(model) }) = &self.guard else { return };
+        let Some(Guard { limits, periods, session_base, model: Some(model), run_cap_usd }) = &self.guard else { return };
         let run_usd = {
             let spend = self.run_spend.lock().unwrap_or_else(|p| p.into_inner());
             let extra = self.session.extra_requests.lock().unwrap_or_else(|p| p.into_inner());
@@ -265,6 +269,13 @@ impl ToolHost {
         // This run's figure goes where the other runs can see it, and theirs come back: two conversations
         // running at once must not together pass a limit that neither passes alone.
         let others = super::ledger::in_flight().report(&self.session.run_id, run_usd);
+        // A scheduled run has its own, smaller cap: nobody is watching it, so it stops itself and says why.
+        if let Some(cap) = run_cap_usd.filter(|cap| run_usd >= *cap) {
+            let message = format!("Stopped: this scheduled run reached its cost cap ({:.2} EUR).", cap * limits.eur_per_usd);
+            self.session.set_end_note(message.clone());
+            self.note("warning", &message);
+            self.session.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         let spent = super::ledger::spent(periods, *session_base).plus_run(run_usd, others);
         if let Some((_, message)) = limits.breach(&spent) {
             self.note("warning", &format!("Stopped: {message}. Raise the limit in Settings › Imber › Spending limits to go on."));
@@ -643,6 +654,7 @@ impl ToolHost {
             n if spawn::is_agent_tool(n) => self.run_agent_tool(n, &call.input),
             n if live::is_live_tool(n) => self.run_live(n, &call.input),
             n if debug::is_debug_tool(n) => self.run_debug(n, &call.input),
+            n if imber_schedule::prelude::is_schedule_tool(n) => super::schedule::run_tool(&self.session.root, &self.session.conversation_id, n, &call.input),
             n if brp::is_brp_tool(n) => self.run_brp(&call.id, n, &call.input),
             n if screenshot::is_screenshot_tool(n) => self.run_screenshot(&call.id, n, &call.input),
             n if profile::is_profile_tool(n) => self.run_profile(n, &call.input),

@@ -222,6 +222,14 @@
     <NumberStepper value={s.limits.warn_percent} min={10} max={99} step={5}
                    ariaLabel="Warning percentage" onchange={(v) => s.setLimits({ warn_percent: Math.min(99, Math.max(10, Number(v) || 80)) })} />
   </FormRow>
+  <FormRow label="Scheduled run cap (EUR)" description="The most one scheduled run may cost; it ends as incomplete when it gets there. 0 = no cap.">
+    <NumberStepper value={s.limits.schedule_run_eur} min={0} step={0.5}
+                   ariaLabel="Scheduled run cap in euros" onchange={(v) => s.setLimits({ schedule_run_eur: Math.max(0, Number(v) || 0) })} />
+  </FormRow>
+  <FormRow label="Scheduled runs per day" description="How many scheduled runs may start in a day, so a mistaken schedule cannot spend the month overnight. 0 = no cap.">
+    <NumberStepper value={s.limits.schedule_runs_per_day} min={0} step={1}
+                   ariaLabel="Scheduled runs per day" onchange={(v) => s.setLimits({ schedule_runs_per_day: Math.max(0, Math.round(Number(v) || 0)) })} />
+  </FormRow>
 </div>
 {/if}
 

@@ -5,20 +5,19 @@
    * **evaluate** it in isolation to inspect the events it generates, and **play**
    * it one-shot to hear its effect — none of which touches the live arrangement.
    *
-   * One CodeMirror instance backs the active tab (its doc swaps on tab change),
+   * One shared `CodeEditor` backs the active tab (its doc swaps on tab change),
    * with the same highlight + autocomplete as the main editor. A snippet is
    * resolved against the active file's preamble (`withFileDeps`), so a bare
    * variable / an expression using file-level bindings evaluates + plays here too.
    * Errors come back inline from `merula_eval_snippet`.
    */
   import { onDestroy } from 'svelte';
-  import { EditorState } from '@codemirror/state';
-  import { EditorView } from '@codemirror/view';
+  import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
   import { FlaskConical, Play, Square, ClipboardPaste, Plus, X, CircleAlert, AlertTriangle } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import { createMerulaExtensions } from '../editor/merula-cm';
+  import { createMerulaLanguage } from '../editor/merula-language';
   import { withFileDeps } from '../editor/merula-lang';
   import type { MerulaIntelSource } from '../editor/merula-intel';
   import { merulaEvalSnippet, type MerulaQueryHap } from '$lib/ipc/merula/merula';
@@ -37,9 +36,8 @@
     instruments: () => soundsStore.instruments,
   };
 
-  let hostEl = $state<HTMLDivElement | undefined>();
-  let view: EditorView | undefined;
-  let suppress = false;        // guard the updateListener during a programmatic swap
+  let cm = $state<CodeEditor | null>(null);
+  const language = createMerulaLanguage({ intel });
   let mountedId: string | null = null;
   // Per-tab debounce + in-flight token so tabs evaluate independently (switching
   // tabs never cancels or misroutes another tab's eval).
@@ -80,48 +78,28 @@
     debounces.set(tabId, timer);
   }
 
-  function mount(target: HTMLDivElement) {
-    const updateListener = EditorView.updateListener.of((u) => {
-      if (u.docChanged && !suppress) {
-        const text = u.state.doc.toString();
-        const a = scratchStore.active;
-        scratchStore.setSource(a.id, text);
-        scheduleEval(a.id, text);
-      }
-    });
-    const state = EditorState.create({
-      doc: active.source,
-      extensions: [createMerulaExtensions({ intel }), updateListener],
-    });
-    view = new EditorView({ state, parent: target });
-    mountedId = active.id;
-    if (active.source.trim() && !active.result) scheduleEval(active.id, active.source);
+  function onInput(text: string) {
+    const a = scratchStore.active;
+    scratchStore.setSource(a.id, text);
+    scheduleEval(a.id, text);
   }
 
-  $effect(() => { if (hostEl && !view) mount(hostEl); });
-
-  // Swap the editor doc when the active tab changes (or an external seed replaced
-  // the active tab's text), without echoing it back through the updateListener.
+  // A tab switch (or the first mount) evaluates the tab that has source but no result yet; the editor
+  // swaps its document in place when `value` changes.
   $effect(() => {
     const a = scratchStore.active;
-    if (!view) return;
-    if (a.id !== mountedId || view.state.doc.toString() !== a.source) {
-      const switched = a.id !== mountedId;
-      mountedId = a.id;
-      suppress = true;
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: a.source } });
-      suppress = false;
-      if (switched && a.source.trim() && !a.result) scheduleEval(a.id, a.source);
-    }
+    if (a.id === mountedId) return;
+    mountedId = a.id;
+    if (a.source.trim() && !a.result) scheduleEval(a.id, a.source);
   });
 
-  onDestroy(() => { for (const t of debounces.values()) clearTimeout(t); view?.destroy(); view = undefined; });
+  onDestroy(() => { for (const t of debounces.values()) clearTimeout(t); });
 
   function loadSelection() {
     const r = editorSelectionStore.primary;
     if (!r) return;
     scratchStore.load(projectStore.activeSource.slice(r.from, r.to));
-    view?.focus();
+    cm?.focus();
   }
   async function play() {
     const full = await withFileDeps(projectStore.activeSource, active.source);
@@ -212,7 +190,9 @@
   </div>
 
   <div class="scr-body">
-    <div class="scr-editor" bind:this={hostEl}></div>
+    <div class="scr-editor">
+      <CodeEditor bind:this={cm} value={active.source} {language} oninput={onInput} fontSize={12.5} wrap lineNumbers={false} />
+    </div>
 
     <div class="scr-readout">
       {#if evaluating}
@@ -315,7 +295,8 @@
     flex: 1.4; min-width: 0; min-height: 0; overflow: hidden;
     border-right: 1px solid var(--border-subtle);
   }
-  .scr-editor :global(.cm-editor) { height: 100%; }
+  .scr-editor { display: flex; }
+  .scr-editor > :global(*) { flex: 1; min-width: 0; min-height: 0; }
   .scr-readout { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 4px 0; }
 
   .scr-state { display: flex; align-items: center; gap: 7px; padding: 12px 14px; font-size: var(--font-size-sm); color: var(--text-muted); }

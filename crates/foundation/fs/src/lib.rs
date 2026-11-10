@@ -25,6 +25,8 @@ pub mod copy;
 pub mod encoding;
 pub mod entry;
 pub mod error;
+pub mod gitmarker;
+pub mod mounts;
 pub mod mutate;
 pub mod pathexpand;
 pub mod prelude;

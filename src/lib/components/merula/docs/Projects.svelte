@@ -37,12 +37,14 @@ drums = "github:owner/repo@v1"</code></pre>
 
 <h2>Workspaces</h2>
 <p>
-  Group related projects into named, colour-coded <strong>workspaces</strong> — switch between
-  them from the project dropdown in the title bar, or manage them with <strong>Manage
-  workspaces…</strong> (the dropdown or the Command Palette). When a workspace is active, the
-  dropdown lists its member projects for one-click swapping; with none active it falls back to
-  your recents. Add the open project to a workspace from the manage dialog. Workspaces are saved
-  with the rest of the merula window state.
+  Group related projects into named, colour-coded <strong>workspaces</strong>. The title-bar
+  dropdown is the same workspace switcher as in Bennu: each workspace is a header row (click to
+  switch to it) with its projects nested underneath (click to open one, switching workspace first),
+  and the footer has <strong>Open project…</strong>, <strong>Recent projects…</strong>,
+  <strong>Add project…</strong>, <strong>New workspace…</strong> and <strong>Manage workspaces…</strong>
+  (also in the Command Palette). The manager is a board — a column per workspace, a card per
+  project; drag a project to another workspace (or <kbd>Alt</kbd> + <kbd>←</kbd>/<kbd>→</kbd>) to
+  move it. Workspaces are saved with the rest of the merula window state.
 </p>
 
 <h2>Picking up where you left off</h2>

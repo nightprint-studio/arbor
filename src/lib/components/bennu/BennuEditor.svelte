@@ -12,7 +12,7 @@
    */
   import {
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
-    PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
+    PenLine, Wand2, Save, Eye, X, XCircle, XSquare, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
     History, UserSearch, GitBranch, GitCommitHorizontal, TextSelect,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
     DownloadCloud, FileDown, Variable, Database, ListPlus,
@@ -25,6 +25,9 @@
   } from 'lucide-svelte';
   import { bennuDtoLabStore } from '$lib/stores/bennu/dtolab.svelte';
   import { tick, untrack } from 'svelte';
+  import { fly } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
+  import { animStore } from '$lib/stores/animations.svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -98,6 +101,7 @@
   import type { DiscoveredTest } from '$lib/types/bennu';
   import { completionNoteStore } from '$lib/stores/bennu/completion-note.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { merulaPlayStore, isMerulaPath } from '$lib/stores/bennu/merula-play.svelte';
   import { bennuMainClassStore } from '$lib/stores/bennu/main-classes.svelte';
   import { emptyInvocation as emptyCargoInvocation } from '$lib/ipc/bennu/cargo';
   import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
@@ -150,6 +154,7 @@
     extNavigate, extHighlights, extGutter, extActions, extRefresh, springEnvVar, xmlFetchSchema,
     type ExtHighlight, type ExtGutterMark, type ExtTarget, type ExtAction, type EnvVarView,
   } from '$lib/ipc/bennu/ext';
+  import { queryMarks } from './jpa-query-marks';
   import { isSpringPropertyFile } from './config-props-lang';
   import { propertiesPath, yamlPath } from './config-path';
   import Breadcrumb from '$lib/components/shared/ui/Breadcrumb.svelte';
@@ -2624,7 +2629,8 @@
       // An abstract base holds shared cases and cannot be instantiated — Surefire would refuse it,
       // so there is nothing to press. Its METHODS are not offered either: they run as part of
       // whatever concrete class inherits them, which is a different class from this file.
-      if (!t.is_abstract && t.methods.length > 0) {
+      // A suite, or the outer class of @Nested tests, has no case of its own but still runs the ones below it.
+      if (!t.is_abstract && (t.methods.length > 0 || t.container)) {
         out.set(t.line, { selector: t.selector, label: simple, disabled: t.disabled });
         for (const m of t.methods) {
           out.set(m.line, {
@@ -2869,7 +2875,22 @@
     await askAssistant(docPrompt(action, target, shown, lang));
   }
 
+  /** A `.merula` file plays as a whole, so its one ▶ (■ while it plays) sits on the first line. */
+  const merulaGutterMarks = $derived(
+    isMerulaPath(activePath)
+      ? [{
+          line: 1,
+          glyph: merulaPlayStore.isPlaying(activePath) ? '■' : '▶',
+          tooltip: merulaPlayStore.isPlaying(activePath)
+            ? 'Stop playing this file (Ctrl+Shift+C)'
+            : 'Play this file (Ctrl+Shift+C)',
+          className: 'cm-run-gutter',
+        }]
+      : [],
+  );
+
   const allGutterMarks = $derived([
+    ...merulaGutterMarks,
     ...runGutterMarks,
     // A test's arrow after an entry point's, on the rare line that is both — pressing ▶ on a
     // `main` means run the program.
@@ -2969,6 +2990,10 @@
    * six places has six real answers, so the menu is anchored at the pointer and lists them all.
    */
   function onGutterClick(line: number, event: MouseEvent) {
+    if (line === 1 && activePath && isMerulaPath(activePath)) {
+      void merulaPlayStore.toggle(activePath);
+      return;
+    }
     const call = controllerCalls.find((c) => c.line === line);
     if (call && !runLines.includes(line)) {
       showControllerMenu(call, event);
@@ -3216,7 +3241,7 @@
   /** Map backend byte spans to the editor's UTF-16 offsets + a CSS class per kind. */
   function toSpringMarks(src: string, hs: ExtHighlight[]) {
     const toU16 = makeByteToU16(src);
-    return hs.map((h) => ({
+    const marks = hs.map((h) => ({
       from: toU16(h.start),
       to: toU16(h.end),
       // `spring.placeholder.key` → `cm-fw-spring-placeholder-key`. An unknown kind still
@@ -3224,6 +3249,12 @@
       // than to nothing.
       className: `cm-fw cm-fw-${h.kind.replace(/\./g, '-')}`,
     }));
+    // A query's tint comes from the backend; its tokens from the lexer Picus shares (`jpa-query-marks`).
+    for (const m of [...marks]) {
+      if (m.className.endsWith('cm-fw-jpa-query-native')) marks.push(...queryMarks(src, m.from, m.to, true));
+      else if (m.className.endsWith('cm-fw-jpa-query')) marks.push(...queryMarks(src, m.from, m.to, false));
+    }
+    return marks;
   }
 
   /** The class-naming spans among the highlights, with the text they hold — what a Ctrl+B inside
@@ -3444,6 +3475,10 @@
 
   // ── Goto-line overlay (Ctrl+G) ───────────────────────────────────────────────
   let gotoOpen = $state(false);
+  /** Overlay slide duration: 0 under `prefers-reduced-motion` (or when animations are off). */
+  const overlayMs = $derived(
+    typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : animStore.dBase,
+  );
   let gotoValue = $state('');
   let gotoInputEl = $state<HTMLInputElement | null>(null);
 
@@ -5573,8 +5608,8 @@
     const hasRight = idx >= 0 && idx < openPaths.length - 1;
     const items: MenuItem[] = [
       { id: 'close',        label: 'Close',            icon: X },
-      { id: 'close-others', label: 'Close Others',     icon: X, disabled: !hasOthers },
-      { id: 'close-all',    label: 'Close All',        icon: X },
+      { id: 'close-others', label: 'Close Others',     icon: XCircle, disabled: !hasOthers },
+      { id: 'close-all',    label: 'Close All',        icon: XSquare },
       { id: 'close-right',  label: 'Close to the Right', icon: ArrowRightToLine, disabled: !hasRight },
       { id: 's1', label: '', separator: true },
       { id: 'copy-path',    label: 'Copy Path',        icon: Copy },
@@ -6124,7 +6159,9 @@
   {/if}
 
   {#if gotoOpen}
-    <div class="ed-goto" role="dialog" aria-label="Go to line" tabindex="-1">
+    <div class="ed-goto" role="dialog" aria-label="Go to line" tabindex="-1"
+         in:fly={{ y: -8, duration: overlayMs, easing: cubicOut }}
+         out:fly={{ y: -6, duration: overlayMs, easing: cubicOut }}>
       <Hash size={13} />
       <input bind:this={gotoInputEl} bind:value={gotoValue} onkeydown={onGotoKey} onblur={() => (gotoOpen = false)} placeholder="Line or line:col…" inputmode="numeric" />
     </div>
@@ -6368,8 +6405,10 @@
   .ed-goto {
     position: absolute; top: 64px; right: 14px;
     display: flex; align-items: center; gap: 6px;
-    background: var(--bg-elevated); border: 1px solid var(--border);
-    border-radius: var(--radius-md); box-shadow: var(--shadow-popup);
+    background: var(--bg-elevated);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-popup), 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
     padding: 6px 8px; color: var(--text-muted); z-index: 20;
   }
   .ed-goto input {
@@ -6622,6 +6661,19 @@
   :global(.cm-content .cm-fw-jpa-query-string span) { color: var(--syntax-string, #6a8759); }
   :global(.cm-content .cm-fw-jpa-query-number),
   :global(.cm-content .cm-fw-jpa-query-number span) { color: var(--syntax-number, #6897bb); }
+  /* The rest of the shared SQL lexer's vocabulary — same colours the Picus editor paints with. */
+  :global(.cm-content .cm-fw-jpa-query-type),
+  :global(.cm-content .cm-fw-jpa-query-type span) { color: var(--syntax-type, #4d9be6); }
+  :global(.cm-content .cm-fw-jpa-query-function),
+  :global(.cm-content .cm-fw-jpa-query-function span) { color: var(--syntax-function, #ffc66d); }
+  :global(.cm-content .cm-fw-jpa-query-field),
+  :global(.cm-content .cm-fw-jpa-query-field span) { color: var(--syntax-field, #9876aa); }
+  :global(.cm-content .cm-fw-jpa-query-constant),
+  :global(.cm-content .cm-fw-jpa-query-constant span) { color: var(--syntax-number, #6897bb); }
+  :global(.cm-content .cm-fw-jpa-query-operator),
+  :global(.cm-content .cm-fw-jpa-query-operator span) { color: var(--text-secondary); }
+  :global(.cm-content .cm-fw-jpa-query-comment),
+  :global(.cm-content .cm-fw-jpa-query-comment span) { color: var(--syntax-comment, #808080); font-style: italic; }
 
   /*
    * ── A pom, read rather than parsed ──────────────────────────────────────────────────────────

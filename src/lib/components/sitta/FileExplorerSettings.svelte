@@ -57,6 +57,7 @@
   let alwaysNewWindow = $state(explorerStore.alwaysNewWindow);
   let openExternalLinks = $state(explorerStore.openExternalLinks);
   let openWebLinks      = $state(explorerStore.openWebLinks);
+  let notifyDriveChanges = $state(explorerStore.notifyDriveChanges);
 
   $effect(() => { explorerStore.setGitAwareness(gitAwareness); });
   $effect(() => { explorerStore.setDefaultView(defaultView as ExplorerView); });
@@ -68,6 +69,7 @@
   $effect(() => { explorerStore.setAlwaysNewWindow(alwaysNewWindow); });
   $effect(() => { explorerStore.setOpenExternalLinks(openExternalLinks); });
   $effect(() => { explorerStore.setOpenWebLinks(openWebLinks); });
+  $effect(() => { explorerStore.setNotifyDriveChanges(notifyDriveChanges); });
 
   // Global shortcut goes through async setters (the backend register can fail
   // on a taken combo); read from the store and toast + revert on error.
@@ -166,6 +168,9 @@
       </FormRow>
       <FormRow label="Show hidden files" description="Reveal dot-prefixed entries by default.">
         <Toggle bind:checked={showHidden} />
+      </FormRow>
+      <FormRow label="Drive notifications" description="Show a toast when a USB drive or volume is plugged in or removed.">
+        <Toggle bind:checked={notifyDriveChanges} />
       </FormRow>
       <FormRow label="Recursive search" description="When searching, match files in all subfolders instead of only the current one.">
         <Toggle bind:checked={recursiveSearch} />

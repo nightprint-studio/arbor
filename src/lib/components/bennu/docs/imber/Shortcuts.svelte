@@ -30,6 +30,8 @@
     <tr><td><em>Imber: Expand panel</em> / <em>Imber: Restore panel</em></td><td>depending on the state of the panel</td></tr>
     <tr><td><em>Imber: Retry the failed request</em></td><td>when the last answer ended in an error</td></tr>
     <tr><td><em>Imber: Retry now (skip the wait)</em></td><td>while a request waits to be sent again</td></tr>
+    <tr><td><em>Imber: Schedules…</em></td><td>always</td></tr>
+    <tr><td><em>Imber: Schedule this prompt…</em></td><td>the composer has text and a project is open</td></tr>
     <tr><td><em>Imber: Manage skills…</em></td><td>always</td></tr>
     <tr><td><em>Imber: Mode — Manual</em> / <em>Accept edits</em> / <em>Autonomous</em></td><td>for the modes you are not in</td></tr>
     <tr><td><em>Imber: Next mode (Manual → Accept edits → Autonomous)</em></td><td>always</td></tr>

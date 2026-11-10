@@ -56,12 +56,13 @@ tracks(
 
 <h2>Where things live</h2>
 <ul>
-  <li><strong>Files</strong> — the project's <code>.merula</code> files, with a per-file summary.</li>
+  <li><strong>Project</strong> (<kbd>Alt</kbd> + <kbd>1</kbd>) — the project folder as a tree, the same one Bennu has: <code>.merula</code> files with a track count, git marks, a filter, and the file verbs on the row menu or the keyboard — <kbd>F2</kbd> rename, <kbd>Del</kbd> delete, <kbd>Ctrl</kbd> + <kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd> copy, cut, paste, <kbd>Ctrl</kbd> + <kbd>D</kbd> duplicate; drag a file onto a folder to move it.</li>
   <li><strong>Outline</strong> — tracks, functions and constants in the active file; tracks expand to their sections.</li>
-  <li><strong>Language reference</strong> — every island, combinator, transform and signal, searchable.</li>
+  <li><strong>Language reference</strong> (book icon, right rail) — every island, combinator, transform and signal, searchable.</li>
+  <li><strong>Syntax tree</strong> (braces icon, right rail, <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd>) — how the parser reads the open file. Click a node to select its text; moving the caret opens the tree down to the node it is in.</li>
   <li><strong>Sound bank</strong> — the engine's resolvable voices + downloadable sample packs. Click a voice to copy its name; star it to keep it in <strong>Favourites</strong>, and voices you use surface under <strong>Recently used</strong>.</li>
   <li><strong>Mixer</strong> — a fader per track, driven by the live engine.</li>
-  <li><strong>Inspector</strong> — the selected track's character and the picked event.</li>
+  <li><strong>Inspector</strong> (right rail) — the selected track's character and the picked event.</li>
   <li><strong>Keyboard</strong> — a piano that lights the notes sounding at the playhead, coloured per track.</li>
 </ul>
 <p>

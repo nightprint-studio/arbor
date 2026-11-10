@@ -30,7 +30,7 @@
   import type { HomeStarter } from '$lib/components/shared/internal/imber/imber-types';
   import { storeAssistantKey } from '$lib/ipc/corvus/imber';
   import { imberStore } from '$lib/stores/corvus/imber.svelte';
-  import { imberSchedulesStore } from '$lib/stores/corvus/imber-schedules.svelte';
+  import { corvusImberSchedules } from '$lib/stores/corvus/imber-schedules.svelte';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import type { ImberKind, ImberMode } from '$lib/types/corvus/imber';
@@ -45,7 +45,6 @@
   const pending = $derived(store.pending);
   const running = $derived(store.running);
 
-  let draft = $state('');
   let composer = $state<HTMLTextAreaElement | undefined>(undefined);
   let root = $state<HTMLElement | undefined>(undefined);
   let keyDraft = $state('');
@@ -78,15 +77,15 @@
   // Focus the composer when the panel opens on a repository.
   $effect(() => { if (tab && store.info?.hasKey) composer?.focus(); });
 
-  async function send(text = draft) {
+  async function send(text = store.draft) {
     const body = text.trim();
     if (!body || running || pending) return;
-    draft = '';
+    store.draft = '';
     await store.send(body);
   }
 
   function begin(s: HomeStarter) {
-    if (kind === 'chat' && s.text.endsWith(': ')) { draft = s.text; composer?.focus(); return; }
+    if (kind === 'chat' && s.text.endsWith(': ')) { store.draft = s.text; composer?.focus(); return; }
     void send(s.text);
   }
 
@@ -150,7 +149,7 @@
     <IconButton size={24} tooltip="Undo Imber's last action" disabled={!store.canUndo || running} onclick={() => void store.undo()}>
       <Undo2 size={14} />
     </IconButton>
-    <IconButton size={24} tooltip="Schedules" onclick={() => imberSchedulesStore.show()}>
+    <IconButton size={24} tooltip="Schedules" onclick={() => corvusImberSchedules.show()}>
       <CalendarClock size={14} />
     </IconButton>
     <IconButton size={24} tooltip="New conversation" disabled={!conv || messages.length === 0} onclick={() => void store.newConversation()}>
@@ -203,12 +202,12 @@
   {#snippet dock()}
     {#if ready}
       <ImberComposerFrame
-        bind:value={draft}
+        bind:value={store.draft}
         bind:element={composer}
         placeholder={kind === 'operate' ? 'Ask Imber to commit, push, branch, merge, or explain the history…' : 'Ask a question about git…'}
         disabled={!!pending}
         {running}
-        canSend={!!draft.trim() && !pending}
+        canSend={!!store.draft.trim() && !pending}
         onSend={() => void send()}
         onStop={() => void store.cancel()}
       >

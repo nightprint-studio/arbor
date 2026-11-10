@@ -44,18 +44,6 @@ export const imberForget = (conversationId: string) => corvus<void>('imber_forge
 export const imberCommitMessage = (root: string, hint: string, requestId: string) =>
   corvus<string>('imber_commit_message', { args: { root, hint, request_id: requestId } });
 
-// ── Schedules ────────────────────────────────────────────────────────────────────────────────────
-
-import type { ImberJob, ImberJobInput } from '$lib/types/corvus/imber';
-
-/** Every schedule, soonest first. The first call also starts the loop that fires them. */
-export const imberScheduleList = () => corvus<ImberJob[]>('imber_schedule_list');
-export const imberScheduleSave = (job: ImberJobInput) => corvus<ImberJob>('imber_schedule_save', { job });
-export const imberScheduleDelete = (id: string) => corvus<void>('imber_schedule_delete', { id });
-export const imberScheduleSetEnabled = (id: string, enabled: boolean) => corvus<ImberJob>('imber_schedule_set_enabled', { id, enabled });
-/** Run now, outside its times; its next run is unchanged. */
-export const imberScheduleRunNow = (id: string) => corvus<void>('imber_schedule_run_now', { id });
-
 // ── What Imber did, and undoing it ───────────────────────────────────────────────────────────────
 
 import type { ImberAction } from '$lib/types/corvus/imber';

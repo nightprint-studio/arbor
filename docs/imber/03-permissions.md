@@ -85,4 +85,4 @@ Press *Revoke* on an access card to take back a folder before the session ends. 
 - `.git` is never changed by file tools.
 - Deleting the project folder itself, an allowed folder, or anything outside the reach always asks.
 - Push does not exist; a commit always asks.
-- Spending limits apply in every mode ([Imber › Cost and context](13-cost-and-context.md)).
+- Spending limits apply in every mode ([Imber › Cost and context](14-cost-and-context.md)).

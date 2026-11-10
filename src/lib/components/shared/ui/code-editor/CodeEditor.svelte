@@ -118,6 +118,7 @@
     onGoto,
     onFindInFiles,
     onLensPress,
+    onReady,
   }: {
     value: string;
     language: LanguageDescriptor;
@@ -362,6 +363,12 @@
      *  Supplying this is what installs the lens layer: a lens is a control, and a host with nothing
      *  to do with a press should not draw something that invites one. */
     onLensPress?: (key: number) => void;
+    /**
+     * The CodeMirror view was created. For a host that layers its own extensions through the
+     * descriptor's `editing` and needs to dispatch their effects (live highlights, markers) or read
+     * the view directly. Called once per mount; the view lives until the component is destroyed.
+     */
+    onReady?: (view: EditorView) => void;
   } = $props();
 
   let hostEl: HTMLDivElement | undefined = $state();
@@ -922,6 +929,7 @@
       state = EditorState.create(stateConfig);
     }
     view = new EditorView({ state, parent: target });
+    onReady?.(view);
     view.dom.addEventListener('mousedown', onPointerDown);
     window.addEventListener('mouseup', onPointerUp);
     window.addEventListener('blur', onPointerUp);

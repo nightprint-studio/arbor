@@ -31,6 +31,25 @@ pub fn type_binary(text: &str, symbols: &FileSymbols, resolver: &dyn TypeResolve
     type_binary_in(text, crate::support::type_scope::TypeScope::Unknown, symbols, resolver)
 }
 
+/// The binary a simple type name denotes IN THIS FILE: what [`type_binary`] / the resolver found, but only
+/// when an import, the file's own package or `java.lang` could actually have brought it into scope.
+///
+/// [`type_binary`] answers "what would this name mean", generously by design — the project index is keyed by
+/// simple name, so `Util` finds `com.acme.a.Util` from any package. That is right for completion, hover and
+/// go-to (and is why Ctrl+click opens a class the file never imported) and wrong for a check: javac says
+/// `cannot find symbol` for it. Every check that decides whether a written name is *bound* asks this instead.
+///
+/// Deliberately blind to the three things that are in scope with nothing to import — a type declared in the
+/// file, a type parameter, a member type inherited from a supertype (JLS §8.1.5): callers exclude those first.
+pub(crate) fn type_binary_in_file_scope(name: &str, symbols: &FileSymbols, resolver: &dyn TypeResolver) -> Option<String> {
+    let package = symbols.package.as_deref();
+    resolver
+        .resolve_simple_name(name, &symbols.imports)
+        .into_iter()
+        .chain(type_binary(name, symbols, resolver))
+        .find(|binary| bennu_java::prelude::simple_name_reaches(binary, name, package, &symbols.imports))
+}
+
 /// [`type_binary`], told exactly WHERE the name is written — the one entry point that takes a
 /// [`TypeScope`](crate::support::type_scope::TypeScope). The two wrappers above pick a scope for their
 /// callers; anything with a real position should come through here.

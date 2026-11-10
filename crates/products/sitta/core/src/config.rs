@@ -58,6 +58,8 @@ pub struct SittaConfig {
     /// Additionally allow plain web links (`http://`, `https://`) from the address
     /// bar to open in the default browser. Gated behind `open_external_links`.
     pub open_web_links: bool,
+    /// Show a discreet toast when a drive / USB volume is plugged in or removed.
+    pub notify_drive_changes: bool,
     /// Schemes the user chose "remember" for in the external-link confirm prompt
     /// (lower-cased, e.g. `["vscode", "https"]`).
     pub remembered_external_schemes: Vec<String>,
@@ -87,6 +89,7 @@ impl Default for SittaConfig {
             max_recents:                 10,
             open_external_links:         false,
             open_web_links:              false,
+            notify_drive_changes:        true,
             remembered_external_schemes: Vec::new(),
             pinned_favourites:           Vec::new(),
             sidebar_sections:            Vec::new(),

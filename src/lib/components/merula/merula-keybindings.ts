@@ -77,6 +77,10 @@ export const MERULA_BINDINGS: MerulaBinding[] = [
   // muscle memory carries across both windows.
   { id: 'command_palette', key: 'k', ctrl: true, scope: 'global', description: 'Open the Command Palette' },
   // `F1` opens the docs, `Shift+F1` the shortcuts cheat-sheet — matches Arbor.
+  // `Alt+1` (IntelliJ / Bennu) — toggle the Project tree.
+  { id: 'toggle_project', key: '1', alt: true, scope: 'global', description: 'Toggle the Project tree' },
+  // `Ctrl+Shift+Y` — the syntax tree of the open file (same chord as Picus's tree panel).
+  { id: 'toggle_ast', key: 'y', ctrl: true, shift: true, scope: 'global', description: 'Toggle the syntax-tree panel' },
   { id: 'docs',         key: 'F1', scope: 'global', description: 'Open the documentation' },
   { id: 'shortcuts',    key: 'F1', shift: true, scope: 'global', description: 'Show the keyboard shortcuts' },
   { id: 'settings',     key: ',', ctrl: true,  scope: 'global', description: 'Open Settings' },

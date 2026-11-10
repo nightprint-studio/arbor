@@ -51,7 +51,8 @@
 
 <h2>A <code>@Query</code> stops being a string</h2>
 <ul>
-  <li>Keywords, parameters, literals and numbers are coloured inside it.</li>
+  <li>It is coloured with the same SQL lexer as the Picus editor: keywords, types, function calls, parameters, literals, numbers, comments, and a name after a dot as a column or attribute. The same colours apply in a text block and under <code>// language=sql</code>.</li>
+  <li>Completion works inside it, in a one-line string and across the lines of a text block: entities after <code>FROM</code>/<code>JOIN</code>, attributes after <code>alias.</code>, the method's parameters after <code>:</code>. In a native query it offers the tables and columns the entities map (<code>@Table</code>, <code>@Column</code>, <code>@JoinColumn</code>, or the derived upper-snake name) — a table the code does not map is not offered; connect Picus to complete from the live schema.</li>
   <li>JPQL and native SQL are tinted apart, being different risks: JPQL is resolved against the entity model, native SQL sent to the database as written.</li>
   <li>A <code>:name</code> no parameter binds is an error on the placeholder, with the fix named.</li>
   <li><kbd>Ctrl</kbd> + <kbd>B</kbd> inside a query opens the entity it selects from.</li>

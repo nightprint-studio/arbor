@@ -35,9 +35,11 @@ single `use arbor_fs::prelude::*;`). Operations are grouped by verb-domain:
 - **`unzip_limited`** — extract an archive you do not trust (a download): a
   hostile name or a symlink fails the run, entry-count/size caps are enforced
   while inflating, optional shared-root strip.
+- **`mounts`** — `list_mounts()` (volumes attached now) + pure `diff_mounts` (added/removed between two snapshots); feeds the explorer's drive watcher.
 - **`roots`** — quick-access roots (user dirs + drives + WSL distros) and
   per-drive storage usage (Overview dashboard).
 - **`size`** — recursive directory size + multi-selection totals.
+- **`gitmarker`** — `near_git_repo(path)`: a few `stat`s telling whether a folder is inside a repo or holds one (gates borrowing `corvus-be`).
 - **`pathexpand`** — address-bar `~` / `%VAR%` / `$VAR` / `${VAR}` expansion.
 - **`encoding`** — encoding-aware decode/encode for file content, plus
   detection that reports **how** it decided. The single canonical home for this

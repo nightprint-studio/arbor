@@ -20,12 +20,14 @@ The *Look into a running Bevy game* family (Settings › Imber › Tools it may 
 - `brp_get`: one entity in full.
 - `brp_resources` and `brp_get_resource`: the resources and one resource's value.
 - `brp_types`: the type registry, so it knows the shape of a component before it asks for it.
+- `brp_screenshot`, `brp_stats`, `brp_actions` and `brp_states`: the game's window as an image (900 px wide unless asked otherwise), its frame time and diagnostics, and the actions it lets a remote client run. These need the `arbor-bevy-remote` plugin in the game (see **Bevy Remote**).
+- `brp_watch`: one entity observed for a few seconds (5 by default, 30 at most), reporting which fields changed and their first and last value.
 
 Reading never asks. The connection itself and the protocol are explained on the **Bevy Remote** page.
 
 ## Changing a running game
 
-*Let it change a running Bevy game* in Settings is a separate switch, off by default, and it needs the Bevy family on. It adds `brp_mutate`, `brp_insert`, `brp_remove`, `brp_spawn`, `brp_despawn` and `brp_set_resource`. These act on live state with no review and no undo. Imber asks once per conversation ("Let Imber change the running game?"), the yes covers every change in that conversation, and every change is listed in the run's summary. Autonomous mode does not skip the question.
+*Let it change a running Bevy game* in Settings is a separate switch, off by default, and it needs the Bevy family on. It adds `brp_mutate`, `brp_insert`, `brp_remove`, `brp_spawn`, `brp_despawn`, `brp_set_resource`, `brp_reparent` and `brp_call`, and, to play the game, `brp_key`, `brp_type`, `brp_mouse`, `brp_gamepad`, `brp_action` and `brp_set_state` (`brp_action` runs one of the game's own registered actions). `brp_call` calls any Remote Protocol method by name; a method that only reads (`rpc.discover`, anything named `query`, `get` or `list`) runs without the question, any other asks like the rest. These act on live state with no review and no undo. Imber asks once per conversation ("Let Imber change the running game?"), the yes covers every change in that conversation, and every change is listed in the run's summary. Autonomous mode does not skip the question.
 
 ## Reading a profiler recording
 

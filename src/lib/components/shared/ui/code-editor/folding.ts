@@ -15,7 +15,7 @@
  * visible and its body collapses.
  */
 
-import { foldGutter, foldService, codeFolding, foldEffect } from '@codemirror/language';
+import { foldGutter, foldService, codeFolding, foldEffect, unfoldEffect } from '@codemirror/language';
 import { StateEffect, type Extension } from '@codemirror/state';
 import type { EditorState } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
@@ -72,6 +72,9 @@ export function createFoldingExtension(
 
   return [
     codeFolding(),
+    // Must be listed before foldGutter: its ViewPlugin.update() populates stateToView
+    // so the fold service (called from within the gutter's own update) finds the view.
+    viewRegistry,
     importsService(getTree),
     service,
     foldGutter({
@@ -82,14 +85,12 @@ export function createFoldingExtension(
         el.textContent = open ? '▾' : '▸'; // ▾ / ▸
         return el;
       },
-      // Recomputed when the tree has caught up with the text — see `treeCatchUp`.
-      foldingChanged: (u) => u.transactions.some((tr) => tr.effects.some((e) => e.is(treeCaughtUp))),
+      // Recomputed when the tree has caught up with the text, or when a fold/unfold action fires —
+      // the gutter must redraw in both cases to show the correct ▾/▸ marker after a user toggle.
+      foldingChanged: (u) => u.transactions.some((tr) => tr.effects.some((e) => e.is(treeCaughtUp) || e.is(foldEffect) || e.is(unfoldEffect))),
     }),
     treeCatchUp(getTree),
     foldAnimation(),
-    // Keep the view registry in sync so the (state-only) fold service can reach
-    // the live tree through its view.
-    viewRegistry,
   ];
 }
 
@@ -273,7 +274,7 @@ export function importBlockRange(state: EditorState, tree: Tree): { from: number
     }
   }
   if (!first || !last) return null;
-  const keyword = /^w+/.exec(state.doc.sliceString(first.startIndex, Math.min(first.startIndex + 12, state.doc.length)));
+  const keyword = /^\w+/.exec(state.doc.sliceString(first.startIndex, Math.min(first.startIndex + 12, state.doc.length)));
   const from = first.startIndex + (keyword ? keyword[0].length : 0);
   const to = Math.min(last.endIndex, state.doc.length);
   if (state.doc.lineAt(from).number >= state.doc.lineAt(to).number) return null;
@@ -328,14 +329,24 @@ export function foldImportsOnLoad(getTree: GetTree): Extension {
 //
 // CodeMirror's foldService callback receives only the EditorState, but reading
 // the tree needs the EditorView (the highlight plugin is view-scoped). We keep a
-// tiny WeakMap from state → view, refreshed by an updateListener bundled into
-// the folding extension, so the service can resolve its view.
+// tiny WeakMap from state → view, refreshed by a ViewPlugin so the mapping is
+// populated BEFORE the fold gutter's own plugin runs and calls the fold service.
+// An updateListener runs after all ViewPlugin updates, which is too late — the
+// fold service would see the new state without a view entry and return null,
+// causing the import-block chevron to vanish right after the user unfolds it.
 
 const stateToView = new WeakMap<EditorState, EditorView>();
 function viewForState(state: EditorState): EditorView | null {
   return stateToView.get(state) ?? null;
 }
-const viewRegistry: Extension = EditorView.updateListener.of((u) => {
-  stateToView.set(u.state, u.view);
-  if (u.startState !== u.state) stateToView.set(u.startState, u.view);
-});
+const viewRegistry: Extension = ViewPlugin.fromClass(
+  class {
+    constructor(view: EditorView) {
+      stateToView.set(view.state, view);
+    }
+    update(u: ViewUpdate) {
+      stateToView.set(u.state, u.view);
+      if (u.startState !== u.state) stateToView.set(u.startState, u.view);
+    }
+  },
+);

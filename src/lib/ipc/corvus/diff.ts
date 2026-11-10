@@ -78,13 +78,6 @@ export const getCommitsRangeFileDiff = (tabId: string, baseOid: string, targetOi
     encoding_overrides: overridesForTab(tabId),
   });
 
-export const getWorkdirDiff = (tabId: string, staged: boolean) =>
-  corvus<DiffFile[]>('get_workdir_diff', {
-    tab_id: tabId, staged,
-    context_lines: getContextLines(), diff_algo: getDiffAlgo(),
-    encoding_overrides: overridesForTab(tabId),
-  });
-
 /// One file's working-tree change, parsed — for a viewer that shows a single file at a time
 /// and so must not pay for the whole workdir (`path` is repo-relative, forward slashes).
 export const getWorkdirFileDiff = (tabId: string, staged: boolean, path: string) =>
@@ -93,15 +86,6 @@ export const getWorkdirFileDiff = (tabId: string, staged: boolean, path: string)
     context_lines: getContextLines(), diff_algo: getDiffAlgo(),
     encoding_overrides: overridesForTab(tabId),
   });
-
-/// Build the argument object for the streaming workdir-diff command.  The diff
-/// store drives the stream itself via `startStream('corvus', 'arbor://diff-stream',
-/// { cmd: 'get_workdir_diff_stream', args: workdirDiffStreamArgs(...) }, ...)`.
-export const workdirDiffStreamArgs = (tabId: string, staged: boolean) => ({
-  tab_id: tabId, staged,
-  context_lines: getContextLines(), diff_algo: getDiffAlgo(),
-  encoding_overrides: overridesForTab(tabId),
-});
 
 export const getFileAtCommit = (tabId: string, oid: string, path: string) => {
   const tab = tabsStore.tabs.find(t => t.id === tabId);

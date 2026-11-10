@@ -21,7 +21,7 @@
     ServerCog, Cog, Languages, Network, Gamepad2, Search, Coffee, FileCode2, Bug, History,
     FileText, Compass, ListTree, Sparkles, ShieldCheck, Wrench, Download, Package, Braces,
     Database, Layers, Palette, Flame, ScrollText, FileType2, SlidersHorizontal, ArrowLeftRight,
-    ListChecks, FolderPlus, Activity, Mic, Wand2,
+    ListChecks, FolderPlus, Activity, Mic, Wand2, CalendarClock,
   } from 'lucide-svelte';
   import Voice from './docs/Voice.svelte';
   import type { Component } from 'svelte';
@@ -130,7 +130,7 @@
     'imber': Sparkles, 'imber-start': Rocket, 'imber-conversations': ScrollText, 'imber-permissions': ShieldCheck,
     'imber-review': History, 'imber-tools': Wrench, 'imber-running': Activity, 'imber-debugging': Bug,
     'imber-bevy': Gamepad2, 'imber-visuals': Palette, 'imber-skills': BookOpen, 'imber-subagents': Network,
-    'imber-decisions': ListChecks, 'imber-cost': SlidersHorizontal, 'imber-editor': PenLine, 'imber-settings': Cog,
+    'imber-decisions': ListChecks, 'imber-schedules': CalendarClock, 'imber-cost': SlidersHorizontal, 'imber-editor': PenLine, 'imber-settings': Cog,
     'imber-shortcuts': Keyboard, 'imber-privacy': ShieldCheck, 'imber-faq': Compass,
   };
   const imberItems: DocsNavItem[] = imberPages.map((p) => ({ id: p.id, label: p.label, icon: IMBER_ICONS[p.id] ?? Sparkles }));

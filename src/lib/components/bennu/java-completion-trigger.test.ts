@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  completionSite, offersFallbackWords, shouldAskForCompletion, wordBefore,
+  completionSite, insideJavaString, offersFallbackWords, shouldAskForCompletion, wordBefore,
 } from './java-completion-trigger';
 
 describe('wordBefore', () => {
@@ -81,5 +81,36 @@ describe('inside an annotation', () => {
     expect(offersFallbackWords('  @Value("${spring.da')).toBe(false);
     expect(offersFallbackWords('  @GetMapping("/a") void f() { fo')).toBe(true);
     expect(offersFallbackWords('  String s = "ab')).toBe(true);
+  });
+});
+
+describe('insideJavaString', () => {
+  it('is true inside a plain literal and false once it is closed', () => {
+    expect(insideJavaString('String q = "select o from')).toBe(true);
+    expect(insideJavaString('String q = "select"; int a')).toBe(false);
+    expect(insideJavaString('x = "a\\"b')).toBe(true); // an escaped quote does not close it
+  });
+
+  it('follows a text block across lines — the shape that never reached the JPA extension', () => {
+    expect(insideJavaString('@Query("""\n  select o\n  from Order o where o.')).toBe(true);
+    expect(insideJavaString('@Query("""\n  select o\n  """) Object m(); int a')).toBe(false);
+  });
+
+  it('ignores quotes in comments and character literals', () => {
+    expect(insideJavaString('// he said "hi\nint a')).toBe(false);
+    expect(insideJavaString('/* " */ int a')).toBe(false);
+    expect(insideJavaString("char q = '\"'; int a")).toBe(false);
+  });
+
+  it('ends an unterminated plain literal at its line, as the compiler would', () => {
+    expect(insideJavaString('String a = "oops\nint b')).toBe(false);
+  });
+});
+
+describe('shouldAskForCompletion — bind parameters', () => {
+  it('asks after a colon only inside a string', () => {
+    expect(shouldAskForCompletion('where o.total > :', false, () => true)).toBe(true);
+    expect(shouldAskForCompletion('x = cond ? a :', false, () => false)).toBe(false);
+    expect(shouldAskForCompletion('x = cond ? a :', false)).toBe(false);
   });
 });

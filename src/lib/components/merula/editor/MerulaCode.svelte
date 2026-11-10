@@ -9,7 +9,21 @@
   import { onDestroy } from 'svelte';
   import { EditorState } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
-  import { createMerulaViewerExtensions } from './merula-cm';
+  import { createHighlightPlugin } from '$lib/components/shared/ui/code-editor/highlight';
+  import { codeEditorTheme } from '$lib/components/shared/ui/code-editor/theme';
+  import { merulaTheme } from './merula-cm';
+  import { createMerulaLanguage } from './merula-language';
+
+  /** The shared editor's theme and highlighter over merula's grammar — the same colours as the real
+   *  editor, with none of its machinery (no gutters, search, lint or selection). */
+  const viewerExtensions = () => [
+    codeEditorTheme,
+    createHighlightPlugin(createMerulaLanguage()).plugin,
+    merulaTheme,
+    EditorView.lineWrapping,
+    EditorView.editable.of(false),
+    EditorState.readOnly.of(true),
+  ];
 
   let { code }: { code: string } = $props();
 
@@ -18,7 +32,7 @@
 
   function mount(target: HTMLDivElement) {
     view = new EditorView({
-      state: EditorState.create({ doc: code, extensions: [createMerulaViewerExtensions()] }),
+      state: EditorState.create({ doc: code, extensions: viewerExtensions() }),
       parent: target,
     });
   }

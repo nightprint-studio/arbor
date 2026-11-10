@@ -29,11 +29,11 @@ The key is kept in a credential vault of its own, apart from the one that holds 
 
 The composer has one quiet line under the text box:
 
-- **Model**: each entry shows what it is for, the size of its window and its price per million tokens (input / output). The list and the prices come from a file; see [Imber › Cost and context](13-cost-and-context.md).
+- **Model**: each entry shows what it is for, the size of its window and its price per million tokens (input / output). The list and the prices come from a file; see [Imber › Cost and context](14-cost-and-context.md).
 - **Settings** (the sliders icon): *Effort* (how hard it thinks: Low, Medium, High, Extra high, Max; a model without such a setting ignores it), *Context window* (the largest window Imber may use, 50K up to 1M, limited by the model), *Reach*, *Permissions*, *Decisions*, *Skills…*, *Step plan*, *Sub-agents*, *Isolated copy* and *Build isolation*. Each shows its current value.
 - **Mode** (agent conversations only): Manual, Accept edits or Autonomous. See [Imber › Permissions and modes](03-permissions.md).
 
-The defaults for a *new* conversation are set in Settings › Imber › New conversations: Opus 5.5 at High effort with a 200K window, in Manual mode with the reach "this project". The composer changes them for the conversation you are in. The full list is in [Imber › Settings reference](15-settings.md).
+The defaults for a *new* conversation are set in Settings › Imber › New conversations: Opus 5.5 at High effort with a 200K window, in Manual mode with the reach "this project". The composer changes them for the conversation you are in. The full list is in [Imber › Settings reference](16-settings.md).
 
 ## Send a first request
 

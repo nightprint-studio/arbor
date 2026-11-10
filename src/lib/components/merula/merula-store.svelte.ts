@@ -28,7 +28,7 @@ export type LeftPanel = 'files' | 'outline' | 'soundbank';
  *  panel — see `usagesStore`.) */
 export type BottomPanel = 'console' | 'problems' | 'mixer' | 'jobs' | 'preview' | 'scratch' | 'keyboard' | 'launcher';
 /** Right-rail panels. */
-export type RightPanel = 'inspector' | 'docs';
+export type RightPanel = 'inspector' | 'docs' | 'ast';
 
 /** A one-shot request to jump the editor to a source offset (Outline click). */
 export interface GotoRequest {

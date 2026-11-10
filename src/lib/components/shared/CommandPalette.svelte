@@ -15,7 +15,7 @@
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { plansStore } from '$lib/stores/corvus/plans.svelte';
   import { imberStore } from '$lib/stores/corvus/imber.svelte';
-  import { imberSchedulesStore } from '$lib/stores/corvus/imber-schedules.svelte';
+  import { corvusImberSchedules } from '$lib/stores/corvus/imber-schedules.svelte';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { windowsStore } from '$lib/stores/windows.svelte';
@@ -488,7 +488,7 @@
     actions.push({
       id: 'action:imber-schedules', kind: 'action', icon: 'CalendarClock', group: 'Imber',
       title: 'Imber: Schedules…', subtitle: 'See, create and manage everything Imber is scheduled to do',
-      action: () => { onClose(); tick().then(() => imberSchedulesStore.show()); },
+      action: () => { onClose(); tick().then(() => corvusImberSchedules.show()); },
     });
     if (hasTab) {
       actions.push(
@@ -502,8 +502,20 @@
       actions.push({
         id: 'action:imber-schedule-new', kind: 'action', icon: 'CalendarPlus', group: 'Imber',
         title: 'Imber: New Schedule…', subtitle: 'Run a prompt, or wake this conversation, at a time or on a repeat',
-        action: () => { onClose(); tick().then(() => imberSchedulesStore.show({ create: true })); },
+        action: () => { onClose(); tick().then(() => corvusImberSchedules.show({ create: true })); },
       });
+      // Only offered with something typed in the composer: that text becomes the schedule's prompt.
+      if (imberStore.draft.trim()) {
+        actions.push({
+          id: 'action:imber-schedule-prompt', kind: 'action', icon: 'CalendarPlus', group: 'Imber',
+          title: 'Imber: Schedule this prompt…', subtitle: 'Turn what is typed in the Imber composer into a schedule',
+          action: () => {
+            const prompt = imberStore.draft.trim();
+            onClose();
+            tick().then(() => corvusImberSchedules.show({ create: true, seed: { action: 'prompt', prompt } }));
+          },
+        });
+      }
       actions.push(
         { id: 'action:imber-toggle', kind: 'action', icon: 'Sparkles', group: 'Imber',
           title: imberStore.open ? 'Imber: Close Assistant' : 'Imber: Open Assistant',

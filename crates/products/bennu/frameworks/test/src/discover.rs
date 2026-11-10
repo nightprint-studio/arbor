@@ -104,13 +104,17 @@ pub struct TestClass {
     /// The whole class is `@Disabled` / `@Ignore`d.
     pub disabled: bool,
     pub methods: Vec<TestMethod>,
+    /// Runs other tests without declaring one itself: a suite (`@Suite`, `@RunWith(Suite.class)`)
+    /// or the outer class of `@Nested` tests. It has no methods to list, but it is the thing
+    /// to press to run everything underneath.
+    pub container: bool,
 }
 
 impl TestClass {
-    /// Whether this class can be handed to a runner (a non-abstract class with at least one
-    /// test method).
+    /// Whether this class can be handed to a runner: a non-abstract class with at least one
+    /// test method, or one that runs other tests (see [`TestClass::container`]).
     pub fn runnable(&self) -> bool {
-        !self.is_abstract && !self.methods.is_empty()
+        !self.is_abstract && (!self.methods.is_empty() || self.container)
     }
 
     /// The simple class name, without any nesting (`Nested` of `Outer$Nested`).
@@ -142,12 +146,58 @@ pub fn discover_tests(facts: &JavaFacts, source: &str) -> Vec<TestClass> {
     let Some(framework) = framework_of(facts) else {
         return Vec::new();
     };
-    facts
+    let mut found: Vec<(&TypeFacts, TestClass)> = facts
         .types
         .iter()
-        .filter_map(|t| discover_class(t, facts, source, framework))
-        .filter(|c| !c.methods.is_empty())
+        .filter_map(|t| discover_class(t, facts, source, framework).map(|c| (t, c)))
+        .collect();
+    mark_containers(&mut found);
+    found
+        .into_iter()
+        .map(|(_, c)| c)
+        .filter(|c| !c.methods.is_empty() || c.container)
         .collect()
+}
+
+/// Whether the type is a suite: JUnit Platform's `@Suite`, or JUnit 4's `@RunWith(Suite.class)` /
+/// `@RunWith(Enclosed.class)`. Suites hold no `@Test` of their own — they only name what to run.
+fn is_suite(ty: &TypeFacts) -> bool {
+    ty.annotations.iter().any(|a| {
+        a.name == "Suite"
+            || (a.name == "RunWith"
+                && a.positional
+                    .iter()
+                    .chain(a.args.iter().map(|(_, v)| v))
+                    .any(|v| matches!(v.trim(), "Suite.class" | "Enclosed.class")))
+    })
+}
+
+/// Sets [`TestClass::container`]: a suite, or a class holding an `@Nested` class that itself has
+/// tests or is a container. Repeated until stable because nesting can be several levels deep and
+/// the scan lists types in source order, not innermost first.
+fn mark_containers(found: &mut [(&TypeFacts, TestClass)]) {
+    for (ty, class) in found.iter_mut() {
+        class.container = is_suite(ty);
+    }
+    loop {
+        let owners: Vec<usize> = (0..found.len())
+            .filter(|&i| !found[i].1.container)
+            .filter(|&i| {
+                let prefix = format!("{}.", found[i].1.fqcn);
+                found.iter().any(|(nested_ty, nested)| {
+                    nested.fqcn.starts_with(&prefix)
+                        && nested_ty.annotations.iter().any(|a| a.name == "Nested")
+                        && (!nested.methods.is_empty() || nested.container)
+                })
+            })
+            .collect();
+        if owners.is_empty() {
+            return;
+        }
+        for i in owners {
+            found[i].1.container = true;
+        }
+    }
 }
 
 /// One type's test methods, or `None` when it is not a shape that can hold any (an
@@ -185,6 +235,7 @@ fn discover_class(
         is_abstract: ty.is_abstract,
         disabled: disabled_annotation(&ty.annotations).is_some(),
         methods,
+        container: false,
     })
 }
 
@@ -462,6 +513,75 @@ mod tests {
         let inner = cs.iter().find(|c| c.fqcn.ends_with("Inner")).expect("nested class discovered");
         assert_eq!(inner.selector, "OuterTest$Inner");
         assert_eq!(inner.simple_name(), "Inner");
+    }
+
+    #[test]
+    fn an_outer_class_holding_only_nested_tests_is_a_runnable_container() {
+        let src = "package com.acme;\n\
+                   import org.junit.jupiter.api.Test;\n\
+                   import org.junit.jupiter.api.Nested;\n\
+                   class OuterTest {\n\
+                   \x20 @Nested class Inner {\n\
+                   \x20   @Test void inner() {}\n\
+                   \x20 }\n\
+                   }\n";
+        let cs = discover(src);
+        let outer = cs.iter().find(|c| c.selector == "OuterTest").expect("outer kept");
+        assert!(outer.methods.is_empty() && outer.container && outer.runnable());
+        let inner = cs.iter().find(|c| c.selector == "OuterTest$Inner").unwrap();
+        assert!(!inner.container);
+    }
+
+    #[test]
+    fn nesting_several_levels_deep_marks_every_owner() {
+        let src = "package com.acme;\n\
+                   import org.junit.jupiter.api.Test;\n\
+                   import org.junit.jupiter.api.Nested;\n\
+                   class A {\n\
+                   \x20 @Nested class B {\n\
+                   \x20   @Nested class C {\n\
+                   \x20     @Test void deep() {}\n\
+                   \x20   }\n\
+                   \x20 }\n\
+                   }\n";
+        let cs = discover(src);
+        assert_eq!(cs.len(), 3, "{cs:?}");
+        assert!(cs.iter().filter(|c| c.container).count() == 2);
+    }
+
+    #[test]
+    fn a_junit_platform_suite_is_runnable_without_methods() {
+        let src = "package com.acme;\n\
+                   import org.junit.platform.suite.api.Suite;\n\
+                   import org.junit.platform.suite.api.SelectClasses;\n\
+                   @Suite @SelectClasses({A.class})\n\
+                   public class AllTests {}\n";
+        let cs = discover(src);
+        assert_eq!(cs.len(), 1);
+        assert!(cs[0].container && cs[0].runnable());
+    }
+
+    #[test]
+    fn a_junit4_suite_runner_is_runnable_without_methods() {
+        let src = "package com.acme;\n\
+                   import org.junit.runner.RunWith;\n\
+                   import org.junit.runners.Suite;\n\
+                   @RunWith(Suite.class)\n\
+                   @Suite.SuiteClasses({A.class})\n\
+                   public class AllTests {}\n";
+        let cs = discover(src);
+        assert_eq!(cs.len(), 1);
+        assert!(cs[0].container);
+    }
+
+    #[test]
+    fn a_plain_runner_without_tests_is_still_not_a_test() {
+        let src = "package com.acme;\n\
+                   import org.junit.runner.RunWith;\n\
+                   import org.mockito.junit.MockitoJUnitRunner;\n\
+                   @RunWith(MockitoJUnitRunner.class)\n\
+                   public class Helper {}\n";
+        assert!(discover(src).is_empty());
     }
 
     #[test]

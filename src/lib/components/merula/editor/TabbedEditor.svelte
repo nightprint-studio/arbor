@@ -30,6 +30,7 @@
   import { structureStore } from '../stores/structure.svelte';
   import { intentionsStore } from '../stores/intentions.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import { astStore } from '../stores/ast.svelte';
   import { withFileDeps } from './merula-lang';
   import { merulaMaterialize } from '$lib/ipc/merula/merula';
   import type { MerulaSymbol } from './merula-lang';
@@ -41,6 +42,9 @@
     openSearch: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
     scrollToOffset: (offset: number, select?: boolean) => void;
+    caretByteOffset: () => number;
+    selectByteRange: (startByte: number, endByte: number) => void;
+    getValue: () => string;
     insertAtCursor: (text: string) => void;
     gotoSymbol: (name: string) => boolean;
     findUsages: () => { name: string | null; items: UsageItem[]; anchor: UsageAnchor | null } | null;
@@ -106,6 +110,29 @@
   $effect(() => {
     if (projectStore.activeFilePath) untrack(() => evalActive());
   });
+
+  // ── Syntax-tree panel bridge ─────────────────────────────────────────────────
+  // Only while the panel is open (nobody pays for a parse nobody reads). The text is the
+  // editor's own document, so the backend's byte ranges index exactly what is on screen.
+  const showingTree = $derived(merulaStore.rightPanel === 'ast');
+  $effect(() => {
+    if (!showingTree || !editorComp || !activePath) return;
+    void projectStore.sourceOf(activePath);
+    astStore.follow(untrack(() => editorComp!.getValue()));
+  });
+  // Caret → reveal the node holding it (line/col tick on every caret move).
+  $effect(() => {
+    void merulaStore.caretLine; void merulaStore.caretCol;
+    if (!showingTree || !editorComp) return;
+    untrack(() => void astStore.revealAt(editorComp!.caretByteOffset()));
+  });
+  // Node click → select its bytes in the editor.
+  $effect(() => {
+    const request = astStore.selectRequest;
+    if (!request || !editorComp) return;
+    untrack(() => editorComp?.selectByteRange(request.start, request.end));
+  });
+  $effect(() => () => astStore.clear());
 
   // ── Cross-file go-to-declaration ─────────────────────────────────────────────
   function crossFileGoto(word: string, importPath: string) {

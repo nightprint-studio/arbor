@@ -67,7 +67,9 @@ expression and leaves the previous trigger in effect on parse failure.
 | File           | Responsibility                                              |
 |----------------|-------------------------------------------------------------|
 | `action.rs`    | `Action` trait + `FnAction` closure adapter                 |
+| `calendar.rs`  | `Recurrence`, `next_after`, the missed-run rule, `period_starts` |
 | `error.rs`     | `SchedulerError` (`NotFound`, `InvalidCron`)                |
+| `jobs/`        | `Job<A>`, `Store<A>`, `JobInput`, `when_to_recurrence` (see below) |
 | `key.rs`       | `ScheduleKey { namespace, name }`                           |
 | `opts.rs`      | `ScheduleOpts` + `Gate` (per-tick sync predicate)           |
 | `prelude.rs`   | canonical public re-exports                                 |
@@ -128,3 +130,16 @@ For jobs that are **data** — listed, edited, persisted, asked "when next?" —
 memory: `Recurrence` (`once` / `interval` / `daily` / `weekly` / `cron`, times in local time), the pure
 `next_after(recurrence, instant)`, and the missed-run rule (`due`, `MissedPolicy::{Skip, RunOnce}`). Imber's
 schedules in Corvus are built on it.
+
+## Jobs as data (`jobs`)
+
+On top of `calendar`: a `Job<A>` (name, `Recurrence`, `MissedPolicy`, the repository it works on, a mode word, next /
+last run, run count, and a product-defined **action** `A: JobAction`), the rules that move it forward
+(`schedule_from`, `tick`, `started`, `finished` — the clock is a parameter), `JobInput` / `Job::from_input` (what a
+window's save becomes, keeping history and the interval anchor), `Store<A>` (the list in one JSON file, written through
+a temp file and renamed; a damaged file is left alone until the next save; an optional reader accepts an older format)
+and `when_to_recurrence` (the friendly `{"kind":"weekly","days":["mon","fri"],"time":"09:00"}` an assistant writes).
+`calendar::period_starts` gives where today / this week / this month began, for spending windows.
+
+Consumed by Imber's schedules (`imber-schedule`, `corvus-be`, `bennu-be`) and by Hirundo's runner schedules; the action
+is the only thing each brings. Adds `serde_json` to the dependencies; still no product knowledge.

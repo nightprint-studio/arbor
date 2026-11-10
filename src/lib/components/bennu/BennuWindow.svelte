@@ -212,6 +212,7 @@
   import { isI18nBundle } from './i18n/bundle-path';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { isPatinaPath } from '$lib/stores/bennu/patina-build';
+  import { merulaPlayStore, isMerulaPath } from '$lib/stores/bennu/merula-play.svelte';
   import { bennuCargoStore } from '$lib/stores/bennu/cargo.svelte';
   import { javaLevelStore } from '$lib/stores/bennu/java-level.svelte';
   import { emptyInvocation as emptyCargoInvocation } from '$lib/ipc/bennu/cargo';
@@ -268,6 +269,9 @@
   import { bennuAgentsStore } from '$lib/stores/bennu/assistant-agents.svelte';
   import { assistantAttachmentsStore } from '$lib/stores/bennu/assistant-attachments.svelte';
   import { assistantLayoutStore } from '$lib/stores/bennu/assistant-layout.svelte';
+  import { bennuImberSchedules } from '$lib/stores/bennu/imber-schedules.svelte';
+  import { listenImberScheduleEvents } from '$lib/stores/imber-schedule-events';
+  import ImberSchedulesModal from '$lib/components/shared/ImberSchedulesModal.svelte';
   import { bennuFormatStyleStore } from '$lib/stores/bennu/format-style.svelte';
 
   // Which file the editor is on, announced to the plugins as `bennu:file_opened`.
@@ -343,6 +347,10 @@
     // a plugin's only channel for saying what went wrong goes silent.
     const unlistenPluginLogs = pluginLogsStore.setupListeners();
     void pluginLogsStore.load();
+    // Imber's schedules. The backend starts the loop that fires them on the first list call, so load now: a
+    // schedule fires without the window ever being opened. The listener raises the "started" / "failed" toasts.
+    void bennuImberSchedules.load();
+    const unlistenImberSchedules = listenImberScheduleEvents('bennu', bennuImberSchedules);
     // Reconcile the frontend's disabled set with the backend's, before any contribution
     // filter runs off a stale one.
     listPluginInfo()
@@ -495,6 +503,7 @@
       unlistenCombo();
       unlistenContainers();
       unlistenPluginLogs();
+      unlistenImberSchedules();
       unlistenOpenPanel();
       bennuIndexStore.reset();
     };
@@ -719,6 +728,15 @@
     const file = projectStore.activeFilePath;
     if (root && isPatinaPath(file)) void bennuRunStore.buildPatinaMod(root, file!);
   }
+  /** Ctrl+Shift+C / Shift+F10 / palette on a `.merula` file — play it, or stop it when it is the one playing. */
+  function triggerMerulaToggle() {
+    const file = projectStore.activeFilePath;
+    if (isMerulaPath(file)) void merulaPlayStore.toggle(file!);
+  }
+  /** Palette "Merula: Stop" — whatever Merula playback this window started. */
+  function triggerMerulaStop() {
+    void merulaPlayStore.stop();
+  }
   /** Palette "Validate project" — the whole-project validation without compiling. */
   function triggerValidate() {
     const root = projectStore.project?.root;
@@ -727,6 +745,11 @@
   function triggerRun() {
     const root = projectStore.project?.root;
     if (!root) return;
+    // A `.merula` file is not a launch target of a run configuration: its ▷ plays the file (and stops it).
+    if (isMerulaPath(projectStore.activeFilePath)) {
+      triggerMerulaToggle();
+      return;
+    }
     // Honour the ACTIVE run configuration — all of it, VM args and environment included.
     // With none, the store looks for the project's entry points and runs the one it finds;
     // the editor opens only when there is a real question to answer (several, or none).
@@ -2248,6 +2271,9 @@
       { id: 'assistant-attach', title: 'Imber:Attach files to the message…', icon: 'Sparkles', action: () => run(() => { showAssistant(); setTimeout(() => assistantAttachmentsStore.requestPicker(), 0); }), when: true },
       { id: 'assistant-retry', title: 'Imber:Retry the failed request', icon: 'RotateCw', action: () => run(() => { showAssistant(); void bennuAssistantStore.retry(); }), when: bennuAssistantStore.canRetry },
       { id: 'assistant-retry-now', title: 'Imber:Retry now (skip the wait)', icon: 'RotateCw', action: () => run(() => void bennuAssistantStore.retryNow()), when: bennuAssistantStore.retrying !== null },
+      { id: 'assistant-schedules', title: 'Imber: Schedules…', icon: 'Calendar', action: () => run(() => bennuImberSchedules.show()), when: true },
+      // Only offered with something typed in the composer: that text becomes the schedule's prompt.
+      { id: 'assistant-schedule-prompt', title: 'Imber: Schedule this prompt…', icon: 'CalendarDays', action: () => run(() => bennuImberSchedules.show({ create: true, seed: { action: 'prompt', prompt: bennuAssistantStore.draft.trim() } })), when: !!bennuAssistantStore.draft.trim() && !!projectStore.project },
       { id: 'assistant-skills', title: 'Imber:Manage skills…', icon: 'Wand2', action: () => run(() => bennuAssistantStore.openSkills()), when: true },
       // How much the agent decides for itself. One verb per mode, so the choice is a few keystrokes from anywhere.
       ...MODES.map((m) => ({
@@ -2328,6 +2354,12 @@
         action: () => run(triggerBuild), when: idle },
       { id: 'build-patina', title: 'Build Patina mod', icon: 'Hammer',
         action: () => run(triggerBuildPatina), when: idle && isPatinaPath(projectStore.activeFilePath) },
+      // Merula playback is not a project run, so it ignores `idle` (no build lock involved).
+      { id: 'merula-play', title: 'Merula: Play this file', icon: 'Play', shortcut: 'Ctrl+Shift+C',
+        action: () => run(() => { const f = projectStore.activeFilePath; if (isMerulaPath(f)) void merulaPlayStore.play(f!); }),
+        when: isMerulaPath(projectStore.activeFilePath) },
+      { id: 'merula-stop', title: 'Merula: Stop', icon: 'Square',
+        action: () => run(triggerMerulaStop), when: !!merulaPlayStore.playing },
       { id: 'validate', title: 'Validate project (no compile)', icon: 'ListChecks',
         action: () => run(triggerValidate), when: idle && javaTools },
       { id: 'run', title: 'Run', icon: 'Play', shortcut: 'Shift+F10',
@@ -2614,6 +2646,12 @@
       bennuLogViewStore.setClean(!bennuLogViewStore.settings.clean);
       return true;
     }
+    // Play / stop the open `.merula` file, from wherever focus is.
+    if (isMerulaPath(projectStore.activeFilePath) && matchesBinding(e, keybindingsStore.getBinding('merula_play_toggle'))) {
+      e.preventDefault();
+      triggerMerulaToggle();
+      return true;
+    }
     // The Regex Tester, from wherever focus is (the editor included — it opens off the literal under the caret).
     if (matchesBinding(e, keybindingsStore.getBinding('regex_tester'))) {
       e.preventDefault();
@@ -2797,6 +2835,10 @@
     if (mod && !e.shiftKey && !e.altKey && e.key === 'F9') {
       if (!projectStore.project || bennuRunStore.active) return;
       e.preventDefault(); triggerBuild(); return;
+    }
+    if (!mod && e.shiftKey && !e.altKey && e.key === 'F10' && isMerulaPath(projectStore.activeFilePath)) {
+      // On a `.merula` file Run means play it.
+      e.preventDefault(); triggerMerulaToggle(); return;
     }
     if (!mod && e.shiftKey && !e.altKey && e.key === 'F10') {
       // Run launches a run configuration — a Java main class. A Cargo project has none.
@@ -3391,6 +3433,9 @@
 
 <!-- The skills manager opens from the palette, the assistant panel and Settings, so it lives here. -->
 <BennuSkillsModal />
+{#if bennuImberSchedules.open}
+  <ImberSchedulesModal store={bennuImberSchedules} onClose={() => bennuImberSchedules.hide()} />
+{/if}
 <AssistantContextModal />
 
 {#if bennuUiStore.projectConfigOpen}

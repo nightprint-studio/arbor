@@ -1,11 +1,11 @@
 //! Completion inside a JPQL `@Query` — entity names after `from`, fields after `alias.`, the
-//! method's parameters after `:`, and the keywords everywhere else.
+//! method's parameters after `:`, and the keywords everywhere else. A native query takes the same
+//! road to [`crate::sql_complete`], which speaks tables and columns instead.
 //!
 //! The same discipline as the rest of this crate: **offer only what is certain.** A name is
 //! suggested when the model says it exists; nothing is suggested inside a string literal of the
-//! query, in a native query (the identifiers there are tables and columns, which this crate does
-//! not know), or when the buffer no longer holds the query the model saw — a completion that
-//! replaces the wrong span corrupts the code.
+//! query, or when the buffer no longer holds the query the model saw — a completion that replaces
+//! the wrong span corrupts the code.
 
 use std::collections::HashMap;
 
@@ -26,7 +26,7 @@ pub fn completions(
     source: &str,
     offset: usize,
 ) -> Vec<CompletionItem> {
-    if query.native || offset < query.start || offset > query.end {
+    if offset < query.start || offset > query.end {
         return Vec::new();
     }
     // The query is read off the live buffer, but guard the span anyway.
@@ -48,6 +48,8 @@ pub fn completions(
 
     let (prefix, items) = if lead.ends_with(':') {
         (word, parameters(params))
+    } else if query.native {
+        crate::sql_complete::candidates(model, &query.text, lead, word)
     } else if let Some((qualifier, prefix)) = word.rsplit_once('.') {
         (prefix, members(model, &scope, qualifier))
     } else {
@@ -74,7 +76,7 @@ fn inside_literal(before: &str) -> bool {
     before.chars().filter(|c| *c == '\'').count() % 2 == 1
 }
 
-fn item(label: &str, kind: &str, detail: Option<String>) -> CompletionItem {
+pub(crate) fn item(label: &str, kind: &str, detail: Option<String>) -> CompletionItem {
     CompletionItem { label: label.to_string(), kind: kind.to_string(), detail, ..Default::default() }
 }
 
@@ -124,7 +126,11 @@ fn names(model: &JpaModel, aliases: &Aliases, lead: &str) -> Vec<CompletionItem>
     };
     match previous.as_str() {
         "from" | "update" => entities().collect(),
-        "join" | "fetch" | "in" => aliased().collect(),
+        // Standard path-join: `join o.items i` — existing aliases are the natural start.
+        // Hibernate cross-join: `join Order o on ...` — the entity name must also be offered,
+        // since it is a first-class token there, not a path through an alias.
+        "join" => aliased().chain(entities()).collect(),
+        "fetch" | "in" => aliased().collect(),
         _ => aliased().chain(hql::jpql_keywords().iter().map(|k| item(k, "keyword", None))).collect(),
     }
 }
@@ -198,7 +204,7 @@ fn is_keyword(word: &str) -> bool {
 }
 
 /// Words (dots kept inside, so `o.items` is one) and commas, skipping string literals.
-fn tokens(text: &str) -> Vec<String> {
+pub(crate) fn tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut word = String::new();
     let mut in_literal = false;
@@ -312,10 +318,24 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_offered_inside_a_literal_or_a_native_query() {
+    fn nothing_is_offered_inside_a_literal() {
         assert!(at("select o from Order o where o.name = 'a o.|", &[]).is_empty());
-        let q = QueryDef { start: 0, end: 5, text: "x".into(), native: true, ..QueryDef::default() };
-        assert!(completions(&model(), &[], &q, "x", 1).is_empty());
+    }
+
+    #[test]
+    fn inner_join_cross_join_offers_entity_names_and_existing_aliases() {
+        // After `INNER JOIN ` the user can either write an entity name (Hibernate cross-join
+        // syntax) or an alias path (standard JPQL path-join). Both must appear.
+        let items = at("select o from Order o INNER JOIN |", &[]);
+        assert!(items.iter().any(|l| l == "Order"), "entity name must be offered after JOIN");
+        assert!(items.iter().any(|l| l == "Customer"), "all entities must be offered");
+        assert!(items.iter().any(|l| l == "o"), "existing alias must be offered for path-join");
+
+        // After `JOIN ` with a typed prefix, filtering still works.
+        assert!(at("select o from Order o JOIN Or|", &[]).iter().any(|l| l == "Order"));
+
+        // Once the cross-join alias is established, fields through it resolve.
+        assert_eq!(at("select o from Order o JOIN Customer c where c.na|", &[]), ["name"]);
     }
 
     #[test]

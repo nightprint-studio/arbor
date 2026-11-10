@@ -71,7 +71,7 @@
   <thead><tr><th>From</th><th>Runs</th></tr></thead>
   <tbody>
     <tr><td>The Tests window's ▷</td><td>That row. An abstract or disabled Java class has no ▷: Surefire cannot instantiate the first, and the second would report skipped.</td></tr>
-    <tr><td>The ▶ in a Java file's gutter</td><td><em>Run</em> or <em>Debug</em> for that class or case. A disabled test keeps its arrow and says so. Arrows come from the file on disk, so an unsaved <code>@Test</code> has none.</td></tr>
+    <tr><td>The ▶ in a Java file's gutter</td><td><em>Run</em> or <em>Debug</em> for that class or case. A disabled test keeps its arrow and says so. A suite (<code>@Suite</code>, <code>@RunWith(Suite.class)</code>) and the outer class of <code>@Nested</code> tests have a class arrow too, even with no <code>@Test</code> of their own. Arrows come from the file on disk, so an unsaved <code>@Test</code> has none.</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> in the editor</td><td>The test the caret is in; above the first test, the class (Java) or the file's target (Rust)</td></tr>
     <tr><td><em>Run tests</em> on a folder or file in the project tree</td><td>What is under it — offered only where there is something, with the count</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F5</kbd></td><td>Every test</td></tr>

@@ -18,7 +18,7 @@ import { pendingApproval, scheduledText, upsertMessage } from '$lib/components/c
 import { setupTauriListeners } from '$lib/utils/tauri-listeners';
 import { uiStore } from '../ui.svelte';
 import { tabsStore } from './tabs.svelte';
-import { imberSchedulesStore } from './imber-schedules.svelte';
+import { corvusImberSchedules } from './imber-schedules.svelte';
 import { graphStore } from './graph.svelte';
 import { plansStore } from './plans.svelte';
 
@@ -44,6 +44,8 @@ function createImberStore() {
   let mode = $state<ImberMode>('manual');
   /** One conversation per repository path. */
   let byRoot = $state<Record<string, Conversation>>({});
+  /** What is typed in the composer (kept here so the palette can schedule it as a prompt). */
+  let draft = $state('');
   let commitRequest = $state<string | null>(null);
   /** What Imber did in the active repository, newest first (the undo list). */
   let actions = $state<ImberAction[]>([]);
@@ -79,7 +81,7 @@ function createImberStore() {
 
   function onEvent(e: ImberEvent) {
     // A scheduled run may belong to a conversation this window never saw; the schedule list still wants to know it ended.
-    if (e.kind === 'done') imberSchedulesStore.runEnded();
+    if (e.kind === 'done') corvusImberSchedules.runEnded();
     const c = ofEvent(e);
     if (!c) return;
     switch (e.kind) {
@@ -122,6 +124,8 @@ function createImberStore() {
     get info() { return info; },
     get mode() { return mode; },
     get current(): Conversation | null { return conv(root()); },
+    get draft() { return draft; },
+    set draft(v: string) { draft = v; },
     get messages(): ImberMessage[] { return conv(root())?.messages ?? []; },
     get running() { return conv(root())?.running ?? false; },
     /** What the run is parked on, if the user has to decide. */

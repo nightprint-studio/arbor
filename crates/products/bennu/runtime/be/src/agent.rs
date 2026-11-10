@@ -4272,6 +4272,7 @@ mod catalogue_tests {
                 is_abstract,
                 disabled: false,
                 methods,
+                container: false,
             },
             module: None,
         })

@@ -66,10 +66,69 @@ const CARGO_ICONS: Record<string, unknown> = {
   install: Rocket,
 };
 
+/**
+ * The colour of each **kind**, from the theme's own accents — so a themed palette recolours them and
+ * nothing here is a hex. One hue per ecosystem, which is what lets a list of mixed configurations be
+ * read by colour before it is read by name: Spring is green, a plain JVM application blue, tests
+ * purple, Tomcat amber, Cargo rust, scripts teal, an attach (not a launch) violet.
+ */
+const KIND_COLORS: Record<string, string> = {
+  application: 'var(--info)',
+  springboot: 'var(--success)',
+  junit: 'var(--color-tag)',
+  cargo: 'var(--color-file-deleted)',
+  tomcat: 'var(--warning)',
+  script: 'var(--color-reflog)',
+  attach: 'var(--color-workspace)',
+};
+
+/**
+ * Inside the Cargo kind the subcommand decides, for the reason it decides the icon: a list of crates
+ * all in one colour is the monochrome list this exists to replace. The same split as the icons —
+ * what *produces* (run, build, install) against what *judges* (test, check, lint).
+ */
+const CARGO_COLORS: Record<string, string> = {
+  run: 'var(--success)',
+  test: 'var(--color-tag)',
+  bench: 'var(--warning)',
+  build: 'var(--warning)',
+  check: 'var(--color-reflog)',
+  clippy: 'var(--info)',
+  fmt: 'var(--color-reflog)',
+  doc: 'var(--info)',
+  install: 'var(--color-workspace)',
+};
+
+/** The Cargo subcommand a configuration runs, as written — `cargo +nightly test` and `test --doc` both
+ *  read as `test`. */
+function cargoSubcommand(config: Pick<RunConfig, 'cargoCommand'>): string | undefined {
+  return (config.cargoCommand ?? '')
+    .trim()
+    .split(/\s+/)
+    .find((w: string) => w && !w.startsWith('+'));
+}
+
 /** The icon for `kind` alone — the coarse answer, kept for callers that have only a kind (a group
  *  header, an empty-state row). */
 export function runKindIcon(kind: string): IconComponent {
   return (KIND_ICONS[kind] ?? CircleHelp) as IconComponent;
+}
+
+/** The colour for `kind` alone — what a group header wears. A kind this table has never heard of is
+ *  muted rather than borrowing another kind's hue. */
+export function runKindColor(kind: string): string {
+  return KIND_COLORS[kind] ?? 'var(--text-muted)';
+}
+
+/** The colour for one configuration: its kind's, refined by the Cargo subcommand where there is one.
+ *  Pair with [`runConfigIcon`] — the two answer the same question at the same grain. */
+export function runConfigColor(config: Pick<RunConfig, 'kind' | 'cargoCommand'>): string {
+  if (config.kind === 'cargo') {
+    const sub = cargoSubcommand(config);
+    const hit = sub ? CARGO_COLORS[sub] : undefined;
+    if (hit) return hit;
+  }
+  return runKindColor(config.kind);
 }
 
 /**
@@ -87,11 +146,7 @@ export function runConfigIcon(
     if (hit) return hit as IconComponent;
   }
   if (config.kind === 'cargo') {
-    // The subcommand as written, so `cargo +nightly test` and `test --doc` both land on `test`.
-    const first = (config.cargoCommand ?? '')
-      .trim()
-      .split(/\s+/)
-      .find((w: string) => w && !w.startsWith('+'));
+    const first = cargoSubcommand(config);
     const hit = first ? CARGO_ICONS[first] : undefined;
     if (hit) return hit as IconComponent;
   }

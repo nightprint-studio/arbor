@@ -4,7 +4,7 @@
 use crate::entry::{DriveUsage, FsRoot, OverviewStats};
 
 #[cfg(target_os = "windows")]
-fn enumerate_drives() -> Vec<FsRoot> {
+pub(crate) fn enumerate_drives() -> Vec<FsRoot> {
     use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
 
     let mut drives = Vec::new();
@@ -64,6 +64,8 @@ fn list_fs_roots_blocking() -> Vec<FsRoot> {
             path: "/".to_string(),
             kind: "drive".to_string(),
         });
+        // Removable media / mounted volumes, so a plugged USB shows up beside `/`.
+        roots.extend(crate::mounts::list_mounts());
     }
 
     roots

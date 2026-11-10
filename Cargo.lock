@@ -569,6 +569,7 @@ dependencies = [
  "chrono",
  "cron",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -967,6 +968,7 @@ dependencies = [
  "arbor-plugin-rpc",
  "arbor-process-ext",
  "arbor-rpc",
+ "arbor-scheduler",
  "arbor-syntax",
  "base64 0.22.1",
  "bennu-assertj",
@@ -1027,6 +1029,7 @@ dependencies = [
  "bennu-wgsl",
  "bennu-xml",
  "imber-core",
+ "imber-schedule",
  "imber-transport",
  "libc",
  "notify",
@@ -2596,6 +2599,7 @@ dependencies = [
  "dirs 6.0.0",
  "git2",
  "imber-core",
+ "imber-schedule",
  "imber-transport",
  "regex",
  "schemars 1.2.1",
@@ -4974,6 +4978,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "imber-schedule"
+version = "0.3.0"
+dependencies = [
+ "arbor-scheduler",
+ "imber-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "imber-transport"
 version = "0.3.0"
 dependencies = [
@@ -5826,6 +5840,7 @@ dependencies = [
  "arbor-feedback",
  "arbor-ipc",
  "arbor-rpc",
+ "arbor-syntax",
  "futures-util",
  "merula",
  "merula-core",
@@ -8887,10 +8902,10 @@ dependencies = [
  "arbor-be",
  "arbor-core",
  "arbor-exe-icon",
+ "arbor-fs",
  "arbor-ipc",
  "arbor-plugin-core",
  "arbor-rpc",
- "corvus-git",
  "serde",
  "serde_json",
  "sitta-core",

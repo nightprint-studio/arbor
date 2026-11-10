@@ -137,6 +137,11 @@
      */
     external?: boolean;
     /**
+     * This row is a **test source** — the name takes the same green the project tree and the editor's
+     * tab strip give a test file, so the fact is read from the row instead of from its path.
+     */
+    test?: boolean;
+    /**
      * An extra dimension this item belongs to — a Maven module, a schema, a connection.
      *
      * Deliberately unnamed by this component: it renders whatever the host calls it (see
@@ -783,6 +788,7 @@
               type="button"
               class="nv-row"
               class:nv-ext={row.external}
+              class:nv-test={row.test}
               class:nv-on={index === selected}
               data-row={index}
               role="option"
@@ -991,6 +997,9 @@
   /* The matched characters, and the only thing bold in the row — which is what
      makes a subsequence match legible instead of mysterious. */
   .nv-name b { color: var(--accent); font-weight: 700; }
+  /* A test source: the name only, in the tree's own green. The matched letters keep the accent so
+     the match stays readable. */
+  .nv-row.nv-test .nv-name { color: var(--success); }
   .nv-detail {
     font-family: var(--font-code);
     font-size: var(--font-size-xs);

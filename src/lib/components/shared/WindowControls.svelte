@@ -139,13 +139,13 @@
          all light up together the moment the pointer enters the group, exactly
          like the real traffic lights. -->
     <button class="wc-btn wc-mac wc-close"    onclick={() => appWindow.close()}    use:tooltip={'Close'}    aria-label="Close window">
-      <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-        <path d="M3.9 3.9l4.2 4.2M8.1 3.9L3.9 8.1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+      <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" shape-rendering="geometricPrecision" aria-hidden="true">
+        <path d="M3.8 3.8l4.4 4.4M8.2 3.8L3.8 8.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
       </svg>
     </button>
     <button class="wc-btn wc-mac wc-minimize" onclick={() => appWindow.minimize()} use:tooltip={'Minimize'} aria-label="Minimize">
-      <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-        <path d="M3.1 6h5.8" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
+      <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" shape-rendering="geometricPrecision" aria-hidden="true">
+        <path d="M3.2 6h5.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
       </svg>
     </button>
     <button
@@ -161,16 +161,18 @@
       aria-expanded={zoomOpen}
     >
       {#if isMaximized}
-        <!-- Collapse: the two arrowheads meet in the centre (tips inward). -->
-        <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-          <path d="M6.3 6.3H3L6.3 3Z" fill="currentColor" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/>
-          <path d="M5.7 5.7H9L5.7 9Z" fill="currentColor" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/>
+        <!-- Collapse: two arrowheads pointing at the centre, their right-angle corners 2.3px apart —
+             filled only: an outline would swell each triangle and close the gap. -->
+        <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" shape-rendering="geometricPrecision" aria-hidden="true">
+          <path d="M5.2 5.2H2.2L5.2 2.2Z" fill="currentColor"/>
+          <path d="M6.8 6.8H9.8L6.8 9.8Z" fill="currentColor"/>
         </svg>
       {:else}
-        <!-- Expand: the platform's outward-pointing pair. -->
-        <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-          <path d="M3 3H6.5L3 6.5Z" fill="currentColor" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/>
-          <path d="M9 9H5.5L9 5.5Z" fill="currentColor" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/>
+        <!-- Expand: the platform's outward-pointing pair, hypotenuses 1.4px apart (symmetric about the
+             centre of the dot). -->
+        <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" shape-rendering="geometricPrecision" aria-hidden="true">
+          <path d="M3.3 3.3H7.7L3.3 7.7Z" fill="currentColor"/>
+          <path d="M8.7 8.7H4.3L8.7 4.3Z" fill="currentColor"/>
         </svg>
       {/if}
     </button>

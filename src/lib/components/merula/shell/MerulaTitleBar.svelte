@@ -10,10 +10,10 @@
    * (project switcher, transport, log threshold) are authored here as snippets.
    */
   import {
-    Play, Square, SkipBack, SkipForward, Rewind, FastForward, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
+    Play, Square, SkipBack, SkipForward, Rewind, FastForward, ChevronDown, Download, Settings, ScrollText, Keyboard,
     PanelLeft, PanelRight, Minimize2, Check, AlertTriangle,
-    FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut, FolderPen,
-    FileAudio, FileMusic, Layers, PackageOpen, Crop, SlidersHorizontal, LayoutGrid,
+    FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut,
+    FileAudio, FileMusic, Layers, PackageOpen, Crop, SlidersHorizontal,
     User, Plus, UserCog,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -24,6 +24,7 @@
   import ProductIcon from '$lib/components/shared/internal/ProductIcon.svelte';
   import WindowControls from '$lib/components/shared/WindowControls.svelte';
   import RecentProjectsModal from './RecentProjectsModal.svelte';
+  import MerulaWorkspaceSwitcher from './MerulaWorkspaceSwitcher.svelte';
   // Profiles are a global Arbor concept (shared vault/settings across windows);
   // both the store and the manager modal are window-agnostic and reused as-is.
   import ProfileManagerModal from '$lib/components/shared/ProfileManagerModal.svelte';
@@ -37,7 +38,6 @@
   import { merulaStore, LOG_LEVELS } from '../merula-store.svelte';
   import { merulaEngine } from '../stores/engine.svelte';
   import { configStore } from '../stores/config.svelte';
-  import { workspaceStore } from '../stores/workspace.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { renderStore } from '../stores/render.svelte';
@@ -89,11 +89,6 @@
       shortcut: 'Ctrl+Shift+R', onclick: () => projectActions.exportWav() },
   ]);
 
-  /** Last path segment (forward- or back-slash) for a recents label. */
-  function basename(path: string): string {
-    const parts = path.split(/[\\/]/).filter(Boolean);
-    return parts[parts.length - 1] ?? path;
-  }
 
   // macOS: the hamburger becomes the real menu bar (File · Project, from the
   // menu's own labelled separators). No-op elsewhere.
@@ -145,38 +140,6 @@
     { kind: 'submenu', id: 'profiles', label: 'Profile', icon: UserCog, items: profileItems },
   ]);
 
-  // ── Project fast-swap (workspaces + their projects / recents + open) ──────────
-  const projectName = $derived(projectStore.project?.name ?? 'No project');
-  const activeWs = $derived(workspaceStore.activeWorkspaceObj);
-  // When a workspace is active, its member projects are the swap list; otherwise
-  // fall back to the global recents.
-  const swapPaths = $derived(activeWs ? activeWs.project_paths : workspaceStore.recentProjects);
-  const projectItems = $derived<DropdownItem[]>([
-    // Workspaces section: switch the active group (or clear it), then Manage…
-    ...(workspaceStore.workspaces.length
-      ? [
-          { kind: 'separator' as const, label: 'Workspaces' },
-          ...workspaceStore.workspaces.map(w => ({
-            kind: 'item' as const, id: `ws:${w.id}`, label: w.name, icon: Layers,
-            active: w.id === workspaceStore.activeWorkspace,
-            onclick: () => workspaceStore.setActiveWorkspace(w.id === workspaceStore.activeWorkspace ? null : w.id),
-          })),
-        ]
-      : []),
-    { kind: 'item' as const, id: '__manage_ws', label: 'Manage workspaces…', icon: LayoutGrid, onclick: () => merulaStore.openWorkspaces() },
-    { kind: 'separator' as const, label: activeWs ? `${activeWs.name} · projects` : 'Recent' },
-    ...swapPaths.map(path => ({
-      kind: 'item' as const, id: path, label: basename(path), subtitle: path,
-      icon: FolderGit2, active: path === projectStore.project?.path,
-      onclick: () => void projectStore.open(path).catch(() => {}),
-    })),
-    ...(projectStore.project
-      ? [{ kind: 'separator' as const },
-         { kind: 'item' as const, id: '__rename', label: 'Rename project…', icon: FolderPen, onclick: () => merulaStore.openRenameProject() }]
-      : []),
-    { kind: 'item' as const, id: '__open', label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => projectActions.openProject() },
-  ]);
-
   // ── Log threshold ───────────────────────────────────────────────────────────
   const logItems = $derived<DropdownItem[]>(
     LOG_LEVELS.map(l => ({
@@ -208,15 +171,7 @@
   {/snippet}
 
   {#snippet leading()}
-    <Dropdown items={projectItems} position="fixed" direction="down" width="240px">
-      {#snippet trigger({ open, toggle })}
-        <button class="gtb-project" class:open onclick={toggle} use:tooltip={'Switch project'} aria-haspopup="menu" aria-expanded={open}>
-          <FolderGit2 size={14} />
-          <span class="gtb-project-name">{projectName}</span>
-          <ChevronDown size={12} />
-        </button>
-      {/snippet}
-    </Dropdown>
+    <MerulaWorkspaceSwitcher onRecent={() => (recentOpen = true)} />
   {/snippet}
 
   <!-- Log level + transport cluster (IntelliJ-style) -->
@@ -359,19 +314,6 @@
   }
   .gtb-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
   .gtb-icon.active { color: var(--accent); }
-
-  .gtb-project {
-    display: flex; align-items: center; gap: 7px;
-    height: 28px; margin-left: 4px; padding: 0 9px;
-    background: var(--bg-input); border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md); color: var(--text-primary);
-    font-size: var(--font-size-sm); font-weight: 500; cursor: pointer;
-    transition: border-color var(--transition-fast);
-    -webkit-app-region: no-drag;
-  }
-  .gtb-project:hover, .gtb-project.open { border-color: var(--border-focus); }
-  .gtb-project-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .gtb-project :global(svg:first-child) { color: var(--accent); }
 
   /* ── Run cluster ── */
   /* IntelliJ leaves a clear gap before the layout toggles / window controls —

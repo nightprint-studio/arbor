@@ -22,7 +22,7 @@
   import { getStatus, stageAll, unstageAll, discardAll, stagePatch, stagePaths, unstagePaths, discardPaths, pathsOf } from '$lib/ipc/corvus/stage';
   import { stashSave } from '$lib/ipc/corvus/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
-  import { getWorkdirDiff } from '$lib/ipc/corvus/diff';
+  import { getWorkdirFileDiff } from '$lib/ipc/corvus/diff';
   import { tooltip } from '$lib/actions/tooltip';
   import type { StageTarget } from '$lib/utils/stage/stage-tree';
 
@@ -66,27 +66,53 @@
     if (!tab) return;
     const s = await getStatus(tab.id);
     repoStore.setStatus(s);
-    if (!diffStore.selectedFile) {
-      const firstUnstaged = s.unstaged[0]?.path ?? s.untracked[0]?.path ?? null;
-      const firstStaged   = s.staged[0]?.path ?? null;
-      if (firstUnstaged) await loadDiff(firstUnstaged, false);
-      else if (firstStaged) await loadDiff(firstStaged, true);
-    }
+    await selectFirstIfNone(s);
   }
 
+  /** With no file selected, show the first changed one (unstaged side first). */
+  async function selectFirstIfNone(s: NonNullable<typeof status>) {
+    if (diffStore.selectedFile) return;
+    const firstUnstaged = s.unstaged[0]?.path ?? s.untracked[0]?.path ?? null;
+    const firstStaged   = s.staged[0]?.path ?? null;
+    if (firstUnstaged) await loadDiff(firstUnstaged, false);
+    else if (firstStaged) await loadDiff(firstStaged, true);
+  }
+
+  // The graph's WIP row empties the diff store instead of loading every changed file itself;
+  // when this panel is already open it is asked to pick the file to show.
+  $effect(() => {
+    function onSelectFirst() {
+      const s = repoStore.status;
+      if (tab && s) void selectFirstIfNone(s);
+    }
+    window.addEventListener('arbor:stage-select-first', onSelectFirst);
+    return () => window.removeEventListener('arbor:stage-select-first', onSelectFirst);
+  });
+
+  /** Latest request wins: a slow diff must not overwrite the one the user clicked afterwards. */
+  let diffRequest = 0;
+
+  /**
+   * Show ONE file's diff. The panel only ever displays the selected file, so only that file is
+   * diffed (pathspec-narrowed in the backend) — the rest of the working tree is never scanned or
+   * parsed, which is what made opening the panel and clicking a row slow on big changesets.
+   */
   async function loadDiff(path: string, staged: boolean) {
     if (!tab) return;
     currentDiffStaged = staged;
-    // Streaming load: the store populates itself via arbor://diff-stream-* events. We just say
-    // which path to select once the metadata list arrives, and show the spinner meanwhile.
-    diffStore.setPendingSelection(path);
+    const request = ++diffRequest;
     diffStore.setLoading(true);
     try {
-      await diffStore.loadWorkdirDiffStream(tab.id, staged);
+      const file = await getWorkdirFileDiff(tab.id, staged, path);
+      if (request !== diffRequest) return;
+      diffStore.clearCommitContext();
+      diffStore.setFiles([file]);
     } catch {
-      // On failure the backend emits arbor://diff-stream-error which clears loading; clear it
-      // defensively in case that never surfaced.
-      diffStore.setLoading(false);
+      // The file is no longer changed on that side (staged / discarded meanwhile): nothing to show.
+      if (request !== diffRequest) return;
+      diffStore.setFiles([]);
+    } finally {
+      if (request === diffRequest) diffStore.setLoading(false);
     }
   }
 
@@ -96,15 +122,14 @@
       await stagePatch(tab.id, patch);
       const f = diffStore.selectedFile;
       if (f) {
-        const remaining = await getWorkdirDiff(tab.id, currentDiffStaged);
-        const fileEntry = remaining.find(df => df.path === f.path);
+        // Only the edited file can have changed; the backend errors when it has no change left on this side.
+        const fileEntry = await getWorkdirFileDiff(tab.id, currentDiffStaged, f.path).catch(() => null);
         if (!fileEntry || fileEntry.hunks.length === 0) {
           if (currentDiffStaged) await unstagePaths(tab.id, pathsOf(f));
           else await stagePaths(tab.id, pathsOf(f));
           diffStore.setFiles([]);
         } else {
-          diffStore.setFiles(remaining);
-          diffStore.selectFile(f.path);
+          diffStore.setFiles([fileEntry]);
         }
       }
       await refreshStatus();

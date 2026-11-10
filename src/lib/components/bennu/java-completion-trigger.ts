@@ -45,9 +45,17 @@ export function completionSite(textBefore: string): CompletionSite {
  * - `@` — the only character in Java that cuts the legal names from every type on the classpath to
  *   the annotation types on it, so the popup at that instant is short and nearly always right.
  */
-export function shouldAskForCompletion(textBefore: string, explicit: boolean): boolean {
+export function shouldAskForCompletion(
+  textBefore: string,
+  explicit: boolean,
+  /** Lazily: whether the caret is inside a string literal. Only asked when it can change the answer. */
+  inString: () => boolean = () => false,
+): boolean {
   if (explicit || wordBefore(textBefore).length > 0) return true;
-  return /(\.|::|@)$/.test(textBefore) || ANNOTATION_STRING_START.test(textBefore) || /\$\{$/.test(textBefore);
+  if (/(\.|::|@)$/.test(textBefore) || ANNOTATION_STRING_START.test(textBefore) || /\$\{$/.test(textBefore)) return true;
+  // `:` opens a bind parameter in a query string — `where o.total > :|` — and means nothing elsewhere
+  // in Java (a ternary, a label, an enhanced for), so it asks only inside a string.
+  return textBefore.endsWith(':') && inString();
 }
 
 /** The opening quote of a string argument of an annotation — `@GetMapping("`, `@PostMapping(produces = "` — where the
@@ -71,4 +79,57 @@ export function insideAnnotationString(textBefore: string): boolean {
  */
 export function offersFallbackWords(textBefore: string): boolean {
   return completionSite(textBefore) !== 'member' && !insideAnnotationString(textBefore);
+}
+
+/**
+ * Whether the end of `before` (the document up to the caret) is inside a string literal — a plain
+ * `"…"` or a text block `"""…"""`, across lines.
+ *
+ * The line-local quote count this replaces read every line of a text block as "outside", so a JPQL or
+ * SQL query written the way modern Java writes them never reached the framework extension that knows
+ * its entities and tables. Comments and character literals are skipped, so a quote inside them opens
+ * nothing; a plain literal that is not closed on its line ends there, as the compiler would say.
+ */
+export function insideJavaString(before: string): boolean {
+  const n = before.length;
+  let i = 0;
+  while (i < n) {
+    const c = before[i];
+    if (c === '/' && before[i + 1] === '/') {
+      const end = before.indexOf('\n', i);
+      if (end < 0) return false;
+      i = end + 1;
+    } else if (c === '/' && before[i + 1] === '*') {
+      const end = before.indexOf('*/', i + 2);
+      if (end < 0) return false;
+      i = end + 2;
+    } else if (c === '"' && before.startsWith('"""', i)) {
+      let j = i + 3;
+      for (;;) {
+        if (j >= n) return true;
+        if (before[j] === '\\') { j += 2; continue; }
+        if (before.startsWith('"""', j)) { j += 3; break; }
+        j++;
+      }
+      i = j;
+    } else if (c === '"') {
+      let j = i + 1;
+      for (;;) {
+        if (j >= n) return true;
+        const d = before[j];
+        if (d === '\\') { j += 2; continue; }
+        if (d === '"') { j++; break; }
+        if (d === '\n') break; // unterminated: the string ended with its line
+        j++;
+      }
+      i = j;
+    } else if (c === "'") {
+      // A character literal (`'"'`, `'\''`): skipped whole so its quote opens nothing.
+      const close = before[i + 1] === '\\' ? i + 3 : i + 2;
+      i = before[close] === "'" ? close + 1 : i + 1;
+    } else {
+      i++;
+    }
+  }
+  return false;
 }

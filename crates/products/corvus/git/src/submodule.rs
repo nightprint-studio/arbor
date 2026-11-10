@@ -111,9 +111,21 @@ pub fn list_submodules(repo: &Repository) -> Result<Vec<SubmoduleInfo>> {
                         .and_then(|h| h.shorthand().map(String::from))
                 };
 
-                let (ahead, behind) = branch.as_deref()
-                    .map(|b| ahead_behind_from_upstream(&inner, b))
-                    .unwrap_or((0, 0));
+                // Compare the submodule's actual HEAD against the commit the parent
+                // records for it: the staged pointer when there is one, else the one
+                // in the parent's HEAD. Behind = `git submodule update` is due;
+                // ahead = a new pointer still has to be staged in the parent.
+                let (ahead, behind) = {
+                    let inner_oid  = inner.head().ok().and_then(|h| h.target());
+                    let parent_oid = sub.index_id().or_else(|| sub.head_id());
+                    match (inner_oid, parent_oid) {
+                        (Some(curr), Some(expected)) => inner
+                            .graph_ahead_behind(curr, expected)
+                            .map(|(a, b)| (a as u32, b as u32))
+                            .unwrap_or((0, 0)),
+                        _ => (0, 0),
+                    }
+                };
 
                 let is_dirty = inner.statuses(None)
                     .map(|s| !s.is_empty())
@@ -136,17 +148,6 @@ pub fn list_submodules(repo: &Repository) -> Result<Vec<SubmoduleInfo>> {
     }
 
     Ok(out)
-}
-
-/// Returns (ahead, behind) of the named local branch vs its upstream.
-fn ahead_behind_from_upstream(repo: &Repository, branch_name: &str) -> (u32, u32) {
-    let Ok(branch)   = repo.find_branch(branch_name, BranchType::Local) else { return (0, 0) };
-    let Ok(upstream) = branch.upstream() else { return (0, 0) };
-    let Some(local_oid) = branch.get().target()    else { return (0, 0) };
-    let Some(up_oid)    = upstream.get().target()  else { return (0, 0) };
-    repo.graph_ahead_behind(local_oid, up_oid)
-        .map(|(a, b)| (a as u32, b as u32))
-        .unwrap_or((0, 0))
 }
 
 fn short7(s: &str) -> String {

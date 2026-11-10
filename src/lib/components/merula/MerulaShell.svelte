@@ -11,8 +11,8 @@
    * arrangement, editor) lives under components/merula/.
    */
   import {
-    Files, ListTree, Music4, Terminal, AlertTriangle,
-    SlidersHorizontal, Crosshair, Braces, Boxes, Piano, Music2, FlaskConical, Minimize2, LayoutGrid,
+    FolderTree, ListTree, Music4, Terminal, AlertTriangle,
+    SlidersHorizontal, ScanSearch, Braces, BookOpen, Boxes, Piano, Music2, FlaskConical, Minimize2, LayoutGrid,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { tooltip } from '$lib/actions/tooltip';
@@ -24,7 +24,7 @@
   import MerulaTitleBar from './shell/MerulaTitleBar.svelte';
   import MerulaFooter from './shell/MerulaFooter.svelte';
 
-  import FilesPanel from './panels/FilesPanel.svelte';
+  import ProjectPanel from './panels/ProjectPanel.svelte';
   import OutlinePanel from './panels/OutlinePanel.svelte';
   import SoundBankPanel from './panels/SoundBankPanel.svelte';
   import ConsolePanel from './panels/ConsolePanel.svelte';
@@ -33,6 +33,8 @@
   import MixerPanel from './panels/MixerPanel.svelte';
   import InspectorPanel from './panels/InspectorPanel.svelte';
   import DocsPanel from './panels/DocsPanel.svelte';
+  import SyntaxTreePanel from '$lib/components/shared/internal/SyntaxTreePanel.svelte';
+  import { astStore } from './stores/ast.svelte';
   import ScratchPanel from './panels/ScratchPanel.svelte';
   import KeyboardPanel from './panels/KeyboardPanel.svelte';
   import LauncherPanel from './panels/LauncherPanel.svelte';
@@ -81,7 +83,7 @@
   import MerulaCommandPalette from './shell/MerulaCommandPalette.svelte';
   import RenameProjectModal from './shell/RenameProjectModal.svelte';
   import RenameFileModal from './shell/RenameFileModal.svelte';
-  import WorkspacesModal from './shell/WorkspacesModal.svelte';
+  import MerulaWorkspaceManagerModal from './shell/MerulaWorkspaceManagerModal.svelte';
   import MerulaDocsPanel from './shell/MerulaDocsPanel.svelte';
   import InstrumentPreviewPanel from './preview/InstrumentPreviewPanel.svelte';
   import { MERULA_BINDINGS, matchesMerula } from './merula-keybindings';
@@ -341,6 +343,8 @@
     toggle_metronome: () => transportUiStore.toggleMetronome(),
     cycle_count_in: () => transportUiStore.cycleCountIn(),
     command_palette: () => merulaStore.togglePalette(),
+    toggle_project: () => merulaStore.toggleLeft('files'),
+    toggle_ast: () => merulaStore.toggleRight('ast'),
     docs: () => merulaStore.toggleDocs(),
     shortcuts: () => merulaStore.openShortcuts(),
     settings: () => merulaStore.openSettings(),
@@ -392,7 +396,7 @@
   const showEditor = $derived(!merulaStore.collapseTabpane);
 
   const leftTop = $derived<ActivityRailItem[]>([
-    { id: 'files',     tooltip: 'Files',      icon: Files,    active: merulaStore.leftPanel === 'files',     onclick: () => merulaStore.toggleLeft('files') },
+    { id: 'files',     tooltip: 'Project',    shortcut: 'Alt+1', icon: FolderTree, active: merulaStore.leftPanel === 'files',     onclick: () => merulaStore.toggleLeft('files') },
     { id: 'outline',   tooltip: 'Outline',    icon: ListTree, active: merulaStore.leftPanel === 'outline',   onclick: () => merulaStore.toggleLeft('outline') },
     { id: 'soundbank', tooltip: 'Sound bank', icon: Music4,   active: merulaStore.leftPanel === 'soundbank', onclick: () => merulaStore.toggleLeft('soundbank') },
   ]);
@@ -409,8 +413,9 @@
     { id: 'scratch',  tooltip: 'Scratch', shortcut: 'Ctrl+Shift+S', icon: FlaskConical, active: merulaStore.bottomPanel === 'scratch', onclick: () => merulaStore.toggleBottom('scratch') },
   ]);
   const rightTop = $derived<ActivityRailItem[]>([
-    { id: 'inspector', tooltip: 'Inspector', icon: Crosshair, active: merulaStore.rightPanel === 'inspector', onclick: () => merulaStore.toggleRight('inspector') },
-    { id: 'docs',      tooltip: 'Language reference', icon: Braces, active: merulaStore.rightPanel === 'docs', onclick: () => merulaStore.toggleRight('docs') },
+    { id: 'inspector', tooltip: 'Inspector — the selected track', icon: ScanSearch, active: merulaStore.rightPanel === 'inspector', onclick: () => merulaStore.toggleRight('inspector') },
+    { id: 'ast',       tooltip: 'Syntax tree — how the parser reads the open file', shortcut: 'Ctrl+Shift+Y', icon: Braces, active: merulaStore.rightPanel === 'ast', onclick: () => merulaStore.toggleRight('ast') },
+    { id: 'docs',      tooltip: 'Language reference', icon: BookOpen, active: merulaStore.rightPanel === 'docs', onclick: () => merulaStore.toggleRight('docs') },
   ]);
   // Diagnostics / system panels — toggles on the right rail (they still dock at the
   // bottom, where their wide log / list layout belongs).
@@ -424,12 +429,13 @@
 <svelte:window onkeydown={onKeyDown} onfocusin={onFocusIn} onpointerdown={onFocusIn} />
 
 {#snippet leftContent()}
-  {#if merulaStore.leftPanel === 'files'}<FilesPanel />
+  {#if merulaStore.leftPanel === 'files'}<ProjectPanel />
   {:else if merulaStore.leftPanel === 'outline'}<OutlinePanel />
   {:else if merulaStore.leftPanel === 'soundbank'}<SoundBankPanel />{/if}
 {/snippet}
 {#snippet rightContent()}
   {#if merulaStore.rightPanel === 'inspector'}<InspectorPanel />
+  {:else if merulaStore.rightPanel === 'ast'}<SyntaxTreePanel source={astStore} emptyMessage="Open a .merula file and its syntax tree appears here." />
   {:else if merulaStore.rightPanel === 'docs'}<DocsPanel />{/if}
 {/snippet}
 {#snippet bottomContent()}
@@ -566,7 +572,7 @@
 {#if merulaStore.shortcutsOpen}<MerulaShortcutsModal onClose={() => merulaStore.closeShortcuts()} />{/if}
 {#if merulaStore.paletteOpen}<MerulaCommandPalette onClose={() => merulaStore.closePalette()} />{/if}
 {#if merulaStore.renameProjectOpen}<RenameProjectModal onClose={() => merulaStore.closeRenameProject()} />{/if}
-{#if merulaStore.workspacesOpen}<WorkspacesModal onClose={() => merulaStore.closeWorkspaces()} />{/if}
+{#if merulaStore.workspacesOpen}<MerulaWorkspaceManagerModal onClose={() => merulaStore.closeWorkspaces()} />{/if}
 {#if merulaStore.renameFileTarget}
   <RenameFileModal
     path={merulaStore.renameFileTarget.path}

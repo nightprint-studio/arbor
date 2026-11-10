@@ -64,7 +64,7 @@
   import { openInIde, getIdeConfig, startIdeDetection } from '$lib/ipc/corvus/worktree';
   import type { IdeConfig, DetectedIde } from '$lib/types/corvus/git';
   import { workspaceColorVar, type RepoRegistryEntry, type WorkspaceDef } from '$lib/types/corvus/workspace';
-  import { EXPLORER_PROJECTS_KEY, type ExplorerProjectsSource } from '$lib/stores/sitta/explorerProjects.svelte';
+  import { EXPLORER_PROJECTS_KEY, explorerProjects, type ExplorerProjectsSource } from '$lib/stores/sitta/explorerProjects.svelte';
   import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS, mergeColumns } from '$lib/stores/sitta/explorer.svelte';
   import type { ExplorerSavedSearch } from '$lib/types/config';
   import { openUrl } from '@tauri-apps/plugin-opener';
@@ -83,6 +83,8 @@
   import WindowControls from '$lib/components/shared/WindowControls.svelte';
   import ActivityBar from '$lib/components/shared/ui/ActivityBar.svelte';
   import ModalSidebarToggle from '../shared/ui/ModalSidebarToggle.svelte';
+  import StatusBarItem from '../shared/ui/StatusBarItem.svelte';
+  import StatusBarSeparator from '../shared/ui/StatusBarSeparator.svelte';
   import Button from '../shared/ui/Button.svelte';
   import Card from '../shared/ui/Card.svelte';
   import Spinner from '../shared/ui/Spinner.svelte';
@@ -287,7 +289,10 @@
   // `source` prop if given, else the product-root context (`EXPLORER_PROJECTS_KEY`),
   // else nothing (empty Projects section — e.g. Merula, which sets no source).
   const ctxSource = getContext<ExplorerProjectsSource | undefined>(EXPLORER_PROJECTS_KEY);
-  const src               = $derived<ExplorerProjectsSource | undefined>(source ?? ctxSource);
+  // Hosts that set neither (Bennu, Merula, …) fall back to the window-local store, loaded
+  // through sitta-be (the backend every picker already talks to) in onMount — so the Projects
+  // section matches the standalone explorer in every picker.
+  const src               = $derived<ExplorerProjectsSource | undefined>(source ?? ctxSource ?? explorerProjects);
   const projects          = $derived<RepoRegistryEntry[]>(src?.projects ?? []);
   const workspaces        = $derived<WorkspaceDef[]>(src?.workspaces ?? []);
   const activeWorkspaceId = $derived<string | null>(src?.activeWorkspaceId ?? null);
@@ -2661,20 +2666,31 @@
   let ideUnlisten: UnlistenFn | null = null;
   let fsOpUnlisten: UnlistenFn | null = null;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-  let rootsTimer: ReturnType<typeof setInterval> | null = null;
+  let drivesUnlisten: UnlistenFn | null = null;
 
-  // Quick-access roots (favourites + drives) are static except for removable
-  // media: a plugged/unplugged USB doesn't fire any event we listen to, so we
-  // poll `listFsRoots` on a light interval and on window focus, reassigning only
-  // when the drive set actually changed (no needless sidebar re-render).
-  async function refreshRoots() {
+  // Quick-access roots (favourites + drives) are static except for removable media.
+  // `sitta-be` watches the mounted volumes and pushes `arbor://drives-changed` when a
+  // drive is plugged or removed; we re-read the roots then (and on window focus, which
+  // also covers hosts where sitta-be isn't running), reassigning only when the set
+  // actually changed (no needless sidebar re-render). `announce` raises the optional toast.
+  async function refreshRoots(announce = false) {
     try {
       const next = await listFsRoots();
-      if (next.map(r => r.path).join('|') !== roots.map(r => r.path).join('|')) roots = next;
+      if (next.map(r => r.path).join('|') === roots.map(r => r.path).join('|')) return;
+      if (announce && explorerStore.notifyDriveChanges) {
+        const had = new Set(roots.map(r => r.path));
+        const has = new Set(next.map(r => r.path));
+        for (const r of next) if (r.kind === 'drive' && !had.has(r.path)) uiStore.showToast(`${r.name} connected`, 'info');
+        for (const r of roots) if (r.kind === 'drive' && !has.has(r.path)) uiStore.showToast(`${r.name} removed`, 'info');
+      }
+      roots = next;
     } catch { /* ignore */ }
   }
   function scheduleRefresh() { if (refreshTimer) clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { refreshTimer = null; refreshCurrent(); }, 200); }
   onMount(async () => {
+    // No Projects source from the host → load the window-local one via sitta-be. Idempotent:
+    // a no-op in windows whose owner (AppShell / ExplorerWindow) already loaded it.
+    if (!source && !ctxSource) void explorerProjects.load({ local: true });
     // Picker: jump straight to the requested folder (eager, before roots load)
     // so there's no Overview/empty flash.
     if (isPicker && initialPath) await navigate(initialPath);
@@ -2724,29 +2740,12 @@
       // The app icon is the drag image until a row's own label has been drawn.
       void dragIconPath().then((p) => { appIcon = p; }).catch(() => {});
     }
-    // Keep the Devices list current: poll for removable-media changes and refresh the instant the
-    // window regains focus (e.g. after plugging a USB).
-    //
-    // The poll runs ONLY while the window has the focus — the same rule Bennu's external-change
-    // tick follows. A drive plugged in while you were elsewhere is noticed by the focus refresh
-    // below, which is both sooner and cheaper than having asked fifteen times a minute in the
-    // meantime; and a backgrounded window's requests are the ones that pile up unanswered, since
-    // the webview is power-throttled there while the backend serving them is not.
-    const startRootsPoll = () => {
-      if (rootsTimer === null) rootsTimer = setInterval(() => { void refreshRoots(); }, 4000);
-    };
-    const stopRootsPoll = () => {
-      if (rootsTimer !== null) { clearInterval(rootsTimer); rootsTimer = null; }
-    };
-    if (document.hasFocus()) startRootsPoll();
+    // Keep the Devices list current without polling from the webview: the backend pushes a
+    // `drives-changed` event on plug/unplug; the focus refresh is the cheap safety net.
+    try { drivesUnlisten = await listen('arbor://drives-changed', () => { void refreshRoots(true); }); } catch { /* ignore */ }
     try {
-      focusUnlisten = await getCurrentWindow().onFocusChanged(({ payload }) => {
-        if (payload) { void refreshRoots(); startRootsPoll(); } else { stopRootsPoll(); }
-      });
-    } catch {
-      // No native focus events — poll unconditionally rather than never.
-      startRootsPoll();
-    }
+      focusUnlisten = await getCurrentWindow().onFocusChanged(({ payload }) => { if (payload) void refreshRoots(); });
+    } catch { /* no native focus events — the drive event still covers it */ }
     // Keyboard-first: park focus on the right control so navigation is live the
     // moment the explorer opens — save pickers focus the filename field (what
     // you came to type); any other browse view focuses the list so the arrow
@@ -2757,7 +2756,7 @@
       else if (view === 'browse') listEl?.focus();
     });
   });
-  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); focusUnlisten?.(); ideUnlisten?.(); fsOpUnlisten?.(); pvFileUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); fsWatchFileStop().catch(() => {}); });
+  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); focusUnlisten?.(); ideUnlisten?.(); fsOpUnlisten?.(); pvFileUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); drivesUnlisten?.(); fsWatchStop().catch(() => {}); fsWatchFileStop().catch(() => {}); });
 </script>
 
 {#snippet sbLabel(id: string, Ico: typeof Folder, text: string)}
@@ -3540,22 +3539,31 @@
       </ModalFooter>
     {:else if view === 'browse'}
       <ModalFooter align="between">
-        <span class="fx-foot-info">{selected.size > 0 ? selectionInfo : footerInfo}{#if clipboard}<span class="fx-clip"> · {clipboard.op === 'cut' ? 'Cut' : 'Copied'} {clipboard.paths.length}</span>{/if}</span>
+        <span class="fx-foot-left">
+          <StatusBarItem>{selected.size > 0 ? selectionInfo : footerInfo}</StatusBarItem>
+          {#if clipboard}
+            <StatusBarSeparator />
+            <StatusBarItem tone="muted">{clipboard.op === 'cut' ? 'Cut' : 'Copied'} {clipboard.paths.length}</StatusBarItem>
+          {/if}
+        </span>
         <span class="fx-foot-right">
           {#if gitStatus?.in_repo && gitStatus.branch}
-            <button type="button" class="fx-foot-branch" class:active={!!branchPopup}
-                    onclick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); void openBranchSwitch(gitStatus?.repo_root ?? currentPath, r.left, r.top); }}
-                    use:tooltip={`On branch ${gitStatus.branch}${gitStatus.ahead ? ` · ${gitStatus.ahead} ahead` : ''}${gitStatus.behind ? ` · ${gitStatus.behind} behind` : ''} — click to switch branch`}>
-              <GitBranch size={11} />{gitStatus.detached ? 'detached' : gitStatus.branch}{#if gitStatus.ahead}<span class="fx-ab">↑{gitStatus.ahead}</span>{/if}{#if gitStatus.behind}<span class="fx-ab">↓{gitStatus.behind}</span>{/if}
-            </button>
+            <StatusBarItem
+              active={!!branchPopup}
+              ariaLabel="Switch branch"
+              tooltip={`On branch ${gitStatus.branch}${gitStatus.ahead ? ` · ${gitStatus.ahead} ahead` : ''}${gitStatus.behind ? ` · ${gitStatus.behind} behind` : ''} — click to switch branch`}
+              onclick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); void openBranchSwitch(gitStatus?.repo_root ?? currentPath, r.left, r.top); }}>
+              <GitBranch size={11} />{gitStatus.detached ? 'detached' : gitStatus.branch}{#if gitStatus.ahead} ↑{gitStatus.ahead}{/if}{#if gitStatus.behind} ↓{gitStatus.behind}{/if}
+            </StatusBarItem>
+            <StatusBarSeparator />
           {/if}
-          <span class="fx-foot-path">{currentPath}</span>
+          <StatusBarItem tone="muted"><span class="fx-foot-path">{currentPath}</span></StatusBarItem>
         </span>
       </ModalFooter>
     {:else}
       <ModalFooter align="between">
-        <span class="fx-foot-info">Built-in explorer</span>
-        <span class="fx-foot-path">{drives.length} device{drives.length !== 1 ? 's' : ''} · {favourites.length} location{favourites.length !== 1 ? 's' : ''}</span>
+        <StatusBarItem>Built-in explorer</StatusBarItem>
+        <StatusBarItem tone="muted">{drives.length} device{drives.length !== 1 ? 's' : ''} · {favourites.length} location{favourites.length !== 1 ? 's' : ''}</StatusBarItem>
       </ModalFooter>
     {/if}
 {/snippet}
@@ -3584,11 +3592,11 @@
         </ActivityBar>
       {/if}
     </div>
-    <footer class="fx-win-foot" class:mac={isMac}>{@render footerBody()}</footer>
+    <footer class="fx-win-foot" class:mac={isMac} class:compact={!isPicker}>{@render footerBody()}</footer>
   </div>
 {:else}
   <Modal onClose={dismiss} width={isPicker ? '960px' : '1240px'} height={isPicker ? '620px' : '720px'}
-         padBody={false} bodyBorder={false} topGap
+         padBody={false} bodyBorder={false} topGap tinted
          showRightRail={view === 'browse'} zIndex="var(--z-modal-picker)" ariaLabel={isPicker ? dialogTitle : 'File Explorer'}>
     {#snippet rightRail()}{@render railButtons()}{/snippet}
     {#snippet header()}
@@ -3742,9 +3750,9 @@
      via `inset` left the flex children stale on WebView2 relayouts → the settings
      page collapsed). `min-height: 0` lets it shrink so the inner scroll panes size
      correctly. No `overflow: hidden` needed — the inner panels clip their own. */
-  .fx-win { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-elevated); }
+  .fx-win { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--chrome-fill); }
   /* padding-left falls back to 10px off macOS; on macOS it becomes the traffic-light gutter. */
-  .fx-win-bar { display: flex; align-items: center; gap: 8px; height: 38px; flex-shrink: 0; padding-left: var(--mac-traffic-gutter, 10px); }
+  .fx-win-bar { display: flex; align-items: center; gap: 8px; height: 38px; flex-shrink: 0; padding-left: var(--mac-traffic-gutter, 10px); background: var(--chrome-fill); position: relative; z-index: 100; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
   /* Mac trio on the leading edge: the trio brings its own inset, so the bar
      drops the padding that would otherwise double up. (macOS keeps it — there
      the gutter belongs to the native traffic lights.) */
@@ -3770,10 +3778,12 @@
      collapsing the body to ~0. Driving the height through the flex algorithm is
      recomputed reliably. */
   .fx-win-body { flex: 1; min-width: 0; min-height: 0; margin: 0 4px 4px; overflow: hidden; display: flex; flex-direction: column; }
-  .fx-win-foot { display: flex; align-items: center; padding: var(--modal-footer-padding); background: var(--modal-chrome-bg); flex-shrink: 0; }
+  .fx-win-foot { display: flex; align-items: center; padding: var(--modal-footer-padding); background: var(--chrome-fill); flex-shrink: 0; }
   /* macOS: the maximised/standalone window has rounded bottom corners — inset the
      footer's corner content so it clears the curve. */
   .fx-win-foot.mac { padding-left: 14px; padding-right: 14px; }
+  /* Status strip (browse / overview): slim IntelliJ-style bar, not a button row. */
+  .fx-win-foot.compact { padding-top: 2px; padding-bottom: 2px; min-height: 22px; }
 
   /* ══ Header chrome ══ */
   .fx-nav-btns { display: inline-flex; gap: 2px; flex-shrink: 0; }
@@ -3810,7 +3820,8 @@
      relayouts (e.g. the re-render after a settings toggle) UNLESS it can shrink.
      The window chrome (.fx-win-mid / .fx-win-body) already pairs the two; these
      two inner levels must too, or the settings page collapses mid-height. */
-  .fx-body { flex: 1; min-height: 0; display: flex; overflow: hidden; background: var(--bg-elevated); gap: 6px; }
+  /* Transparent: the gaps between panels show the chrome veil behind (window or tinted modal). */
+  .fx-body { flex: 1; min-height: 0; display: flex; overflow: hidden; gap: 6px; }
 
   /* ── Long-operation progress card (copy / move / duplicate) ─────────────── */
   .fx-op { position: absolute; right: 12px; bottom: 12px; width: 320px; max-width: calc(100% - 24px); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg, 0 6px 24px rgba(0,0,0,0.35)); padding: 10px 12px; z-index: 20; display: flex; flex-direction: column; gap: 7px; }
@@ -3869,6 +3880,14 @@
   /* ── Sidebar ── */
   .fx-sidebar { width: 196px; flex-shrink: 0; background: var(--bg-base); border-radius: var(--radius-lg); overflow-y: auto; padding-bottom: 8px; display: flex; flex-direction: column; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; transition: width var(--anim-dur-panel, 180ms) cubic-bezier(.16,1,.3,1); }
   .fx-sidebar.collapsed { width: 46px; }
+  /* Labels mount when the sidebar expands: fade them in while the width eases open, so the
+     text does not pop in at full opacity over a half-open column. */
+  .fx-sb-title, .fx-sb-label-text, .fx-sb-text { animation: fx-sb-fade var(--anim-dur-panel, 180ms) ease-out both; }
+  @keyframes fx-sb-fade { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .fx-sidebar { transition: none; }
+    .fx-sb-title, .fx-sb-label-text, .fx-sb-text { animation: none; }
+  }
   .fx-sb-top { display: flex; align-items: center; justify-content: space-between; height: 34px; padding: 0 8px 0 12px; box-sizing: border-box; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
   .fx-sb-title { font-size: var(--font-size-2xs); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); user-select: none; white-space: nowrap; overflow: hidden; }
   .fx-sidebar.collapsed .fx-sb-top { padding: 0; justify-content: center; }
@@ -4076,7 +4095,6 @@
 
   /* ══ Footer ══ */
   .fx-foot-info { font-size: var(--font-size-xs); color: var(--text-secondary); }
-  .fx-clip { color: var(--text-muted); }
   .fx-foot-path { font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
   .fx-foot-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
@@ -4126,18 +4144,9 @@
   .fx-ignored { opacity: 0.5; }
   .fx-ignored.selected { opacity: 0.75; }
 
-  /* Footer branch chip — clickable, toggles the Changes panel. */
-  .fx-foot-right { display: inline-flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
-  .fx-foot-branch {
-    display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
-    font-size: var(--font-size-xs); color: var(--text-secondary); font-family: var(--font-ui-sans);
-    padding: 1px 7px 1px 6px; border-radius: var(--radius-pill, 999px);
-    background: var(--bg-base); border: 1px solid var(--border-subtle, var(--border));
-    cursor: pointer; transition: background var(--transition-fast), border-color var(--transition-fast);
-  }
-  .fx-foot-branch:hover { background: var(--bg-hover); border-color: var(--border); }
-  .fx-foot-branch.active { background: var(--accent-subtle); border-color: transparent; color: var(--accent); }
-  .fx-foot-branch :global(svg) { color: var(--accent); flex-shrink: 0; }
+  /* Status strip groups (StatusBarItem / StatusBarSeparator). */
+  .fx-foot-left, .fx-foot-right { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .fx-foot-right { overflow: hidden; }
   .fx-ab { color: var(--text-muted); font-variant-numeric: tabular-nums; margin-left: 1px; }
 
   /* ── Changes panel (staged / unstaged list) ──────────────────────────────── */

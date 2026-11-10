@@ -1,9 +1,9 @@
 <script lang="ts">
   /**
-   * MerulaEditor — the CodeMirror 6 host for one `.merula` buffer. Format-specific
-   * sibling of the shared `StudioTextPane`, but merula-coupled: it wires the live
-   * engine stores (diagnostics → lint, active-haps → highlight) and Tree-sitter
-   * go-to-declaration directly, so the surrounding TabbedEditor stays thin.
+   * MerulaEditor — the host of one `.merula` buffer on the shared `CodeEditor`. The editor is
+   * Bennu's; what is merula's is the language descriptor (`merula-language.ts`) and this wiring of
+   * the live engine stores (diagnostics → lint, active-haps → highlight, key/clip lints → underlines)
+   * and of the DSL refactors, so the surrounding TabbedEditor stays thin.
    *
    * Controlled `value`: external writes (tab switch, cross-file open) flow in via
    * the prop; internal edits flow out via `oninput` (the parent debounces the
@@ -11,16 +11,16 @@
    * gotoSymbol / getValue) is exposed via `bind:this`.
    */
   import { onDestroy } from 'svelte';
-  import { EditorState } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
-  import { setDiagnostics } from '@codemirror/lint';
-  import { openSearchPanel } from '@codemirror/search';
+  import CodeEditor from '$lib/components/shared/ui/code-editor/CodeEditor.svelte';
+  import type { EditorDiagnostic } from '$lib/components/shared/ui/code-editor/types';
 
-  import { createMerulaExtensions, setActiveHaps, toActiveHapMarks, setOutOfScale, setClipRisk, toWarnMarks, toCmDiagnostics, getMerulaTree }
+  import { setActiveHaps, toActiveHapMarks, setOutOfScale, setClipRisk, toWarnMarks, getMerulaTree }
     from './merula-cm';
+  import { createMerulaLanguage } from './merula-language';
   import { merulaFormat } from '$lib/ipc/merula/merula';
   import type { MerulaIntelSource } from './merula-intel';
-  import { extractSymbols, identifierAt, identifierUsages, tracksReferencing, stringArgCallAt, declBodyRangeForSelection, withFileDeps, type MerulaSymbol } from './merula-lang';
+  import { extractSymbols, identifierAt, identifierUsages, tracksReferencing, stringArgCallAt, declBodyRangeForSelection, withFileDeps, makeByteToU16, type MerulaSymbol } from './merula-lang';
   import { symbolHighlightStore } from '../stores/symbol-highlight.svelte';
   import { editorSelectionStore } from '../stores/editor-selection.svelte';
   import { buildControlEdits, type ControlEdit, type EditChange } from './merula-edit';
@@ -69,10 +69,9 @@
     onCrossFileGoto?: (word: string, importPath: string) => void;
   } = $props();
 
-  let hostEl: HTMLDivElement | undefined = $state();
+  let cm = $state<CodeEditor | null>(null);
+  /** The CodeMirror view of the shared editor, once it exists — what the DSL refactors below work on. */
   let view: EditorView | undefined;
-  let suppressEmit = false;
-  let lastEmitted: string | null = null;
 
   // ── Symbol-under-caret → arrangement lane highlight ──────────────────────────
   // The occurrence plugin reports the identifier at the caret; resolve which
@@ -99,6 +98,15 @@
     }
     editorSelectionStore.set(ranges);
   }
+
+  // The language is built once per editor: its layers report back through these callbacks.
+  // svelte-ignore state_referenced_locally
+  const language = createMerulaLanguage({
+    intel,
+    onPreview: (name) => previewStore.showByName(name),
+    onSymbol: handleSymbol,
+    onSelection: handleSelection,
+  });
 
   // ── Right-click → play / send the selection ──────────────────────────────────
   let ctx = $state<{ x: number; y: number; text: string } | null>(null);
@@ -159,68 +167,25 @@
     if (importPath) onCrossFileGoto?.(word, importPath);
   }
 
-  function mount(target: HTMLDivElement) {
-    const updateListener = EditorView.updateListener.of((u) => {
-      if (u.docChanged && !suppressEmit) {
-        const text = u.state.doc.toString();
-        lastEmitted = text;
-        oninput?.(text);
-      }
-      if (u.focusChanged && u.view.hasFocus) onfocus?.();
-      if (oncaret && (u.selectionSet || u.docChanged)) {
-        const head = u.state.selection.main.head;
-        const line = u.state.doc.lineAt(head);
-        oncaret(line.number, head - line.from + 1);
-      }
-    });
-
-    const state = EditorState.create({
-      doc: value,
-      extensions: [
-        createMerulaExtensions({
-          readOnly,
-          onGoto: handleGoto,
-          onPreview: (name) => previewStore.showByName(name),
-          onSymbol: handleSymbol,
-          onSelection: handleSelection,
-          intel,
-        }),
-        updateListener,
-      ],
-    });
-    view = new EditorView({ state, parent: target });
-    pushDiagnostics();
+  function onReady(v: EditorView) {
+    view = v;
     pushActiveHaps();
+    pushOffScale();
+    pushClipRisk();
   }
-
-  $effect(() => { if (hostEl && !view) mount(hostEl); });
   onDestroy(() => {
-    view?.destroy();
     view = undefined;
     symbolHighlightStore.clear(); // drop the arrangement lane highlight with the editor
     editorSelectionStore.clear(); // drop the selection→region boxes with the editor
   });
 
-  // ── value (controlled) → editor ─────────────────────────────────────────────
-  $effect(() => {
-    const next = value;
-    if (!view) return;
-    if (next === lastEmitted) return;
-    const current = view.state.doc.toString();
-    if (current === next) return;
-    suppressEmit = true;
-    try {
-      view.dispatch({ changes: { from: 0, to: current.length, insert: next } });
-    } finally { suppressEmit = false; }
-  });
-
-  // ── diagnostics store → lint markers ────────────────────────────────────────
-  function pushDiagnostics() {
-    if (!view) return;
-    const src = view.state.doc.toString();
-    view.dispatch(setDiagnostics(view.state, toCmDiagnostics(diagnosticsStore.errors, src)));
-  }
-  $effect(() => { void diagnosticsStore.errors; pushDiagnostics(); });
+  // ── diagnostics store → lint markers (UTF-8 byte spans; the shared editor maps them) ──
+  const editorDiagnostics = $derived<EditorDiagnostic[]>(
+    diagnosticsStore.errors.map((e) => {
+      const from = e.start ?? 0;
+      return { from, to: e.end ?? from, severity: e.severity as EditorDiagnostic['severity'], message: e.message };
+    }),
+  );
 
   // ── active-haps store → live highlight ──────────────────────────────────────
   function pushActiveHaps() {
@@ -248,13 +213,12 @@
   $effect(() => { void clipLintStore.marks; void levelAnalysisStore.marks; pushClipRisk(); });
 
   // ── Imperative API ──────────────────────────────────────────────────────────
-  export function focus() { view?.focus(); }
+  export function focus() { cm?.focus(); }
 
   /** Open CodeMirror's search panel and focus its query field (routed here from
    *  the MerulaShell's Ctrl+F when the editor pane has focus). */
   export function openSearch() {
-    if (!view) return;
-    openSearchPanel(view);
+    cm?.openSearch();
   }
 
   export function scrollToOffset(offset: number, select = false) {
@@ -264,6 +228,27 @@
     view.dispatch({
       selection: select ? { anchor: pos, head: pos } : { anchor: pos },
       effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+    });
+    view.focus();
+  }
+
+  /** The caret as a UTF-8 byte offset into the document — the coordinate the
+   *  backend's syntax tree speaks (CodeMirror counts UTF-16 units). */
+  export function caretByteOffset(): number {
+    if (!view) return 0;
+    const head = view.state.selection.main.head;
+    return new TextEncoder().encode(view.state.doc.sliceString(0, head)).length;
+  }
+
+  /** Select a backend byte range and scroll it into view (a syntax-tree node click). */
+  export function selectByteRange(startByte: number, endByte: number) {
+    if (!view) return;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    const anchor = b2u(startByte);
+    const head = b2u(endByte);
+    view.dispatch({
+      selection: { anchor, head },
+      effects: EditorView.scrollIntoView(anchor, { y: 'center' }),
     });
     view.focus();
   }
@@ -531,7 +516,22 @@
      (an enhancement; the same actions are reachable via bindings / palette), so the
      static-interaction rule is a false positive on this non-semantic host. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="grv-editor" bind:this={hostEl} oncontextmenu={onContextMenu}></div>
+<div class="grv-editor" oncontextmenu={onContextMenu}>
+  <CodeEditor
+    bind:this={cm}
+    {value}
+    {language}
+    {readOnly}
+    diagnostics={editorDiagnostics}
+    fontSize={12.5}
+    wrap
+    {oninput}
+    {onfocus}
+    oncaret={(line, col) => oncaret?.(line, col)}
+    onGoto={(word, v) => handleGoto(word, v)}
+    {onReady}
+  />
+</div>
 
 {#if ctx}
   <ContextMenu actions={ctxActions} items={ctxItems} x={ctx.x} y={ctx.y} onSelect={onCtxSelect} onClose={() => (ctx = null)} />
@@ -544,5 +544,6 @@
     background: var(--bg-base);
     overflow: hidden;
   }
-  .grv-editor :global(.cm-editor) { height: 100%; }
+  .grv-editor { display: flex; }
+  .grv-editor > :global(*) { flex: 1; min-width: 0; min-height: 0; }
 </style>

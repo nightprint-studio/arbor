@@ -34,6 +34,7 @@ mod query;
 mod scenes;
 mod sounds;
 mod format;
+mod ast;
 mod scales;
 mod reference;
 mod packs;

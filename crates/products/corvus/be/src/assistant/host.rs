@@ -16,7 +16,7 @@ use corvus_core::prelude::CorvusState;
 use imber_core::prelude::{detail_of, AgentEvent, Gate, Host, ToolCall, ToolSpec, Usage, View};
 use serde_json::{json, Value};
 
-use super::permission::{classify, needs_approval, preview, unattended_allows, Mode, Risk};
+use super::permission::{classify, needs_approval_for, preview, unattended_allows, Mode, Risk};
 use super::{plan_tools, runs, tools};
 
 pub const TOPIC: &str = "arbor://corvus/imber";
@@ -197,7 +197,7 @@ impl Host for ImberHost {
                 Err(why) => Gate::Refuse(why),
             };
         }
-        if !needs_approval(self.mode, risk) {
+        if !needs_approval_for(&call.name, self.mode, risk) {
             return Gate::Run;
         }
         if self.approved(call, risk) {

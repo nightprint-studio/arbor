@@ -29,6 +29,8 @@ arbor-be       = { path = "../../../foundation/be" }
 # active profile FIRST in `main`, so `merula_config_dir()` / `merula_data_dir()`
 # (which the domain modules read) resolve under the launcher's profile.
 arbor-core     = { path = "../../../foundation/core" }
+# Language-agnostic syntax-tree outline (the syntax-tree panel); merula supplies the grammar.
+arbor-syntax   = { path = "../../../foundation/syntax" }
 # The Tauri-free job model (`JobSpec`/`JobStatus`): the render / pack-download
 # domains drive jobs in the shell's single-source `JobRegistry` over the reverse
 # channel (`be/src/jobs.rs`), exactly like corvus-be.

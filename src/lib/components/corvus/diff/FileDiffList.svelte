@@ -118,12 +118,6 @@
   <div class="list-header">
     <span>Files changed</span>
     <span class="count">{files.length}</span>
-    {#if diffStore.isLoading && diffStore.totalExpected > 0}
-      <span class="parse-progress" use:tooltip={'Parsing diffs…'}>
-        <Loader2 size={11} class="spinner" />
-        <span>{diffStore.parsedCount}/{diffStore.totalExpected}</span>
-      </span>
-    {/if}
     <div class="view-toggle">
       <button
         class="toggle-btn"
@@ -280,15 +274,6 @@
     flex-shrink: 0;
   }
 
-  .parse-progress {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--accent);
-    font-variant-numeric: tabular-nums;
-    font-size: var(--font-size-2xs);
-  }
-  .parse-progress :global(svg.spinner),
   .parsing-badge :global(svg.spinner) {
     animation: arbor-spin 1s linear infinite;
   }

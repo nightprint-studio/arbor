@@ -2,24 +2,7 @@ import { untrack } from 'svelte';
 import type { DiffFile } from '../../types/corvus/git';
 import type { DiffConfig, DiffMode, DiffAlgorithm, FileListView } from '../../types/config';
 import { getDiffConfig, setDiffConfig } from '$lib/ipc/config';
-import { getCommitFileDiff, getCommitsRangeFileDiff, workdirDiffStreamArgs } from '$lib/ipc/corvus/diff';
-import { startStream, type StreamHandle, type StreamEnvelope } from '$lib/ipc/stream';
-
-// Streaming-seam payloads (`docs/streaming-seam.md`). Every event also carries
-// the `{ stream_id, seq }` envelope; `stream_id` is the job_id of the request.
-type StreamStartedPayload = StreamEnvelope & {
-  tab_id: string;
-  staged: boolean;
-  total_files: number;
-  files: DiffFile[];
-};
-
-type StreamFilePayload = {
-  tab_id: string;
-  index: number;
-  total: number;
-  file: DiffFile;
-};
+import { getCommitFileDiff, getCommitsRangeFileDiff } from '$lib/ipc/corvus/diff';
 
 const DEFAULT_CONFIG: DiffConfig = {
   algorithm:        'myers',
@@ -45,17 +28,6 @@ function createDiffStore() {
   let files = $state<DiffFile[]>([]);
   let selectedFile = $state<DiffFile | null>(null);
   let isLoading = $state(false);
-  /// Total files expected for the current streaming load (0 when not streaming).
-  let totalExpected = $state(0);
-  /// Number of fully-parsed files received so far (for "parsed 12/34" spinner).
-  let parsedCount = $state(0);
-  /// The stream_id (== job_id) of the in-flight streaming request.  Used to
-  /// ignore stale events when the user triggers a new load before the previous
-  /// one finishes.
-  let activeJobId = $state<string | null>(null);
-  /// The in-flight stream's listener handle, disposed before starting a new
-  /// load and on `clear()` so listeners don't leak across requests.
-  let activeStream: StreamHandle | null = null;
 
   // ── DiffConfig fields (all persisted via the backend config.toml) ────────
   // Defaults render immediately on first paint; disk values overwrite once
@@ -131,8 +103,8 @@ function createDiffStore() {
     persistConfig();
   }
 
-  /// Track which file paths are still awaiting their hunk data (streaming
-  /// workdir OR lazy commit-file load). Use a Set so Svelte's reactivity
+  /// Track which file paths are still awaiting their hunk data (lazy
+  /// commit-file load). Use a Set so Svelte's reactivity
   /// picks up reference changes on replace.
   let pendingPaths = $state<Set<string>>(new Set());
 
@@ -148,11 +120,6 @@ function createDiffStore() {
   /// Bumped on every commit context change. Per-file fetches capture the
   /// value at launch and re-check on completion — stale results are dropped.
   let commitSeq = 0;
-
-  /// Requested selection path for the next streaming load.  Consumed once
-  /// `beginStream` runs so the caller can request "load diff and select path X"
-  /// even though the files list only arrives via an async event.
-  let pendingSelection: string | null = null;
 
   function setFiles(f: DiffFile[]) {
     files = f;
@@ -304,126 +271,18 @@ function createDiffStore() {
   }
 
   function clear() {
-    activeStream?.dispose();
-    activeStream = null;
     files = [];
     selectedFile = null;
     isLoading = false;
-    totalExpected = 0;
-    parsedCount = 0;
-    activeJobId = null;
     pendingPaths = new Set();
     commitContext = null;
     commitSeq++;
-  }
-
-  /// Begin a streaming load.  The caller supplies the job_id returned by the
-  /// backend and the metadata list from the `-started` event.  The store
-  /// replaces its files list with placeholder entries (hunks empty) so the
-  /// sidebar renders the list immediately, and tracks `pendingPaths` so the
-  /// UI can show a "parsing…" badge on rows whose hunks haven't arrived yet.
-  function beginStream(jobId: string, meta: DiffFile[]) {
-    // Streaming diff is workdir-only — clear any leftover commit context so
-    // lazy fetches don't fight the stream.
-    commitContext = null;
-    commitSeq++;
-    activeJobId = jobId;
-    totalExpected = meta.length;
-    parsedCount = 0;
-    files = meta;
-    // Resolve the selected file, honoring an explicit pending selection first,
-    // then the previously selected path if still present, then the first file.
-    let chosen: DiffFile | null = null;
-    if (pendingSelection) {
-      chosen = meta.find(f => f.path === pendingSelection) ?? null;
-      pendingSelection = null;
-    }
-    if (!chosen && selectedFile) {
-      chosen = meta.find(f => f.path === selectedFile!.path) ?? null;
-    }
-    selectedFile = chosen ?? meta[0] ?? null;
-    pendingPaths = new Set(meta.map(f => f.path));
-    isLoading = true;
-  }
-
-  /// Record the path the caller wants selected once the next streaming load's
-  /// metadata arrives.  Safe to call before `loadWorkdirDiffStream`.
-  function setPendingSelection(path: string | null) {
-    pendingSelection = path;
-  }
-
-  /// Replace a placeholder entry with the fully-parsed version.  Ignored if
-  /// the job_id doesn't match the active stream (stale event from a previous
-  /// request).
-  function applyStreamFile(jobId: string, parsed: DiffFile) {
-    if (jobId !== activeJobId) return;
-    const idx = files.findIndex(f => f.path === parsed.path);
-    if (idx === -1) return;
-    // Replace by creating a new array so Svelte's reactivity fires.
-    const next = files.slice();
-    next[idx] = parsed;
-    files = next;
-    parsedCount += 1;
-    // Remove from pending set (create new Set for reactivity).
-    if (pendingPaths.has(parsed.path)) {
-      const nextPending = new Set(pendingPaths);
-      nextPending.delete(parsed.path);
-      pendingPaths = nextPending;
-    }
-    // If the newly-parsed file is the currently selected one, refresh the
-    // selection so DiffViewer receives the populated hunks.
-    if (selectedFile && selectedFile.path === parsed.path) {
-      selectedFile = next[idx];
-    }
-  }
-
-  function endStream(jobId: string) {
-    if (jobId !== activeJobId) return;
-    activeJobId = null;
-    isLoading = false;
-    pendingPaths = new Set();
-  }
-
-  function failStream(jobId: string, _err: string) {
-    if (jobId !== activeJobId) return;
-    activeJobId = null;
-    isLoading = false;
-    pendingPaths = new Set();
-  }
-
-  /// Start a streaming workdir-diff load via the standardized seam. Subscribes
-  /// to `arbor://diff-stream-*` (filtered by the minted stream_id) BEFORE the
-  /// command runs, so a fast synchronous `started` can't outrun the listeners.
-  /// Disposes any previous in-flight stream first so listeners never leak.
-  /// Resolves once the command returns the job_id (events keep arriving after).
-  async function loadWorkdirDiffStream(tabId: string, staged: boolean): Promise<void> {
-    activeStream?.dispose();
-    activeStream = null;
-    const handle = await startStream<StreamFilePayload>(
-      'corvus',
-      'arbor://diff-stream',
-      { cmd: 'get_workdir_diff_stream', args: workdirDiffStreamArgs(tabId, staged) },
-      {
-        onStarted: (p) => {
-          // `p` is the generic started envelope (`Record<string, unknown>` keys);
-          // narrow to the concrete workdir-diff `started` shape it carries.
-          const s = p as unknown as StreamStartedPayload;
-          beginStream(s.stream_id, s.files);
-        },
-        onChunk:   (p) => applyStreamFile(p.stream_id, p.file),
-        onDone:    (p) => { endStream(p.stream_id); activeStream?.dispose(); activeStream = null; },
-        onError:   (e, p) => { failStream(p.stream_id, e); activeStream?.dispose(); activeStream = null; },
-      },
-    );
-    activeStream = handle;
   }
 
   return {
     get files() { return files; },
     get selectedFile() { return selectedFile; },
     get isLoading() { return isLoading; },
-    get totalExpected() { return totalExpected; },
-    get parsedCount() { return parsedCount; },
     get pendingPaths() { return pendingPaths; },
     get mode() { return mode; },
     get wordWrap() { return wordWrap; },
@@ -452,12 +311,6 @@ function createDiffStore() {
     setVirtThreshold,
     setTabWidth,
     clear,
-    beginStream,
-    applyStreamFile,
-    endStream,
-    failStream,
-    setPendingSelection,
-    loadWorkdirDiffStream,
   };
 }
 

@@ -43,6 +43,7 @@ corvus-core       = { path = "../core" }
 # transport it streams through. The git tools and the approval rule are this crate's own (`src/assistant`).
 imber-core        = { path = "../../../platform/imber/core" }
 imber-transport   = { path = "../../../platform/imber/transport" }
+imber-schedule    = { path = "../../../platform/imber/schedule" }
 # Calendar recurrences + next-run + missed-run rule for Imber's schedules (pure; the engine's own cron parser).
 arbor-scheduler   = { path = "../../../platform/scheduler" }
 corvus-git        = { path = "../git" }

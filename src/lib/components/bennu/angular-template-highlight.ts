@@ -3,68 +3,40 @@
  *
  * `lang-html` knows HTML and nothing of what Angular adds to it, so in a component template the
  * parts that carry the logic come out as plain text: the control-flow blocks (`@if (…) {` … `}`),
- * `{{ interpolation }}`, and the binding attributes (`[prop]`, `(event)`, `[(model)]`, `*ngIf`,
- * `#ref`). `ngserver` does not paint them either — it answers completion, hover and diagnostics for
- * a template but sends no semantic tokens for one — so this is the only colour they will get.
+ * `{{ interpolation | pipe }}`, and the binding attributes (`[prop]`, `(event)`, `[(model)]`,
+ * `*ngIf`, `#ref`). `ngserver` does not paint them either — it answers completion, hover and
+ * diagnostics for a template but, as far as the editor has ever seen, sends no semantic tokens for
+ * one — so this local layer is the colour they get, with or without a server running.
  *
- * A decoration layer, not a grammar: a real Angular Lezer grammar is a package to vendor, and what
- * is wanted here is that the file reads, not that it parses. Regexes over the visible lines keep it
- * cheap and stateless, at the cost of not understanding a block spread across lines — acceptable,
- * because every construct coloured here opens and closes on one line.
+ * What is coloured, and how conservatively, is `angular-template-tokens.ts`; this file only draws
+ * its spans. A decoration layer rather than a Lezer grammar: a real Angular grammar is a package to
+ * vendor, and what is wanted is that the file reads, not that it parses.
  *
- * Harmless on a non-Angular `.html`: `@if` and `{{ }}` mean nothing else in markup, and the same
- * `{{ }}` colouring is right for the other mustache-style templates people keep in `.html` anyway.
+ * If the server *does* send semantic tokens they are drawn by the editor host as a layer of their
+ * own, on top of this one; nothing here has to know.
+ *
+ * The scan covers the whole document, once per edit, not the viewport: an interpolation or a block
+ * header can span lines and a viewport can start in the middle of one. It is linear, bounded by
+ * {@link MAX_SCAN_LENGTH}, and skipped altogether when scrolling.
  */
 
-import { RangeSet, type Range } from '@codemirror/state';
+import { Prec, RangeSet, type Range } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { MAX_SCAN_LENGTH, tokenizeAngular, type NgClass } from './angular-template-tokens';
 
-const keyword = Decoration.mark({ class: 'cm-ng-keyword' });
-const expression = Decoration.mark({ class: 'cm-ng-expr' });
-const binding = Decoration.mark({ class: 'cm-ng-binding' });
-
-/** `@if (cond) {`, `} @else if (cond) {`, `@for (item of items; track item.id) {`, `@case (x) {`… */
-const BLOCK_HEADER =
-  /@(?:else if|if|else|for|empty|switch|case|default|defer|placeholder|loading|error|let)\b(\s*\([^)\n]*\))?/g;
-/** A block's closing brace — only when it opens the line, or text with braces in it would match. */
-const BLOCK_CLOSE = /^\s*(\})/;
-const INTERPOLATION = /(\{\{)([\s\S]*?)(\}\})/g;
-/** `[prop]`, `[(model)]`, `(event)`, `*ngIf`, `#ref`, as an attribute name inside a tag. */
-const BINDING_ATTR = /(?<=[\s"'])(?:\[\(?[\w.@:-]+\)?\]|\([\w.@:-]+\)|\*[A-Za-z]\w*|#[\w-]+)(?=[=\s>/])/g;
+const marks = new Map<NgClass, Decoration>();
+function markFor(cls: NgClass): Decoration {
+  let mark = marks.get(cls);
+  if (!mark) marks.set(cls, (mark = Decoration.mark({ class: `cm-ng-${cls}` })));
+  return mark;
+}
 
 function decorate(view: EditorView): DecorationSet {
-  const ranges: Range<Decoration>[] = [];
   const doc = view.state.doc;
-  let lastLine = -1;
-
-  for (const { from, to } of view.visibleRanges) {
-    for (let pos = from; pos <= to; ) {
-      const line = doc.lineAt(pos);
-      pos = line.to + 1;
-      if (line.number === lastLine) continue;
-      lastLine = line.number;
-      const text = line.text;
-      const at = line.from;
-
-      for (const m of text.matchAll(BLOCK_HEADER)) {
-        const start = at + m.index!;
-        const head = m[0].length - (m[1]?.length ?? 0);
-        ranges.push(keyword.range(start, start + head));
-        if (m[1]) ranges.push(expression.range(start + head, start + m[0].length));
-      }
-      const close = BLOCK_CLOSE.exec(text);
-      if (close) ranges.push(keyword.range(at + close[0].length - 1, at + close[0].length));
-
-      for (const m of text.matchAll(INTERPOLATION)) {
-        const start = at + m.index!;
-        ranges.push(keyword.range(start, start + 2));
-        if (m[2]) ranges.push(expression.range(start + 2, start + 2 + m[2].length));
-        ranges.push(keyword.range(start + m[0].length - 2, start + m[0].length));
-      }
-      for (const m of text.matchAll(BINDING_ATTR)) {
-        ranges.push(binding.range(at + m.index!, at + m.index! + m[0].length));
-      }
-    }
+  if (doc.length > MAX_SCAN_LENGTH) return Decoration.none;
+  const ranges: Range<Decoration>[] = [];
+  for (const span of tokenizeAngular(doc.toString())) {
+    if (span.to > span.from) ranges.push(markFor(span.cls).range(span.from, span.to));
   }
   return RangeSet.of(ranges, true);
 }
@@ -74,17 +46,28 @@ const angularTemplatePlugin = ViewPlugin.fromClass(
     decorations: DecorationSet;
     constructor(view: EditorView) { this.decorations = decorate(view); }
     update(u: ViewUpdate) {
-      if (u.docChanged || u.viewportChanged) this.decorations = decorate(u.view);
+      if (u.docChanged) this.decorations = decorate(u.view);
     }
   },
   { decorations: (v) => v.decorations },
 );
 
+// The same `--syntax-*` variables the Lezer highlight style reads, so an expression in a template
+// is the colour of the same thing anywhere else in Bennu.
 const angularTemplateTheme = EditorView.baseTheme({
-  '.cm-ng-keyword': { color: 'var(--syntax-keyword)' },
-  '.cm-ng-expr': { color: 'var(--syntax-field)' },
-  '.cm-ng-binding': { color: 'var(--syntax-function)' },
+  '.cm-ng-kw': { color: 'var(--syntax-keyword, #cc7832)', fontWeight: '600' },
+  '.cm-ng-punct, .cm-ng-op': { color: 'var(--text-secondary)' },
+  '.cm-ng-str': { color: 'var(--syntax-string, #6a8759)' },
+  '.cm-ng-num, .cm-ng-lit': { color: 'var(--syntax-number, #6897bb)' },
+  '.cm-ng-var': { color: 'var(--text-primary)' },
+  '.cm-ng-prop': { color: 'var(--syntax-field, #9876aa)' },
+  '.cm-ng-call': { color: 'var(--syntax-function, #ffc66d)' },
+  '.cm-ng-pipe': { color: 'var(--syntax-builtin, #8888c6)', fontStyle: 'italic' },
+  '.cm-ng-bind': { color: 'var(--syntax-field, #9876aa)' },
+  '.cm-ng-event': { color: 'var(--syntax-function, #ffc66d)' },
+  '.cm-ng-dir': { color: 'var(--syntax-keyword, #cc7832)' },
+  '.cm-ng-ref': { color: 'var(--syntax-constant, #9876aa)', fontStyle: 'italic' },
 });
 
-/** The extension to put beside `html()` — see the file doc. */
-export const angularTemplateHighlight = [angularTemplatePlugin, angularTemplateTheme];
+/** The extension to put beside `html()` — see the file doc. Highest precedence so its colour is the innermost. */
+export const angularTemplateHighlight = [Prec.high(angularTemplatePlugin), angularTemplateTheme];

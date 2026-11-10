@@ -110,13 +110,17 @@ pub struct LimitsConfig {
     pub eur_per_usd: f64,
     /// From this share of a limit, in percent, the meter warns.
     pub warn_percent: f64,
+    /// What one scheduled run may spend before it is stopped (0: no cap). A run nobody watches gets a small one.
+    pub schedule_run_eur: f64,
+    /// How many scheduled runs may start in a day, whatever the schedules say (0: no cap).
+    pub schedule_runs_per_day: u32,
 }
 
 impl Default for LimitsConfig {
     // On by default, at amounts that a normal day does not reach: the brakes are for the day something
     // loops, and nobody turns them on after that day.
     fn default() -> Self {
-        Self { session_eur: 5.0, day_eur: 10.0, week_eur: 0.0, month_eur: 50.0, eur_per_usd: 0.92, warn_percent: 80.0 }
+        Self { session_eur: 5.0, day_eur: 10.0, week_eur: 0.0, month_eur: 50.0, eur_per_usd: 0.92, warn_percent: 80.0, schedule_run_eur: 1.0, schedule_runs_per_day: 24 }
     }
 }
 

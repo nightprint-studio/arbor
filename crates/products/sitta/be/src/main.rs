@@ -8,9 +8,9 @@
 //! config / data dirs once `init_active_profile()` has run.
 //!
 //! A file manager keeps almost no backend domain state of its own: filesystem I/O
-//! lives in `arbor-fs` (served by the shell's `platform` broker) and git-awareness
-//! in `corvus-git`. The domains served here are the explorer git-awareness
-//! ([`fs_git`]), the typed config ([`config_cmds`]) and the read-only workspace
+//! lives in `arbor-fs` (served by the shell's `platform` broker), and git-awareness is
+//! borrowed from `corvus-be` by path (started on demand). The domains served here are
+//! the typed config ([`config_cmds`]) and the read-only workspace
 //! queries ([`workspace`], a thin reader of corvus's `repos.json` / `workspaces.json`
 //! for the Projects sidebar); each is an `#[arbor_rpc::handler]` module,
 //! auto-advertised via `Hello` and auto-routed by the shell's broker.
@@ -26,10 +26,6 @@ use sitta_core::prelude::SittaState;
 // domain. They self-register via `inventory`, so `arbor_rpc::registry()` collects
 // them and `Hello` advertises them by name.
 mod selftest;
-// Git awareness for the File Explorer — thin wrappers over `corvus_git::explorer`
-// (the pure, shared git2 logic). Moved off `corvus-be` so the explorer's git works
-// without the git client running.
-mod fs_git;
 // The typed global sitta config (`get/set_sitta_config`) — the explorer's own UX
 // preferences, owned out-of-process here (the 4 window/OS-integration settings stay
 // in the launcher config).
@@ -38,8 +34,8 @@ mod config_cmds;
 // `list_registry_repos`), parsing the same JSON directly so the Projects sidebar
 // lists projects without spawning the git client.
 mod workspace;
-// What this backend holds in memory, for the process monitor's `__memory` breakdown.
-mod memory_report;
+// Emits `arbor://drives-changed` when a USB drive / volume is attached or removed.
+mod drive_watch;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, the plugin dir and
@@ -65,8 +61,9 @@ fn main() {
     // links (self-test today, the sitta domains as the waves land). `inventory("")`
     // covers them all — sitta-be links only its own handlers.
     let dispatcher = arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle())
-        .inventory("")
-        .memory(|_state| memory_report::report());
+        .inventory("");
+
+    drive_watch::spawn(state.event_sink());
 
     // Serve over framed stdio until the shell disconnects. The `App`'s post-`Hello`
     // hook boot-loads the host-pure plugins from sitta's installed/ pool.

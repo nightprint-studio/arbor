@@ -45,6 +45,7 @@ mod corvus_config;
 mod deep_link;
 mod diff;
 mod ephemeral;
+mod explorer_git;
 mod file_history;
 mod git_cli;
 mod gitflow;

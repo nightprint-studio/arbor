@@ -1755,6 +1755,13 @@ fn spawn_merula_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String
             // launcher + Corvus windows with another product's telemetry. This
             // mirrors the in-process `merula::events::emit` (`emit_to`).
             use tauri::Emitter;
+            // A window borrowing the backend (Bennu playing a `.merula` file) gets only the
+            // low-rate, human-facing topics — never the audio-rate telemetry above.
+            if matches!(topic.as_str(), "merula:log" | "merula:diagnostics" | "merula:audio_error") {
+                for holder in split_broker::holders("merula") {
+                    let _ = app_for_events.emit_to(holder.as_str(), &topic, payload.clone());
+                }
+            }
             let _ = app_for_events.emit_to(MERULA_WINDOW_LABEL, &topic, payload);
         },
         move |method, params| host_dispatch(&app_for_host, method, params),

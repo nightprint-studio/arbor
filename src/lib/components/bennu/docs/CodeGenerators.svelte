@@ -55,6 +55,12 @@
   method security, a user store (in memory, JDBC, your own) and the password encoder are options.
 </p>
 <p>
+  <strong>Excluded from security</strong> lists Ant patterns (<code>/css/**</code>, <code>/favicon.ico</code>…)
+  that skip the filter chain altogether through a <code>WebSecurityCustomizer</code> bean
+  (<code>configure(WebSecurity)</code> before 5.7). Web scenarios start with the usual static resources; for a
+  path that still needs security headers add a rule with <code>permitAll()</code> instead.
+</p>
+<p>
   The style follows the Spring Security version: the lambda DSL, the fluent <code>.and()</code> chain where
   it still exists, <code>requestMatchers</code> or <code>antMatchers</code>, <code>@EnableMethodSecurity</code>
   or <code>@EnableGlobalMethodSecurity</code>, and a <code>WebSecurityConfigurerAdapter</code> before 5.7.
