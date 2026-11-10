@@ -175,6 +175,8 @@
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
   import { hasDeclarationEngine, opensReadOnly } from './patina-nav';
+  import { patinaTestMarks, patinaModDirOf, type PatinaTestMark } from './patina-tests';
+  import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
   // The gutter's breakpoints and the paused line — both are the debugger's state seen from
   // the editor, and both are read-only here: the store owns them and persists them.
   import { bennuDebugStore, canonFile } from '$lib/stores/bennu/debug.svelte';
@@ -1516,8 +1518,10 @@
           // itself above every member is what made a test file unreadable.
           return {
             start: m.decl,
-            title: m.count === 0 ? 'no usages' : `${m.count} usage${m.count === 1 ? '' : 's'}`,
+            // A Patina function adds its gas estimate after the count ("3 usages · ~gas 24 · cx 3"); over the mod's budget the row takes the accent tone.
+            title: (m.count === 0 ? 'no usages' : `${m.count} usage${m.count === 1 ? '' : 's'}`) + (m.note ? ` · ${m.note}` : ''),
             actionable: m.count > 0,
+            ...(m.warn ? { tone: 'accent' as const } : {}),
             key,
           };
         }
@@ -1547,7 +1551,8 @@
         !isCargoManifest(path) &&
         !isPackageManifest(path) &&
         !isPomFile(path) &&
-        !isJavaFileOf(path)
+        !isJavaFileOf(path) &&
+        !isPatinaFileOf(path)
       ) {
         pushLenses([]);
       }
@@ -2203,12 +2208,14 @@
     const revision = docRevision;
     const on = bennuSettingsStore.usageCounts;
     const indexed = bennuIndexStore.buildRevision;
-    if (!path || !on || !isJavaFileOf(path)) {
+    // A `.ptn` file gets the same rows from the Patina package — and, for a function, its static gas estimate as the row's note.
+    const countable = !!path && (isJavaFileOf(path) || isPatinaFileOf(path));
+    if (!path || !on || !countable) {
       // Only the unused layer is cleared here. The lens layer belongs to whichever effect owns this
       // buffer, and clearing it for a `Cargo.toml` because Java has nothing to say would wipe the
       // version hints that effect had just pushed.
       editorComp?.setUnusedRanges([]);
-      if (isJavaFileOf(path)) pushLenses([]);
+      if (isJavaFileOf(path) || isPatinaFileOf(path)) pushLenses([]);
       return;
     }
     void revision;
@@ -2657,6 +2664,17 @@
     })),
   );
 
+  // Le prove di una mod `.ptn`: un ▶ sull'attributo `#[test]`, che lancia quella prova col binario `patina-test` e ne mostra
+  // l'esito nel pannello dei test (adattatore sugli eventi di Cargo). Dal testo del buffer, non dal disco: il banco rilegge i file
+  // al lancio, quindi una prova non salvata non gira — salvare e' gia' il gesto prima di premere.
+  const patinaTestMarksHere = $derived.by(() => {
+    if (!activePath || !isPatinaFileOf(activePath) || !patinaModDirOf(activePath)) return [] as PatinaTestMark[];
+    return patinaTestMarks(projectStore.sourceOf(activePath));
+  });
+  const patinaGutterMarks = $derived(
+    patinaTestMarksHere.map((m) => ({ line: m.line, glyph: '▶', tooltip: `Run ${m.name}`, className: 'cm-run-gutter' })),
+  );
+
   const runGutterMarks = $derived(
     scriptRunLine
       ? [{
@@ -2895,6 +2913,7 @@
     // A test's arrow after an entry point's, on the rare line that is both — pressing ▶ on a
     // `main` means run the program.
     ...testGutterMarks.filter((m) => !runGutterMarks.some((r) => r.line === m.line)),
+    ...patinaGutterMarks,
     ...springGutterMarks.filter((g) => !runLines.includes(g.line)),
     ...httpGutterMarks,
     ...controllerMarks.filter((m) => !runLines.includes(m.line)),
@@ -2992,6 +3011,12 @@
   function onGutterClick(line: number, event: MouseEvent) {
     if (line === 1 && activePath && isMerulaPath(activePath)) {
       void merulaPlayStore.toggle(activePath);
+      return;
+    }
+    const patinaTest = patinaTestMarksHere.find((m) => m.line === line);
+    if (patinaTest && activePath) {
+      const modDir = patinaModDirOf(activePath);
+      if (modDir) void bennuCargoTestStore.runPatina(modDir, [patinaTest.name]);
       return;
     }
     const call = controllerCalls.find((c) => c.line === line);
@@ -4175,22 +4200,34 @@
   export async function formatDocument() {
     const path = activePath;
     if (!path || !editorComp) return;
-    // Java is formatted by Bennu's own formatter and everything else by its server, and the backend
-    // routes between them — so the only files with no formatter are the ones that are neither.
-    if (!isLspFileOf(path) && !isJavaFileOf(path)) {
+    // Java is formatted by Bennu's own formatter, a `.ptn` by the Patina package (`patina-fmt`, styled by the
+    // project's `patina-fmt.toml`) and everything else by its server, and the backend routes between them — so
+    // the only files with no formatter are the ones that are none of those.
+    const patina = isPatinaFileOf(path);
+    if (!isLspFileOf(path) && !isJavaFileOf(path) && !patina) {
       toastStore.show('No formatter for this file type', 'info');
       return;
     }
     const src = editorComp.getValue();
-    // A selection narrows a Java format to it (the language servers format whole files).
-    const range = isJavaFileOf(path) ? selectionBytes() ?? undefined : undefined;
+    // A selection narrows a Java or a Patina format to it (the language servers format whole files).
+    const range = isJavaFileOf(path) || patina ? selectionBytes() ?? undefined : undefined;
+    // The Patina formatter refuses a document that does not parse and says why: that sentence is shown, not
+    // swallowed into "Already formatted" (which would say the opposite — that there was nothing to fix).
+    const failed: { message: string | null } = { message: null };
     const edits = await formatBuffer(
       path,
       src,
       bennuSettingsStore.tabSize,
       bennuSettingsStore.indentStyle !== 'tabs',
       range,
-    ).catch(() => []);
+    ).catch((e) => {
+      if (patina) failed.message = String(e);
+      return [];
+    });
+    if (failed.message) {
+      toastStore.show(`Couldn't format: ${failed.message}`, 'error');
+      return;
+    }
     if (!edits.length) {
       // A formatter that returns nothing has nothing to change — which is the good outcome, and
       // worth saying so the user does not press it again wondering.

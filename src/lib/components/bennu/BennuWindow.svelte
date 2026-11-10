@@ -2002,7 +2002,7 @@
       { id: 'intentions', title: 'Show intentions', icon: 'Lightbulb', shortcut: 'Alt+Enter',
         // Also the language-server quick-fix list for a server-backed buffer — the user's gesture
         // is "what can you do here", and which engine answers is not their problem.
-        action: () => run(() => editor?.openIntentions()), when: isJava || isLspFile(path) },
+        action: () => run(() => editor?.openIntentions()), when: isJava || isLspFile(path) || isPatinaPath(path) },
       // The signature of the call at the caret. Never opens by itself; Esc closes it.
       { id: 'paraminfo', title: 'Parameter info', icon: 'Info', shortcut: 'Ctrl+P',
         action: () => run(() => editor?.toggleParameterInfo()), when: isJava || isLspFile(path) },
@@ -2010,10 +2010,10 @@
       // preserve AltGr, so the binding would simply never fire. Alt+Shift+F is VS Code's and is
       // in the safe family.
       { id: 'format', title: 'Format file', icon: 'Wand2', shortcut: 'Alt+Shift+F',
-        action: () => run(() => void editor?.formatDocument()), when: isJava || isLspFile(path) },
+        action: () => run(() => void editor?.formatDocument()), when: isJava || isLspFile(path) || isPatinaPath(path) },
       // The same key does this when there is a selection; the entry is for finding it by name.
       { id: 'format-selection', title: 'Format selection', icon: 'Wand2',
-        action: () => run(() => void editor?.formatSelection()), when: isJava },
+        action: () => run(() => void editor?.formatSelection()), when: isJava || isPatinaPath(path) },
       { id: 'format-detect', title: 'Detect code style…', icon: 'Wand2',
         action: () => run(() => {
           bennuFormatStyleStore.setScope('project');
@@ -3053,7 +3053,7 @@
     // silently unbinds the whole Alt family on a Mac.
     if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'f')) {
       const path = projectStore.activeFilePath;
-      if (!isLspFile(path) && !isJavaFile(path)) return;
+      if (!isLspFile(path) && !isJavaFile(path) && !isPatinaPath(path)) return;
       e.preventDefault(); void editor?.formatDocument(); return;
     }
 
@@ -3165,7 +3165,7 @@
       if (e.key === 'Enter') {
         e.preventDefault();
         const path = projectStore.activeFilePath;
-        if (isJavaFile(path) || isLspFile(path)) editor?.openIntentions();
+        if (isJavaFile(path) || isLspFile(path) || isPatinaPath(path)) editor?.openIntentions();
         return;
       }
       if (e.key === 'Insert') {

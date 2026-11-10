@@ -581,6 +581,8 @@ mod test_engines;
 // in its crate and target) + `bennu_run_cargo_tests`, which reads a live `cargo test` off its two
 // output streams. Stop is still `bennu_cancel_tests` — one registry, one verb.
 mod cargo_tests;
+// I `#[test]` di una mod Patina (`.ptn`) dal binario `patina-test`, come eventi del pannello di cargo_tests (adattatore).
+mod patina_tests;
 // The other half of a test run: what it looked like once it FINISHED. The two runners above
 // return the moment the child is up, which is right for a live tree and useless to a caller
 // that cannot listen — so a `Collector` rides the same pumps and a `TestRunReport` comes out

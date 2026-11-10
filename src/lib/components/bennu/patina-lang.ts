@@ -27,6 +27,8 @@
  * | `name:` in a struct, a literal or a call | a field / named argument |
  * | `a::b::` | a module path |
  * | `block!(…)` | a form, a name the language brings |
+ * | `t!("ui:key")`, `block!("tnt")` | the id inside a catalog form: its own colour, one per kind (text key / catalog id) |
+ * | `"hi {p.x}"` | an interpolation hole: the braces and the path inside read apart from the text around them |
  *
  * What it cannot tell is what needs the index: a parameter from a local, a `mut` binding from another, a trait
  * from a struct. That is a semantic layer the backend would have to send.
@@ -37,12 +39,16 @@
  * closes on a later line folds up to that `}` (strings and `//` comments skipped).
  */
 
+import { patinaExtraFold, useBlockRange } from './patina-fold';
 import { foldService, HighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language';
 import type { StreamParser } from '@codemirror/language';
 import { Tag, tags as t } from '@lezer/highlight';
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
-import { backendCompletionSource, backendHoverSource } from './lsp-lang';
+import type { CompletionContext, CompletionResult, CompletionSource } from '@codemirror/autocomplete';
+import { backendCompletionSource, backendHoverSource, eagerBackendCompletionSource, keyBackendCompletionSource } from './lsp-lang';
+import { patinaIndent } from './patina-indent';
 import { patinaLinkRange } from './patina-link';
+import { stringContext } from './patina-strings';
 
 /** Patina's keywords, as its lexer has them — reserved-for-later words included, so they read as reserved. */
 const KEYWORDS = new Set([
@@ -80,6 +86,26 @@ const primitiveType = Tag.define(t.typeName);
  *  `--syntax-attribute`; the arguments inside the brackets keep their ordinary colours. */
 const attribute = Tag.define(t.meta);
 
+/** The string argument of `t!(…)`: a translation key. A tag of its own, styled below. */
+const textKey = Tag.define(t.string);
+
+/** The string argument of any other catalog form (`block!`, `item!`, `ui!`…): an id of the game's data. */
+const catalogId = Tag.define(t.string);
+
+/** The braces of an interpolation hole `"{p.x}"`, and the path inside. */
+const holeBrace = Tag.define(t.punctuation);
+const holePath = Tag.define(t.variableName);
+
+/**
+ * The forms whose string arguments are ids of the game's data (`#[form("…")]` in the library): a catalog id, or a text
+ * key for `t`. `assert!`, `log!` and the other function-like forms are left out: their strings are text.
+ */
+const CATALOG_FORMS = new Set([
+  'action', 'anim', 'biome', 'block', 'decoration', 'dimension', 'effect', 'flag', 'generator', 'group', 'hud_key', 'item', 'loot',
+  'map', 'material', 'material_param', 'mode', 'patch', 'piece', 'projectile', 'screen', 'sound', 'species', 'status',
+  'structure_piece', 't', 'ui', 'world_type',
+]);
+
 interface PatinaState {
   /** Bracket depth inside an attribute's `[ … ]`; `0` outside one. Carried across lines, so `#[` and its name may be apart. */
   attrDepth: number;
@@ -93,7 +119,21 @@ interface PatinaState {
   inUse: boolean;
   /** Inside a `fn` signature, before its body: `name:` there is a parameter, not a field. */
   inSignature: boolean;
+  /** One entry per open bracket: the name of the catalog form it is the argument list of (`block`, `t`…), or null. */
+  stack: (string | null)[];
+  /** The catalog form whose `!` was just read: the `(` right after it opens its argument list. */
+  pendingForm: string | null;
+  /** Inside a string: which tag its text takes, or `null` outside one. */
+  str: 'string' | 'textKey' | 'catalogId' | null;
+  /** Inside an interpolation hole `{…}` of the string. */
+  hole: boolean;
 }
+
+/** A hole in a string's text (with the `{{` escapes already taken out): a brace and the first letter of a name. */
+const HOLE = /\{[\p{L}_]/u;
+
+/** Past this many open brackets the stack stops growing: a broken file must not make the state unbounded. */
+const MAX_STACK = 64;
 
 /** A name followed by a single `:` (not `::`). */
 const SINGLE_COLON = /^\s*:(?!:)/;
@@ -101,17 +141,26 @@ const SINGLE_COLON = /^\s*:(?!:)/;
 export const patinaMode: StreamParser<PatinaState> = {
   name: 'patina',
 
-  startState: () => ({ attrDepth: 0, attrOpen: false, attrName: false, prev: '', inUse: false, inSignature: false }),
+  startState: () => ({ attrDepth: 0, attrOpen: false, attrName: false, prev: '', inUse: false, inSignature: false, stack: [], pendingForm: null, str: null, hole: false }),
 
   // `'` is a label, never a character literal: Patina has none. The rainbow-bracket scanner reads this, so a
   // `'outer` does not swallow the brackets after it.
-  languageData: { commentTokens: { line: '//' }, rainbowSingleQuote: false },
+  languageData: { commentTokens: { line: '//' }, rainbowSingleQuote: false, indentOnInput: /^\s*[}\])]$/ },
 
-  tokenTable: { staticCall, primitiveType, attribute },
+  tokenTable: { staticCall, primitiveType, attribute, textKey, catalogId, holeBrace, holePath },
 
   token(stream, state): string | null {
-    if (stream.sol() && state.inUse) state.inUse = false;
+    if (stream.sol()) {
+      if (state.inUse) state.inUse = false;
+      // A string does not span lines: an unterminated one ends where its line does.
+      state.str = null;
+      state.hole = false;
+    }
+    if (state.str) return stringPart(stream, state);
     if (stream.eatSpace()) return null;
+    // The `(` right after `block!` opens that form's argument list; anything else between them cancels it.
+    const form = state.pendingForm;
+    state.pendingForm = null;
 
     // `//` and `///` to the end of the line. Patina has no block comments (its lexer rejects them).
     if (stream.match('//')) {
@@ -128,11 +177,23 @@ export const patinaMode: StreamParser<PatinaState> = {
       state.attrOpen = false;
       state.attrDepth = 1;
       state.attrName = true;
+      state.stack.push(null);
       return null;
     }
-    if (stream.match(/^"(?:[^"\\]|\\.)*"?/)) {
+    if (stream.peek() === '"') {
       state.prev = '';
-      return 'string';
+      // The argument of a catalog form is an id (`t` a text key); every other string is text.
+      const top = state.stack[state.stack.length - 1];
+      const tag = top === undefined || top === null ? 'string' : top === 't' ? 'textKey' : 'catalogId';
+      // A string with no hole is one token, as it always was; only one with a `{name}` in it is cut into pieces.
+      const whole = stream.match(/^"(?:[^"\\]|\\.)*"?/, false) as RegExpMatchArray | null;
+      if (whole && !HOLE.test(whole[0].replace(/\{\{/g, ''))) {
+        stream.match(/^"(?:[^"\\]|\\.)*"?/);
+        return tag;
+      }
+      stream.next();
+      state.str = tag;
+      return tag;
     }
     // A label: `'outer`.
     if (stream.match(/^'[A-Za-z_]\w*/)) return 'labelName';
@@ -166,10 +227,16 @@ export const patinaMode: StreamParser<PatinaState> = {
       // The signature is over: names with a colon inside the body are fields or named arguments again.
       state.inSignature = false;
       state.prev = '';
+      if (state.stack.length < MAX_STACK) state.stack.push(null);
       return null;
     }
     if (stream.match(/^[()[\]}]/)) {
       const c = stream.current();
+      if (c === '(' || c === '[') {
+        if (state.stack.length < MAX_STACK) state.stack.push(c === '(' ? form : null);
+      } else {
+        state.stack.pop();
+      }
       if (state.attrDepth > 0) {
         if (c === '[') state.attrDepth++;
         else if (c === ']') state.attrDepth--;
@@ -188,6 +255,46 @@ export const patinaMode: StreamParser<PatinaState> = {
     return 'punctuation';
   },
 };
+
+/**
+ * One piece of the string the stream is inside: a hole's brace, the path in it, or the plain text up to the next one.
+ * The text takes the tag the opening quote chose (`string`, `textKey`, `catalogId`), so a whole `t!("ui:conta")` reads as one
+ * colour; only a hole breaks it.
+ */
+function stringPart(stream: Parameters<StreamParser<PatinaState>['token']>[0], state: PatinaState): string | null {
+  const tag = state.str as string;
+  if (stream.eat('"')) {
+    state.str = null;
+    state.hole = false;
+    return tag;
+  }
+  if (state.hole) {
+    if (stream.match(/^[\p{L}_][\p{L}\p{N}_.]*/u)) return 'holePath';
+    if (stream.eat('}')) {
+      state.hole = false;
+      return 'holeBrace';
+    }
+    // Something a hole does not accept: the brace was only text.
+    state.hole = false;
+  }
+  if (stream.peek() === '\\') {
+    stream.next();
+    stream.next();
+    return tag;
+  }
+  if (stream.peek() === '{') {
+    // `{{` is a literal brace; `{` and a name's first letter open a hole; a lone `{` is text.
+    if (stream.match('{{')) return tag;
+    if (stream.match(/^\{(?=[\p{L}_])/u)) {
+      state.hole = true;
+      return 'holeBrace';
+    }
+    stream.next();
+    return tag;
+  }
+  if (!stream.match(/^[^"\\{]+/)) stream.next();
+  return tag;
+}
 
 /** One identifier, coloured by what is around it. */
 function name(w: string, stream: Parameters<StreamParser<PatinaState>['token']>[0], state: PatinaState): string {
@@ -215,6 +322,7 @@ function name(w: string, stream: Parameters<StreamParser<PatinaState>['token']>[
   // A form: `block!("tnt")`, `t!("mod:key")`. A name the language brings, like a builtin.
   if (stream.peek() === '!' && stream.string.charAt(stream.pos + 1) !== '=') {
     stream.next();
+    state.pendingForm = CATALOG_FORMS.has(w) ? w : null;
     return 'variableName.standard';
   }
 
@@ -264,6 +372,13 @@ export const patinaHighlight = syntaxHighlighting(
     // A type a line declares, as a `fn` name is: the type colour, bolder.
     { tag: t.definition(t.typeName), color: 'var(--syntax-type, #4d9be6)', fontWeight: '600' },
     { tag: t.labelName, color: 'var(--syntax-label, var(--text-secondary))', fontStyle: 'italic' },
+    // The id in `t!("ui:key")` and in `block!("tnt")`: a string, but one the game checks — apart from the text around it. A theme without
+    // `--syntax-text-key` / `--syntax-catalog-id` gets the string colour pulled toward the type's / the constant's.
+    { tag: textKey, color: 'var(--syntax-text-key, color-mix(in srgb, var(--syntax-string, #6a9956) 55%, var(--syntax-type, #4d78cc)))' },
+    { tag: catalogId, color: 'var(--syntax-catalog-id, color-mix(in srgb, var(--syntax-string, #6a9956) 55%, var(--syntax-constant, #9876aa)))' },
+    // An interpolation hole `"{p.x}"`: the name reads as code, the braces as the keyword colour.
+    { tag: holePath, color: 'var(--syntax-variable, var(--text-primary))' },
+    { tag: holeBrace, color: 'var(--syntax-keyword, #cc7832)', fontWeight: '600' },
   ]),
 );
 
@@ -315,12 +430,31 @@ const braceFold = foldService.of((state, lineStart, lineEnd) => {
   return null;
 });
 
+/**
+ * Completion for `.ptn`: the backend answers *what*, this chooses *how the token is read* — which depends on where the caret is.
+ *
+ * - in the text of a string: an id (`ui:avvio.solo`) is one token with its `:` and `.`, asked everywhere inside the quotes;
+ * - in an interpolation hole `"{p.x}"`: a plain identifier, asked everywhere (a `{` is the trigger);
+ * - anywhere else: the usual source.
+ *
+ * Without this the default source read `con` as the word in `t!("ui:con`, replaced only that, and left `ui:ui:conta`.
+ */
+const patinaCompletionSource: CompletionSource = (ctx: CompletionContext): Promise<CompletionResult | null> | CompletionResult | null => {
+  const line = ctx.state.doc.lineAt(ctx.pos);
+  const where = stringContext(line.text.slice(0, ctx.pos - line.from));
+  if (where === 'text') return keyBackendCompletionSource(ctx);
+  if (where === 'hole') return eagerBackendCompletionSource(ctx);
+  return backendCompletionSource(ctx);
+};
+
 /** The `.ptn` language: shape from here, truth from the `language-intel` extension. */
 export const patinaLanguage: LanguageDescriptor = {
   id: 'patina',
   createParser: () => Promise.reject(new Error('patina: highlighted by a stream mode')),
   classify: () => null,
-  cmExtension: [StreamLanguage.define(patinaMode), patinaHighlight, braceFold],
+  cmExtension: [StreamLanguage.define(patinaMode), patinaHighlight, foldService.of(patinaExtraFold), braceFold, patinaIndent],
+  // `use …` collassa da solo all'apertura (impostazione "fold imports"), come gli import di Java.
+  importFold: useBlockRange,
   // The gutter: the ranges come from `braceFold` above, not from a grammar.
   cmFold: true,
   serverFold: false,
@@ -328,5 +462,5 @@ export const patinaLanguage: LanguageDescriptor = {
   // Ctrl/Cmd-hover: the one name under the pointer, not the whole `a.b` / `a::b` chain.
   linkRange: patinaLinkRange,
   // A Rust-shaped language: completion after a dot, a `::`, or a word — the default backend source's gate.
-  intel: { completion: backendCompletionSource, hover: backendHoverSource },
+  intel: { completion: patinaCompletionSource, hover: backendHoverSource },
 };

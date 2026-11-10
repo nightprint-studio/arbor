@@ -40,6 +40,8 @@ use bennu_proto::prelude::{
 use serde::Deserialize;
 use serde_json::{json, Value as Json};
 
+use crate::intentions::{offer_of, EditWire, OfferWire};
+
 /// The interface and the package id that serve `.ptn`.
 const INTERFACE: &str = "language-intel";
 const EXTENSION: &str = "ptn";
@@ -171,13 +173,33 @@ fn request_of(mod_dir: &Path, file: &str, source: &str) -> Json {
     })
 }
 
+/// The folder a call's `fs` sandbox should be: the Bennu project on screen when the mod lives inside it (its other mods, the base data, and
+/// the translations are all under it), else the mod's own folder. `None` when the request names no mod (the shell then keeps its own rule).
+fn sandbox_root(args: &[Json]) -> Option<String> {
+    let dir = args.first()?.get("workspace")?.get("dir")?.as_str()?;
+    if dir.is_empty() {
+        return None;
+    }
+    let dir_path = Path::new(dir);
+    if let Some(active) = crate::project::active_root() {
+        if dir_path.starts_with(Path::new(&active)) {
+            return Some(active);
+        }
+    }
+    Some(dir.to_string())
+}
+
 /// One call into the package. An error is logged and returned; the callers turn it into an empty answer.
 fn call(ctx: &BennuState, method: &str, args: Vec<Json>) -> Result<Json, String> {
+    // The shell judges the package's `fs` reads against the repository open in Arbor — the active *git* tab, which is not the project
+    // open here. Saying which project this call is about makes it the sandbox of the call; without it the package reads no translations.
+    let root = sandbox_root(&args);
     ctx.host_call(
         "__ext_call",
         json!({
             "plugin": "bennu_patina",
             "spec": { "interface": INTERFACE, "version": 1, "id": EXTENSION, "method": method, "args": args },
+            "root": root,
         }),
     )
     .map_err(|e| {
@@ -245,6 +267,13 @@ struct WireLocation {
 }
 
 #[derive(Deserialize)]
+struct WireCodeAction {
+    id: String,
+    title: String,
+    edits: Vec<WireEdit>,
+}
+
+#[derive(Deserialize)]
 struct WireRenameEdit {
     file: String,
     span: Span,
@@ -252,6 +281,32 @@ struct WireRenameEdit {
     new_text: String,
     old: String,
     reason: String,
+}
+
+#[derive(Deserialize)]
+struct WireCost {
+    base: u64,
+    #[serde(rename = "per-iteration")]
+    per_iteration: u64,
+    recursive: bool,
+    complexity: u32,
+    #[serde(rename = "over-budget")]
+    over_budget: bool,
+    #[serde(rename = "iterations-in-budget")]
+    iterations_in_budget: Option<u64>,
+    budget: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct WireUsageMark {
+    decl: usize,
+    #[serde(rename = "name-span")]
+    name_span: Span,
+    kind: String,
+    name: String,
+    count: usize,
+    unused: bool,
+    cost: Option<WireCost>,
 }
 
 fn decode<T: for<'de> Deserialize<'de>>(method: &str, v: Json) -> Option<T> {
@@ -476,6 +531,155 @@ pub(crate) fn references(ctx: &BennuState, file: &str, source: &str, offset: usi
     }
     let label = name_at(source, offset);
     Some(Some(UsagesResult { target_label: label, usages }))
+}
+
+/// The package's **code actions** at the caret (`offset`), as Alt+Enter offers: today its hints — a `for` that reads better as an iterator chain
+/// (`check.iter_chain`) — each with the edits that apply it. Empty for a file that is not Patina, for a library's read-only view, and when the installed
+/// package predates the `code-actions` export (an optional function, like `build`: nothing to offer, nothing broken).
+///
+/// An offer's edits are whole: the editor applies them together as one undo step (see [`offer_of`]). An edit that names another file is dropped — a hint
+/// rewrites the code it is on.
+pub(crate) fn code_action_offers(ctx: &BennuState, file: &str, source: &str, offset: usize) -> Vec<OfferWire> {
+    if !is_patina(file) || is_library_view(file) {
+        return Vec::new();
+    }
+    let out = call(ctx, "code-actions", vec![request(file, source), json!(offset), json!(offset)])
+        .ok()
+        .and_then(|v| decode::<Vec<WireCodeAction>>("code-actions", v))
+        .unwrap_or_default();
+    offers_of(&file.replace('\\', "/"), out)
+}
+
+/// The wire actions as Alt+Enter offers: only the edits that are in `here` (the file the caret is in), and no offer without edits.
+fn offers_of(here: &str, wire: Vec<WireCodeAction>) -> Vec<OfferWire> {
+    wire.into_iter()
+        .filter_map(|a| {
+            let edits: Vec<EditWire> = a
+                .edits
+                .into_iter()
+                .filter(|e| e.file.replace('\\', "/") == here)
+                .map(|e| EditWire { start: e.span.start, end: e.span.end, text: e.new_text })
+                .collect();
+            (!edits.is_empty()).then(|| offer_of(&format!("patina:{}", a.id), &a.title, edits, None))
+        })
+        .collect()
+}
+
+/// The use count of every declaration of a Patina file, each function with its static gas estimate (the package's `usage-marks`). `None` for a file that
+/// is not Patina. Empty when the installed package predates the `usage-marks` export (an optional function, like `build`: no rows, nothing broken).
+pub(crate) fn usage_marks(ctx: &BennuState, file: &str, source: &str) -> Option<Vec<crate::hints::UsageCountWire>> {
+    if !is_patina(file) {
+        return None;
+    }
+    if is_library_view(file) {
+        return Some(Vec::new());
+    }
+    let marks = call(ctx, "usage-marks", vec![request(file, source), json!(true)])
+        .ok()
+        .and_then(|v| decode::<Vec<WireUsageMark>>("usage-marks", v))
+        .unwrap_or_default();
+    Some(marks.into_iter().map(usage_row).collect())
+}
+
+fn usage_row(m: WireUsageMark) -> crate::hints::UsageCountWire {
+    let (note, warn) = match &m.cost {
+        Some(c) => (Some(cost_note(c)), c.over_budget),
+        None => (None, false),
+    };
+    crate::hints::UsageCountWire {
+        decl: m.decl,
+        start: m.name_span.start,
+        end: m.name_span.end,
+        kind: m.kind,
+        name: m.name,
+        count: m.count,
+        unused: m.unused,
+        note,
+        warn,
+    }
+}
+
+/// The estimate as one short phrase: `~gas 24`, `~gas 24 + 8/iter (≤ 12 000 iter)`, `~gas 24 + recursion`, then ` · cx 3` (cyclomatic complexity), and
+/// `· over per_hook 100 000` when the cheapest path alone exceeds the mod's budget.
+fn cost_note(c: &WireCost) -> String {
+    let mut s = format!("~gas {}", group(c.base));
+    if c.recursive {
+        s.push_str(" + recursion");
+    } else if c.per_iteration > 0 {
+        s.push_str(&format!(" + {}/iter", group(c.per_iteration)));
+        if let Some(n) = c.iterations_in_budget {
+            s.push_str(&format!(" (≤ {} iter)", group(n)));
+        }
+    }
+    s.push_str(&format!(" · cx {}", c.complexity));
+    if c.over_budget {
+        if let Some(b) = c.budget {
+            s.push_str(&format!(" · over per_hook {}", group(b)));
+        }
+    }
+    s
+}
+
+/// `12345` as `12 345`.
+fn group(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push('\u{202f}');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// The edits that format `file` (the whole document, or the lines `range` — UTF-8 byte offsets — touches), from the package's `patina-fmt`. `None` for a
+/// file that is not Patina. `Some(Err)` carries the package's sentence: a document that does not parse is never touched, and a wrong `patina-fmt.toml` is
+/// said, not worked around. A package that predates the `format` export answers with an error too (its function is not there), which the editor shows.
+pub(crate) fn format(ctx: &BennuState, file: &str, source: &str, range: Option<(usize, usize)>) -> Option<Result<Vec<SourceEdit>, String>> {
+    if !is_patina(file) {
+        return None;
+    }
+    if is_library_view(file) {
+        return Some(Ok(Vec::new()));
+    }
+    let range = match range {
+        Some((start, end)) => json!({ "start": start, "end": end }),
+        None => Json::Null,
+    };
+    let answer = call(ctx, "format", vec![request(file, source), range]).and_then(|v| decode::<Vec<WireEdit>>("format", v).ok_or_else(|| "the formatter's answer could not be read".to_string()));
+    Some(answer.map(|edits| edits.into_iter().map(|e| SourceEdit { file: e.file, start: e.span.start, end: e.span.end, new_text: e.new_text }).collect()))
+}
+
+/// Where the name at `offset` is realized (a trait's implementors, a trait method's `impl` methods). `None` for a file that is not Patina; an empty answer
+/// when nothing realizes it, or when the installed package predates the `implementations` export (an optional function, like `build`).
+pub(crate) fn implementations(ctx: &BennuState, file: &str, source: &str, offset: usize) -> Option<Option<UsagesResult>> {
+    if !is_patina(file) {
+        return None;
+    }
+    if is_library_view(file) {
+        return Some(None);
+    }
+    let out = call(ctx, "implementations", vec![request(file, source), json!(offset)])
+        .ok()
+        .and_then(|v| decode::<Vec<WireLocation>>("implementations", v))
+        .unwrap_or_default();
+    let here = file.replace('\\', "/");
+    let mut texts: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let usages: Vec<UsageHit> = out
+        .into_iter()
+        .filter(|l| !l.file.starts_with(LIBRARY_SCHEME))
+        .map(|l| {
+            let text = texts.entry(l.file.clone()).or_insert_with(|| if l.file == here { source.to_string() } else { std::fs::read_to_string(&l.file).unwrap_or_default() });
+            let (line, col) = line_col(text, l.span.start);
+            let preview = text[line_start(text, l.span.start)..].lines().next().unwrap_or("").trim().to_string();
+            UsageHit { file: l.file, start: l.span.start, end: l.span.end, line, col, preview, via: None }
+        })
+        .collect();
+    if usages.is_empty() {
+        return Some(None);
+    }
+    Some(Some(UsagesResult { target_label: format!("implementations of {}", name_at(source, offset)), usages }))
 }
 
 /// The edits of a rename, flat. `None` for a file that is not Patina; empty when the package refuses (a
@@ -821,6 +1025,23 @@ mod tests {
     }
 
     #[test]
+    fn a_hint_becomes_one_offer_with_its_edits_and_foreign_edits_are_dropped() {
+        let wire = |edits: Vec<(&str, usize, usize, &str)>| WireCodeAction {
+            id: "check.iter_chain".into(),
+            title: "Turn the loop into `.map(..).collect()`".into(),
+            edits: edits.into_iter().map(|(f, a, b, t)| WireEdit { file: f.into(), span: Span { start: a, end: b }, new_text: t.into() }).collect(),
+        };
+        let offers = offers_of("/m/script/a.ptn", vec![wire(vec![("/m/script/a.ptn", 10, 40, "let out = xs.iter().collect()")])]);
+        assert_eq!(offers.len(), 1);
+        assert_eq!((offers[0].id.as_str(), offers[0].start, offers[0].end, offers[0].replacement.as_str()), ("patina:check.iter_chain", 10, 40, "let out = xs.iter().collect()"));
+        assert!(offers[0].label.starts_with("Turn the loop"));
+        // Another file's edit is not applied here; with nothing left there is no offer.
+        assert!(offers_of("/m/script/a.ptn", vec![wire(vec![("/m/script/b.ptn", 0, 1, "x")])]).is_empty());
+        // Windows separators in the package's answer still match.
+        assert_eq!(offers_of("C:/m/script/a.ptn", vec![wire(vec![("C:\\m\\script\\a.ptn", 1, 2, "y")])]).len(), 1);
+    }
+
+    #[test]
     fn only_ptn_files_are_ours() {
         assert!(is_patina("/m/script/a.ptn"));
         assert!(is_patina("C:/m/script/A.PTN"));
@@ -1069,5 +1290,72 @@ mod tests {
         assert_eq!((root, file), (d.clone(), d.join("script/brains/shy.ptn")));
         assert!(search_scope("/nowhere/at/all").is_none());
         assert!(search_scope(&slash(&scratch("nomod"))).is_none());
+    }
+}
+
+#[cfg(test)]
+mod sandbox_root_tests {
+    use super::*;
+
+    fn args(dir: &str) -> Vec<Json> {
+        vec![json!({ "workspace": { "dir": dir, "manifest": null, "files": [] }, "path": "", "text": "", "lang": "" })]
+    }
+
+    #[test]
+    fn a_request_without_a_mod_names_no_root() {
+        assert_eq!(sandbox_root(&[]), None);
+        assert_eq!(sandbox_root(&[json!({ "path": "x" })]), None);
+        assert_eq!(sandbox_root(&args("")), None);
+    }
+
+    #[test]
+    fn without_a_project_on_screen_the_root_is_the_mods_own_folder() {
+        // `active_root()` is process-global and unset in this test binary unless another test sets it: the fallback is the mod folder.
+        if crate::project::active_root().is_none() {
+            assert_eq!(sandbox_root(&args("/p/voriz/mods/atmosphere")).as_deref(), Some("/p/voriz/mods/atmosphere"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod usage_marks_tests {
+    use super::*;
+
+    fn mark(cost: Option<serde_json::Value>) -> WireUsageMark {
+        serde_json::from_value(json!({
+            "decl": 10, "name-span": { "start": 14, "end": 18 }, "kind": "function", "name": "tick", "count": 3, "unused": false, "cost": cost,
+        }))
+        .unwrap()
+    }
+
+    fn cost(base: u64, per: u64, rec: bool, over: bool, iters: Option<u64>) -> serde_json::Value {
+        json!({ "base": base, "per-iteration": per, "loops": u32::from(per > 0), "recursive": rec, "complexity": 3, "over-budget": over, "iterations-in-budget": iters, "budget": 100000 })
+    }
+
+    #[test]
+    fn a_straight_function_has_a_short_note() {
+        let row = usage_row(mark(Some(cost(24, 0, false, false, None))));
+        assert_eq!((row.note.as_deref(), row.warn, row.count, row.start, row.end), (Some("~gas 24 · cx 3"), false, 3, 14, 18));
+    }
+
+    #[test]
+    fn a_loop_says_the_turn_and_how_many_fit_and_recursion_says_so() {
+        let looped = usage_row(mark(Some(cost(24, 8, false, false, Some(12_000)))));
+        assert_eq!(looped.note.as_deref(), Some("~gas 24 + 8/iter (≤ 12\u{202f}000 iter) · cx 3"));
+        let rec = usage_row(mark(Some(cost(24, 0, true, false, None))));
+        assert_eq!(rec.note.as_deref(), Some("~gas 24 + recursion · cx 3"));
+    }
+
+    #[test]
+    fn over_the_budget_is_a_warning_row() {
+        let row = usage_row(mark(Some(cost(150_000, 0, false, true, None))));
+        assert!(row.warn);
+        assert_eq!(row.note.as_deref(), Some("~gas 150\u{202f}000 · cx 3 · over per_hook 100\u{202f}000"));
+    }
+
+    #[test]
+    fn a_mark_without_cost_has_no_note() {
+        let row = usage_row(mark(None));
+        assert_eq!((row.note, row.warn), (None, false));
     }
 }

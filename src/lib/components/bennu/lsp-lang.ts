@@ -102,6 +102,9 @@ export function sayNoSuggestions(ctx: CompletionContext): void {
   completionNoteStore.say(`No suggestions at Ln ${line.number}, Col ${ctx.pos - line.from + 1}`);
 }
 
+/** An id as it is written in a string: `ui:avvio.solo`, `matassa-1`. */
+const KEY_TOKEN = /[\w$.:/-]*$/;
+
 /** How a server-backed source decides whether the caret is worth a round-trip. */
 interface BackendCompletionOptions {
   /**
@@ -137,6 +140,15 @@ interface BackendCompletionOptions {
    * everywhere because its vocabulary sits after a space, but a dot in it is a member.
    */
   wideToken?: boolean;
+
+  /**
+   * The suggestion replaces an **id inside a string**: `ui:avvio.solo`, `matassa-1`, `hud.kills`.
+   *
+   * The token is the letters, digits and the separators an id carries (`: . - /`), and the dot is part of the id — unlike {@link wideToken}, whose dot means
+   * member access. A narrow token here is the bug that completed `t!("ui:con` as `ui:ui:conta`: CodeMirror replaced only `con`, and the backend's
+   * suggestion carries the whole key.
+   */
+  keyToken?: boolean;
 }
 
 /** Build a completion source backed by `bennu_completion`. See {@link backendCompletionSource}. */
@@ -193,7 +205,7 @@ function makeBackendCompletionSource(opts: BackendCompletionOptions = {}): Compl
     // have members after a dot. Riding on `eager` made `Tool.` a single token in `.dig`, which is
     // how the members of an enum were filtered out of their own menu — see
     // {@link BackendCompletionOptions.wideToken}.
-    const token = opts.wideToken ? ctx.matchBefore(/[\w$./\\-]*$/) : word;
+    const token = opts.keyToken ? ctx.matchBefore(KEY_TOKEN) : opts.wideToken ? ctx.matchBefore(/[\w$./\\-]*$/) : word;
     const from = token ? token.from : ctx.pos;
 
     return {
@@ -204,7 +216,7 @@ function makeBackendCompletionSource(opts: BackendCompletionOptions = {}): Compl
       // filterable is the cheaper default and is right for the languages here.
       // Same token shape as `from` above, or the popup would stay open across a character that
       // moved the range it is filtering against.
-      validFor: opts.wideToken ? /^[\w$./\\-]*$/ : /^[\w$]*$/,
+      validFor: opts.keyToken ? /^[\w$.:/-]*$/ : opts.wideToken ? /^[\w$./\\-]*$/ : /^[\w$]*$/,
     };
   };
 }
@@ -242,6 +254,13 @@ export const eagerBackendCompletionSource: CompletionSource =
  * The two halves are separate on purpose — see {@link BackendCompletionOptions.wideToken} for the
  * bug that came of tying them together.
  */
+/**
+ * The same source for the **text of a string** that holds an id (`t!("ui:…")`, `block!("…")`): asked everywhere inside the quotes, and the suggestion
+ * replaces the whole id. See {@link BackendCompletionOptions.keyToken}.
+ */
+export const keyBackendCompletionSource: CompletionSource =
+  makeBackendCompletionSource({ eager: true, keyToken: true });
+
 export const commandBackendCompletionSource: CompletionSource =
   makeBackendCompletionSource({ eager: true, wideToken: true });
 

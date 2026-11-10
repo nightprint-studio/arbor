@@ -37,7 +37,7 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { SvelteMap } from 'svelte/reactivity';
-import { discoverCargoTests, runCargoTests } from '$lib/ipc/bennu/cargo-tests';
+import { discoverCargoTests, runCargoTests, runPatinaTests } from '$lib/ipc/bennu/cargo-tests';
 import { cancelTests } from '$lib/ipc/bennu/tests';
 import type {
   CargoCaseEvent, CargoCompilingEvent, CargoTargetDoneEvent, CargoTargetEvent, CargoTestScope,
@@ -108,6 +108,16 @@ interface TargetBlock {
   done: boolean;
 }
 
+/** Il percorso di `patina-test` scelto dall'utente (impostazione per-macchina, nel browser). Vuoto: lo cerca il backend. */
+export const PATINA_TEST_BIN_KEY = 'bennu.patinaTestBin';
+function patinaBinary(): string | null {
+  try {
+    return localStorage.getItem(PATINA_TEST_BIN_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
 function createCargoTestStore() {
   // ── discovery ────────────────────────────────────────────────────────────────
   let discovered = $state<DiscoveredRustTest[]>([]);
@@ -149,6 +159,8 @@ function createCargoTestStore() {
   // Not reactive — only the event handlers and `stop()` read these.
   let lastScope: CargoTestScope | null = null;
   let lastRoot = '';
+  /** L'ultima corsa era una mod `.ptn` (adattatore `patina-test`): rilanciarla vuol dire rilanciare quella, non `cargo`. */
+  let lastPatina: { modDir: string; only: string[] } | null = null;
   let includeIgnored = false;
   let ticker: ReturnType<typeof setInterval> | null = null;
 
@@ -339,7 +351,7 @@ function createCargoTestStore() {
     }
   }
 
-  async function run(root: string, scope: CargoTestScope): Promise<void> {
+  async function run(root: string, scope: CargoTestScope, launch?: () => ReturnType<typeof runCargoTests>): Promise<void> {
     if (!root || running) return;
     flushPending();
     pendingCases.clear();
@@ -356,6 +368,7 @@ function createCargoTestStore() {
     compiling = null;
     lastScope = scope;
     lastRoot = root;
+    if (!launch) lastPatina = null;
     running = true;
     startedAt = Date.now();
     elapsedMs = 0;
@@ -364,7 +377,7 @@ function createCargoTestStore() {
     // them go and find it.
     bennuUiStore.showTestRun();
     try {
-      const handle = await runCargoTests(root, scope, includeIgnored);
+      const handle = await (launch ? launch() : runCargoTests(root, scope, includeIgnored));
       runId = handle.run_id;
       label = handle.label;
       command = handle.command;
@@ -376,6 +389,11 @@ function createCargoTestStore() {
       stopTicker();
       push(String(e instanceof Error ? e.message : e), 'err');
     }
+  }
+
+  function runPatina(modDir: string, only: string[] = []): Promise<void> {
+    lastPatina = { modDir, only };
+    return run(modDir, { kind: 'workspace' }, () => runPatinaTests(modDir, { only, binary: patinaBinary() }));
   }
 
   async function stop(): Promise<void> {
@@ -875,11 +893,19 @@ function createCargoTestStore() {
       return cases.length ? run(root, { kind: 'cases', cases }) : Promise.resolve();
     },
 
+    /** Lancia le prove `#[test]` di una mod `.ptn` (tutte, o solo `only`) nel pannello dei test. */
+    runPatina,
+
     rerun() {
+      if (lastPatina) return runPatina(lastPatina.modDir, lastPatina.only);
       if (!lastScope || !lastRoot) return Promise.resolve();
       return run(lastRoot, lastScope);
     },
     rerunFailed() {
+      if (lastPatina) {
+        const names = [...new Set(reported.filter((c) => isBad(c.status)).map((c) => c.path))];
+        return names.length ? runPatina(lastPatina.modDir, names) : Promise.resolve();
+      }
       const cases = failedCases();
       if (!cases.length || !lastRoot) return Promise.resolve();
       return run(lastRoot, { kind: 'cases', cases });

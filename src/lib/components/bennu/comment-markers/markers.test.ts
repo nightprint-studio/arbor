@@ -25,6 +25,13 @@ describe('where the comments are', () => {
     expect(commentSpans('select 1 -- one', 'q.sql')).toHaveLength(1);
     expect(commentSpans('anything', 'a.unknownext')).toEqual([]);
   });
+
+  it('reads Patina: // and ///, a quote is a string and an apostrophe a loop label', () => {
+    const src = "let a = \"x // not\" // TODO: real\n'outer: for i in xs { } /// FIXME doc\n";
+    const spans = commentSpans(src, 'main.ptn');
+    expect(spans.map((s) => src.slice(s.from, s.to))).toEqual(['// TODO: real', '/// FIXME doc']);
+    expect(words(src, 'main.ptn')).toEqual(['TODO', 'FIXME']);
+  });
 });
 
 describe('finding markers', () => {

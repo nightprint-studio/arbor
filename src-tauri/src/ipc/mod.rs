@@ -262,6 +262,50 @@ pub fn build_router(app: &AppHandle) -> Router {
 /// `arbor.ui.*` plugin round-trips join here later. Runs on the `ChildClient`
 /// reader thread; `session` is a fast keyring read, a slow `refresh` (OAuth)
 /// briefly stalls demux — promote to a worker if that ever bites.
+/// The reverse-channel dispatcher of `bennu-be`: [`host_dispatch`], plus one thing only Bennu may ask for.
+///
+/// An extension call (`__ext_call`) is judged by the guest's `fs` gate against **the repository open in Arbor** — the
+/// shell's cached active-*Corvus*-tab path. A language backend in Bennu reads a mod's translations and catalogs through
+/// that gate, and the project open in Bennu is not necessarily the active git tab: with another repository active the gate
+/// refuses the read, the package degrades to "no data", and `t!(..)` gets no completion and no hover — silently.
+/// So a call that comes from `bennu-be` may carry `root`, the Bennu project it is about, and that root becomes the sandbox
+/// of **that call**.
+///
+/// Only this dispatcher reads `root`: every other backend goes through [`host_dispatch`], which ignores it, and a Lua plugin
+/// cannot add it (the glue builds `{plugin, spec}` itself). Even so the value is checked ([`ext_root_is_acceptable`]).
+fn bennu_host_dispatch(
+    app: &AppHandle,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if method == "__ext_call" {
+        if let Some(root) = params.get("root").and_then(|v| v.as_str()).filter(|r| !r.is_empty()) {
+            let root = std::path::PathBuf::from(root);
+            if !ext_root_is_acceptable(&root) {
+                return Err(format!("arbor.ext.call: refused root {}", root.display()));
+            }
+            let spec_v = params.get("spec").cloned().ok_or_else(|| "arbor.ext.call: missing `spec`".to_string())?;
+            let spec: crate::ext::CallSpec = serde_json::from_value(spec_v).map_err(|e| format!("arbor.ext.call: {e}"))?;
+            return crate::ext::call(&spec, Some(root));
+        }
+    }
+    host_dispatch(app, method, params)
+}
+
+/// A root a Bennu call may name as its `fs` sandbox: an absolute, existing directory that is neither a filesystem root nor
+/// the user's home folder — a project, not "everything the user owns".
+fn ext_root_is_acceptable(root: &std::path::Path) -> bool {
+    if !root.is_absolute() || !root.is_dir() || root.parent().is_none() {
+        return false;
+    }
+    if root.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return false;
+    }
+    let canon = root.canonicalize().ok();
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(std::path::PathBuf::from).and_then(|h| h.canonicalize().ok());
+    !(canon.is_none() || canon == home)
+}
+
 fn host_dispatch(
     app: &AppHandle,
     method: &str,
@@ -2185,7 +2229,7 @@ fn spawn_bennu_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
             // the index wave ships. Global emit is harmless with a single window.
             forward_backend_event(&app_for_events, "bennu", topic, payload);
         },
-        move |method, params| host_dispatch(&app_for_host, method, params),
+        move |method, params| bennu_host_dispatch(&app_for_host, method, params),
         move || {
             // Fires for a genuine crash AND the intentional teardown of an OLD child
             // after stop+respawn. `detach_if_current` acts only when gen={gen} is
@@ -2839,4 +2883,32 @@ fn ext_file_params<'a>(
     let file: crate::ext::FileSpec =
         serde_json::from_value(file_v).map_err(|e| format!("{who}: {e}"))?;
     Ok((plugin, spec, file))
+}
+
+#[cfg(test)]
+mod ext_root_tests {
+    use super::ext_root_is_acceptable;
+    use std::path::Path;
+
+    #[test]
+    fn a_project_folder_is_acceptable() {
+        let dir = std::env::temp_dir().join(format!("arbor-ext-root-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(ext_root_is_acceptable(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_filesystem_root_the_home_folder_a_relative_or_a_missing_path_are_not() {
+        assert!(!ext_root_is_acceptable(Path::new("/")));
+        assert!(!ext_root_is_acceptable(Path::new("relative/dir")));
+        assert!(!ext_root_is_acceptable(Path::new("/definitely/not/here/arbor")));
+        if let Some(home) = std::env::var_os("HOME") {
+            assert!(!ext_root_is_acceptable(Path::new(&home)), "la cartella home non e' un progetto");
+        }
+        let dir = std::env::temp_dir().join(format!("arbor-ext-root-up-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!ext_root_is_acceptable(&dir.join("..")), "un `..` non si accetta");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -46,7 +46,7 @@ import { snippetStops } from './snippet-stops';
 import { completionRowParts, rowClass, type RichOption } from './completion-render';
 import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
-import { createFoldingExtension, foldBlockCommentsOnLoad, foldImportsOnLoad } from './folding';
+import { createFoldingExtension, foldBlockCommentsOnLoad, foldImportsOnLoad, foldRangeOnLoad } from './folding';
 import { emmetKeymap } from './emmet';
 import { hasMultipleCursors, multiCursor, multiCursorKeymap, quietWithMultipleCursors } from './multi-cursor';
 import { intellijEditingKeymap } from './intellij-keymap';
@@ -411,7 +411,7 @@ export function createCodeEditorExtensions(
   const activeLineHighlight = [highlightActiveLine(), highlightActiveLineGutter()];
   const whitespaceGlyphs = highlightWhitespace();
   const commentFoldOnLoad = foldBlockCommentsOnLoad(lang, getTree);
-  const importFoldOnLoad = lang.foldNode ? foldImportsOnLoad(getTree) : [];
+  const importFoldOnLoad = lang.foldNode ? foldImportsOnLoad(getTree) : lang.importFold ? foldRangeOnLoad(lang.importFold) : [];
 
   /**
    * Build the contents of {@link preferencesCompartment} for one set of preferences.

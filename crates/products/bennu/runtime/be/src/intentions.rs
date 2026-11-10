@@ -112,7 +112,7 @@ impl OfferWire {
 
 /// Every intention applicable at the caret (empty when none fits).
 #[arbor_rpc::handler]
-fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<RankedOffer>, String> {
+fn bennu_intentions_at(ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<RankedOffer>, String> {
     let mut offers: Vec<RankedOffer> = Vec::new();
 
     // Everything below this point up to the naming offer is **Java**, and is now guarded as such:
@@ -151,6 +151,14 @@ fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<Ra
     // decides for itself which files it answers for, and a framework with an opinion about an XML
     // file should not need this handler to learn about it.
     offers.extend(framework_offers(&args));
+
+    // A `.ptn` (Patina): the package's hints with the edits that apply them — a `for` that reads better as an iterator chain. Rewrites of code that is
+    // already right, so they sit among the intentions, not the fixes. The editor asks this handler for every file, so no frontend guard is needed.
+    offers.extend(
+        crate::patina_intel::code_action_offers(ctx, &args.file, &args.source, args.offset)
+            .into_iter()
+            .map(|o| o.in_section(OfferCategory::Intention)),
+    );
 
     // The caret is on a declaration whose name breaks the project's naming convention. The fix is
     // the name the convention itself produced, so the offer never has to compute one.

@@ -197,12 +197,28 @@ fn build_node(
     TreeNode {
         hidden: is_hidden(path, &name),
         ignored: inherited,
-        root_tag: if is_dir { String::new() } else { root_tag(path, &name) },
+        root_tag: if is_dir { dir_tag(path) } else { root_tag(path, &name) },
         name,
         path: path.display().to_string(),
         is_dir,
         children,
         unloaded: false,
+    }
+}
+
+/// Tag che una cartella-mod di Voriz porta nel campo `root_tag` (che per i file e' l'elemento radice dell'XML).
+pub const VORIZ_MOD_TAG: &str = "vorizmod";
+
+/// Il tag di una cartella: `vorizmod` se ha un `manifest.ron` accanto a una `script/`, altrimenti vuoto.
+///
+/// Calcolato qui, nel listing, e non dal frontend sui `children`: l'albero e' caricato a richiesta, e una
+/// cartella chiusa ha i figli vuoti, quindi il riconoscimento a nodo chiuso e' possibile solo dal backend.
+/// Costa due `stat` per cartella.
+fn dir_tag(path: &Path) -> String {
+    if path.join("manifest.ron").is_file() && path.join("script").is_dir() {
+        VORIZ_MOD_TAG.to_string()
+    } else {
+        String::new()
     }
 }
 
@@ -388,6 +404,23 @@ mod tests {
             return Some(node);
         }
         node.children.iter().find_map(|c| find(c, name))
+    }
+
+    /// Un mod si riconosce a cartella chiusa: depth 1 lascia `children` vuoti, ma il tag c'e'.
+    #[test]
+    fn a_mod_folder_is_tagged_even_when_it_is_not_expanded() {
+        let t = TempDir::new("vorizmod");
+        t.write("mods/pets/manifest.ron", "()");
+        t.dir("mods/pets/script");
+        t.write("mods/plain/manifest.ron", "()");
+        t.write("mods/scripts_only/script/a.ptn", "");
+        let tree = build(&t.0, 64).unwrap();
+        assert_eq!(find(&tree, "pets").unwrap().root_tag, VORIZ_MOD_TAG);
+        assert_eq!(find(&tree, "plain").unwrap().root_tag, "");
+        assert_eq!(find(&tree, "scripts_only").unwrap().root_tag, "");
+        let shallow = build(&t.0.join("mods"), 1).unwrap();
+        let pets = find(&shallow, "pets").unwrap();
+        assert!(pets.children.is_empty() && pets.root_tag == VORIZ_MOD_TAG);
     }
 
     /// The reason for the rule: worktrees full of files, sorted before the real sources, must not use up the budget.

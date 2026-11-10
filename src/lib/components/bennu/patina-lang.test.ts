@@ -3,7 +3,12 @@ import { StringStream } from '@codemirror/language';
 import Prism from 'prismjs';
 
 // The completion and hover sources pull in the whole editor; the tokenizer needs none of it.
-vi.mock('./lsp-lang', () => ({ backendCompletionSource: () => () => null, backendHoverSource: () => () => null }));
+vi.mock('./lsp-lang', () => ({
+  backendCompletionSource: () => () => null,
+  eagerBackendCompletionSource: () => () => null,
+  keyBackendCompletionSource: () => () => null,
+  backendHoverSource: () => () => null,
+}));
 
 import { patinaMode } from './patina-lang';
 import '$lib/utils/prism-languages/patina';
@@ -147,5 +152,53 @@ describe('patina stream mode: attributes', () => {
 
   it('a lone `#` is not an attribute', () => {
     expect(styleOf('a # b', '#')).toBe('punctuation');
+  });
+});
+
+describe('patina stream mode: strings that carry an id or a hole', () => {
+  it('keeps a plain string as one token', () => {
+    expect(tokens('let a = "hello"')).toContainEqual(['"hello"', 'string']);
+  });
+
+  it('gives the argument of t!(…) the text-key colour and the other catalog forms the id colour', () => {
+    expect(styleOf('let a = t!("ui:avvio.solo")', '"ui:avvio.solo"')).toBe('textKey');
+    expect(styleOf('let a = block!("tnt")', '"tnt"')).toBe('catalogId');
+    expect(styleOf('let a = ui!("barra", "matassa-1")', '"barra"')).toBe('catalogId');
+    expect(styleOf('let a = ui!("barra", "matassa-1")', '"matassa-1"')).toBe('catalogId');
+  });
+
+  it('leaves a string that is not directly the argument of a form as text', () => {
+    expect(styleOf('let a = t!(f("x"))', '"x"')).toBe('string');
+    expect(styleOf('assert!(ok, "message")', '"message"')).toBe('string');
+    expect(styleOf('log!("line")', '"line"')).toBe('string');
+    expect(styleOf('let a = t!("k") + "plain"', '"plain"')).toBe('string');
+  });
+
+  it('cuts a string around its interpolation holes', () => {
+    expect(tokens('let a = "hi {p.name} and {n}!"').filter(([, st]) => st !== null)).toEqual([
+      ['let', 'keyword'], ['a', 'variableName'], ['=', 'operator'],
+      ['"', 'string'], ['hi ', 'string'], ['{', 'holeBrace'], ['p.name', 'holePath'], ['}', 'holeBrace'],
+      [' and ', 'string'], ['{', 'holeBrace'], ['n', 'holePath'], ['}', 'holeBrace'], ['!', 'string'], ['"', 'string'],
+    ]);
+  });
+
+  it('reads {{ }} and a lone { as text, and an escape as part of the string', () => {
+    expect(tokens('let a = "{{x}} {1}"')).toContainEqual(['"{{x}} {1}"', 'string']);
+    const out = tokens('let a = "{{x}}"');
+    expect(out.filter(([, s]) => s === 'holeBrace')).toEqual([]);
+    expect(tokens('let a = "{1}"').filter(([, s]) => s === 'holeBrace')).toEqual([]);
+  });
+
+  it('colours a hole inside a catalog form the same way and ends the string at the closing quote', () => {
+    const out = tokens('let a = t!("k {x}") + 1');
+    expect(out).toContainEqual(['x', 'holePath']);
+    expect(out).toContainEqual(['1', 'number']);
+    expect(out.find(([s]) => s === 'k ')?.[1]).toBe('textKey');
+  });
+
+  it('forgets an unterminated string at the end of its line', () => {
+    const out = tokensOver(['let a = "open {x', 'let b = 2']);
+    expect(out).toContainEqual(['let', 'keyword']);
+    expect(out.filter(([s]) => s === 'b').map(([, st]) => st)).toEqual(['variableName']);
   });
 });

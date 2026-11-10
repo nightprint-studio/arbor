@@ -131,6 +131,16 @@ pub struct UsageCountWire {
     /// True only when the count of zero is a fact about the **program** and not merely about the
     /// index — see `bennu_intel::usage_marks`. The editor greys exactly these.
     pub unused: bool,
+    /// Text drawn after the count on the same row — for a Patina function, its static gas estimate (`~gas 24 + 8/iter · cx 3`). Absent for Java.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// The note is a warning (the function costs more than the mod's `per_hook` budget): draw the row in the accent tone.
+    #[serde(skip_serializing_if = "is_false")]
+    pub warn: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// How many places use each declaration in the buffer.
@@ -145,6 +155,10 @@ fn bennu_usage_counts(
     _ctx: &BennuState,
     args: UsageCountArgs,
 ) -> Result<Vec<UsageCountWire>, String> {
+    // A `.ptn` file is answered by the Patina package: the same rows, plus the gas estimate of each function.
+    if let Some(marks) = crate::patina_intel::usage_marks(_ctx, &args.file, &args.source) {
+        return Ok(marks);
+    }
     if !crate::intel::is_java_file(&args.file) {
         return Ok(Vec::new());
     }
@@ -175,6 +189,8 @@ fn bennu_usage_counts(
                 name: m.name,
                 count: m.count,
                 unused,
+                note: None,
+                warn: false,
             }
         })
         .collect())

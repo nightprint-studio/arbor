@@ -23,7 +23,7 @@
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
     History, Tag, Trash2, ExternalLink, FolderPlus, FolderInput, Package, Boxes, ClipboardPaste, Sparkles, Info, Wand2,
-    Languages, Send,
+    Languages, Send, Puzzle,
   } from 'lucide-svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import FilePropertiesModal from '$lib/components/shared/internal/FilePropertiesModal.svelte';
@@ -179,6 +179,9 @@
    *  correctly. Every one of them is [`damped`] — see there for why. */
   function folderColor(path: string): string {
     const p = path.replace(/\\/g, '/');
+    // The `script/` of a Voriz mod is its source root — Patina code lives there, so it reads as
+    // code (blue) like `src` does in a crate, and so does everything below it.
+    if (modScriptDirs.some((d) => p === d || p.startsWith(d + '/'))) return damped('var(--info)');
     if (/\/src\/(main|test)\/resources(\/|$)/.test(p)) return damped('var(--warning)');
     // Resources first, then the shared test predicate — `src/test/resources` is resources, and
     // `isTestSource` is deliberately not that fussy because the tab strip has no such distinction.
@@ -189,6 +192,32 @@
     if (/\/(crates|src)(\/|$)/.test(p)) return damped('var(--info)');
     return 'var(--text-muted)';
   }
+
+  /** Whether this directory is a **Voriz mod**: a `manifest.ron` next to a `script/` folder.
+   *
+   *  The pair is what the game's mod loader asks for, so it is the honest definition — a project root
+   *  has a manifest but no `script/`, and a folder that merely holds scripts has no manifest. */
+  function isVorizMod(node: TreeNode): boolean {
+    if (!node.is_dir) return false;
+    // Closed folder: the tree is lazy and `children` is empty, so the backend says it (`root_tag`).
+    if (node.root_tag === 'vorizmod') return true;
+    return node.children.some((c) => !c.is_dir && c.name === 'manifest.ron')
+      && node.children.some((c) => c.is_dir && c.name === 'script');
+  }
+
+  /** The `script/` directory of every mod in the tree (forward slashes), found in one walk. */
+  const modScriptDirs = $derived.by<string[]>(() => {
+    const out: string[] = [];
+    const walk = (nodes: readonly TreeNode[]) => {
+      for (const n of nodes) {
+        if (!n.is_dir) continue;
+        if (isVorizMod(n)) out.push(`${n.path.replace(/\\/g, '/')}/script`);
+        walk(n.children);
+      }
+    };
+    walk(projectStore.tree?.children ?? []);
+    return out;
+  });
 
   /** What a row draws: a lucide glyph this file tints itself, or one of the shared VS Code
    *  file icons (which carry their own colour and must not be tinted). */
@@ -278,6 +307,11 @@
       // eye can read as emphasis.
       if (isBuildUnit(node)) {
         return { shape: 'glyph', icon: Folder, color: 'var(--accent)', filled: true };
+      }
+      // A Voriz mod is a unit of its own too: a puzzle piece, because a mod is a piece you slot
+      // into the game, and it is not a Cargo crate or a Maven module to be mistaken for one.
+      if (isVorizMod(node)) {
+        return { shape: 'glyph', icon: Puzzle, color: 'var(--accent)', filled: true };
       }
       // A directory inside a source root is a package, and reads as one — the row says
       // `it.acme.portal`, so a folder icon next to it would be describing the storage
@@ -613,7 +647,13 @@
     // Offered only where there is something to run — an entry that can only report "matched
     // nothing" is worse than no entry, and on a source tree most folders have no tests.
     const testCount = testsFor(node).length;
-    const runItem: MenuItem[] = testCount
+    // A mod `.ptn` (cartella con manifest.ron + script/) si prova col binario patina-test: l'adattatore sugli eventi di Cargo.
+    const runItem: MenuItem[] = node.is_dir && isVorizMod(node)
+      ? [
+          { id: 'run-ptn-tests', label: 'Run mod tests', icon: FlaskConical },
+          { separator: true, id: 'sep-tests', label: '' },
+        ]
+      : testCount
       ? [
           {
             id: 'run-tests',
@@ -685,6 +725,7 @@
         case 'new-folder':
         case 'new-module': runNew(id, newDir); break;
         case 'run-tests': runTestsFor(node); break;
+        case 'run-ptn-tests': void bennuCargoTestStore.runPatina(node.path.replace(/\\/g, '/')); break;
         case 'optimize-imports': bennuUiStore.openOptimizeImports(node.path); break;
         case 'convert-encoding': bennuUiStore.openEncodingConvert([node.path]); break;
         case 'rename':    renamePath = node.path; break;

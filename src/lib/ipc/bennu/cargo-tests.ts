@@ -43,3 +43,16 @@ export function runCargoTests(
     args: { root, scope, include_ignored: includeIgnored },
   });
 }
+
+/** Lancia `patina-test` su una mod `.ptn` (cartella con `manifest.ron`). Risponde con lo stesso handle di `runCargoTests`:
+ *  la corsa narra i suoi eventi al pannello dei test di Cargo (adattatore, `bennu-be/src/patina_tests.rs`).
+ *  `only` limita a certe prove (nomi come li stampa il banco); `binary` e' il percorso scelto dall'utente.
+ *  Wire: `bennu_run_patina_tests` — `PatinaRunArgs { mod_dir, only, binary?, allow_unrealized }`. */
+export function runPatinaTests(
+  modDir: string,
+  opts: { only?: string[]; binary?: string | null; allowUnrealized?: boolean } = {},
+): Promise<CargoRunHandle> {
+  return bennu('bennu_run_patina_tests', {
+    args: { mod_dir: modDir, only: opts.only ?? [], binary: opts.binary ?? null, allow_unrealized: opts.allowUnrealized ?? false },
+  });
+}

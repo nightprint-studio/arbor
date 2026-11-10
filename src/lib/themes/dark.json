@@ -109,6 +109,8 @@
     "--syntax-type":     "#4d78cc",
     "--syntax-primitive": "#2aacb8",
     "--syntax-attribute": "#d98ba8",
+    "--syntax-text-key": "#e6c36a",
+    "--syntax-catalog-id": "#8fb8e0",
     "--radius-sm":       "4px",
     "--radius-md":       "6px",
     "--radius-lg":       "10px",

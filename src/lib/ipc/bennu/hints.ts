@@ -68,6 +68,10 @@ export interface UsageCount {
    *  index — anything carrying an annotation, any override, and `main` are excluded, because
    *  something outside the code can reach each of them. Grey exactly these. */
   unused: boolean;
+  /** Text drawn after the count on the same row — a Patina function's static gas estimate (`~gas 24 · cx 3`). */
+  note?: string;
+  /** The note is a warning (over the mod's `per_hook` budget): the row takes the accent tone. */
+  warn?: boolean;
 }
 
 /** How many places use each declaration in the buffer — **minus the ones not worth a word**.

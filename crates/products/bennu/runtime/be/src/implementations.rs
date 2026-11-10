@@ -36,11 +36,15 @@ pub struct ImplementationsArgs {
 /// nothing builds on it.
 #[arbor_rpc::handler]
 fn bennu_implementations(
-    _ctx: &BennuState,
+    ctx: &BennuState,
     args: ImplementationsArgs,
 ) -> Result<Option<UsagesResult>, String> {
     if let Some(found) = crate::lsp_route::implementations(&args.file, &args.source, args.offset) {
         return Ok(Some(found));
+    }
+    // A `.ptn`: the `impl`s of a trait, or of one of its methods, across the mod.
+    if let Some(found) = crate::patina_intel::implementations(ctx, &args.file, &args.source, args.offset) {
+        return Ok(found);
     }
     if !crate::intel::is_java_file(&args.file) {
         return Ok(None);

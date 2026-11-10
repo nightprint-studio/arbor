@@ -21,6 +21,8 @@ interface Syntax {
 
 const C_STYLE: Syntax = { line: ['//'], block: [['/*', '*/']], quotes: '"\'' };
 const HASH: Syntax = { line: ['#'], block: [], quotes: '"\'' };
+/** Patina: `//` and `///` only (its lexer rejects block comments), and a `'` is a loop label, never a quote. */
+const PATINA: Syntax = { line: ['//'], block: [], quotes: '"' };
 const MARKUP: Syntax = { line: [], block: [['<!--', '-->']], quotes: '' };
 
 const BY_EXTENSION: Record<string, Syntax> = {
@@ -30,6 +32,7 @@ const BY_EXTENSION: Record<string, Syntax> = {
   scss: C_STYLE, less: C_STYLE,
   sql: { line: ['--'], block: [['/*', '*/']], quotes: '\'' },
   lua: { line: ['--'], block: [['--[[', ']]']], quotes: '"\'' },
+  ptn: PATINA,
   yaml: HASH, yml: HASH, toml: HASH, sh: HASH, bash: HASH, zsh: HASH, py: HASH, rb: HASH, conf: HASH,
   ini: { line: ['#', ';'], block: [], quotes: '' },
   properties: { line: ['#', '!'], block: [], quotes: '' },

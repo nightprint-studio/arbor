@@ -177,6 +177,9 @@ export interface LanguageDescriptor {
    * for tree-sitter descriptors (they fold via {@link foldNode} instead).
    */
   cmFold?: boolean;
+  /** Il blocco di import da collassare all'apertura per un linguaggio senza albero (stream mode): lo calcola
+   *  dal testo. Letto dall'impostazione "fold imports", come `foldNode` per i linguaggi ad albero. */
+  importFold?: (state: import('@codemirror/state').EditorState) => { from: number; to: number } | null;
 
   /**
    * Fold from ranges a **provider** supplies rather than from the buffer's own structure.

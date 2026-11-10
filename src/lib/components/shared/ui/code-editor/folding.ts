@@ -325,6 +325,34 @@ export function foldImportsOnLoad(getTree: GetTree): Extension {
   );
 }
 
+/**
+ * Come {@link foldImportsOnLoad}, ma per un linguaggio senza albero: il range lo calcola `range(state)` dal
+ * testo. Una volta sola, al primo aggiornamento in cui il documento non e' vuoto (il file puo' arrivare dopo la vista).
+ */
+export function foldRangeOnLoad(range: (state: EditorState) => { from: number; to: number } | null): Extension {
+  return ViewPlugin.fromClass(
+    class {
+      private done = false;
+
+      constructor(view: EditorView) {
+        this.foldOnce(view);
+      }
+
+      update(u: ViewUpdate) {
+        this.foldOnce(u.view);
+      }
+
+      private foldOnce(view: EditorView) {
+        if (this.done || view.state.doc.length === 0) return;
+        this.done = true;
+        const r = range(view.state);
+        if (!r) return;
+        queueMicrotask(() => view.dispatch({ effects: foldEffect.of(r) }));
+      }
+    },
+  );
+}
+
 // ── View registry ──────────────────────────────────────────────────────────
 //
 // CodeMirror's foldService callback receives only the EditorState, but reading

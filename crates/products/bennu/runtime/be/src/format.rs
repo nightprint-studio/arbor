@@ -10,6 +10,8 @@
 //! truth that the CI does not read. Java has no such file of its own, so its style is built from
 //! Bennu's settings, the project's `.editorconfig` and the project override — see `format_style`.
 //!
+//! A `.ptn` is the third engine: the Patina package formats it with its own `patina-fmt` (and a selection too), the style being the project's `patina-fmt.toml`.
+//!
 //! Edits rather than formatted text, in both directions: the editor applies them through CodeMirror
 //! so the format lands in the undo history as one step and the caret keeps its place.
 
@@ -42,7 +44,12 @@ pub struct FormatArgs {
 
 /// Reformat `source`. Empty when it is already formatted, or when nothing can format this file.
 #[arbor_rpc::handler]
-fn bennu_format(_ctx: &BennuState, args: FormatArgs) -> Result<Vec<SourceEdit>, String> {
+fn bennu_format(ctx: &BennuState, args: FormatArgs) -> Result<Vec<SourceEdit>, String> {
+    // A `.ptn` is formatted by the Patina package (`patina-fmt`, styled by the project's `patina-fmt.toml`), which also formats a selection. Its error — a syntax
+    // error, a wrong config file — is returned, so the editor can say it.
+    if let Some(answer) = crate::patina_intel::format(ctx, &args.file, &args.source, args.range.as_ref().map(|r| (r.start, r.end))) {
+        return answer;
+    }
     let cfg = bennu_core::config::load();
     let tab_size = args.tab_size.unwrap_or(cfg.indent_width).max(1) as usize;
     let spaces = args.insert_spaces.unwrap_or(!cfg.indent_with_tabs);

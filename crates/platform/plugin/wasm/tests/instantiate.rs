@@ -498,3 +498,54 @@ fn a_guest_answers_definitions_and_name_searches() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// **La mod vera dentro l'host vero**: `t!("…")` di `mods/atmosphere` di Voriz, con il pacchetto Patina compilato e il gate di `fs` di Arbor. Prima con il repository
+/// attivo = Voriz (come in Arbor con il progetto aperto), poi con un repository che **non** contiene la mod: lì il pacchetto non legge le traduzioni, non dà errore, e
+/// l'hover resta vuoto.
+///
+/// ```sh
+/// ARBOR_PATINA_FIXTURE=…/patina_language_intel.wasm ARBOR_VORIZ=…/games/voriz \
+///   cargo test -p arbor-plugin-wasm --features runtime -- --ignored translation_keys_of_a_real_mod --nocapture
+/// ```
+#[test]
+#[ignore = "needs ARBOR_PATINA_FIXTURE (the built Patina package) and ARBOR_VORIZ (the Voriz checkout)"]
+fn a_guest_hovers_the_translation_keys_of_a_real_mod() {
+    use arbor_plugin_types::prelude::AccessLevel;
+
+    let module = std::path::PathBuf::from(std::env::var("ARBOR_PATINA_FIXTURE").expect("set ARBOR_PATINA_FIXTURE"));
+    let voriz = std::path::PathBuf::from(std::env::var("ARBOR_VORIZ").expect("set ARBOR_VORIZ")).canonicalize().unwrap();
+    let mod_dir = voriz.join("mods/atmosphere");
+    let path = mod_dir.join("script/commands.ptn");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let manifest = std::fs::read_to_string(mod_dir.join("manifest.ron")).unwrap();
+    let mut files = vec![];
+    for e in std::fs::read_dir(mod_dir.join("script")).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "ptn") {
+            files.push(serde_json::json!({ "path": p.to_string_lossy(), "text": std::fs::read_to_string(&p).unwrap() }));
+        }
+    }
+    let req = serde_json::json!({
+        "workspace": { "dir": mod_dir.to_string_lossy(), "manifest": manifest, "files": files },
+        "path": path.to_string_lossy(), "text": text, "lang": "it",
+    });
+    let at = text.find("atmosphere:cmd.opened").unwrap() + 3;
+    let iface = "arbor:extensions/language-intel@1.0.0";
+    let host = WasmHost::new().expect("engine");
+
+    let mut ask = |repo: Option<std::path::PathBuf>| -> (serde_json::Value, serde_json::Value) {
+        let caps = GuestCaps::new("patina", vec![], vec![]).with_fs(AccessLevel::Read, vec![]).with_repo(repo);
+        let mut g = host.open_dynamic(&module, caps, Arc::new(NoServices) as Services).expect("the package comes up");
+        let hover = g.call(Some(iface), "hover", &[req.clone(), serde_json::json!(at)]).expect("hover");
+        let comp = g.call(Some(iface), "completion", &[req.clone(), serde_json::json!(at)]).expect("completion");
+        (hover, comp)
+    };
+    let (hover, comp) = ask(Some(voriz.clone()));
+    eprintln!("repo = voriz: hover = {hover}");
+    eprintln!("repo = voriz: completion = {} items, first = {:?}", comp.as_array().map_or(0, |a| a.len()), comp.as_array().and_then(|a| a.first()));
+    assert!(!hover.is_null(), "con il repository di Voriz attivo l'hover su una chiave `t!` deve rispondere");
+    let (hover_out, comp_out) = ask(Some(std::env::temp_dir()));
+    eprintln!("repo fuori dalla mod: hover = {hover_out}, completion = {} items", comp_out.as_array().map_or(0, |a| a.len()));
+    let (hover_none, _) = ask(None);
+    eprintln!("nessun repository: hover = {hover_none}");
+}
