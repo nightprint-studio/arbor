@@ -276,7 +276,7 @@
   }
 
   // A branch opening or closing moves every row under it. For a moment after the toggle the rows glide to
-  // their new place and the ones that appear or go fade; the rest of the time — scrolling above all — the
+  // their new place and the ones that appear fade in (see `rowEnter`); the rest of the time — scrolling above all — the
   // window of rows is recycled instantly, because an animation there would flash on every row it reuses.
   let toggling = $state(false);
   let togglingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -285,10 +285,24 @@
     clearTimeout(togglingTimer);
     togglingTimer = setTimeout(() => (toggling = false), animStore.dFast + 80);
   }
-  /** The row transition: opacity and a small drop, for as long as {@link toggling} says so. */
-  function rowFx(_node: Element, { enter }: { enter: boolean }) {
+  /**
+   * A row that appears while a branch opens fades in with a small drop. Rows that go simply go.
+   *
+   * A Web Animation started on mount, and deliberately **not** a Svelte `in:` / `out:` transition. An
+   * outro keeps its element in the DOM, frozen at its old `top`, until the animation ends — and in a
+   * virtualised list rows leave all the time without being removed from the tree: opening a folder
+   * whose children arrive lazily pushes every row below it out of the window at once. Those rows sat
+   * on top of the new ones (`Cargo.toml` printed over `src`) until a scroll reconciled the list. With
+   * no outro the DOM is always exactly the window of rows, which is the one invariant a virtualised
+   * list cannot give up.
+   */
+  function rowEnter(node: HTMLElement): void {
     const duration = toggling ? animStore.dFast : 0;
-    return { duration, css: (t: number) => `opacity: ${t}; transform: translateY(${(1 - t) * (enter ? -6 : -4)}px)` };
+    if (!duration) return;
+    node.animate(
+      [{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }],
+      { duration, easing: 'ease-out' },
+    );
   }
 
   function toggle(node: T): void {
@@ -694,8 +708,7 @@
           class:tree-row-drop-hover={isDropHover}
           class:tree-row-dragging={dragSourceId === r.id}
           data-tree-id={r.id}
-          in:rowFx={{ enter: true }}
-          out:rowFx={{ enter: false }}
+          use:rowEnter
           style="position: absolute; left: 0; right: 0; top: {(startIdx + vi) * rowHeight}px; height: {rowHeight}px; min-height: {rowHeight}px; padding-left: {basePadding + r.depth * indentSize}px; display: flex; align-items: center; gap: {cellGap}px; box-sizing: border-box;"
           role="treeitem"
           aria-expanded={r.hasChildren ? r.expanded : undefined}
