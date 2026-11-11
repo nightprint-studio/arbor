@@ -410,8 +410,8 @@ mod tests {
     #[test]
     fn a_mod_folder_is_tagged_even_when_it_is_not_expanded() {
         let t = TempDir::new("vorizmod");
-        t.write("mods/pets/manifest.ron", "()");
-        t.dir("mods/pets/script");
+        t.write("mods/utilita/pets/manifest.ron", "()");
+        t.dir("mods/utilita/pets/script");
         t.write("mods/plain/manifest.ron", "()");
         t.write("mods/scripts_only/script/a.ptn", "");
         let tree = build(&t.0, 64).unwrap();

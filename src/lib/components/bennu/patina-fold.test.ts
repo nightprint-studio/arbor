@@ -24,6 +24,16 @@ describe('useBlockRange', () => {
     const r = useBlockRange(s)!;
     expect(s.sliceDoc(r.to - 6, r.to)).toBe('use b;');
   });
+  it('senza `;` (Patina) il blocco finisce con l\'ultimo use, non al primo `;` del file', () => {
+    const s = st('use a::b\nuse c::{d, e}\n\nfn x() { let y = 1; }\nfn z() { let w = 2; }\n');
+    const r = useBlockRange(s)!;
+    expect(s.sliceDoc(r.from, r.to)).toBe(' a::b\nuse c::{d, e}');
+  });
+  it('un use multiriga senza `;` si chiude alla graffa', () => {
+    const s = st('use a::{\n  b,\n  c\n}\nuse d::e\nfn x() { 1; }');
+    const r = useBlockRange(s)!;
+    expect(s.sliceDoc(r.from, r.to)).toBe(' a::{\n  b,\n  c\n}\nuse d::e');
+  });
   it('senza use: null', () => expect(useBlockRange(st('fn f() {}'))).toBeNull());
 });
 

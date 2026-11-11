@@ -16,8 +16,8 @@ describe('patinaTestMarks', () => {
 
 describe('patinaModDirOf', () => {
   it('risale alla cartella prima di script/', () => {
-    expect(patinaModDirOf('/g/mods/pets/script/rules.ptn')).toBe('/g/mods/pets');
-    expect(patinaModDirOf('C:\\g\\mods\\pets\\script\\a\\b.ptn')).toBe('C:/g/mods/pets');
+    expect(patinaModDirOf('/g/mods/utilita/pets/script/rules.ptn')).toBe('/g/mods/utilita/pets');
+    expect(patinaModDirOf('C:\\g\\mods\\pets\\script\\a\\b.ptn')).toBe('C:/g/mods/utilita/pets');
     expect(patinaModDirOf('/g/other/a.ptn')).toBeNull();
   });
 });

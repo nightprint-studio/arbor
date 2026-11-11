@@ -9,7 +9,7 @@ import type { EditorState } from '@codemirror/state';
 
 export interface FoldRange { from: number; to: number }
 
-/** `use a::b;` — l'inizio di un'istruzione di importazione, a inizio riga (indentata o no). */
+/** `use a::b` — l'inizio di un'istruzione di importazione, a inizio riga (indentata o no). */
 const USE_LINE = /^\s*(?:pub\s+)?use\b/;
 /** Un commento di documentazione: `///` o `//!` (non `////`, che e' un commento qualunque). */
 const DOC_LINE = /^\s*\/\/[\/!](?!\/)/;
@@ -30,9 +30,15 @@ export function useBlockRange(state: EditorState): FoldRange | null {
     const text = line.text;
     if (text.trim() === '' || /^\s*\/\//.test(text)) { n++; continue; }
     if (!USE_LINE.test(text)) break;
-    // finisce al primo `;` fuori da commenti di riga: per i `use` basta cercare il `;`
+    // In Patina il `use` NON ha `;`: finisce dove le graffe tornano in pari (o al `;` se c'e', come in Rust).
+    // Cercare solo il `;` faceva scorrere fino al primo `;` del file e piegava meta' documento.
     let end = n;
-    while (end <= doc.lines && !doc.line(end).text.replace(/\/\/.*$/, '').includes(';')) end++;
+    let depth = 0;
+    for (; end <= doc.lines; end++) {
+      const code = doc.line(end).text.replace(/\/\/.*$/, '');
+      for (const ch of code) { if (ch === '{') depth++; else if (ch === '}') depth--; }
+      if (depth <= 0 || code.includes(';')) break;
+    }
     if (end > doc.lines) break;
     if (first < 0) first = n;
     lastEnd = doc.line(end).to;
