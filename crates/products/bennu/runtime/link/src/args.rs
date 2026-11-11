@@ -202,6 +202,79 @@ pub struct ImageAnalyzeArgs {
     pub detail: Option<String>,
 }
 
+/// Args for the summary of a region of the live world.
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct RegionArgs {
+    /// One corner of the box, in blocks `[x, y, z]` (the other is `max`). Both corners are inside the box. Omit both to look around the player instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<[i32; 3]>,
+    /// The opposite corner, in blocks `[x, y, z]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<[i32; 3]>,
+    /// Without `min` and `max`: the box around the local player, this many blocks to each side (default 16, at most 64), 8 below and 24 above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub around_player: Option<i32>,
+    /// Only these parts of the summary, which makes it cheaper: `counts`, `layers`, `heights`, `sections`, `voids`, `marks`. Default: all.
+    #[serde(default)]
+    pub parts: Vec<String>,
+}
+
+/// Args for the models and props placed in the world.
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct PropsArgs {
+    /// A fragment of the name to keep (case-insensitive), or `mod:<id>` for the models one mod placed. Default: all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+}
+
+/// Args for the summary of a map file (no game needed).
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct MapSchedaArgs {
+    /// The map: an absolute path to a `.fmap.ron` (or to the cooked `.fmap` next to it); with `root`, a path inside that project.
+    pub path: String,
+    /// A project root the map belongs to (scope-checked, like `image_analyze`). Without it `path` must be absolute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+    /// A second map, or a summary saved earlier (`.json`): the answer is then what changed from `path` (before) to this (after).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compare: Option<String>,
+    /// Only these parts: `counts`, `layers`, `heights`, `sections`, `voids`, `marks`. Default: all.
+    #[serde(default)]
+    pub parts: Vec<String>,
+    /// Columns per character of the height profile (default: the smallest that fits 72 characters).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell: Option<u32>,
+}
+
+/// Args for "can the player walk from A to B" on a map file (no game needed).
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct MapPercorsoArgs {
+    /// The map: an absolute path to a `.fmap.ron` (or to the cooked `.fmap` next to it); with `root`, a path inside that project.
+    pub path: String,
+    /// A project root the map belongs to (scope-checked, like `image_analyze`). Without it `path` must be absolute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+    /// Where from: a mark name (`start`) or a position `x,y,z` (x and z are cell indices, y is in blocks).
+    pub from: String,
+    /// Where to: a mark, or a chain joined with `+` (`checkpoint:*+finish`; the `*` takes every mark with that prefix, in numeric order).
+    pub to: String,
+    /// The highest jump in blocks (default 1.26: the game's jump speed 8.4 with gravity 28).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump: Option<f32>,
+    /// The reach of a running jump on level ground, in blocks (default 3.7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<f32>,
+    /// The step walked up without jumping (default 0.6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<f32>,
+    /// Slack added to the gap of a jump (default 0: strict; the body overhangs 0.3 per side, so the real game grants up to 0.6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pad: Option<f32>,
+    /// Also return each leg's route as a polyline of `[x, y, z]` points (default false: for a long route it is half the bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polyline: Option<bool>,
+}
+
 /// Args for connecting to a game.
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct GameConnectArgs {
@@ -249,6 +322,16 @@ mod tests {
         let a: AnalyzeArgs = serde_json::from_value(json!({ "ops": ["stats"], "region": "0,0,1,1" })).unwrap();
         assert_eq!(a.ops, vec!["stats"]);
         assert!(serde_json::from_value::<ImageAnalyzeArgs>(json!({})).is_err());
+    }
+
+    #[test]
+    fn the_world_as_numbers_tools_send_no_nulls() {
+        assert_eq!(serde_json::to_value(RegionArgs::default()).unwrap(), json!({ "parts": [] }));
+        assert_eq!(serde_json::to_value(PropsArgs::default()).unwrap(), json!({}));
+        let a: MapPercorsoArgs = serde_json::from_value(json!({ "path": "/x.fmap.ron", "from": "start", "to": "finish" })).unwrap();
+        assert!(a.jump.is_none() && a.pad.is_none());
+        assert!(serde_json::from_value::<MapSchedaArgs>(json!({})).is_err());
+        assert!(serde_json::from_value::<MapPercorsoArgs>(json!({ "path": "/x" })).is_err());
     }
 
     #[test]

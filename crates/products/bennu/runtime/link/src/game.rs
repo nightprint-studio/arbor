@@ -19,7 +19,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::args::{ActionArgs, AnalyzeArgs, CommandArgs, KeyArgs, MouseArgs, PoseArgs, ScreenshotArgs, StatsArgs, TextArgs, UiArgs};
+use crate::args::{ActionArgs, AnalyzeArgs, CommandArgs, KeyArgs, MouseArgs, PoseArgs, PropsArgs, RegionArgs, ScreenshotArgs, StatsArgs, TextArgs, UiArgs};
 use crate::target::{unsupported, Capability, LiveTarget};
 
 /// A PNG handed back inline — the shape the MCP `output = image` expects — with its size.
@@ -109,6 +109,16 @@ pub trait GameLink: LiveTarget {
     /// The pose sampled over several frames, with a summary: `{target, kind, keys, rows: [[frame, secs, v…]], anims, summary, notes}`.
     async fn pose_series(&self, _args: PoseArgs) -> Result<Value, String> {
         Err(unsupported(self, Capability::Pose, "Take a bevy_game_screenshot (small, with max_width) to see the motion instead."))
+    }
+
+    /// A region of the live world as numbers, without a picture: `{label, size, kinds, layers…, heights, voids, sentence}` (the shape of `mappa scheda`).
+    async fn region(&self, _args: RegionArgs) -> Result<Value, String> {
+        Err(unsupported(self, Capability::Region, "Take a bevy_game_screenshot (small, with max_width) to see the world instead."))
+    }
+
+    /// The models and props placed in the world: `{sentence, props: [{source, name, id, cell, yaw, min, max}], notes}`.
+    async fn props(&self, _args: PropsArgs) -> Result<Value, String> {
+        Err(unsupported(self, Capability::Props, "Take a bevy_game_screenshot (small, with max_width) to see the props instead."))
     }
 
     /// Questions about the screen answered in the game, without the picture crossing: `{results: [{op, summary?, data?}]}`.

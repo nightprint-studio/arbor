@@ -21,8 +21,8 @@
 
 use bennu_core::prelude::BennuState;
 use bennu_link::prelude::{
-    ActionArgs, AnalyzeArgs, ChatArgs, CommandArgs, GameConnectArgs, GameDisconnectArgs, HudArgs, ImageAnalyzeArgs, KeyArgs, ModStateArgs,
-    MouseArgs, PoseArgs, ScreenshotArgs, Shot, StatsArgs, TextArgs, UiArgs,
+    ActionArgs, AnalyzeArgs, ChatArgs, CommandArgs, GameConnectArgs, GameDisconnectArgs, HudArgs, ImageAnalyzeArgs, KeyArgs, MapPercorsoArgs,
+    MapSchedaArgs, ModStateArgs, MouseArgs, PoseArgs, PropsArgs, RegionArgs, ScreenshotArgs, Shot, StatsArgs, TextArgs, UiArgs,
 };
 use serde_json::Value;
 
@@ -132,6 +132,93 @@ async fn bennu_game_pose(_ctx: &BennuState, args: PoseArgs) -> Result<Value, Str
     } else {
         link.pose(args).await
     }
+}
+
+/// **What is in a region of the live world, as numbers, instead of a screenshot.** Give a box in blocks (`min`/`max`)
+/// or none (then it is the box around the local player, `around_player` blocks to each side): the game counts the
+/// blocks by type and by layer, draws the **height profile** (one character per few columns, `' '` nothing → `'@'`
+/// highest), finds the **enclosed voids** (air that no outside air reaches) and says it all in one sentence
+/// ("world@(0,60,0)..(31,90,31) 32×31×32, 41% stone, nessun segno, 2 vuoti interni (30 celle)"). **Prefer it to
+/// `bevy_game_screenshot` for "is the terrain there?", "what is this made of?", "is there a hole?", "did my
+/// structure come out the size I wanted?"** — a summary is a few hundred bytes to ~2 KB, a screenshot ~1200 tokens
+/// and no number. `parts` narrows it (`counts`, `layers`, `heights`, `sections`, `voids`, `marks`). Chunks not loaded
+/// count as air and the answer says how many. Saved summaries can be compared with the Studio (`mappa scheda
+/// --confronta`); the same shape comes from `map_scheda` for a map FILE. `dev` channel (protocol 4) only.
+#[arbor_rpc::handler(mcp(
+    name = "bevy_game_region",
+    title = "Summary of a region of the live world as numbers (instead of a screenshot)",
+    safety = read,
+))]
+async fn bennu_game_region(_ctx: &BennuState, args: RegionArgs) -> Result<Value, String> {
+    active().await?.region(args).await
+}
+
+/// **Which models and props stand in the world, where and how big, instead of a screenshot.** For every prop: where it
+/// comes from (`script`: a model a mod placed with `model.place`; `block`: a `prop_…` block of the voxel world), its
+/// name, cell, rotation (yaw degrees) and **box in metres** (`min`, `max`, `size`) — enough to know *whether* the goal
+/// stone is there, *where*, that it is 3 cells tall, or that the crystal floats 2 m above the pedestal. `filter` keeps
+/// the names containing a fragment, or `mod:<id>` for one mod's models. Models live on the **client**: a dedicated
+/// server answers the blocks only and says so in `notes`. A script model's box comes from its skins at rest (the
+/// running clip is not followed). `dev` channel (protocol 4) only.
+#[arbor_rpc::handler(mcp(
+    name = "bevy_game_props",
+    title = "Models and props placed in the world: name, cell, rotation, box (instead of a screenshot)",
+    safety = read,
+))]
+async fn bennu_game_props(_ctx: &BennuState, args: PropsArgs) -> Result<Value, String> {
+    active().await?.props(args).await
+}
+
+/// Resolve a map path the caller gave: scope-checked inside `root` when it names one, as it is otherwise.
+fn scoped_map_path(root: Option<&str>, path: &str) -> Result<String, String> {
+    match root.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(root) => crate::project_paths::in_root(root, path),
+        None => Ok(path.to_string()),
+    }
+}
+
+/// **The numbers of a map FILE, instead of an isometric photo of it** (no game needed): size, blocks by type and by
+/// layer, the height profile, enclosed voids, the marks (`start`, `checkpoint:3`…) with their positions, the props with
+/// their cells, unknown block names, and one sentence ("track 293×33×9, 30% mossy_cobblestone, 9 segni, nessun blocco
+/// sconosciuto"). With `compare` (another map, or a summary saved earlier) it answers what changed from `path` to it:
+/// blocks by type, layers, marks moved or added, props. Reads the `.fmap.ron` (or the source next to a cooked `.fmap`).
+/// The same shape as `bevy_game_region`, so a map and the live world built from it can be compared.
+#[arbor_rpc::handler(mcp(
+    name = "map_scheda",
+    title = "Numbers of a map file: size, blocks, heights, voids, marks (instead of a photo)",
+    safety = read,
+))]
+async fn bennu_map_scheda(_ctx: &BennuState, args: MapSchedaArgs) -> Result<Value, String> {
+    let mut args = args;
+    args.path = scoped_map_path(args.root.as_deref(), &args.path)?;
+    if let Some(other) = args.compare.clone().filter(|c| !c.trim().is_empty()) {
+        args.compare = Some(scoped_map_path(args.root.as_deref(), &other)?);
+    }
+    tokio::task::spawn_blocking(move || bennu_link::prelude::map_scheda(&args))
+        .await
+        .map_err(|e| format!("the map task failed: {e}"))?
+}
+
+/// **Can the player walk from A to B on this map? — without playing it.** Uses the game's body (jump 1.26 blocks, a
+/// running jump reaches 3.7 on level ground, a 0.6 step, 1.8 tall; override with `jump`, `run`, `step`, `pad`) and the
+/// map file's blocks: from a mark or a position to a mark or a chain (`checkpoint:*+finish`). The answer is
+/// `reachable` per leg, the polyline, the steps that are jumps with their **margin** ("gap 3.61 of 3.70"), the
+/// three tightest ones, and — when it fails — the **impossible steps**: which pair of cells, what is wrong (jump too
+/// long by x, too high by y), the blocks at both ends (a launcher like `bouncy` explains a step the model cannot
+/// do), or the nearest point reached when nothing connects. The proof an obby or a parkour map needs. Pass `polyline` for
+/// the route as points too (half the bytes of a long route). Not modelled: the run-up, ceilings over the arc, moving
+/// blocks, launchers.
+#[arbor_rpc::handler(mcp(
+    name = "map_percorso",
+    title = "Is a map walkable from A to B? Impossible steps, tightest jumps (instead of playing it)",
+    safety = read,
+))]
+async fn bennu_map_percorso(_ctx: &BennuState, args: MapPercorsoArgs) -> Result<Value, String> {
+    let mut args = args;
+    args.path = scoped_map_path(args.root.as_deref(), &args.path)?;
+    tokio::task::spawn_blocking(move || bennu_link::prelude::map_percorso(&args))
+        .await
+        .map_err(|e| format!("the map task failed: {e}"))?
 }
 
 /// **Questions about the screen, answered inside the game**: the game takes its own screenshot, computes the

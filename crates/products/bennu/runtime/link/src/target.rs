@@ -80,6 +80,10 @@ pub enum Capability {
     ImageAnalysis,
     /// The pose of a UI node or of an entity as numbers (position, scale, rotation, opacity, running animations), now or sampled over N frames (`dev` channel, protocol 3).
     Pose,
+    /// A region of the live world as numbers: blocks by type and layer, height profile, enclosed voids (`dev` channel, protocol 4).
+    Region,
+    /// The models and props placed in the world: name, cell, rotation, box in metres (`dev` channel, protocol 4).
+    Props,
     // ── Debuggers ────────────────────────────────────────────────────────────────────
     /// Stop the program, let it run, step.
     Pause,
@@ -92,11 +96,11 @@ pub enum Capability {
 }
 
 impl Capability {
-    pub const ALL: [Capability; 20] = [
+    pub const ALL: [Capability; 22] = [
         Capability::Info, Capability::Screenshot, Capability::Input, Capability::Command, Capability::Actions, Capability::Stats,
         Capability::Hud, Capability::Chat, Capability::Mods, Capability::World, Capability::ModState, Capability::Ecs,
-        Capability::BevyStates, Capability::UiTree, Capability::ImageAnalysis, Capability::Pose, Capability::Pause, Capability::Eval,
-        Capability::Stack, Capability::Output,
+        Capability::BevyStates, Capability::UiTree, Capability::ImageAnalysis, Capability::Pose, Capability::Region, Capability::Props, Capability::Pause,
+        Capability::Eval, Capability::Stack, Capability::Output,
     ];
 
     /// The name it has on the wire and in a tool's answer.
@@ -118,6 +122,8 @@ impl Capability {
             Capability::UiTree => "ui_tree",
             Capability::ImageAnalysis => "image_analysis",
             Capability::Pose => "pose",
+            Capability::Region => "region",
+            Capability::Props => "props",
             Capability::Pause => "pause",
             Capability::Eval => "eval",
             Capability::Stack => "stack",
@@ -144,6 +150,8 @@ impl Capability {
             Capability::UiTree => "UI tree",
             Capability::ImageAnalysis => "image analysis",
             Capability::Pose => "numeric pose",
+            Capability::Region => "world region summary",
+            Capability::Props => "placed props and models",
             Capability::Pause => "pause or stepping",
             Capability::Eval => "expression evaluation",
             Capability::Stack => "stack and variables",

@@ -39,7 +39,7 @@ use fulcrum_dev_channel::TOPIC;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::args::{ActionArgs, AnalyzeArgs, CommandArgs, KeyArgs, MouseArgs, PoseArgs, ScreenshotArgs, TextArgs, UiArgs};
+use crate::args::{ActionArgs, AnalyzeArgs, CommandArgs, KeyArgs, MouseArgs, PoseArgs, PropsArgs, RegionArgs, ScreenshotArgs, TextArgs, UiArgs};
 use crate::game::{GameLink, Shot};
 use crate::target::{Capability, LiveTarget, TargetKind};
 
@@ -395,6 +395,8 @@ impl LiveTarget for DevChannelLink {
             Capability::UiTree,
             Capability::ImageAnalysis,
             Capability::Pose,
+            Capability::Region,
+            Capability::Props,
         ]
     }
 }
@@ -419,6 +421,7 @@ impl GameLink for DevChannelLink {
                 "There is no registry of named actions on this channel: a mod's or the game's commands are console lines, run with bevy_game_command.",
                 "Prefer bevy_game_ui (the interface as data) and bevy_game_analyze (stats, palette, edges, diff on the screen) to bevy_game_screenshot: they answer in a few hundred bytes instead of a picture.",
                 "For an animation or a movement, prefer bevy_game_pose (numbers: position, scale, rotation, opacity, running animations, optionally sampled over N frames with a summary) to a screenshot: it costs a few hundred bytes instead of thousands of tokens.",
+                "To know what is in the world (blocks by type and layer, the height profile, enclosed voids) prefer bevy_game_region to a screenshot; to know whether and where a model or prop stands (and how tall it is) use bevy_game_props. Both are numbers (protocol 4); a map FILE needs no game at all: map_scheda, map_percorso.",
                 "There is no ECS on this channel: entities, components and resources need the Bevy Remote Protocol (bevy_game_connect protocol brp).",
             ],
         }))
@@ -553,6 +556,37 @@ impl GameLink for DevChannelLink {
         }
     }
 
+    async fn region(&self, args: RegionArgs) -> Result<Value, String> {
+        let ops = crate::numbers::parts_of(&args.parts)?;
+        let (min, max) = match (args.min, args.max) {
+            (Some(a), Some(b)) => ([a[0].min(b[0]), a[1].min(b[1]), a[2].min(b[2])], [a[0].max(b[0]), a[1].max(b[1]), a[2].max(b[2])]),
+            (None, None) => {
+                // Around a player: the position is the world's (`Query::World` lists the players the process knows, a dedicated server too).
+                let radius = args.around_player.unwrap_or(16).clamp(1, 64);
+                let world = match self.ask(Request::Query(Query::World)).await? {
+                    Response::World(w) => w,
+                    other => return Err(unexpected("the world", &other)),
+                };
+                let who = world.players.first().ok_or_else(|| String::from("there is no player in the world: give `min` and `max`"))?;
+                let (px, py, pz) = (who.pos[0].floor() as i32, who.pos[1].floor() as i32, who.pos[2].floor() as i32);
+                ([px - radius, py - 8, pz - radius], [px + radius, py + 24, pz + radius])
+            }
+            _ => return Err("give both `min` and `max`, or neither (then the box is around the player)".into()),
+        };
+        match self.ask(Request::Query(Query::Region { min, max, ops })).await? {
+            Response::Region(s) => Ok(crate::numbers::summary_json_value(&s)),
+            other => Err(unexpected("a region", &other)),
+        }
+    }
+
+    async fn props(&self, args: PropsArgs) -> Result<Value, String> {
+        let filter = args.filter.unwrap_or_default().trim().to_string();
+        match self.ask(Request::Query(Query::Props { filter })).await? {
+            Response::Props(d) => Ok(crate::numbers::props_json(&d)),
+            other => Err(unexpected("the props", &other)),
+        }
+    }
+
     async fn analyze(&self, args: AnalyzeArgs) -> Result<Value, String> {
         let detail = crate::vision::Detail::parse(args.detail.as_deref())?;
         let ops = crate::vision::parse_ops(&args.ops, args.region.as_deref())?;
@@ -663,7 +697,8 @@ mod tests {
         // `capabilities` does not need a live client, so the line is held on a plain list too.
         let declared = [
             Capability::Info, Capability::Screenshot, Capability::Input, Capability::Command, Capability::Hud, Capability::Chat,
-            Capability::Mods, Capability::World, Capability::ModState, Capability::UiTree, Capability::ImageAnalysis, Capability::Pose,
+            Capability::Mods, Capability::World, Capability::ModState, Capability::UiTree, Capability::ImageAnalysis, Capability::Pose, Capability::Region,
+            Capability::Props,
         ];
         assert!(declared.iter().all(|c| c.belongs_to(TargetKind::Game)));
     }

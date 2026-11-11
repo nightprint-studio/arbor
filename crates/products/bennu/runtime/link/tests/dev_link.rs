@@ -116,6 +116,25 @@ fn answer(request: &m::Request) -> m::Response {
             anims: vec!["preset/banner-drop".into()],
             notes: vec![],
         }),
+        // v4: il mondo a numeri. Una regione finta (pavimento di pietra con un tronco in un angolo) e due prop.
+        m::Request::Query(m::Query::Region { min, max, ops }) => {
+            use fulcrum_map_scan::prelude::*;
+            let mut t = Terrain::new("finta");
+            for x in min[0]..=max[0] {
+                for z in min[2]..=max[2] {
+                    t.add(x, z, 0, SLABS, "stone");
+                }
+            }
+            t.add(min[0], min[2], SLABS, 3 * SLABS, "log");
+            m::Response::Region(t.summary(&Options { parts: ops.clone(), ..Options::default() }))
+        }
+        m::Request::Query(m::Query::Props { filter }) => {
+            let all = vec![
+                m::PropEntry { source: "script".into(), name: "meta".into(), id: "cozy:meta".into(), cell: [3, 64, -2], pos: [3.5, 64.0, -1.5], yaw: 90.0, min: [3.0, 64.0, -2.0], max: [4.0, 67.0, -1.0] },
+                m::PropEntry { source: "block".into(), name: "vaso".into(), id: "prop_vaso_n".into(), cell: [0, 1, 0], pos: [0.5, 1.0, 0.5], yaw: 0.0, min: [0.0; 3], max: [0.0; 3] },
+            ];
+            m::Response::Props(m::PropsDump { entries: all.into_iter().filter(|e| filter.is_empty() || e.name.contains(filter.as_str())).collect(), notes: vec![] })
+        }
         // Le interrogazioni di versioni più nuove del protocollo: questo finto non le conosce.
         #[allow(unreachable_patterns)]
         m::Request::Query(_) => m::Response::Error("il fake non risponde a questa interrogazione".into()),
@@ -537,4 +556,45 @@ async fn the_session_slot_holds_one_link_and_the_choice() {
     assert!(bennu_link::session::clear_dev());
     assert!(!bennu_link::session::clear_dev());
     bennu_link::session::set_preference(Protocol::Auto);
+}
+
+#[tokio::test]
+async fn a_region_comes_back_as_a_summary_and_around_the_player_it_asks_his_position_first() {
+    let game = FakeGame::start("region");
+    let link = game.link().await;
+    assert!(link.supports(Capability::Region) && Capability::Region.belongs_to(TargetKind::Game));
+    let v = link.region(RegionArgs { min: Some([4, 0, 0]), max: Some([0, 1, 3]), parts: vec!["counts".into()], ..Default::default() }).await.unwrap();
+    // The corners were given the other way round: the link puts them in order.
+    assert_eq!(v["size"], json!([5, 3, 4]));
+    assert_eq!(v["kinds"]["stone"], json!(20), "{v}");
+    assert_eq!(v["kinds"]["log"], json!(2), "{v}");
+    assert!(v.get("heights").is_none(), "only the counts were asked for");
+    assert!(v["sentence"].as_str().unwrap().contains("5×3×4"), "{v}");
+    let sent = game.requests();
+    assert_eq!(sent[0], m::Request::Query(m::Query::Region { min: [0, 0, 0], max: [4, 1, 3], ops: vec![fulcrum_map_scan::summary::Part::Counts] }));
+    // No corners: the box is around the player.
+    link.region(RegionArgs::default()).await.unwrap();
+    let sent = game.requests();
+    assert_eq!(sent[1], m::Request::Query(m::Query::World));
+    // The fake world has one player, at (1, 64, -3.5): floor = 1, 64, -4; radius 16, 8 below, 24 above.
+    assert_eq!(sent[2], m::Request::Query(m::Query::Region { min: [-15, 56, -20], max: [17, 88, 12], ops: vec![] }));
+    // One corner only, or a part that does not exist: refused before the wire.
+    assert!(link.region(RegionArgs { min: Some([0; 3]), ..Default::default() }).await.unwrap_err().contains("both"));
+    assert!(link.region(RegionArgs { parts: vec!["nope".into()], ..Default::default() }).await.unwrap_err().contains("not a part"));
+    assert_eq!(game.requests().len(), 3);
+}
+
+#[tokio::test]
+async fn the_props_come_back_with_their_boxes_and_the_filter_goes_to_the_game() {
+    let game = FakeGame::start("props");
+    let link = game.link().await;
+    assert!(link.supports(Capability::Props) && Capability::Props.belongs_to(TargetKind::Game));
+    let all = link.props(PropsArgs::default()).await.unwrap();
+    assert_eq!(all["props"].as_array().unwrap().len(), 2);
+    assert_eq!(all["props"][0]["size"], json!([1.0, 3.0, 1.0]));
+    assert!(all["sentence"].as_str().unwrap().contains("tallest: meta 3.0 m"), "{all}");
+    let one = link.props(PropsArgs { filter: Some(" vaso ".into()) }).await.unwrap();
+    assert_eq!(one["props"].as_array().unwrap().len(), 1);
+    assert!(one["props"][0].get("size").is_none(), "a prop with unknown geometry carries no box");
+    assert_eq!(game.requests()[1], m::Request::Query(m::Query::Props { filter: "vaso".into() }));
 }
