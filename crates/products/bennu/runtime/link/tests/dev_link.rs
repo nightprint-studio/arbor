@@ -15,6 +15,9 @@ use fulcrum_debug_channel::prelude::{ChannelEvent, ChannelServer, ServerConfig};
 use fulcrum_debug_channel::topic::DEV;
 use fulcrum_dev_channel::message as m;
 use fulcrum_dev_channel::TOPIC;
+use fulcrum_vision::image::{Image as VImage, Rect as VRect};
+use fulcrum_vision::ops::run_all;
+use fulcrum_vision::region::NoEnv;
 use serde_json::json;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -67,6 +70,55 @@ fn answer(request: &m::Request) -> m::Response {
             dimension: "overworld".into(),
             players: vec![m::PlayerInfo { name: "Anna".into(), pos: [1.0, 64.0, -3.5] }],
         }),
+        m::Request::Query(m::Query::Ui { screen, visible_only }) => {
+            let node = |scope: &str, id: &str, visible: bool, alpha: f32| m::UiNode {
+                scope: scope.into(),
+                id: id.into(),
+                text: Some(format!("texto di {id}")),
+                rect: [896.0, 20.0, 120.0, 28.0],
+                visible,
+                alpha,
+                bg: Some("#1e1715".into()),
+                ink: None,
+            };
+            let mut nodes = vec![node("cozy", "pill", true, 0.7), node("cozy", "ghost", false, 1.0), node("pausa", "riprendi", true, 1.0)];
+            nodes.retain(|n| (n.visible || !visible_only) && screen.as_deref().map_or(true, |s| s == n.scope));
+            m::Response::Ui(m::UiDump { viewport: [1280.0, 720.0], scale: 2.0, flags: vec!["at-aperto".into()], nodes })
+        }
+        m::Request::Query(m::Query::Image { source, ops }) => match source {
+            m::ImageSource::Path(p) => m::Response::Error(format!("il fake non apre file: {p}")),
+            // Uno schermo finto: la metà sinistra cacao, la destra ambra, con un riquadro bianco in alto a destra.
+            m::ImageSource::Screenshot => {
+                let mut img = VImage::from_fn(64, 32, |x, _| if x < 32 { [92, 58, 40, 255] } else { [230, 160, 40, 255] });
+                img.fill_rect(VRect::new(48, 0, 16, 4), [255, 255, 255, 255]);
+                m::Response::Image(run_all(&img, &ops, &NoEnv))
+            }
+        },
+        // v3: la posa a numeri. Un banner che cala (scala 2 → 1 in 0.3 s) e sta fermo.
+        m::Request::Query(m::Query::Pose { target }) => m::Response::Pose(m::PoseDump {
+            target: target.clone(),
+            kind: m::PoseKind::Ui,
+            keys: vec!["tx".into(), "sx".into(), "alpha".into()],
+            values: vec![0.0, 1.5, 1.0],
+            anims: vec![m::PoseAnim { name: "preset/banner-drop".into(), t: 0.1, length: 2.8, waiting: false }],
+            notes: vec![],
+        }),
+        m::Request::Query(m::Query::PoseSeries { target, ticks, every }) => m::Response::PoseSeries(m::PoseSeriesDump {
+            target: target.clone(),
+            kind: m::PoseKind::Ui,
+            keys: vec!["sx".into(), "alpha".into()],
+            samples: (0..*ticks)
+                .map(|i| {
+                    let t = (i * every) as f32 / 60.0;
+                    m::PoseSample { frame: i * every, secs: t, values: vec![1.0 + (1.0 - (t / 0.3).min(1.0)).powi(2), 1.0] }
+                })
+                .collect(),
+            anims: vec!["preset/banner-drop".into()],
+            notes: vec![],
+        }),
+        // Le interrogazioni di versioni più nuove del protocollo: questo finto non le conosce.
+        #[allow(unreachable_patterns)]
+        m::Request::Query(_) => m::Response::Error("il fake non risponde a questa interrogazione".into()),
         m::Request::Screenshot { max_side } => {
             m::Response::Screenshot(m::Screenshot { width: *max_side.max(&1), height: 2, format: m::ImageFormat::Png, data: vec![1, 2, 3, 4] })
         }
@@ -164,7 +216,7 @@ async fn the_game_is_found_in_the_discovery_folder_and_listed() {
     assert_eq!(found[0].game, "fakegame");
     assert_eq!(found[0].port, game.port);
     assert!(found[0].compatible);
-    assert!(found[0].topics.contains("dev=1"), "{}", found[0].topics);
+    assert!(found[0].topics.contains(&format!("dev={}", fulcrum_dev_channel::VERSION)), "{}", found[0].topics);
 }
 
 #[tokio::test]
@@ -349,6 +401,91 @@ async fn the_queries_come_back_in_the_shapes_the_tools_promise() {
     let state = link.mod_state("cozy".into(), "Run".into(), Some("Anna".into())).await.unwrap();
     assert_eq!(state["mod"], "cozy");
     assert!(state["state"].as_str().unwrap().contains("Anna"));
+}
+
+#[tokio::test]
+async fn the_ui_tree_comes_back_compact_and_filtered_by_the_game() {
+    let game = FakeGame::start("uitree");
+    let link = game.link().await;
+    let tree = link.ui_tree(UiArgs::default()).await.unwrap();
+    // By default only what is visible: the ghost is not listed.
+    assert_eq!(tree["count"], 2);
+    assert_eq!(tree["nodes"][0]["n"], "cozy/pill");
+    assert_eq!(tree["nodes"][0]["a"], json!(0.7));
+    assert!(tree["nodes"][0].get("v").is_none(), "a visible node carries no `v`");
+    assert_eq!(tree["scale"], json!(2.0));
+    assert_eq!(tree["nodes"][0]["r"], json!([896.0, 20.0, 120.0, 28.0]));
+    assert_eq!(tree["flags"][0], "at-aperto");
+    let all = link.ui_tree(UiArgs { screen: Some("cozy".into()), include_hidden: Some(true) }).await.unwrap();
+    assert_eq!(all["count"], 2);
+    assert_eq!(all["nodes"][1]["v"], json!(false));
+    assert!(all.get("flags").is_none(), "a narrow query does not repeat the flags");
+    let sent = game.requests();
+    assert_eq!(sent[0], m::Request::Query(m::Query::Ui { screen: None, visible_only: true }));
+    assert_eq!(sent[1], m::Request::Query(m::Query::Ui { screen: Some("cozy".into()), visible_only: false }));
+}
+
+#[tokio::test]
+async fn the_pose_comes_back_as_numbers_and_a_series_brings_its_summary() {
+    let game = FakeGame::start("pose");
+    let link = game.link().await;
+    assert!(link.supports(Capability::Pose) && Capability::Pose.belongs_to(TargetKind::Game));
+    let now = link.pose(PoseArgs { target: "hud/banner".into(), ticks: None, every: None }).await.unwrap();
+    assert_eq!(now["pose"]["sx"], json!(1.5));
+    assert_eq!(now["anims"][0]["name"], "preset/banner-drop");
+    let series = link.pose_series(PoseArgs { target: "hud/banner".into(), ticks: Some(30), every: Some(2) }).await.unwrap();
+    assert_eq!(series["rows"].as_array().unwrap().len(), 30);
+    assert_eq!(series["columns"], json!(["frame", "secs", "sx", "alpha"]));
+    // The scale falls from 2 to 1 and stays: the summary says so; the opacity never moves and is listed once as still.
+    assert_eq!(series["summary"]["channels"][0]["key"], "sx");
+    assert_eq!(series["summary"]["channels"][0]["from"], json!(2.0));
+    assert_eq!(series["still"], json!(["alpha"]));
+    let sent = game.requests();
+    assert_eq!(sent[0], m::Request::Query(m::Query::Pose { target: "hud/banner".into() }));
+    assert_eq!(sent[1], m::Request::Query(m::Query::PoseSeries { target: "hud/banner".into(), ticks: 30, every: 2 }));
+    // An empty target never reaches the game.
+    assert!(link.pose(PoseArgs::default()).await.unwrap_err().contains("target"));
+    assert_eq!(game.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn an_analysis_asks_the_game_for_results_and_never_for_the_picture() {
+    let game = FakeGame::start("analyze");
+    let link = game.link().await;
+    let a = link
+        .analyze(AnalyzeArgs { ops: vec!["stats".into(), "palette:2".into(), "bbox:#ffffff".into()], region: None, detail: None })
+        .await
+        .unwrap();
+    let rows = a["results"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert!(rows[0]["summary"].as_str().unwrap().contains("regione 64x32"), "{}", rows[0]);
+    assert!(rows[1]["summary"].as_str().unwrap().contains("cacao"), "{}", rows[1]);
+    assert!(rows[2]["summary"].as_str().unwrap().contains("x48 y0 16x4"), "{}", rows[2]);
+    let j = link.analyze(AnalyzeArgs { ops: vec!["count:#ffffff".into()], region: Some("0.5,0,1,0.5".into()), detail: Some("json".into()) }).await.unwrap();
+    assert_eq!(j["results"][0]["data"]["count"]["count"], 64, "{j}");
+    assert!(j["results"][0].get("summary").is_none());
+    // Nothing but the query crossed: no screenshot request.
+    assert!(game.requests().iter().all(|r| matches!(r, m::Request::Query(m::Query::Image { .. }))), "{:?}", game.requests());
+    let m::Request::Query(m::Query::Image { source, ops }) = &game.requests()[1] else { panic!() };
+    assert_eq!(*source, m::ImageSource::Screenshot);
+    assert_eq!(ops.len(), 1);
+}
+
+#[tokio::test]
+async fn a_bad_operation_is_refused_before_it_reaches_the_game() {
+    let game = FakeGame::start("badop");
+    let link = game.link().await;
+    assert!(link.analyze(AnalyzeArgs { ops: vec!["boh".into()], region: None, detail: None }).await.unwrap_err().contains("sconosciuta"));
+    assert!(link.analyze(AnalyzeArgs { ops: vec!["stats".into()], region: None, detail: Some("verbose".into()) }).await.unwrap_err().contains("unknown detail"));
+    assert!(game.requests().is_empty());
+}
+
+#[tokio::test]
+async fn the_dev_link_declares_the_new_capabilities_and_a_link_without_them_says_so() {
+    let game = FakeGame::start("capsnew");
+    let link = game.link().await;
+    assert!(link.supports(Capability::UiTree) && link.supports(Capability::ImageAnalysis));
+    assert!(Capability::UiTree.belongs_to(TargetKind::Game) && Capability::ImageAnalysis.belongs_to(TargetKind::Game));
 }
 
 #[tokio::test]

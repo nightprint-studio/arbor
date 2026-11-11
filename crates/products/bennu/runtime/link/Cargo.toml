@@ -25,6 +25,12 @@ base64     = { workspace = true }
 # here, so a protocol change is one `cargo` error in this crate rather than a silent drift. Pure Rust, no Bevy.
 fulcrum-debug-channel = { path = "../../../../../../../engine/fulcrum/crates/core/fulcrum-debug-channel" }
 fulcrum-dev-channel   = { path = "../../../../../../../engine/fulcrum/crates/core/fulcrum-dev-channel" }
+# Image analysis (`stats`, `palette`, `edges`, `diff`…): the operations are fulcrum's, parsed and shaped here; the game runs them for a
+# screenshot (`Query::Image`) and Arbor runs them itself for a PNG on disk. Pure Rust, no Bevy, no ML.
+fulcrum-vision        = { path = "../../../../../../../engine/fulcrum/crates/core/fulcrum-vision" }
+# Numeric traces (`bevy_game_pose`): the series and the summary (peak, overshoot, settling) are fulcrum's, computed here from the samples the game
+# returns. Pure Rust, no dependencies of its own.
+fulcrum-trace         = { path = "../../../../../../../engine/fulcrum/crates/core/fulcrum-trace" }
 
 [dev-dependencies]
 # Only the fake game of the tests decodes the client's messages (the real client never needs it): the same

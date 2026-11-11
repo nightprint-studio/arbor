@@ -19,7 +19,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::args::{ActionArgs, CommandArgs, KeyArgs, MouseArgs, ScreenshotArgs, StatsArgs, TextArgs};
+use crate::args::{ActionArgs, AnalyzeArgs, CommandArgs, KeyArgs, MouseArgs, PoseArgs, ScreenshotArgs, StatsArgs, TextArgs, UiArgs};
 use crate::target::{unsupported, Capability, LiveTarget};
 
 /// A PNG handed back inline — the shape the MCP `output = image` expects — with its size.
@@ -94,6 +94,26 @@ pub trait GameLink: LiveTarget {
     /// The world: `{name, seed, dimension, players: [{name, pos}]}`.
     async fn world(&self) -> Result<Value, String> {
         Err(unsupported(self, Capability::World, ""))
+    }
+
+    /// The UI as data, without a picture: `{viewport, scale, flags, count, nodes: [{n: "scope/id", r: [x, y, w, h], t?, v?, a?, bg?, ink?}]}`.
+    async fn ui_tree(&self, _args: UiArgs) -> Result<Value, String> {
+        Err(unsupported(self, Capability::UiTree, "Take a bevy_game_screenshot (small, with max_width) to see the interface instead."))
+    }
+
+    /// The pose of a node or entity right now: `{target, kind, pose: {key: value}, anims: [{name, t, length, waiting}], notes}`.
+    async fn pose(&self, _args: PoseArgs) -> Result<Value, String> {
+        Err(unsupported(self, Capability::Pose, "Take a bevy_game_screenshot (small, with max_width) to see the motion instead."))
+    }
+
+    /// The pose sampled over several frames, with a summary: `{target, kind, keys, rows: [[frame, secs, v…]], anims, summary, notes}`.
+    async fn pose_series(&self, _args: PoseArgs) -> Result<Value, String> {
+        Err(unsupported(self, Capability::Pose, "Take a bevy_game_screenshot (small, with max_width) to see the motion instead."))
+    }
+
+    /// Questions about the screen answered in the game, without the picture crossing: `{results: [{op, summary?, data?}]}`.
+    async fn analyze(&self, _args: AnalyzeArgs) -> Result<Value, String> {
+        Err(unsupported(self, Capability::ImageAnalysis, "Take a bevy_game_screenshot (small, with max_width) and look at it instead."))
     }
 
     /// The state a mod keeps: `{mod, ty, state}`.

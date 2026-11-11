@@ -21,8 +21,8 @@
 
 use bennu_core::prelude::BennuState;
 use bennu_link::prelude::{
-    ActionArgs, ChatArgs, CommandArgs, GameConnectArgs, GameDisconnectArgs, HudArgs, KeyArgs, ModStateArgs, MouseArgs, ScreenshotArgs, Shot,
-    StatsArgs, TextArgs,
+    ActionArgs, AnalyzeArgs, ChatArgs, CommandArgs, GameConnectArgs, GameDisconnectArgs, HudArgs, ImageAnalyzeArgs, KeyArgs, ModStateArgs,
+    MouseArgs, PoseArgs, ScreenshotArgs, Shot, StatsArgs, TextArgs, UiArgs,
 };
 use serde_json::Value;
 
@@ -78,8 +78,12 @@ async fn bennu_game_info(_ctx: &BennuState) -> Result<Value, String> {
     active().await?.info().await
 }
 
-/// A screenshot of the running game's window. Images are expensive to read: prefer `max_width` of 800–1000
-/// unless detail matters.
+/// A screenshot of the running game's window. **An image is the most expensive way to look at a game** (a 1280×720
+/// picture is thousands of tokens): use it only for what is purely visual and cannot be asked. To know what the
+/// interface says or whether a panel is there, use `bevy_game_ui`; to know whether the look changed, what colours
+/// dominate or whether an outline is continuous, use `bevy_game_analyze`; to check an animation or a movement, use
+/// `bevy_game_pose` (numbers over time, with a summary). When you do need the picture, pass a small
+/// `max_width` (500–800).
 #[arbor_rpc::handler(mcp(
     name = "bevy_game_screenshot",
     title = "Screenshot of the running game",
@@ -88,6 +92,90 @@ async fn bennu_game_info(_ctx: &BennuState) -> Result<Value, String> {
 ))]
 async fn bennu_game_screenshot(_ctx: &BennuState, args: ScreenshotArgs) -> Result<Shot, String> {
     active().await?.screenshot(args).await
+}
+
+/// The game's **interface as data, without a picture**: every UI node with its identity (`scope/id`), the text it
+/// shows (already in the player's language), its rectangle in window points, whether it is visible, its opacity
+/// and its colours, plus the raised UI flags. **Prefer it to `bevy_game_screenshot`** for "does the banner say X?",
+/// "is the cozy pill on screen and at what opacity?", "where is the button I want to click?" — the answer is a few
+/// hundred bytes and exact. Narrow it with `screen` (`pausa`, `pausa/riprendi`, `hud/matassa*`): a whole HUD is
+/// hundreds of nodes. By default only what the player can see; `include_hidden` adds the switched-off nodes.
+/// `dev` channel (protocol 2) only; a game without UI documents answers an empty tree.
+#[arbor_rpc::handler(mcp(
+    name = "bevy_game_ui",
+    title = "The UI of the running game as data (instead of a screenshot)",
+    safety = read,
+))]
+async fn bennu_game_ui(_ctx: &BennuState, args: UiArgs) -> Result<Value, String> {
+    active().await?.ui_tree(args).await
+}
+
+/// **The pose of a UI node or of an entity as numbers, instead of a screenshot.** For a node `scope/id` (`hud/banner`):
+/// the translation, scale and rotation written on its transform, its opacity, whether it is visible, its laid-out
+/// rectangle and the animations running on it with their time. For an entity (`entity:Name`, or `player` where the
+/// game offers it): position, angles, scale and, when the game knows them, velocity. **Prefer it to
+/// `bevy_game_screenshot` for any animation or movement** ("does the life card shake when I am hurt and go back to
+/// 3° of tilt?", "is the crystal spinning?"): without `ticks` it answers the pose right now in a few lines; with
+/// `ticks` (and `every` frames between samples) the game samples N consecutive frames in ONE round trip and the
+/// answer carries the table plus a summary — peak, overshoot, settling time, reversals, whether it returns to its
+/// start, warnings (a NaN, a jump, a node left invisible). The same table a screenshot sheet of eight poses would
+/// need thousands of tokens to show. `dev` channel (protocol 3) only; the numbers are the last finished frame.
+#[arbor_rpc::handler(mcp(
+    name = "bevy_game_pose",
+    title = "Pose of a UI node or entity as numbers (instead of a screenshot of the animation)",
+    safety = read,
+))]
+async fn bennu_game_pose(_ctx: &BennuState, args: PoseArgs) -> Result<Value, String> {
+    let link = active().await?;
+    if args.ticks.is_some_and(|t| t > 1) {
+        link.pose_series(args).await
+    } else {
+        link.pose(args).await
+    }
+}
+
+/// **Questions about the screen, answered inside the game**: the game takes its own screenshot, computes the
+/// operations you list and sends back only the results (the picture never crosses). Operations: `stats`
+/// (luminance, saturation, mean colour, % near black/white), `palette:k` (dominant colours with names and %),
+/// `count:#rrggbb~tol` / `bbox:#rrggbb~tol` (how many pixels of a colour and the rectangle that holds them),
+/// `edges` (outline density, thickness, direction, continuity %), `grid:CxR` (a tiny character picture, e.g.
+/// `grid:16x6`), `thumb:side` (a downscaled PNG as last resort), `diff:file.png` (against a saved picture).
+/// Regions: fractions `x0,y0,x1,y1` of the picture (`0.7,0,1,0.15` = top-right corner), `px:x,y,w,h`, or a UI node
+/// (`ui:cozy/pill`, resolved with the UI tree). **Prefer it to `bevy_game_screenshot`** whenever the question has
+/// a number or a yes/no in it: "is it darker than before?", "is the stitching continuous?", "how much amber is in
+/// the corner?". Each answer is one sentence (`detail: summary`) or structured (`json`). `dev` channel (protocol 2)
+/// only.
+#[arbor_rpc::handler(mcp(
+    name = "bevy_game_analyze",
+    title = "Analyse the running game's screen (statistics, palette, edges, diff) without a screenshot",
+    safety = read,
+))]
+async fn bennu_game_analyze(_ctx: &BennuState, args: AnalyzeArgs) -> Result<Value, String> {
+    active().await?.analyze(args).await
+}
+
+/// The same operations as `bevy_game_analyze` (`stats`, `palette`, `count`, `bbox`, `edges`, `grid`, `thumb`,
+/// `diff`), on a **PNG file** instead of the live screen — for the pictures a tool already saved (a Studio
+/// `ui shot`, a `mappa foto`, an earlier screenshot) so you can interrogate them **without reading them**. With
+/// `root` the file is a path inside that project (scope-checked); without, an absolute `.png` in the temporary
+/// folder. Needs no running game; a `ui:` region is refused (it names a node of a live game).
+#[arbor_rpc::handler(mcp(
+    name = "image_analyze",
+    title = "Analyse a PNG file (statistics, palette, edges, diff) without reading the image",
+    safety = read,
+))]
+async fn bennu_image_analyze(_ctx: &BennuState, args: ImageAnalyzeArgs) -> Result<Value, String> {
+    let file = match args.root.as_deref().filter(|r| !r.trim().is_empty()) {
+        Some(root) => std::path::PathBuf::from(crate::project_paths::in_root(root, &args.file)?),
+        None => bennu_link::prelude::scratch_path(&args.file)?,
+    };
+    let detail = bennu_link::prelude::Detail::parse(args.detail.as_deref())?;
+    let ops = bennu_link::prelude::parse_ops(&args.ops, args.region.as_deref())?;
+    let ops_for_answer = ops.clone();
+    let results = tokio::task::spawn_blocking(move || bennu_link::prelude::analyze_file(&file, &ops))
+        .await
+        .map_err(|e| format!("the analysis task failed: {e}"))??;
+    Ok(bennu_link::prelude::results_json(&ops_for_answer, &results, detail))
 }
 
 /// Runtime statistics of the running game: frame time (average, min, max, p50 / p95 / p99), FPS, entity count

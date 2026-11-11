@@ -74,6 +74,12 @@ pub enum Capability {
     Ecs,
     /// Bevy `State<T>` machines (BRP only).
     BevyStates,
+    /// The UI tree as data: every node with its identity, resolved text, rectangle, visibility and colours (`dev` channel, protocol 2).
+    UiTree,
+    /// Questions about the picture on screen answered in the game (statistics, palette, edges, differences), without the picture crossing.
+    ImageAnalysis,
+    /// The pose of a UI node or of an entity as numbers (position, scale, rotation, opacity, running animations), now or sampled over N frames (`dev` channel, protocol 3).
+    Pose,
     // ── Debuggers ────────────────────────────────────────────────────────────────────
     /// Stop the program, let it run, step.
     Pause,
@@ -86,10 +92,11 @@ pub enum Capability {
 }
 
 impl Capability {
-    pub const ALL: [Capability; 17] = [
+    pub const ALL: [Capability; 20] = [
         Capability::Info, Capability::Screenshot, Capability::Input, Capability::Command, Capability::Actions, Capability::Stats,
         Capability::Hud, Capability::Chat, Capability::Mods, Capability::World, Capability::ModState, Capability::Ecs,
-        Capability::BevyStates, Capability::Pause, Capability::Eval, Capability::Stack, Capability::Output,
+        Capability::BevyStates, Capability::UiTree, Capability::ImageAnalysis, Capability::Pose, Capability::Pause, Capability::Eval,
+        Capability::Stack, Capability::Output,
     ];
 
     /// The name it has on the wire and in a tool's answer.
@@ -108,6 +115,9 @@ impl Capability {
             Capability::ModState => "mod_state",
             Capability::Ecs => "ecs",
             Capability::BevyStates => "bevy_states",
+            Capability::UiTree => "ui_tree",
+            Capability::ImageAnalysis => "image_analysis",
+            Capability::Pose => "pose",
             Capability::Pause => "pause",
             Capability::Eval => "eval",
             Capability::Stack => "stack",
@@ -131,6 +141,9 @@ impl Capability {
             Capability::ModState => "mod state",
             Capability::Ecs => "entity and component access (ECS)",
             Capability::BevyStates => "Bevy state machines",
+            Capability::UiTree => "UI tree",
+            Capability::ImageAnalysis => "image analysis",
+            Capability::Pose => "numeric pose",
             Capability::Pause => "pause or stepping",
             Capability::Eval => "expression evaluation",
             Capability::Stack => "stack and variables",

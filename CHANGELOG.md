@@ -161,6 +161,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu › Imber plans before it changes things, and answers a question without editing** — a task that edits files starts with a step plan (unless you say to just do it), and a question about an exception or a piece of code gets an explanation, not an unrequested fix.
 
 ### Fixed
+- **Trees: rows no longer pile on top of each other after expanding a folder** — opening a folder with many entries could leave the rows below it drawn over the new ones until the tree was scrolled; collapsing a branch now hides its rows at once instead of fading them out.
 - **Bennu › Patina: Cmd/Ctrl+click on a declaration shows its usages** — on the name of a function, method, type or constant where it is declared, the gesture did nothing in a `.ptn`; it now opens find usages, as in Java and Rust.
 - **Editor: the completion popup and hover cards are no longer cut off** — with a bottom panel open (console, terminal) a long completion list could come out clipped or partly under the panel, and a resized popup cut its last row in half; editor popups now float above the panels.
 - **Bennu: hover documentation in markdown is rendered** — on `.ptn` and on language-server files (Rust) the hover card showed the doc comment's raw marks (backticks, `**`, ```` ``` ```` fences, `#` headings); it now shows formatted text, inline code, lists and coloured examples. A Rust hover whose documentation has an example no longer loses it, nor shows the example as the signature.

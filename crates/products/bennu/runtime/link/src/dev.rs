@@ -33,13 +33,13 @@ use fulcrum_debug_channel::error::ChannelError;
 use fulcrum_debug_channel::topic;
 use fulcrum_dev_channel::client::{DevClient, DevError};
 use fulcrum_dev_channel::message::{
-    Caller, HudEntry, HudValue, Input, KeyAction, KeyPress, MouseButton, MouseOp, Query, Request, Response,
+    Caller, HudEntry, HudValue, ImageSource, Input, KeyAction, KeyPress, MouseButton, MouseOp, Query, Request, Response,
 };
 use fulcrum_dev_channel::TOPIC;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::args::{ActionArgs, CommandArgs, KeyArgs, MouseArgs, ScreenshotArgs, TextArgs};
+use crate::args::{ActionArgs, AnalyzeArgs, CommandArgs, KeyArgs, MouseArgs, PoseArgs, ScreenshotArgs, TextArgs, UiArgs};
 use crate::game::{GameLink, Shot};
 use crate::target::{Capability, LiveTarget, TargetKind};
 
@@ -171,6 +171,17 @@ impl DevChannelLink {
         .map_err(|e| format!("the dev channel task failed: {e}"))?
     }
 
+    /// Like [`Self::ask`] with a longer patience: a pose series answers only after its last frame.
+    async fn ask_for(&self, request: Request, wait: Duration) -> Result<Response, String> {
+        let client = Arc::clone(&self.client);
+        tokio::task::spawn_blocking(move || {
+            let mut c = client.lock().unwrap_or_else(|e| e.into_inner());
+            ask_blocking(&mut c, request, wait)
+        })
+        .await
+        .map_err(|e| format!("the dev channel task failed: {e}"))?
+    }
+
     /// Queue an input batch and say what the game counted.
     async fn input(&self, input: Input) -> Result<Value, String> {
         match self.ask(Request::Input(input)).await? {
@@ -232,6 +243,11 @@ fn response_name(r: &Response) -> &'static str {
         Response::Screenshot(_) => "a screenshot",
         Response::InputQueued { .. } => "an input receipt",
         Response::Error(_) => "an error",
+        Response::Ui(_) => "a UI tree",
+        Response::Image(_) => "image analysis results",
+        // Answers of later protocol versions that this link never asks for (the pose queries are read by their own tools).
+        #[allow(unreachable_patterns)]
+        _ => "an answer of a newer protocol",
     }
 }
 
@@ -376,6 +392,9 @@ impl LiveTarget for DevChannelLink {
             Capability::Mods,
             Capability::World,
             Capability::ModState,
+            Capability::UiTree,
+            Capability::ImageAnalysis,
+            Capability::Pose,
         ]
     }
 }
@@ -398,6 +417,8 @@ impl GameLink for DevChannelLink {
             "keys": "letters, digits, Space, Enter, Escape, Tab, Backspace, Up/Down/Left/Right, Shift, Ctrl, Alt, F1..F12, -, /",
             "notes": [
                 "There is no registry of named actions on this channel: a mod's or the game's commands are console lines, run with bevy_game_command.",
+                "Prefer bevy_game_ui (the interface as data) and bevy_game_analyze (stats, palette, edges, diff on the screen) to bevy_game_screenshot: they answer in a few hundred bytes instead of a picture.",
+                "For an animation or a movement, prefer bevy_game_pose (numbers: position, scale, rotation, opacity, running animations, optionally sampled over N frames with a summary) to a screenshot: it costs a few hundred bytes instead of thousands of tokens.",
                 "There is no ECS on this channel: entities, components and resources need the Bevy Remote Protocol (bevy_game_connect protocol brp).",
             ],
         }))
@@ -494,6 +515,50 @@ impl GameLink for DevChannelLink {
         match self.ask(Request::Query(Query::World)).await? {
             Response::World(w) => Ok(world_json(&w)),
             other => Err(unexpected("a world description", &other)),
+        }
+    }
+
+    async fn ui_tree(&self, args: UiArgs) -> Result<Value, String> {
+        let screen = args.screen.filter(|s| !s.trim().is_empty());
+        let whole = screen.is_none();
+        let query = Query::Ui { screen, visible_only: !args.include_hidden.unwrap_or(false) };
+        match self.ask(Request::Query(query)).await? {
+            Response::Ui(d) => Ok(crate::vision::ui_json(&d, whole)),
+            other => Err(unexpected("the UI tree", &other)),
+        }
+    }
+
+    async fn pose(&self, args: PoseArgs) -> Result<Value, String> {
+        if args.target.trim().is_empty() {
+            return Err("`target` is required: a UI node `scope/id`, `entity:Name`, or `player`".into());
+        }
+        match self.ask(Request::Query(Query::Pose { target: args.target.trim().to_string() })).await? {
+            Response::Pose(d) => Ok(crate::pose::pose_json(&d)),
+            other => Err(unexpected("a pose", &other)),
+        }
+    }
+
+    async fn pose_series(&self, args: PoseArgs) -> Result<Value, String> {
+        if args.target.trim().is_empty() {
+            return Err("`target` is required: a UI node `scope/id`, `entity:Name`, or `player`".into());
+        }
+        let ticks = args.ticks.unwrap_or(30).clamp(1, 2000);
+        let every = args.every.unwrap_or(1).clamp(1, 600);
+        // The answer comes after the last sample: at 30 fps that is `ticks × every / 30` seconds, plus the usual patience.
+        let frames = u64::from(ticks) * u64::from(every);
+        let wait = self.wait + Duration::from_millis(frames * 40);
+        match self.ask_for(Request::Query(Query::PoseSeries { target: args.target.trim().to_string(), ticks, every }), wait).await? {
+            Response::PoseSeries(d) => Ok(crate::pose::series_json(&d)),
+            other => Err(unexpected("a pose series", &other)),
+        }
+    }
+
+    async fn analyze(&self, args: AnalyzeArgs) -> Result<Value, String> {
+        let detail = crate::vision::Detail::parse(args.detail.as_deref())?;
+        let ops = crate::vision::parse_ops(&args.ops, args.region.as_deref())?;
+        match self.ask(Request::Query(Query::Image { source: ImageSource::Screenshot, ops: ops.clone() })).await? {
+            Response::Image(results) => Ok(crate::vision::results_json(&ops, &results, detail)),
+            other => Err(unexpected("image analysis results", &other)),
         }
     }
 
@@ -598,7 +663,7 @@ mod tests {
         // `capabilities` does not need a live client, so the line is held on a plain list too.
         let declared = [
             Capability::Info, Capability::Screenshot, Capability::Input, Capability::Command, Capability::Hud, Capability::Chat,
-            Capability::Mods, Capability::World, Capability::ModState,
+            Capability::Mods, Capability::World, Capability::ModState, Capability::UiTree, Capability::ImageAnalysis, Capability::Pose,
         ];
         assert!(declared.iter().all(|c| c.belongs_to(TargetKind::Game)));
     }
