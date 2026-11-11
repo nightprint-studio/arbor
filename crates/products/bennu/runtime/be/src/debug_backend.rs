@@ -15,6 +15,14 @@
 //! there are two protocols, which is the whole point: **which debugger is in use is not a question the
 //! panel should be able to ask.**
 //!
+//! ## The other half of "what can you attach to"
+//!
+//! This trait is the debugger's *operation* set and stays that. Who a session is and what it can do —
+//! in the vocabulary a running game also speaks — is `bennu_link::target` (`LiveTarget`, `Capability`), and
+//! `crate::link::debugger::DebuggerTarget` wraps a session in it: that is how the listing the MCP
+//! `bevy_game_status` and Imber's `live_targets` give puts a JVM and a game side by side. The two sets of
+//! verbs are not unified on purpose — a game is never paused — see `docs/arbor-gioco-collegato.md` in Voriz.
+//!
 //! ## What is deliberately not on it
 //!
 //! Nothing about *starting* a session. The two are started by completely different means — JDWP by

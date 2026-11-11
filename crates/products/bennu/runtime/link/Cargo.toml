@@ -1,0 +1,32 @@
+[package]
+name         = "bennu-link"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The live-target seam of Bennu: what a running thing Arbor can attach to (a debugged program, a running game) declares it can do, and the link to a game over the fulcrum `dev` channel. Pure of Tauri and of Bennu's backend, so it is tested on its own against a fake game."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# JSON Schema for the args structs the MCP tools (and Imber's) are published with: the field `///`s are the
+# per-parameter descriptions a client reads. Same pin as every other crate that derives it.
+schemars   = { workspace = true }
+# The one trait object (`dyn GameLink`) the backend picks between the two links through; already pinned for the workspace.
+async-trait = { workspace = true }
+# `spawn_blocking`: the `dev` client is synchronous (it is made for CLIs), so a request is run off the async workers.
+tokio      = { workspace = true }
+# Screenshots cross the seam as base64 PNG, the shape the BRP companion already uses.
+base64     = { workspace = true }
+
+# The `dev` channel — client side. Path dependencies OUTSIDE this workspace, on the fulcrum checkout that sits
+# beside it (`rust/engine/fulcrum`): the protocol types and the loopback client are fulcrum's and are NOT copied
+# here, so a protocol change is one `cargo` error in this crate rather than a silent drift. Pure Rust, no Bevy.
+fulcrum-debug-channel = { path = "../../../../../../../engine/fulcrum/crates/core/fulcrum-debug-channel" }
+fulcrum-dev-channel   = { path = "../../../../../../../engine/fulcrum/crates/core/fulcrum-dev-channel" }
+
+[dev-dependencies]
+# Only the fake game of the tests decodes the client's messages (the real client never needs it): the same
+# codec the channel itself uses (`postcard` 1.1, already in the tree through `fulcrum-dev-channel`).
+postcard = { version = "1.1", features = ["use-std"] }

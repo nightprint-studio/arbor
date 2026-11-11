@@ -1,9 +1,19 @@
-//! A running Bevy game, as tools: connect over the Bevy Remote Protocol, read the world, and — behind a
-//! switch that is off until the user turns it on — change it.
+//! A running game, as tools: attach to it over the Bevy Remote Protocol or the fulcrum `dev` channel, read
+//! it, and — behind a switch that is off until the user turns it on — change it.
 //!
-//! Nothing here speaks BRP. The connection, the reconnect monitor, the method dialects and the registry
-//! are `crate::brp` — the same ones the inspector panel uses — and every tool is a call to one of its
-//! handlers; this file is the model-facing layer: specs, the approval rule, and compact capped text.
+//! Nothing here speaks either wire. The BRP connection, the reconnect monitor, the method dialects and the
+//! registry are `crate::brp` — the same ones the inspector panel uses — and the `dev` channel is
+//! `bennu-link`; every tool is a call to one of their handlers (`bennu_brp_*` for the ECS, `bennu_game_*` for
+//! what both wires answer, routed by `crate::link::active`). This file is the model-facing layer: specs, the
+//! approval rule, and compact capped text.
+//!
+//! ## One gesture to attach
+//!
+//! `live_attach` attaches to a live target: a **game** (either wire: `protocol` `auto` tries the `dev`
+//! channel first) or a **debugger** (a JVM, which is `debug_attach` with its own approval and its own switch).
+//! `live_targets` lists what is attached and what each can do, so the model plans from the capabilities
+//! instead of calling a tool the link cannot answer. The ECS tools (`brp_query`, `brp_get`, …) stay the
+//! Remote Protocol's, and say so when the game is on the `dev` channel.
 //!
 //! ## Two families
 //!
@@ -19,13 +29,14 @@ use serde_json::{json, Map, Value};
 use super::{clip, spec, ToolHost};
 use crate::live::{conversation_key, live_for};
 
-const READ: [&str; 11] = [
+const READ: [&str; 18] = [
     "brp_connect", "brp_query", "brp_get", "brp_resources", "brp_get_resource", "brp_types", "brp_watch",
     "brp_screenshot", "brp_stats", "brp_actions", "brp_states",
+    "live_targets", "live_attach", "game_world", "game_mods", "game_hud", "game_chat", "game_mod_state",
 ];
-const WRITE: [&str; 14] = [
+const WRITE: [&str; 15] = [
     "brp_mutate", "brp_insert", "brp_remove", "brp_spawn", "brp_despawn", "brp_set_resource", "brp_reparent", "brp_call",
-    "brp_key", "brp_type", "brp_mouse", "brp_gamepad", "brp_action", "brp_set_state",
+    "brp_key", "brp_type", "brp_mouse", "brp_gamepad", "brp_action", "brp_set_state", "game_command",
 ];
 
 /// `brp_screenshot` leaves a picture for the loop to attach, like `screenshot_page`.
@@ -46,6 +57,11 @@ pub(super) fn is_brp_write(name: &str) -> bool {
 
 pub(super) fn is_brp_tool(name: &str) -> bool {
     is_brp_read(name) || is_brp_write(name)
+}
+
+/// `live_attach` aimed at a debugger: it is `debug_attach` for the gate, the access policy and the switch.
+pub(super) fn attaches_debugger(input: &Value) -> bool {
+    input.get("target").and_then(Value::as_str) == Some("debugger")
 }
 
 /// The most characters of one component's value in `brp_get`; the cap for a whole answer is below.
@@ -181,17 +197,17 @@ pub(super) fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "brp_screenshot",
-            "Look at the running game: a screenshot of its window, returned as an image. Needs the `arbor-bevy-remote` plugin in the game (see brp_connect's hint if it is missing). Images are expensive and the conversation keeps only the latest two: take one to answer a question, not to poll; `max_width` (default 900) keeps it cheap.",
+            "Look at the running game: a screenshot of its window, returned as an image. Works on either link: the fulcrum `dev` channel, or the Remote Protocol with the `arbor-bevy-remote` plugin in the game (see brp_connect's hint if it is missing). Images are expensive and the conversation keeps only the latest two: take one to answer a question, not to poll; `max_width` (default 900) keeps it cheap.",
             json!({"type":"object","properties":{"max_width":{"type":"integer","description":"Shrink to at most this many pixels wide. Default 900."}}}),
         ),
         spec(
             "brp_stats",
-            "Runtime statistics of the running game: frame time (average, p50/p95/p99, max), FPS, entity count and the other diagnostics it registered, and the window size. `history` adds the last N frame times. Needs the `arbor-bevy-remote` plugin.",
+            "Runtime statistics of the running game: frame time (average, p50/p95/p99, max), FPS, entity count and the other diagnostics it registered, and the window size. `history` adds the last N frame times. Remote Protocol only (needs the `arbor-bevy-remote` plugin): the `dev` channel has no statistics.",
             json!({"type":"object","properties":{"history":{"type":"integer","description":"Also return the last N frame times in ms (at most 600)."}}}),
         ),
         spec(
             "brp_actions",
-            "List the named actions the running game registered for remote clients (`restart`, `spawn_wave`, …) with their descriptions. Run one with brp_action. Needs the `arbor-bevy-remote` plugin.",
+            "List the named actions the running game registered for remote clients (`restart`, `spawn_wave`, …) with their descriptions. Run one with brp_action. Remote Protocol only (needs the `arbor-bevy-remote` plugin): on the `dev` channel the game's and the mods' commands are console lines, run with game_command.",
             json!({"type":"object","properties":{}}),
         ),
         spec(
@@ -206,7 +222,7 @@ pub(super) fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "brp_key",
-            &format!("WRITE to the running game: press a key as if on the keyboard (`key`: `a`, `Enter`, `Escape`, `F5`, `ArrowUp`, `space` …), optionally with `modifiers` (`ctrl`, `shift`, `alt`) and `action` press (default) / down / up. {LIVE_STATE} Needs the `arbor-bevy-remote` plugin."),
+            &format!("WRITE to the running game: press a key as if on the keyboard (`key`: `a`, `Enter`, `Escape`, `F5`, `ArrowUp`, `space` …), optionally with `modifiers` (`ctrl`, `shift`, `alt`) and `action` press (default) / down / up. {LIVE_STATE} Works on either link (the Remote Protocol needs the `arbor-bevy-remote` plugin)."),
             json!({"type":"object","properties":{
                 "key":{"type":"string"},
                 "action":{"type":"string","enum":["press","down","up"]},
@@ -216,12 +232,12 @@ pub(super) fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "brp_type",
-            &format!("WRITE to the running game: type text (1–500 characters) into whatever has the focus — a text field, a console. {LIVE_STATE} Needs the `arbor-bevy-remote` plugin."),
+            &format!("WRITE to the running game: type text (1–500 characters) into whatever has the focus — a text field, a console. {LIVE_STATE} Works on either link (the Remote Protocol needs the `arbor-bevy-remote` plugin)."),
             json!({"type":"object","properties":{"text":{"type":"string"},"interval_ms":{"type":"integer"}},"required":["text"]}),
         ),
         spec(
             "brp_mouse",
-            &format!("WRITE to the running game: move, click, double-click, drag or scroll the mouse. `x`/`y` are logical window pixels from the top-left — take a brp_screenshot first to know where things are. {LIVE_STATE} Needs the `arbor-bevy-remote` plugin."),
+            &format!("WRITE to the running game: move, click, double-click, drag or scroll the mouse. `x`/`y` are logical window pixels from the top-left — take a brp_screenshot first to know where things are. {LIVE_STATE} Works on either link (the Remote Protocol needs the `arbor-bevy-remote` plugin)."),
             json!({"type":"object","properties":{
                 "action":{"type":"string","enum":["move","down","up","click","double_click","drag","wheel"]},
                 "x":{"type":"number"},"y":{"type":"number"},
@@ -242,8 +258,55 @@ pub(super) fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "brp_action",
-            &format!("WRITE to the running game: run one of its registered actions by `name` (list them with brp_actions, which also says what each does). What an action does is the game's own business and may not be undoable. {LIVE_STATE}"),
+            &format!("WRITE to the running game: run one of its registered actions by `name` (list them with brp_actions, which also says what each does). What an action does is the game's own business and may not be undoable. On the `dev` channel there is no registry: `name` is the first word of a console line and `arg` the rest. {LIVE_STATE}"),
             json!({"type":"object","properties":{"name":{"type":"string"},"arg":{"description":"The action's argument, as JSON, if it takes one."}},"required":["name"]}),
+        ),
+        spec(
+            "live_targets",
+            "List what Imber can look at while it runs: the games attached (over the fulcrum `dev` channel or the Bevy Remote Protocol) and the debug sessions, each with its protocol and its CAPABILITIES (screenshot, input, command, hud, chat, mods, world, mod_state, ecs, bevy_states for a game; pause, stack, eval, output for a debugger), plus the games listening on the `dev` channel that are not attached yet. Read it before choosing a tool: a tool the target has no capability for answers with a sentence, not a result. Pausing is a debugger's capability only — a game is never stopped to be read.",
+            json!({"type":"object","properties":{}}),
+        ),
+        spec(
+            "live_attach",
+            "Attach to a live target with one gesture. `target` `game` (default): `protocol` `auto` (default) tries the fulcrum `dev` channel first (the game must be started with its dev channel on — Voriz: `--dev-channel`) and then the Bevy Remote Protocol; `dev` or `brp` choose one, and the choice is kept for the game tools. Waits for the game to come up like brp_connect (`wait_s`). `target` `debugger`: attach the debugger to a JVM listening on `port` — the same as debug_attach, with its approval; it needs the debug tools switched on. Loopback only.",
+            json!({"type":"object","properties":{
+                "target":{"type":"string","enum":["game","debugger"],"description":"Default game."},
+                "protocol":{"type":"string","enum":["auto","dev","brp"],"description":"game: which wire. Default auto."},
+                "game":{"type":"string","description":"game on the dev channel: its id, when more than one is listening (live_targets lists them)."},
+                "port":{"type":"integer","description":"game on the dev channel: connect to this port directly. debugger: the JVM's JDWP port (required)."},
+                "endpoint":{"type":"string","description":"game over BRP: default http://127.0.0.1:15702."},
+                "wait_s":{"type":"integer","description":"game: how long to wait for it to come up. Default 30, at most 120."}
+            }}),
+        ),
+        spec(
+            "game_world",
+            "The world the running game is in: name, seed, dimension and who is in it with their positions. `dev` channel only (live_targets says whether the attached game has the capability `world`).",
+            json!({"type":"object","properties":{}}),
+        ),
+        spec(
+            "game_mods",
+            "The mods the running game loaded: whether each is on (and the reason when it is not), how many hooks it has and how many errors it has made so far. The first thing to read when a mod does nothing. `dev` channel only.",
+            json!({"type":"object","properties":{}}),
+        ),
+        spec(
+            "game_hud",
+            "The values mods wrote to the HUD — the mod, the key, the typed value and how many times it was written — of one mod (`mod_id`) or of all. `dev` channel only.",
+            json!({"type":"object","properties":{"mod_id":{"type":"string"}}}),
+        ),
+        spec(
+            "game_chat",
+            "The latest chat lines (translation key and parameters, and who they were for) and console log lines of the running game. `last` default 30, at most 200. `dev` channel only.",
+            json!({"type":"object","properties":{"last":{"type":"integer"}}}),
+        ),
+        spec(
+            "game_mod_state",
+            "The state a mod keeps, read by its type (`ty`) and optionally the player it is about (`who`), as the game prints it. game_mods lists the mod ids. `dev` channel only.",
+            json!({"type":"object","properties":{"mod_id":{"type":"string"},"ty":{"type":"string"},"who":{"type":"string"}},"required":["mod_id","ty"]}),
+        ),
+        spec(
+            "game_command",
+            &format!("WRITE to the running game: run one line of its console — a verb of the game or of one of its mods, as the player would type it (`cozy on`, no leading slash) — and read what it answered. `as_console` runs it with every permission group instead of as the player. Check what a verb does before running one you do not know. {LIVE_STATE} `dev` channel only."),
+            json!({"type":"object","properties":{"line":{"type":"string"},"as_console":{"type":"boolean"}},"required":["line"]}),
         ),
     ]
 }
@@ -450,6 +513,123 @@ fn actions_text(list: &Value) -> String {
     format!("{} action(s):\n{}", rows.len(), rows.join("\n"))
 }
 
+/// `bevy_game_status`' answer as lines the model plans from: what is attached with its capabilities, the
+/// debug sessions, and the games listening that are not attached yet.
+fn targets_text(status: &Value) -> String {
+    let mut out = format!("protocol choice: {}", status["protocol"].as_str().unwrap_or("auto"));
+    let caps = |t: &Value| t["capabilities"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+    let links = status["links"].as_array().cloned().unwrap_or_default();
+    if links.is_empty() {
+        out.push_str("\nno game is attached.");
+    }
+    for l in &links {
+        let active = if l["active"].as_bool() == Some(true) { " [used by the game tools]" } else { "" };
+        let up = if l["connected"].as_bool() == Some(false) { " [reconnecting]" } else { "" };
+        out.push_str(&format!("\ngame over {}: {}{active}{up}\n  can: {}", l["protocol"].as_str().unwrap_or("?"), l["label"].as_str().unwrap_or("?"), caps(l)));
+    }
+    for d in status["debuggers"].as_array().into_iter().flatten() {
+        out.push_str(&format!("\ndebugger over {} (session {}): {}\n  can: {}", d["protocol"].as_str().unwrap_or("?"), d["session"].as_str().unwrap_or("?"), d["label"].as_str().unwrap_or("?"), caps(d)));
+    }
+    let attached_dev_port = links.iter().find(|l| l["protocol"] == "dev").and_then(|l| l["label"].as_str()).unwrap_or("").to_string();
+    let waiting: Vec<String> = status["dev_games_found"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|g| !attached_dev_port.contains(&format!("port {}", g["port"])))
+        .map(|g| format!("{} (port {}{})", g["game"].as_str().unwrap_or("?"), g["port"], if g["compatible"].as_bool() == Some(false) { ", incompatible dev version" } else { "" }))
+        .collect();
+    if !waiting.is_empty() {
+        out.push_str(&format!("\nlistening on the dev channel, not attached: {}", waiting.join(", ")));
+    }
+    if let Some(hint) = status["hint"].as_str() {
+        out.push_str(&format!("\n{hint}"));
+    }
+    out
+}
+
+/// A console command's answer: `ok` or `FAILED`, then each line the game printed.
+fn command_text(answer: &Value) -> String {
+    let verdict = if answer["ok"].as_bool() == Some(true) { "ok" } else { "FAILED" };
+    let lines: Vec<&str> = answer["lines"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if lines.is_empty() {
+        return format!("{verdict} (no output)");
+    }
+    cap(&format!("{verdict}\n{}", lines.join("\n")), MAX_ANSWER_CHARS)
+}
+
+fn world_text(w: &Value) -> String {
+    let players: Vec<String> = w["players"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|p| {
+            let at: Vec<String> = p["pos"].as_array().into_iter().flatten().filter_map(Value::as_f64).map(|v| format!("{v:.1}")).collect();
+            format!("{} at ({})", p["name"].as_str().unwrap_or("?"), at.join(", "))
+        })
+        .collect();
+    let seed = w["seed"].as_u64().map(|s| format!(", seed {s}")).unwrap_or_default();
+    format!(
+        "world \"{}\"{seed}, dimension {}; {} player(s){}",
+        w["name"].as_str().unwrap_or("?"),
+        w["dimension"].as_str().unwrap_or("?"),
+        players.len(),
+        if players.is_empty() { String::new() } else { format!(": {}", players.join("; ")) }
+    )
+}
+
+fn mods_text(list: &Value) -> String {
+    let rows: Vec<String> = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|m| {
+            let state = if m["enabled"].as_bool() == Some(true) { "on" } else { "OFF" };
+            let note = m["note"].as_str().filter(|n| !n.is_empty()).map(|n| format!(" — {n}")).unwrap_or_default();
+            format!("{}: {state}, {} hook(s), {} error(s){note}", m["id"].as_str().unwrap_or("?"), m["hooks"], m["faults"])
+        })
+        .collect();
+    if rows.is_empty() {
+        return "the game loaded no mods.".into();
+    }
+    format!("{} mod(s):\n{}", rows.len(), rows.join("\n"))
+}
+
+fn hud_text(h: &Value) -> String {
+    let rows: Vec<String> = h["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|e| format!("{}.{} = {} (written {}×)", e["mod"].as_str().unwrap_or("?"), e["key"].as_str().unwrap_or("?"), e["value"], e["writes"]))
+        .collect();
+    if rows.is_empty() {
+        return "no HUD value has been written.".into();
+    }
+    format!("{} HUD value(s):\n{}", rows.len(), rows.join("\n"))
+}
+
+fn chat_text(c: &Value) -> String {
+    let chat: Vec<String> = c["chat"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|l| {
+            let params: Vec<String> = l["params"].as_object().into_iter().flatten().map(|(k, v)| format!("{k}={}", v.as_str().unwrap_or(""))).collect();
+            let to = l["to"].as_u64().map(|t| format!(" (to client {t})")).unwrap_or_default();
+            format!("{}{}{to}", l["key"].as_str().unwrap_or("?"), if params.is_empty() { String::new() } else { format!(" [{}]", params.join(", ")) })
+        })
+        .collect();
+    let console: Vec<&str> = c["console"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let mut out = format!("chat ({} line(s)):", chat.len());
+    for l in &chat {
+        out.push_str(&format!("\n  {l}"));
+    }
+    out.push_str(&format!("\nconsole ({} line(s)):", console.len()));
+    for l in &console {
+        out.push_str(&format!("\n  {l}"));
+    }
+    out
+}
+
 fn strings(input: &Value, key: &str) -> Vec<String> {
     input.get(key).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()
 }
@@ -491,7 +671,7 @@ impl ToolHost {
             "brp_watch" => self.brp_watch(input),
             "brp_screenshot" => self.brp_screenshot(call_id, input),
             "brp_stats" => {
-                let stats = self.brp("bennu_brp_stats", pass(input, &["history"]))?;
+                let stats = self.brp("bennu_game_stats", pass(input, &["history"]))?;
                 Ok(clip(stats_text(&stats)))
             }
             "brp_states" => {
@@ -499,8 +679,21 @@ impl ToolHost {
                 Ok(clip(states_text(&list)))
             }
             "brp_actions" => {
-                let list = self.call_handler("bennu_brp_actions", json!({}))?;
+                let list = self.call_handler("bennu_game_actions", json!({}))?;
                 Ok(clip(actions_text(&list)))
+            }
+            "live_targets" => {
+                let status = self.call_handler("bennu_game_status", json!({}))?;
+                Ok(clip(targets_text(&status)))
+            }
+            "live_attach" => self.live_attach(input),
+            "game_world" => Ok(clip(world_text(&self.call_handler("bennu_game_world", json!({}))?))),
+            "game_mods" => Ok(clip(mods_text(&self.call_handler("bennu_game_mods", json!({}))?))),
+            "game_hud" => Ok(clip(hud_text(&self.brp("bennu_game_hud", pass(input, &["mod_id"]))?))),
+            "game_chat" => Ok(clip(chat_text(&self.brp("bennu_game_chat", pass(input, &["last"]))?))),
+            "game_mod_state" => {
+                let state = self.brp("bennu_game_mod_state", pass(input, &["mod_id", "ty", "who"]))?;
+                Ok(clip(cap(state["state"].as_str().unwrap_or("(empty)"), MAX_ANSWER_CHARS)))
             }
             write if is_brp_write(write) => self.brp_write(write, input),
             other => Err(format!("`{other}` is not a bevy tool")),
@@ -626,7 +819,7 @@ impl ToolHost {
     fn brp_screenshot(&self, call_id: &str, input: &Value) -> Result<String, String> {
         use base64::Engine as _;
         let width = input.get("max_width").cloned().unwrap_or_else(|| json!(DEFAULT_SHOT_WIDTH));
-        let shot = self.brp("bennu_brp_screenshot", json!({ "max_width": width }))?;
+        let shot = self.brp("bennu_game_screenshot", json!({ "max_width": width }))?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(shot["data"].as_str().unwrap_or_default())
             .map_err(|e| format!("the game sent a screenshot that is not valid base64: {e}"))?;
@@ -658,6 +851,41 @@ impl ToolHost {
             return Ok(format!("entity #{id}: nothing changed in {seconds} s ({reads} reads)."));
         }
         Ok(clip(format!("entity #{id}: {} change(s) in {seconds} s ({reads} reads; first → last value)\n{}", changes.len(), changes.join("\n"))))
+    }
+
+    /// Attach to a game over either wire, or hand a JVM to the debugger — one gesture, two kinds of target.
+    fn live_attach(&self, input: &Value) -> Result<String, String> {
+        if attaches_debugger(input) {
+            // The debugger has its own switch and its own approval (the gate already asked it): this is its door.
+            if self.off.hides("debug_attach") {
+                return Err("the user has switched debugging off".into());
+            }
+            return self.run_debug("debug_attach", input);
+        }
+        let wait = input.get("wait_s").and_then(Value::as_u64).unwrap_or(DEFAULT_CONNECT_WAIT_S).min(MAX_CONNECT_WAIT_S);
+        let mut args = pass(input, &["protocol", "game", "port"]);
+        if let Some(raw) = input.get("endpoint").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+            args["endpoint"] = json!(local_endpoint(Some(raw))?);
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait);
+        let mut last = String::from("no answer");
+        loop {
+            match self.brp("bennu_game_connect", args.clone()) {
+                Ok(status) => return Ok(format!("attached.\n{}", targets_text(&status))),
+                Err(e) => last = e,
+            }
+            if self.session.cancelled() {
+                return Err("cancelled while waiting for the game".into());
+            }
+            if self.own_processes_all_ended() {
+                return Err(format!("the process you started has ended, so nothing will answer. Read its output with run_logs. Last error: {last}"));
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        Err(format!("nothing to attach to within {wait} s.\n{last}\nIf the game is still compiling, call live_attach again with a larger wait_s; check progress with run_logs."))
     }
 
     // ── Writes ────────────────────────────────────────────────────────────────────────────────
@@ -738,17 +966,17 @@ impl ToolHost {
                 format!("despawned entity #{id}")
             }
             "brp_key" => {
-                self.brp("bennu_brp_key", pass(input, &["key", "action", "modifiers", "hold_ms"]))?;
+                self.brp("bennu_game_key", pass(input, &["key", "action", "modifiers", "hold_ms"]))?;
                 let mods = strings(input, "modifiers");
                 let combo = if mods.is_empty() { str_of(input, "key")?.to_string() } else { format!("{}+{}", mods.join("+"), str_of(input, "key")?) };
                 format!("pressed {combo} in the game ({})", input.get("action").and_then(Value::as_str).unwrap_or("press"))
             }
             "brp_type" => {
-                self.brp("bennu_brp_text", pass(input, &["text", "interval_ms"]))?;
+                self.brp("bennu_game_text", pass(input, &["text", "interval_ms"]))?;
                 format!("typed {} characters in the game", str_of(input, "text")?.chars().count())
             }
             "brp_mouse" => {
-                self.brp("bennu_brp_mouse", pass(input, &["action", "x", "y", "to_x", "to_y", "button", "steps", "duration_ms", "dx", "dy", "unit"]))?;
+                self.brp("bennu_game_mouse", pass(input, &["action", "x", "y", "to_x", "to_y", "button", "steps", "duration_ms", "dx", "dy", "unit"]))?;
                 format!("mouse {} in the game", str_of(input, "action")?)
             }
             "brp_gamepad" => {
@@ -762,8 +990,18 @@ impl ToolHost {
             }
             "brp_action" => {
                 let name = str_of(input, "name")?;
-                let answer = self.brp("bennu_brp_action", pass(input, &["name", "arg"]))?;
-                format!("ran action {name} → {}", cap(&answer.to_string(), MAX_COMPONENT_CHARS))
+                let answer = self.brp("bennu_game_action", pass(input, &["name", "arg"]))?;
+                // On the `dev` channel an action is a console line, and its answer is the line's result.
+                if answer.get("lines").is_some() {
+                    format!("ran action {name} → {}", command_text(&answer))
+                } else {
+                    format!("ran action {name} → {}", cap(&answer.to_string(), MAX_COMPONENT_CHARS))
+                }
+            }
+            "game_command" => {
+                let line = str_of(input, "line")?;
+                let answer = self.brp("bennu_game_command", pass(input, &["line", "as_console"]))?;
+                format!("ran `{line}` → {}", command_text(&answer))
             }
             other => return Err(format!("`{other}` is not a bevy write tool")),
         };
@@ -812,6 +1050,7 @@ fn describe_write(tool: &str, input: &Value) -> String {
         "brp_mouse" => format!("use the mouse ({})", target("action")),
         "brp_gamepad" => "use the gamepad".to_string(),
         "brp_action" => format!("run the game's action {}", target("name")),
+        "game_command" => format!("run the console command `{}`{}", target("line"), if input["as_console"].as_bool() == Some(true) { " as the server console (every permission group)" } else { "" }),
         _ => format!("change resource {}", target("type_path")),
     }
 }
@@ -981,5 +1220,65 @@ mod tests {
         let m = json!({"entity": 4, "type_path": "Health", "path": ".current", "value": 0});
         assert_eq!(describe_write("brp_mutate", &m), "set .current of Health on entity #4 to 0");
         assert_eq!(describe_write("brp_despawn", &json!({"entity": 4})), "despawn entity #4");
+    }
+
+    #[test]
+    fn the_attach_gesture_is_read_family_but_a_debugger_target_is_recognised() {
+        assert!(is_brp_read("live_attach") && is_brp_read("live_targets") && !is_brp_write("live_attach"));
+        assert!(attaches_debugger(&json!({"target": "debugger", "port": 5005})));
+        assert!(!attaches_debugger(&json!({"target": "game"})) && !attaches_debugger(&json!({})));
+    }
+
+    #[test]
+    fn the_console_command_is_a_write_that_names_its_line_for_the_approval() {
+        assert!(is_brp_write("game_command") && !is_brp_read("game_command"));
+        assert_eq!(describe_write("game_command", &json!({"line": "cozy on"})), "run the console command `cozy on`");
+        let console = describe_write("game_command", &json!({"line": "weather rain", "as_console": true}));
+        assert!(console.contains("every permission group"), "{console}");
+    }
+
+    #[test]
+    fn the_game_queries_are_reads() {
+        for n in ["game_world", "game_mods", "game_hud", "game_chat", "game_mod_state"] {
+            assert!(is_brp_read(n) && !is_brp_write(n), "{n}");
+        }
+    }
+
+    #[test]
+    fn a_command_answer_says_ok_or_failed_and_keeps_the_lines() {
+        assert_eq!(command_text(&json!({"ok": true, "lines": ["done", "again"]})), "ok\ndone\nagain");
+        assert_eq!(command_text(&json!({"ok": false, "lines": ["no such verb"]})), "FAILED\nno such verb");
+        assert_eq!(command_text(&json!({"ok": true, "lines": []})), "ok (no output)");
+    }
+
+    #[test]
+    fn the_targets_list_names_the_capabilities_the_model_plans_from() {
+        let status = json!({
+            "protocol": "auto",
+            "links": [{"kind": "game", "protocol": "dev", "label": "Voriz (port 47821)", "capabilities": ["info", "command", "screenshot"], "connected": true, "active": true}],
+            "dev_games_found": [{"game": "voriz", "port": 47821, "compatible": true}, {"game": "other", "port": 47822, "compatible": false}],
+            "debuggers": [{"kind": "debugger", "protocol": "jdwp", "label": "JVM 21", "capabilities": ["pause", "stack"], "session": "run-7"}]
+        });
+        let text = targets_text(&status);
+        assert!(text.contains("game over dev: Voriz (port 47821) [used by the game tools]"), "{text}");
+        assert!(text.contains("can: info, command, screenshot"), "{text}");
+        assert!(text.contains("debugger over jdwp (session run-7): JVM 21") && text.contains("can: pause, stack"), "{text}");
+        assert!(text.contains("not attached: other (port 47822, incompatible dev version)") && !text.contains("voriz (port 47821)"), "{text}");
+        let none = targets_text(&json!({"protocol": "auto", "links": [], "dev_games_found": [], "debuggers": [], "hint": "Not connected to a game."}));
+        assert!(none.contains("no game is attached.") && none.contains("Not connected to a game."), "{none}");
+    }
+
+    #[test]
+    fn the_world_the_mods_the_hud_and_the_chat_read_as_lines() {
+        let w = json!({"name": "Prova", "seed": 42, "dimension": "overworld", "players": [{"name": "Anna", "pos": [1.0, 64.0, -3.5]}]});
+        assert_eq!(world_text(&w), "world \"Prova\", seed 42, dimension overworld; 1 player(s): Anna at (1.0, 64.0, -3.5)");
+        let mods = json!([{"id": "cozy", "enabled": true, "note": "", "hooks": 4, "faults": 0}, {"id": "bad", "enabled": false, "note": "a hook failed", "hooks": 1, "faults": 3}]);
+        let text = mods_text(&mods);
+        assert!(text.contains("cozy: on, 4 hook(s), 0 error(s)") && text.contains("bad: OFF, 1 hook(s), 3 error(s) — a hook failed"), "{text}");
+        assert_eq!(mods_text(&json!([])), "the game loaded no mods.");
+        let hud = hud_text(&json!({"entries": [{"mod": "obby", "key": "stage", "value": 3, "writes": 7}]}));
+        assert!(hud.contains("obby.stage = 3 (written 7×)"), "{hud}");
+        let chat = chat_text(&json!({"chat": [{"to": 2, "key": "welcome", "params": {"name": "Anna"}}], "console": ["hello"]}));
+        assert!(chat.contains("welcome [name=Anna] (to client 2)") && chat.contains("console (1 line(s)):\n  hello"), "{chat}");
     }
 }

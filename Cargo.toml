@@ -105,6 +105,9 @@ members = [
     # Live runs: managed processes, recipes, localhost HTTP, the unified timeline and scenarios.
     # Std-only (threads, TcpStream) — the assistant tools and the Live panel are thin glue over it.
     "crates/products/bennu/runtime/live",
+    # What a running thing Arbor attaches to declares it can do (debugger or game), the `GameLink` trait, and the
+    # link over the fulcrum `dev` channel. Depends on the fulcrum checkout beside this repo (`rust/engine/fulcrum`).
+    "crates/products/bennu/runtime/link",
     # The expression language the Java (JDWP) and Rust (DAP) debuggers share for watches and
     # breakpoint conditions: lexer, parser, AST and an evaluator generic over a `DebugTarget`. Pure.
     "crates/products/bennu/runtime/debug-expr",

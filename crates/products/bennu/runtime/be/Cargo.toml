@@ -222,6 +222,12 @@ bennu-profile = { path = "../../profile" }
 # Live runs: managed processes, recipes, loopback HTTP, the unified timeline, scenarios. The
 # process-tree kill in `child.rs` lives there too, so a run, a test and a managed service stop alike.
 bennu-live = { path = "../live" }
+# What a running game is to Arbor, whichever wire it speaks: the `GameLink` trait the MCP `bevy_game_*` tools and Imber
+# call through, the link over the fulcrum `dev` channel, and the capability vocabulary the debugger shares. The Bevy
+# Remote Protocol link implements the same trait from `brp/link.rs`.
+bennu-link = { path = "../link" }
+# `#[async_trait]` on the `GameLink` impl of the Remote Protocol (`brp/link.rs`): the trait is declared with it in `bennu-link`.
+async-trait = { workspace = true }
 
 # The rendered shader preview crosses the MCP seam as base64 PNG — the same shape and the same
 # workspace dependency tyto-be uses for its screenshots.

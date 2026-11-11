@@ -196,6 +196,20 @@ async fn bennu_brp_status(_ctx: &BennuState) -> Result<Status, String> {
     Ok(status_of(&lock()))
 }
 
+// ── For the neutral game tools ───────────────────────────────────────────────
+
+/// `bevy_game_connect` with protocol `brp` (or `auto` falling back to it): the same connection as the panel's,
+/// installed the same way, so the inspector and the tools never hold two. Returns the status as JSON.
+pub(crate) async fn connect_for_link(ctx: &BennuState, endpoint: Option<String>) -> Result<serde_json::Value, String> {
+    let status = bennu_brp_connect(ctx, ConnectArgs { endpoint, timeout_ms: None }).await?;
+    serde_json::to_value(&status).map_err(|e| e.to_string())
+}
+
+/// `bevy_game_disconnect` for the Remote Protocol half: the panel's disconnect.
+pub(crate) async fn disconnect_for_link(ctx: &BennuState) -> Result<(), String> {
+    bennu_brp_disconnect(ctx).await.map(|_| ())
+}
+
 // ── Connecting ───────────────────────────────────────────────────────────────
 
 /// Probe `endpoint` and build everything the inspector needs to talk to it.

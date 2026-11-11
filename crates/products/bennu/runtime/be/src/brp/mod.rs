@@ -17,6 +17,7 @@
 //! | `console.rs` | any method the game lists in `rpc.discover`, called by name |
 //! | `states.rs` | Bevy states (`State<T>` / `NextState<T>`): list, read, move — also assistant and MCP tools |
 //! | `saved.rs` | saved endpoints and saved searches, persisted in the profile |
+//! | `link.rs` | [`link::BrpLink`]: this connection seen as a `GameLink`, beside the `dev` channel's (see `crate::link`) |
 //!
 //! ## One connection, process-wide
 //!
@@ -37,9 +38,12 @@ mod console;
 mod drive;
 mod edit;
 mod entities;
+/// This connection as one of the two `GameLink`s; the neutral tools reach it through `crate::link`.
+pub(crate) mod link;
 mod resources;
 mod saved;
 mod session;
+pub(crate) use session::{connect_for_link, disconnect_for_link};
 /// The assistant's tools name transitions the same way the handlers do, so the helpers are shared.
 pub(crate) mod states;
 mod types;
@@ -131,7 +135,18 @@ fn lock() -> MutexGuard<'static, Conn> {
 }
 
 fn live() -> Result<Arc<Live>, String> {
-    lock().live.clone().ok_or_else(|| "Not connected to a Bevy game.".to_string())
+    lock().live.clone().ok_or_else(crate::link::not_connected_to_brp)
+}
+
+/// Whether a game is connected over the Remote Protocol and answering (not lost, not between retries).
+pub(crate) fn is_connected() -> bool {
+    let c = lock();
+    c.live.is_some() && c.link == Link::Connected
+}
+
+/// The endpoint of the connected game, for a status line.
+pub(crate) fn endpoint() -> Option<String> {
+    lock().live.as_ref().map(|l| l.endpoint.clone())
 }
 
 fn touch() {

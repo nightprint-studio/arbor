@@ -9,6 +9,12 @@ panel, or an AI assistant — can *drive* a running game, not only inspect it:
 - **Runtime statistics**: frame time with percentiles, FPS, entity count and every other registered diagnostic, window size
 - **Presence indicator**: a soft coloured border and a small label while a client is attached
 
+> **Two ways to drive a game.** This crate is the Bevy Remote Protocol's companion. A fulcrum game (Voriz) is driven
+> over its own `dev` channel instead — console commands, HUD, chat, mods, screenshot, input — which Arbor reaches
+> through `bennu-link` (`../runtime/link`). The MCP tools `bevy_game_*` and Imber's `live_attach` work with both and
+> keep one choice between them; the ECS (entities, components, resources, states), the gamepad and the presence
+> indicator are this protocol's only. See `docs/arbor-gioco-collegato.md` in the Voriz repo.
+
 Stand-alone: this crate has its own `[workspace]` and does not depend on Arbor or Tauri. Use it by path
 (`arbor-bevy-remote = { path = "…/crates/products/bennu/bevy-remote" }`).
 

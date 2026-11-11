@@ -1,19 +1,30 @@
-//! Driving the game: screenshots, input, actions, statistics and the presence indicator — the
-//! `arbor.*` methods of the **`arbor-bevy-remote`** crate the game adds next to Bevy's own remote plugins.
+//! Driving the game over the Bevy Remote Protocol: screenshots, input, actions, statistics and the presence
+//! indicator — the `arbor.*` methods of the **`arbor-bevy-remote`** crate the game adds next to Bevy's own
+//! remote plugins.
 //!
-//! These handlers are the seam for everything that drives a game: the inspector's Screenshot, Input and
-//! Stats views call them, Imber's tools call them, and — being `mcp(...)` handlers — an MCP client can too.
-//! They share the inspector's connection; a game without the companion plugin answers "method not found",
-//! which [`arbor`] turns into the sentence that says what to add.
+//! These handlers are the **BRP-exact** seam: the inspector's Screenshot, Input and Stats views call them, and
+//! so does [`super::link::BrpLink`], the BRP side of the neutral `GameLink` trait. They share the inspector's
+//! connection; a game without the companion plugin answers "method not found", which [`arbor`] turns into the
+//! sentence that says what to add.
 //!
-//! Classification: observing (screenshot, stats, info, action list) is `read`; input and presence are
-//! `write` (the game reacts, nothing on disk changes); running a game's own action is `destructive`,
-//! because what an action does is the game's business and may not be undoable.
+//! ## What is an MCP tool and what is not
+//!
+//! Since the `dev` channel became a second way to drive a game (11 nov 2026), the MCP tools `bevy_game_info`,
+//! `_screenshot`, `_stats`, `_actions`, `_key`, `_type`, `_mouse` and `_action` are published by
+//! `crate::link::tools`, which routes each call to whichever link is open. They used to be the `mcp(...)`
+//! attribute of the handlers below; the handlers stay — as plain handlers — for the panel. What only the
+//! companion plugin has stays here with its MCP name: the gamepad, cancelling pending input, and the presence
+//! indicator.
+//!
+//! Classification of the tools that remain: input and presence are `write` (the game reacts, nothing on disk
+//! changes).
 
 use std::time::Duration;
 
 use arbor_brp::prelude::BrpError;
 use bennu_core::prelude::BennuState;
+// The arguments of the calls both links answer live in `bennu-link` (the `dev` channel reads the same ones).
+use bennu_link::prelude::{ActionArgs, KeyArgs, MouseArgs, ScreenshotArgs, Shot, StatsArgs, TextArgs};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -39,7 +50,7 @@ pub(super) async fn arbor(method: &str, params: Value) -> Result<Value, String> 
     }
 }
 
-fn params<T: Serialize>(args: &T) -> Result<Value, String> {
+pub(super) fn params<T: Serialize>(args: &T) -> Result<Value, String> {
     serde_json::to_value(args).map_err(|e| e.to_string())
 }
 
@@ -47,47 +58,21 @@ fn params<T: Serialize>(args: &T) -> Result<Value, String> {
 
 /// What the game's companion plugin offers: version, methods, the key and gamepad names it accepts, the
 /// actions the game registered, and the presence indicator's state.
-#[arbor_rpc::handler(mcp(
-    name = "bevy_game_info",
-    title = "What the running Bevy game lets you drive",
-    safety = read,
-))]
+#[arbor_rpc::handler]
 async fn bennu_brp_arbor_info(_ctx: &BennuState) -> Result<Value, String> {
     arbor("arbor.info", json!({})).await
 }
 
-/// Args for [`bennu_brp_screenshot`].
-#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
-pub struct ScreenshotArgs {
-    /// Shrink the picture to at most this many pixels wide (default: full size, capped at 4 MB). A smaller
-    /// picture is cheaper to look at.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_width: Option<u32>,
-    /// A window entity id; default the primary window.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub window: Option<u64>,
-}
-
-/// A PNG handed back inline — the shape `output = image` expects — with its size.
-#[derive(Serialize, JsonSchema)]
-pub struct Screenshot {
-    /// Always `image/png`.
-    pub mime_type: String,
-    /// Base64, no data-URI prefix.
-    pub data: String,
-    pub width: u64,
-    pub height: u64,
-}
-
 /// A screenshot of the running Bevy game's window. Needs the `arbor-bevy-remote` plugin in the game.
 /// Images are expensive to read: prefer `max_width` of 800–1000 unless detail matters.
-#[arbor_rpc::handler(mcp(
-    name = "bevy_game_screenshot",
-    title = "Screenshot of the running Bevy game",
-    safety = read,
-    output = image,
-))]
-async fn bennu_brp_screenshot(_ctx: &BennuState, args: ScreenshotArgs) -> Result<Screenshot, String> {
+#[arbor_rpc::handler]
+async fn bennu_brp_screenshot(_ctx: &BennuState, args: ScreenshotArgs) -> Result<Shot, String> {
+    take_screenshot(args).await
+}
+
+/// Ask the game for a picture and wait for it: it finishes a few frames after it is asked for. The one
+/// implementation behind the panel's handler and [`super::link::BrpLink`].
+pub(super) async fn take_screenshot(args: ScreenshotArgs) -> Result<Shot, String> {
     let started = arbor("arbor.screenshot", params(&args)?).await?;
     let id = started["id"].as_u64().ok_or("the game did not say which screenshot it started")?;
     let deadline = std::time::Instant::now() + SHOT_WAIT;
@@ -95,7 +80,7 @@ async fn bennu_brp_screenshot(_ctx: &BennuState, args: ScreenshotArgs) -> Result
         tokio::time::sleep(SHOT_POLL).await;
         let r = arbor("arbor.screenshot.fetch", json!({ "id": id })).await?;
         if r["ready"].as_bool() == Some(true) {
-            return Ok(Screenshot {
+            return Ok(Shot {
                 mime_type: "image/png".into(),
                 data: r["png_base64"].as_str().unwrap_or_default().to_string(),
                 width: r["width"].as_u64().unwrap_or(0),
@@ -108,21 +93,9 @@ async fn bennu_brp_screenshot(_ctx: &BennuState, args: ScreenshotArgs) -> Result
     }
 }
 
-/// Args for [`bennu_brp_stats`].
-#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
-pub struct StatsArgs {
-    /// Also return the last N frame times in milliseconds (at most 600), for a graph.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub history: Option<usize>,
-}
-
 /// Runtime statistics of the running Bevy game: frame time (average, min, max, p50 / p95 / p99), FPS, entity
 /// count and every other diagnostic the game registered (system timings included), and the window size.
-#[arbor_rpc::handler(mcp(
-    name = "bevy_game_stats",
-    title = "Frame time, FPS and diagnostics of the running Bevy game",
-    safety = read,
-))]
+#[arbor_rpc::handler]
 async fn bennu_brp_stats(_ctx: &BennuState, args: StatsArgs) -> Result<Value, String> {
     arbor("arbor.stats", params(&args)?).await
 }
@@ -135,103 +108,29 @@ async fn bennu_brp_inspect_hints(_ctx: &BennuState) -> Result<Value, String> {
 }
 
 /// The actions the running game registered for remote clients, with their descriptions.
-#[arbor_rpc::handler(mcp(
-    name = "bevy_game_actions",
-    title = "Actions the running Bevy game offers",
-    safety = read,
-))]
+#[arbor_rpc::handler]
 async fn bennu_brp_actions(_ctx: &BennuState) -> Result<Value, String> {
     arbor("arbor.actions.list", json!({})).await
 }
 
 // ── Acting ───────────────────────────────────────────────────────────────────
 
-/// Args for [`bennu_brp_key`].
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct KeyArgs {
-    /// A key: `a`, `7`, `Enter`, `Escape`, `Space`, `F5`, `ArrowUp`, `ctrl`, … (`bevy_game_info` lists them all).
-    pub key: String,
-    /// `press` (default: down, held a moment, up), `down` or `up`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub action: Option<String>,
-    /// Modifiers held during the press: `["ctrl", "shift"]`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub modifiers: Vec<String>,
-    /// How long a `press` is held, in milliseconds (default 60).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hold_ms: Option<u64>,
-}
-
 /// Press a key in the running Bevy game as if on the keyboard. The input is real to the game: it acts on
 /// live state with no undo.
-#[arbor_rpc::handler(mcp(
-    name = "bevy_game_key",
-    title = "Press a key in the running Bevy game",
-    safety = write,
-))]
+#[arbor_rpc::handler]
 async fn bennu_brp_key(_ctx: &BennuState, args: KeyArgs) -> Result<Value, String> {
     arbor("arbor.input.key", params(&args)?).await
 }
 
-/// Args for [`bennu_brp_text`].
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct TextArgs {
-    /// Text to type, 1–500 characters.
-    pub text: String,
-    /// Gap between characters in milliseconds (default 0).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub interval_ms: Option<u64>,
-}
-
 /// Type text into the running Bevy game (a focused text field, a console).
-#[arbor_rpc::handler(mcp(
-    name = "bevy_game_type",
-    title = "Type text in the running Bevy game",
-    safety = write,
-))]
+#[arbor_rpc::handler]
 async fn bennu_brp_text(_ctx: &BennuState, args: TextArgs) -> Result<Value, String> {
     arbor("arbor.input.text", params(&args)?).await
 }
 
-/// Args for [`bennu_brp_mouse`].
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct MouseArgs {
-    /// `move`, `down`, `up`, `click`, `double_click`, `drag` or `wheel`.
-    pub action: String,
-    /// Logical window pixels, origin top-left (required for move, click, double_click, drag).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub x: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub y: Option<f32>,
-    /// `drag` ends here.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub to_x: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub to_y: Option<f32>,
-    /// `left` (default), `right`, `middle`, `back`, `forward`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub button: Option<String>,
-    /// `drag`: intermediate moves (default 12) over `duration_ms` (default 300).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub steps: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<u64>,
-    /// `wheel`: scroll amounts, in `line` (default) or `pixel` units.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dx: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dy: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unit: Option<String>,
-}
-
 /// Move, click, double-click, drag or scroll the mouse in the running Bevy game. Coordinates are logical
 /// pixels of the window; take a `bevy_game_screenshot` first to know where things are.
-#[arbor_rpc::handler(mcp(
-    name = "bevy_game_mouse",
-    title = "Use the mouse in the running Bevy game",
-    safety = write,
-))]
+#[arbor_rpc::handler]
 async fn bennu_brp_mouse(_ctx: &BennuState, args: MouseArgs) -> Result<Value, String> {
     arbor("arbor.input.mouse", params(&args)?).await
 }
@@ -275,23 +174,9 @@ async fn bennu_brp_input_cancel(_ctx: &BennuState) -> Result<Value, String> {
     arbor("arbor.input.cancel", json!({})).await
 }
 
-/// Args for [`bennu_brp_action`].
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct ActionArgs {
-    /// An action name from `bevy_game_actions`.
-    pub name: String,
-    /// The action's argument, if it takes one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arg: Option<Value>,
-}
-
 /// Run one of the actions the running game registered (`restart`, `spawn_wave`, …). What it does is the
 /// game's own business and may not be undoable: read its description in `bevy_game_actions` first.
-#[arbor_rpc::handler(mcp(
-    name = "bevy_game_action",
-    title = "Run a named action in the running Bevy game",
-    safety = destructive,
-))]
+#[arbor_rpc::handler]
 async fn bennu_brp_action(_ctx: &BennuState, args: ActionArgs) -> Result<Value, String> {
     arbor("arbor.action", params(&args)?).await
 }

@@ -69,6 +69,8 @@ impl ToolHost {
             "structural_search" => out.push((self.project().to_path_buf(), Op::List)),
             n if live::is_live_tool(n) => out.extend(self.live_touched(n, input)),
             n if debug::is_debug_tool(n) => out.extend(self.debug_touched(n, input)),
+            // `live_attach` aimed at a debugger is `debug_attach`: it reads the project folder like it.
+            "live_attach" if brp::attaches_debugger(input) => out.extend(self.debug_touched("debug_attach", input)),
             // A game and a page on this machine: no file is read or written, the loopback rule is in the tool.
             n if brp::is_brp_tool(n) || screenshot::is_screenshot_tool(n) => {}
             "local_history" => out.extend(self.history_touched(input).into_iter().map(|(p, write)| (p, if write { Op::Write } else { Op::Read }))),
@@ -260,6 +262,12 @@ impl ToolHost {
         // Launching or attaching a debugger asks first; the rest of the debugger acts on the session that approval opened.
         if debug::is_debug_tool(&call.name) {
             if let Err(why) = self.debug_gate(&call.name, &call.input) {
+                return Gate::Refuse(why);
+            }
+        }
+        // `live_attach` at a debugger is `debug_attach`'s door, so it asks what `debug_attach` asks.
+        if call.name == "live_attach" && brp::attaches_debugger(&call.input) {
+            if let Err(why) = self.debug_gate("debug_attach", &call.input) {
                 return Gate::Refuse(why);
             }
         }

@@ -29,6 +29,10 @@ mod selftest;
 // the entity snapshot, watch streams, resources, the type registry and the write verbs.
 mod brp;
 
+// The game Arbor is attached to, over either wire: the `dev` channel of the fulcrum games or the Bevy Remote Protocol.
+// The neutral `bevy_game_*` tools and the choice of link; `brp` above stays the inspector's own connection.
+mod link;
+
 // `JobHandle`: register the background analysis warm-up as a tracked job in the shell registry
 // (over the reverse channel) so it appears in the bennu Jobs overlay.
 mod jobs;

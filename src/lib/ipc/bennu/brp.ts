@@ -321,6 +321,49 @@ export const brpSavedGet = (): Promise<BrpSaved> => bennu('bennu_brp_saved_get',
 /** Replace what is saved; resolves with what was stored (trimmed, de-duplicated, capped). */
 export const brpSavedSet = (saved: BrpSaved): Promise<BrpSaved> => bennu('bennu_brp_saved_set', { args: saved });
 
+// ── Which game, over which wire ──────────────────────────────────────────────
+//
+// The inspector above is the Bevy Remote Protocol's. The same game can also be reached over the fulcrum `dev`
+// channel (console commands, HUD, chat, mods), and the backend keeps one choice between the two
+// (`bennu_game_*`, the neutral tools MCP and Imber use). These wrappers are the typed door to it; the panel's
+// protocol selector is a follow-up that builds on them (docs/arbor-gioco-collegato.md).
+
+/** `auto` tries the `dev` channel first, then the Remote Protocol. */
+export type GameProtocol = 'auto' | 'dev' | 'brp';
+
+/** One attached link, or one debug session, with what it can do (`screenshot`, `command`, `ecs`, `pause`, …). */
+export interface LiveTargetInfo {
+  kind: 'game' | 'debugger';
+  /** `dev`, `brp`, `jdwp` or `dap`. */
+  protocol: string;
+  label: string;
+  capabilities: string[];
+  /** Games only: the socket is up (`null` while a request is in flight). */
+  connected?: boolean | null;
+  /** Games only: the link the neutral game tools use now. */
+  active?: boolean;
+  /** Debuggers only: the run id of the session. */
+  session?: string;
+}
+
+export interface GameStatus {
+  protocol: GameProtocol;
+  links: LiveTargetInfo[];
+  /** Games listening on the `dev` channel, attached or not. */
+  dev_games_found: { game: string; name: string; port: number; pid: number; compatible: boolean; topics: string }[];
+  debuggers: LiveTargetInfo[];
+  hint?: string;
+}
+
+export const gameStatus = (): Promise<GameStatus> => bennu('bennu_game_status', {});
+export const gameConnect = (a: { protocol?: GameProtocol; game?: string; port?: number; endpoint?: string } = {}): Promise<GameStatus> =>
+  bennu('bennu_game_connect', { args: a });
+export const gameDisconnect = (protocol?: GameProtocol): Promise<{ closed: string[] }> =>
+  bennu('bennu_game_disconnect', { args: protocol ? { protocol } : {} });
+
+/** Whether a target can do `capability` — the one test a toolbar should make, instead of comparing a protocol name. */
+export const canDo = (t: LiveTargetInfo | undefined, capability: string): boolean => !!t && t.capabilities.includes(capability);
+
 // ── Events ───────────────────────────────────────────────────────────────────
 
 export const onBrpState = (cb: (e: BrpStateEvent) => void): Promise<UnlistenFn> =>
