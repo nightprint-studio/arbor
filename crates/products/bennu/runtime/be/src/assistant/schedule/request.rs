@@ -59,9 +59,11 @@ pub fn send_args(cfg: &AssistantConfig, wake: &Wake<'_>) -> Value {
         "plan": cfg.plan_enabled,
         "families_off": families_off,
         "skills_on": cfg.skills_on,
+        "skill_folders": cfg.skill_folders,
         "decision_level": cfg.decision_level,
         "decision_notes": cfg.decision_notes,
         "debug_idle_minutes": cfg.debug_idle_minutes,
+        "max_steps": cfg.max_steps,
         "periods": { "day": wake.periods.0.max(0), "week": wake.periods.1.max(0), "month": wake.periods.2.max(0) },
     })
 }

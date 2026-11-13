@@ -19,7 +19,7 @@ pub(super) fn specs() -> Vec<ToolSpec> {
     vec![
         spec(
             "edit_files",
-            "Make several exact edits, in one or more files, as one change. Each edit is `{file, old_text, new_text, expected_count?}` and follows the rule of edit_file: the text must appear exactly once unless `expected_count` says how many. Edits to the same file apply in order, each on the result of the one before. All or nothing — if one cannot be applied, nothing is changed and the reply names it. Use this instead of many edit_file calls: it is one request, not one per edit.",
+            "Make several exact edits, in one or more files, as one change. Each edit is `{file, old_text, new_text, expected_count?}` and follows the rule of edit_file: the text must appear exactly once unless `expected_count` says how many. Edits to the same file apply in order, each on the result of the one before. All or nothing — if one cannot be applied, nothing is changed and the reply names it. Use this instead of many edit_file calls: it is one request, not one per edit. Keep one call to a few hundred lines of text in all: arguments stream as you write them, and a very long call is the likeliest to arrive broken — two calls are cheaper than one resent.",
             json!({"type":"object","properties":{
                 "edits":{"type":"array","minItems":1,"items":{"type":"object","properties":{
                     "file":{"type":"string","description":"Absolute path, or relative to the project."},
@@ -31,7 +31,7 @@ pub(super) fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "replace_in_files",
-            "Replace text — or a regular expression — in every file under a folder that contains it. `path` and `extensions` narrow it; build output and version-control folders are skipped. Run it first with `dry_run: true` to see which files would change and how many times, then for real. Refuses past `max_files` (default 100): a pattern that matches that much is more likely a mistake than a refactoring. For renaming a Java symbol use rename_symbol, which understands scope; this is for text.",
+            "Replace text — or a regular expression — in every file under a folder that contains it. `path` and `extensions` narrow it; build output and version-control folders are skipped. Run a regular expression first with `dry_run: true`: it shows every match with its line and what it would become, so a pattern that catches more than meant (a `.*` to the end of the line, a `\\s` across lines) shows before anything changes; then run it for real. Refuses past `max_files` (default 100): a pattern that matches that much is more likely a mistake than a refactoring. For renaming a Java symbol use rename_symbol, which understands scope; this is for text.",
             json!({"type":"object","properties":{
                 "pattern":{"type":"string","description":"The text to replace, or a regular expression with `regex`."},
                 "replacement":{"type":"string","description":"With `regex`, `$1` and `${name}` stand for the pattern's groups."},
@@ -45,6 +45,11 @@ pub(super) fn specs() -> Vec<ToolSpec> {
         ),
     ]
 }
+
+/// How many matches a dry run shows per file, and in all: enough to see what a pattern really catches,
+/// not a copy of the change.
+const PREVIEW_PER_FILE: usize = 8;
+const PREVIEW_TOTAL: usize = 60;
 
 /// One file's text as the list of edits has left it so far.
 struct Draft {
@@ -120,6 +125,7 @@ impl ToolHost {
         }
         let mut report = Vec::new();
         let mut total = 0usize;
+        let (mut previewed, mut files_changed) = (0usize, 0usize);
         for file in &files {
             let shown = self.display_path(&file.display().to_string());
             let (text, stamp) = match self.read_text(file) {
@@ -136,6 +142,15 @@ impl ToolHost {
             total += count;
             if args.dry_run {
                 report.push(format!("{shown} ({count})"));
+                let room = PREVIEW_PER_FILE.min(PREVIEW_TOTAL.saturating_sub(previewed));
+                let lines = text_tools::preview_matches(&re, &text, &args.replacement, args.regex, room);
+                previewed += lines.len();
+                let unshown = count - lines.len();
+                report.extend(lines);
+                if unshown > 0 {
+                    report.push(format!("  … and {unshown} more here"));
+                }
+                files_changed += 1;
                 continue;
             }
             match self.submit(file, &text, next, Some(stamp), None) {
@@ -144,7 +159,7 @@ impl ToolHost {
             }
         }
         let head = if args.dry_run {
-            format!("Dry run — {total} replacements in {} files, nothing changed:", report.len())
+            format!("Dry run — {total} replacements in {files_changed} files, nothing changed. Check each match is what you meant:")
         } else {
             format!("{total} replacements in {} files:", files.len())
         };

@@ -13,6 +13,8 @@ vi.mock('$lib/components/shared/ui/code-editor', async () => {
   return { sqlLanguage: () => StreamLanguage.define(flat), javascriptStream: flat };
 });
 vi.mock('$lib/components/bennu/lsp-lang', () => ({ backendCompletionSource: () => null, backendHoverSource: () => null }));
+// The Patina descriptor renders its comments through the markdown editor (DOM widgets, Tauri); the fences need none of it.
+vi.mock('$lib/utils/comment-markdown', () => ({ commentMarkdown: () => [] }));
 
 const { MARKDOWN_FENCE_LANGUAGES } = await import('$lib/components/bennu/markdown-fences');
 

@@ -10,7 +10,7 @@
 //!
 //! ```ignore
 //! let live = live::live_for(&root, &sink);
-//! let info = live.manager.start(StartSpec { name, command, cwd, env, ports, ready, group: None, lifetime: None, owner: None })?;
+//! let info = live.manager.start(StartSpec { name, command, argv: Vec::new(), cwd, env, ports, ready, group: None, lifetime: None, owner: None })?;
 //! live.manager.wait_ready(&info.id, None, &|| cancelled())?;   // blocking: call off the request worker
 //! let (info, lines) = live.manager.logs(&info.id, &LogQuery::default())?;
 //! live.manager.stop(&info.id)?;                                  // polite, then the whole tree

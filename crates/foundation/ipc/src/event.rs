@@ -60,7 +60,20 @@ pub trait EventSink: Send + Sync {
         }
         self.emit(PROGRESS_TOPIC, payload);
     }
+
+    /// Something needs the user — a question waiting for an answer, a long run that ended — and they may not be
+    /// looking. `title` and `body` are the notification's two lines.
+    fn attention(&self, title: &str, body: &str) {
+        self.emit(ATTENTION_TOPIC, serde_json::json!({ "title": title, "body": body }));
+    }
 }
+
+/// The topic [`EventSink::attention`] emits on.
+///
+/// The shell takes it instead of the webview: a page cannot tell the operating system anything when its window
+/// is in the background, which is exactly when this matters. It shows a system notification and asks for the
+/// user's attention on the product's window — only when none of that product's windows has the focus.
+pub const ATTENTION_TOPIC: &str = "arbor://attention";
 
 /// The topic [`EventSink::progress`] emits on.
 ///

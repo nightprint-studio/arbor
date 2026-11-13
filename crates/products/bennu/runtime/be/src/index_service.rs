@@ -5933,7 +5933,7 @@ fn is_java(file: &str) -> bool {
 ///
 /// The list is what the index actually holds: Java sources, the JSP family, and the XML /
 /// properties configuration Bennu resolves symbols through.
-fn understands(file: &str) -> bool {
+pub(crate) fn understands(file: &str) -> bool {
     matches!(
         Path::new(file).extension().and_then(|e| e.to_str()),
         Some(

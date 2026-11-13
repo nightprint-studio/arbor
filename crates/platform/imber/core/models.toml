@@ -12,6 +12,9 @@
 #   id             the API model id
 #   name, tagline  what the picker shows
 #   context_max    the largest window the model accepts, in tokens
+#   max_output     the most output tokens one response may have, thinking included (default 32000).
+#                  Imber asks for this much on every request, less only when the conversation leaves no
+#                  room for it in the window: output is paid for as it is written, not as it is allowed.
 #   efforts        the effort levels it accepts; empty for a model with no such setting
 #
 #   [model.price]  the base rates
@@ -28,6 +31,7 @@ id = "claude-fable-5-1"
 name = "Fable 5.1"
 tagline = "Hardest reasoning, longest tasks"
 context_max = 1000000
+max_output = 128000
 efforts = ["low", "medium", "high", "xhigh", "max"]
 [model.price]
 input = 10.0
@@ -41,6 +45,7 @@ id = "claude-opus-5-5"
 name = "Opus 5.5"
 tagline = "Best all-round for code"
 context_max = 1000000
+max_output = 128000
 efforts = ["low", "medium", "high", "xhigh", "max"]
 [model.price]
 input = 4.0
@@ -54,6 +59,7 @@ id = "claude-sonnet-5-5"
 name = "Sonnet 5.5"
 tagline = "Fast, for everyday edits"
 context_max = 1000000
+max_output = 128000
 efforts = ["low", "medium", "high", "xhigh", "max"]
 [model.price]
 input = 2.0
@@ -67,6 +73,7 @@ id = "claude-haiku-5-5"
 name = "Haiku 5.5"
 tagline = "Fastest and cheapest, for quick questions"
 context_max = 1000000
+max_output = 128000
 efforts = ["low", "medium", "high", "xhigh", "max"]
 [model.price]
 input = 0.10

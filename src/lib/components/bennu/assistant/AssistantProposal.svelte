@@ -6,12 +6,16 @@
    * review the diff, or apply. **Accept edits** and **Autonomous**: the edits go in as they are proposed
    * and the card is a record, with the diff one click away (and an Undo that puts the files back, while the backend still remembers the apply). Once decided it stays in the conversation as
    * what was decided.
+   *
+   * Reading the diff is one press away wherever the eye is: each file row opens the review, and the Review button
+   * carries the size of the change, so whether it is worth a look before applying shows on the button itself.
    */
   import { FilePenLine, Check, X, Zap, GitCompareArrows, TriangleAlert, Layers, Undo2 } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import AssistantOutdatedActions from './AssistantOutdatedActions.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import DiffStat from '$lib/components/shared/ui/DiffStat.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
   import { modeAppliesEdits } from './assistant-mode';
   import type { AssistantMode, EditProposal } from './assistant-types';
@@ -59,21 +63,23 @@
     <span class="title">Proposed changes</span>
     <span class="count">{proposal.files.length} file{proposal.files.length === 1 ? '' : 's'}</span>
     {#if proposal.status === 'outdated'}<Badge variant="tone" tone="warning" size="sm">Outdated</Badge>{/if}
-    <span class="delta"><b class="add">+{added}</b> <b class="del">−{removed}</b></span>
+    <span class="head-stat"><DiffStat {added} {removed} blocks={0} /></span>
   </div>
 
   <ul class="files">
     {#each proposal.files as f (f.path)}
       {@const p = split(f.path)}
       <li class="file" class:stale={f.stale}>
-        <span class="path"><span class="dir">{p.dir}</span><span class="name">{p.name}</span></span>
+        <button type="button" class="open" onclick={review} title="Review the diff">
+          <span class="path"><span class="dir">{p.dir}</span><span class="name">{p.name}</span></span>
+        </button>
         {#if f.stale}
           <Badge variant="tone" tone="warning" size="sm"><TriangleAlert size={10} /> The file changed since this was proposed</Badge>
         {:else if f.shared && proposal.status === 'pending'}
           <!-- Applying either proposal makes the other outdated. -->
           <Badge variant="tone" tone="info" size="sm"><Layers size={10} /> Also in another proposal</Badge>
         {/if}
-        <span class="delta"><span class="add">+{f.added}</span> <span class="del">−{f.removed}</span></span>
+        <DiffStat added={f.added} removed={f.removed} />
       </li>
     {/each}
   </ul>
@@ -82,7 +88,7 @@
     {#if proposal.status === 'applied'}
       <Badge variant="tone" tone="success" size="sm"><Check size={10} /> Applied</Badge>
       <span class="grow"></span>
-      <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review</Button>
+      <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review diff</Button>
       {#if undoable}
         <Button variant="ghost" size="sm" onclick={() => (undoAsked = true)}><Undo2 size={12} /> Undo</Button>
       {:else}
@@ -92,21 +98,23 @@
     {:else if proposal.status === 'undone'}
       <Badge variant="tone" tone="neutral" size="sm"><Undo2 size={10} /> Undone</Badge>
       <span class="grow"></span>
-      <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review</Button>
+      <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review diff</Button>
     {:else if proposal.status === 'rejected'}
       <Badge variant="tone" tone="error" size="sm"><X size={10} /> Rejected</Badge>
       <span class="grow"></span>
-      <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review</Button>
+      <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review diff</Button>
     {:else if proposal.status === 'outdated'}
       <AssistantOutdatedActions {proposal} {conversationId} onReview={review} />
     {:else if modeAppliesEdits(mode)}
       <Badge variant="tone" tone="info" size="sm"><Zap size={10} /> Applies automatically</Badge>
       <span class="grow"></span>
-      <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review</Button>
+      <Button variant="ghost" size="sm" onclick={review}><GitCompareArrows size={12} /> Review diff</Button>
     {:else}
       <Button variant="ghost" size="sm" onclick={() => decide('rejected')}>Reject</Button>
       <span class="grow"></span>
-      <Button variant="secondary" size="sm" onclick={review}><GitCompareArrows size={12} /> Review</Button>
+      <Button variant="secondary" size="sm" tooltip="Read the diff before applying" onclick={review}>
+        <GitCompareArrows size={13} /> Review <DiffStat {added} {removed} blocks={5} />
+      </Button>
       <Button variant="primary" size="sm" onclick={() => decide('applied')}><Check size={12} /> Apply</Button>
     {/if}
   </div>
@@ -153,7 +161,7 @@
   }
   .title { font-size: var(--font-size-xs); font-weight: 600; color: var(--text-primary); }
   .count { font-size: var(--font-size-2xs); color: var(--text-muted); }
-  .head .delta { margin-left: auto; }
+  .head-stat { margin-left: auto; }
 
   .files { list-style: none; margin: 0; padding: 4px 4px; display: flex; flex-direction: column; }
   .file {
@@ -162,13 +170,16 @@
     font-size: var(--font-size-xs);
   }
   .file:hover { background: var(--bg-hover); }
+  .open {
+    flex: 1; min-width: 0; display: flex; padding: 0; border: none; background: none; text-align: left;
+    color: inherit; font: inherit; cursor: pointer;
+  }
+  .open:hover .name { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .open:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); border-radius: var(--radius-sm); }
   .path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-code); }
   .dir { color: var(--text-muted); }
   .name { color: var(--text-primary); }
 
-  .delta { flex-shrink: 0; font-family: var(--font-code); font-size: var(--font-size-2xs); font-variant-numeric: tabular-nums; }
-  .add { color: var(--success); font-weight: 600; }
-  .del { color: var(--error);   font-weight: 600; }
 
   .foot {
     display: flex; align-items: center; gap: 6px;

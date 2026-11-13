@@ -81,20 +81,27 @@ impl Family {
 /// help about Bennu, loading a skill the user enabled, the plan (which has its own switch) and git (which has its own, and is off by default).
 pub fn family_of(tool: &str) -> Option<Family> {
     match tool {
-        "ask_user" | "bennu_help" | "update_plan" | "open_ui" | "load_skill" | "show_diagram" => None,
+        // `set_title` too: the first message asks for it, so no switch may take it away.
+        "ask_user" | "bennu_help" | "update_plan" | "open_ui" | "load_skill" | "show_diagram" | "set_title" => None,
         // Imber's own schedule tools: always there, like the plan; a scheduled run is refused the ones that change them.
         other if imber_schedule::prelude::is_schedule_tool(other) => None,
         // A structural search only reads, so it lives with the other searches and not with the rewrite.
         "search_text" | "find_files" | "structural_search" | "bennu_read_file" | "read_files" | "file_outline" => Some(Family::Read),
         // Showing an image file is reading it; a chat (which has no families) shows SVG it wrote.
-        "show_image" => Some(Family::Read),
+        "show_image" | "view_image" => Some(Family::Read),
+        // A `.merula` check reads and evaluates, like the editor's lint; a render builds a file, like a build.
+        "merula_check" => Some(Family::Project),
+        "merula_render" => Some(Family::Run),
         // The way to get the rest of a digest: it follows whichever tool produced one, so it is never switched off alone.
         "expand_result" => None,
         "edit_file" | "edit_files" | "replace_in_files" | "create_file" | "delete_file" => Some(Family::Edit),
         "rename_symbol" | "add_parameter" => Some(Family::Refactor),
         "local_history" => Some(Family::History),
         "structural_replace" => Some(Family::Structural),
-        other if super::live::is_live_tool(other) => Some(Family::Live),
+        // `cargo_run` starts a managed process and is read with the live tools, so it lives with them.
+        other if super::live::is_live_tool(other) || other == super::cargo_run::NAME => Some(Family::Live),
+        // A program the user declared runs code on this machine.
+        other if super::external::is_external_tool(other) || super::script::is_script_tool(other) => Some(Family::Run),
         other if super::debug::more::is_mutate_tool(other) => Some(Family::DebugMutate),
         other if super::debug::is_debug_tool(other) => Some(Family::Debug),
         other if super::brp::is_brp_write(other) => Some(Family::BevyWrite),
@@ -106,7 +113,7 @@ pub fn family_of(tool: &str) -> Option<Family> {
         other if other.starts_with("corvus_") => None,
         // What executes the project's code. By name, not by a word in it: bennu_tests only lists the tests.
         // The resolve behind `bennu_dependency_conflicts` runs the build tool (and its plugins), so it is Run too.
-        "bennu_build" | "bennu_test_run" | "bennu_npm_run_script" | "bennu_cargo_run" | "bennu_dependency_conflicts" => Some(Family::Run),
+        "bennu_check" | "bennu_build" | "bennu_test_run" | "bennu_npm_run_script" | "bennu_cargo_run" | "bennu_dependency_conflicts" => Some(Family::Run),
         other if other.starts_with("bennu_run_") || other.starts_with("bennu_debug") || other.starts_with("bennu_launch") => Some(Family::Run),
         _ => Some(Family::Project),
     }

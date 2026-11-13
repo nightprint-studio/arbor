@@ -24,7 +24,7 @@
   import AssistantHeader from './AssistantHeader.svelte';
   import AssistantContextBar from './AssistantContextBar.svelte';
   import AssistantWorktreeBanner from './AssistantWorktreeBanner.svelte';
-  import AssistantAgents from './AssistantAgents.svelte';
+  import AssistantTray from './AssistantTray.svelte';
   import AssistantAgentModal from './AssistantAgentModal.svelte';
   import AssistantMessage from './AssistantMessage.svelte';
   import AssistantComposer from './AssistantComposer.svelte';
@@ -152,12 +152,12 @@
   {/snippet}
 
   {#snippet bars()}
-    <div class="top">
-      <AssistantHeader />
+    <!-- Expanded, the conversation and its meter share one row: the height goes to the thread. -->
+    <div class="bars" class:wide={layout.expanded}>
+      <div class="top"><AssistantHeader /></div>
+      <div class="meter"><AssistantContextBar /></div>
     </div>
-    <AssistantContextBar />
     <AssistantWorktreeBanner />
-    <AssistantAgents />
   {/snippet}
 
   {#snippet homeContent()}<AssistantHome />{/snippet}
@@ -170,7 +170,7 @@
   <AssistantActivity />
   <AssistantStopCard />
 
-  {#snippet dock()}<AssistantComposer />{/snippet}
+  {#snippet dock()}<AssistantTray /><AssistantComposer />{/snippet}
 </ImberChatPanel>
 
 {#if store.deleteAsked}
@@ -193,4 +193,9 @@
 
 <style>
   .top { padding: 8px 12px 4px; }
+  .bars.wide {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 38%); align-items: start; column-gap: 12px;
+    max-width: var(--imber-wide-max, 1480px); margin-inline: auto; width: 100%;
+  }
+  .bars.wide .top { padding-bottom: 6px; }
 </style>

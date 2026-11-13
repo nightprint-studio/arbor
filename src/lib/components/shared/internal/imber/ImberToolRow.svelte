@@ -1,10 +1,13 @@
 <script lang="ts">
   /**
    * One thing the assistant did on the way to its answer: it read a file, searched, checked its work.
-   * A single quiet line — these are the receipts, not the content — with the kind of work as a small
-   * tinted glyph and what came back at the right edge.
+   * A single quiet line — these are the receipts, not the content. The glyph says the kind of work, and turns
+   * red when the call failed or was refused; the time it took stays at the right edge whatever the line holds,
+   * and what came back is cut to fit, whole in the tooltip.
    */
-  import { FileText, Search, ShieldCheck, Pencil, Check, Wand2, X } from 'lucide-svelte';
+  import { FileText, Search, ShieldCheck, Pencil, Wand2 } from 'lucide-svelte';
+  import { tooltip } from '$lib/actions/tooltip';
+  import { formatDuration } from './imber-format';
   import type { ToolCall, ToolKind } from './imber-types';
 
   let { call }: { call: ToolCall } = $props();
@@ -17,13 +20,24 @@
     refactor: Wand2,
   };
   const Icon = $derived(ICON[call.kind]);
+  const failed = $derived(call.ok === false);
+  const tip = $derived({
+    content: call.label,
+    description: [
+      failed ? `Failed: ${call.detail}` : call.detail,
+      call.ms !== undefined ? `Ran in ${formatDuration(call.ms)}` : '',
+      call.waitMs ? `Waited ${formatDuration(call.waitMs)} for your answer first` : '',
+    ].filter(Boolean).join('\n'),
+    maxWidth: 520,
+  });
 </script>
 
-<div class="tool" class:failed={call.ok === false}>
-  <span class="glyph k-{call.kind}"><Icon size={11} /></span>
+<div class="tool" class:failed use:tooltip={tip}>
+  <span class="glyph k-{call.kind}" aria-label={failed ? 'failed' : undefined}><Icon size={11} /></span>
   <span class="label">{call.label}</span>
   <span class="detail">{call.detail}</span>
-  {#if call.ok === false}<X size={11} class="bad" />{:else}<Check size={11} class="done" />{/if}
+  {#if call.waitMs}<span class="wait">waited {formatDuration(call.waitMs)}</span>{/if}
+  {#if call.ms !== undefined}<span class="time">{formatDuration(call.ms)}</span>{/if}
 </div>
 
 <style>
@@ -45,9 +59,16 @@
   .k-edit     { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
   .k-validate { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
   .k-refactor { color: var(--accent);  background: var(--accent-subtle); }
-  .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .detail { flex-shrink: 0; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  /* A failure wins over the kind: the one thing a glance down the list must catch. */
+  .tool.failed .glyph { color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
+  /* The label keeps its words; what came back gives way first, and the time never does. */
+  .label { flex: 0 1 auto; min-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .detail {
+    flex: 1 1 0; min-width: 0; text-align: right;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--text-muted); font-variant-numeric: tabular-nums;
+  }
   .tool.failed .detail { color: var(--danger); }
-  .tool :global(.bad) { flex-shrink: 0; color: var(--danger); }
-  .tool :global(.done) { flex-shrink: 0; color: var(--success); opacity: 0.8; }
+  .wait { flex-shrink: 0; color: var(--warning); font-variant-numeric: tabular-nums; }
+  .time { flex-shrink: 0; min-width: 44px; text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 </style>

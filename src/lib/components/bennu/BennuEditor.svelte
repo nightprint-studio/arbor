@@ -4617,11 +4617,12 @@
    * hierarchy can be built from.
    */
   async function showHierarchy(kind: 'calls' | 'types') {
-    // Java is answered by Bennu's own engine over the reference index and everything else by its
-    // server; the backend routes between them, so the only files with no hierarchy are the ones
-    // that are neither. Same shape as `formatDocument`.
+    // Java is answered by Bennu's own engine over the reference index, a `.ptn` by the Patina
+    // package (who calls — it has no type hierarchy) and everything else by its server; the
+    // backend routes between them, so the only files with no hierarchy are the ones none serves.
     if (!activePath || !editorComp) return;
-    if (!isLspFileOf(activePath) && !isJavaFileOf(activePath)) return;
+    const patina = /\.ptn$/i.test(activePath);
+    if (!isLspFileOf(activePath) && !isJavaFileOf(activePath) && !(patina && kind === 'calls')) return;
     bennuUiStore.showBottom('hierarchy');
     await bennuHierarchyStore.open(
       kind,

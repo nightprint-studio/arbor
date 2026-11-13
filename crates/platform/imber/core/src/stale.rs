@@ -29,6 +29,10 @@ pub const STUB_PREFIX: &str = "[result dropped to save room";
 pub struct StalePolicy {
     /// Results of the last this-many assistant turns are kept whole.
     pub keep_turns: usize,
+    /// Keep whole everything since the user's last message: the task being worked on reads what it read
+    /// earlier in the same task, and a file stubbed at step 12 that was read at step 5 is a file read twice.
+    /// Only earlier requests, whose conclusions are already in the assistant's text, are stubbed.
+    pub keep_current_request: bool,
     /// A result shorter than this (characters) is not worth a stub.
     pub min_chars: usize,
     /// [`maybe_stub`] acts only once this many tokens would be freed …
@@ -39,7 +43,7 @@ pub struct StalePolicy {
 
 impl Default for StalePolicy {
     fn default() -> Self {
-        Self { keep_turns: 6, min_chars: 1_500, trigger_tokens: 12_000, trigger_share: 0.25 }
+        Self { keep_turns: 6, keep_current_request: true, min_chars: 1_500, trigger_tokens: 12_000, trigger_share: 0.25 }
     }
 }
 
@@ -55,8 +59,8 @@ pub struct StaleReport {
 /// How to get a tool's output back, or `None` when the output cannot be reproduced (it depends on the
 /// moment, on the user, or on a side effect) and must stay in the conversation.
 fn refetch_hint(tool: &str) -> Option<&'static str> {
-    const KEEP_EXACT: [&str; 12] = [
-        "ask_user", "update_plan", "load_skill", "show_diagram", "open_ui", "http_request", "trace_request", "wait_ready", "timeline", "page_diagnostics", "bennu_test_run", "bennu_build",
+    const KEEP_EXACT: [&str; 13] = [
+        "ask_user", "update_plan", "load_skill", "show_diagram", "open_ui", "http_request", "trace_request", "wait_ready", "timeline", "page_diagnostics", "bennu_test_run", "bennu_build", "bennu_check",
     ];
     const KEEP_PREFIX: [&str; 13] = [
         "run_", "debug_", "brp_", "screenshot", "edit_", "create_", "delete_", "replace_", "rename_", "add_", "structural_", "corvus_", "spawn_",
@@ -87,16 +91,70 @@ fn calls_by_id(messages: &[Message]) -> HashMap<&str, (&str, &Value)> {
     messages.iter().flat_map(Message::tool_uses).map(|(id, name, input)| (id, (name, input))).collect()
 }
 
-/// The index of the first message whose results are kept whole.
-fn cutoff(messages: &[Message], keep_turns: usize) -> usize {
+/// The index of the first message whose results are kept whole: the last `keep_turns` assistant turns, and
+/// — with `keep_current_request` — everything from the user's last own message on, whichever reaches further back.
+fn cutoff(messages: &[Message], policy: &StalePolicy) -> usize {
     let assistant_at: Vec<usize> = messages.iter().enumerate().filter(|(_, m)| m.role == Role::Assistant).map(|(i, _)| i).collect();
-    if assistant_at.len() > keep_turns { assistant_at[assistant_at.len() - keep_turns] } else { 0 }
+    let by_turns = if assistant_at.len() > policy.keep_turns { assistant_at[assistant_at.len() - policy.keep_turns] } else { 0 };
+    if !policy.keep_current_request {
+        return by_turns;
+    }
+    by_turns.min(current_request_at(messages))
+}
+
+/// Where the request being worked on began: the last user message that the user wrote (text), as opposed to
+/// one that only carries tool results back. 0 when there is none.
+fn current_request_at(messages: &[Message]) -> usize {
+    messages
+        .iter()
+        .rposition(|m| m.role == Role::User && m.blocks.iter().any(|b| matches!(b, Block::Text { .. })))
+        .unwrap_or(0)
+}
+
+/// The files a call is about, as its arguments name them: `file`, `path`, and the same inside `files`, `edits`
+/// and `paths` lists. Separators made `/`, so two spellings of one path compare.
+fn subjects(input: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut take = |v: &Value| {
+        if let Some(s) = v.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+            out.push(s.replace('\\', "/"));
+        }
+    };
+    for key in ["file", "path"] {
+        if let Some(v) = input.get(key) {
+            take(v);
+        }
+    }
+    for key in ["files", "edits", "paths"] {
+        for item in input.get(key).and_then(Value::as_array).into_iter().flatten() {
+            take(item);
+            for k in ["file", "path"] {
+                if let Some(v) = item.get(k) {
+                    take(v);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// One path names the same file as another: equal, or one is the other with a prefix in front (a project
+/// name, a root, `./`) — `voriz:src/app.rs`, `/p/voriz/src/app.rs` and `src/app.rs` are one file here.
+fn same_file(a: &str, b: &str) -> bool {
+    let tail = |s: &str| s.rsplit(':').next().unwrap_or(s).trim_start_matches("./").to_string();
+    let (a, b) = (tail(a), tail(b));
+    a == b || a.ends_with(&format!("/{b}")) || b.ends_with(&format!("/{a}"))
 }
 
 /// A result that would become a stub: its message index, block index and the stub.
+///
+/// Not a result about a file the kept part of the conversation still works on — read again, edited, searched
+/// in: the model is in the middle of that file, and a stub there means working from memory on a signature it
+/// can no longer see, or reading it again.
 fn candidates(messages: &[Message], policy: &StalePolicy) -> Vec<(usize, usize, String, String, u64)> {
     let calls = calls_by_id(messages);
-    let end = cutoff(messages, policy.keep_turns);
+    let end = cutoff(messages, policy);
+    let working: Vec<String> = messages.iter().skip(end).flat_map(Message::tool_uses).flat_map(|(_, _, input)| subjects(input)).collect();
     let mut found = Vec::new();
     for (mi, m) in messages.iter().enumerate().take(end) {
         for (bi, b) in m.blocks.iter().enumerate() {
@@ -106,6 +164,9 @@ fn candidates(messages: &[Message], policy: &StalePolicy) -> Vec<(usize, usize, 
             }
             let Some((name, input)) = calls.get(tool_use_id.as_str()) else { continue };
             let Some(hint) = refetch_hint(name) else { continue };
+            if subjects(input).iter().any(|f| working.iter().any(|w| same_file(f, w))) {
+                continue;
+            }
             let stub = stub_text(name, input, content, hint);
             let freed = estimate(content).saturating_sub(estimate(&stub));
             found.push((mi, bi, tool_use_id.clone(), stub, freed));
@@ -168,7 +229,26 @@ mod tests {
         m.iter().flat_map(|m| m.blocks.iter()).filter_map(|b| if let Block::ToolResult { content, .. } = b { Some(content.clone()) } else { None }).collect()
     }
     fn small() -> StalePolicy {
-        StalePolicy { keep_turns: 2, min_chars: 100, trigger_tokens: 100, trigger_share: 0.1 }
+        StalePolicy { keep_turns: 2, keep_current_request: false, min_chars: 100, trigger_tokens: 100, trigger_share: 0.1 }
+    }
+
+    #[test]
+    fn a_file_still_worked_on_keeps_its_old_read() {
+        // r0 and r1 are old reads; a recent edit touches r0's file under another spelling.
+        let mut m = conversation(4, 4_000);
+        m.push(Message::assistant(vec![Block::ToolUse { id: "e".into(), name: "edit_file".into(), input: json!({"file": "/p/proj/r0.java"}) }]));
+        m.push(Message::tool_results(vec![Block::ToolResult { tool_use_id: "e".into(), content: "ok".into(), is_error: false }]));
+        let (out, report) = stub_stale_results(&m, &small());
+        assert!(!report.stubbed.contains(&"r0".to_string()), "{:?}", report.stubbed);
+        assert!(report.stubbed.contains(&"r1".to_string()));
+        assert!(!is_stub(&contents(&out)[0]));
+    }
+
+    #[test]
+    fn two_spellings_of_one_path_are_one_file() {
+        assert!(same_file("voriz:src/app.rs", "/p/voriz/src/app.rs"));
+        assert!(same_file("./src/app.rs", "src/app.rs"));
+        assert!(!same_file("src/app.rs", "src/apps.rs"));
     }
 
     #[test]
@@ -180,6 +260,23 @@ mod tests {
         assert_eq!(report.stubbed, ["r0", "r1", "r2"]);
         assert!(report.freed_tokens > 2_000);
         assert_eq!(c[4].len(), 4_000 / 5 * 5, "the recent ones stay whole");
+    }
+
+    #[test]
+    fn the_request_being_worked_on_is_kept_whole_however_many_turns_it_took() {
+        let policy = StalePolicy { keep_current_request: true, ..small() };
+        // One request, five reads: nothing goes, though only two turns are "recent".
+        let (out, report) = stub_stale_results(&conversation(5, 4_000), &policy);
+        assert!(report.stubbed.is_empty() && !contents(&out).iter().any(|c| is_stub(c)));
+        // A second request: the first one's reads may go, the second's stay.
+        let mut two = conversation(3, 4_000);
+        two.push(Message::user("now the next thing"));
+        for i in 0..3 {
+            two.push(call(&format!("n{i}"), "bennu_read_file"));
+            two.push(answer(&format!("n{i}"), 4_000));
+        }
+        let (_, report) = stub_stale_results(&two, &policy);
+        assert_eq!(report.stubbed, ["r0", "r1", "r2"]);
     }
 
     #[test]

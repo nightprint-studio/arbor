@@ -38,7 +38,7 @@ use bennu_lsp::prelude::{
     background_init_options, find_root_with_dep, is_dependency_source, locate, locate_custom,
     spec_by_id,
     FileEdit, FileOp,
-    LspSession, ServerAvailability,
+    LspSession, ServerAvailability, ServerFeatures,
     ServerSpec, SessionConfig, SessionObserver, SessionState, BUILTIN_SERVERS,
 };
 
@@ -135,6 +135,33 @@ enum Slot {
     Missing { info: SlotInfo },
 }
 
+/// A language server that starts for a project root (see [`LspRegistry::servers_at_root`]).
+#[derive(Debug, Clone)]
+pub struct ServerAtRoot {
+    pub name: String,
+    /// The extensions it serves, without dots.
+    pub extensions: Vec<String>,
+    /// What it answers: declared by its handshake when it is running, expected from the catalogue otherwise.
+    pub features: Option<ServerFeatures>,
+    /// `features` came from the running server, not from the catalogue.
+    pub confirmed: bool,
+}
+
+/// What [`LspRegistry::claim_file`] found for a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LspClaim {
+    /// A server serves it.
+    Served,
+    /// Language servers are switched off.
+    Off,
+    /// No enabled server serves its extension.
+    NoServer,
+    /// A server serves the extension, but there is no project of its kind above the file.
+    NoProject { server: String, markers: Vec<String> },
+    /// The server for it is not on this machine.
+    NotInstalled { server: String, hint: String },
+}
+
 /// A server description resolved against the config — a catalogue entry or a user-defined
 /// one, flattened so the rest of the module does not care which it was.
 #[derive(Clone)]
@@ -159,6 +186,11 @@ struct ResolvedServer {
 }
 
 impl ResolvedServer {
+    /// A project opened at `root` is this server's: one of its markers is **at** the root (see `warm_start`).
+    fn claims_root(&self, root: &Path) -> bool {
+        self.root_markers.iter().any(|m| root.join(m).is_file())
+    }
+
     /// `check_command` is what rust-analyzer runs on save. Threaded in rather than read from a
     /// file inside `bennu-lsp`, which is a leaf that must not know where Bennu keeps its settings.
     fn from_spec(spec: &ServerSpec, check_command: &str) -> Self {
@@ -633,7 +665,7 @@ impl LspRegistry {
             // inside a Cargo workspace member should start the server for the workspace, and
             // that is the root the FE opened, so anything further up is somebody else's
             // project.
-            if !server.root_markers.iter().any(|m| root_path.join(m).is_file()) {
+            if !server.claims_root(root_path) {
                 continue;
             }
             let key = slot_key(root, &server.language);
@@ -647,6 +679,63 @@ impl LspRegistry {
             self.begin_start(key, server, root_path.to_path_buf(), &cfg.lsp.server_paths, origin);
         }
         self.prune_dependency_roots();
+    }
+
+    /// The names of the language servers that start for a project opened at `root` — the ones whose root marker
+    /// is there, as [`warm_start`](Self::warm_start) decides. Empty when language servers are switched off.
+    pub fn servers_for_root(&self, root: &str) -> Vec<String> {
+        self.servers_at_root(root).into_iter().map(|s| s.name).collect()
+    }
+
+    /// The language servers that start for a project opened at `root`, each with the extensions it serves and —
+    /// once it is running — what it said it can answer. Asked lazily (a project summary), never at a keystroke.
+    pub fn servers_at_root(&self, root: &str) -> Vec<ServerAtRoot> {
+        let cfg = load_config();
+        if !cfg.lsp.enabled {
+            return Vec::new();
+        }
+        self.all_servers(&cfg.lsp)
+            .into_iter()
+            .filter(|s| s.claims_root(Path::new(root)))
+            .map(|s| {
+                let live = match self.peek(&slot_key(root, &s.language)) {
+                    Existing::Ready(session) if session.is_alive() => Some(session.server_features()),
+                    _ => None,
+                };
+                let confirmed = live.is_some();
+                let features = live.or_else(|| self.known_features(&s.id, &s.language).map(|(f, _)| f));
+                ServerAtRoot { name: s.name, extensions: s.extensions, features, confirmed }
+            })
+            .collect()
+    }
+
+    /// What a server answers, for the settings page and a summary: what a running session of it declared
+    /// (`true`: confirmed), otherwise what the catalogue expects of it (`false`). `None` for a server of the
+    /// user's own that has not run yet.
+    pub fn known_features(&self, id: &str, language: &str) -> Option<(ServerFeatures, bool)> {
+        let live = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slots.iter().find_map(|((_, lang), slot)| match slot {
+                Slot::Ready(session) if lang == language && session.is_alive() => Some(session.server_features()),
+                _ => None,
+            })
+        };
+        live.map(|f| (f, true)).or_else(|| bennu_lsp::prelude::expected_features(id).map(|f| (f, false)))
+    }
+
+    /// What the server serving `file` said it can answer — `None` until that server is running (or when none serves
+    /// the file). Never starts one: a question about capabilities is not a reason to spend a server.
+    pub fn features_for(&self, file: &str) -> Option<ServerFeatures> {
+        let cfg = load_config();
+        if !cfg.lsp.enabled {
+            return None;
+        }
+        let server = self.server_for(file, &cfg.lsp)?;
+        let RootKind::Own(root) = self.root_of(file, &server) else { return None };
+        match self.peek(&slot_key(&root.to_string_lossy(), &server.language)) {
+            Existing::Ready(session) if session.is_alive() => Some(session.server_features()),
+            _ => None,
+        }
     }
 
     /// Stop background sessions that have gone quiet, forever, on their own thread.
@@ -807,17 +896,31 @@ impl LspRegistry {
     /// an empty server answer, and go-to, find-usages, hover and the naga diagnostics behind them
     /// went quiet on machines that had never installed it.
     pub fn is_lsp_file(&self, file: &str) -> bool {
+        matches!(self.claim_file(file), LspClaim::Served)
+    }
+
+    /// Whether a language server serves `file`, and when not, why: decided by the file's extension, the project
+    /// marker (and, for Svelte and Angular, the npm dependency) above it, and whether the server is installed —
+    /// never by asking it. [`crate::engine`] turns the "why" into the sentence a refusal carries.
+    pub fn claim_file(&self, file: &str) -> LspClaim {
         let cfg = load_config();
         if !cfg.lsp.enabled {
-            return false;
+            return LspClaim::Off;
         }
         let Some(server) = self.server_for(file, &cfg.lsp) else {
-            return false;
+            return LspClaim::NoServer;
         };
         if find_root_with_dep(Path::new(file), &server.markers(), &server.package_dep).is_none() {
-            return false;
+            let mut marks = server.root_markers.clone();
+            if !server.package_dep.is_empty() {
+                marks.push(format!("a package.json depending on {}", server.package_dep));
+            }
+            return LspClaim::NoProject { server: server.name.clone(), markers: marks };
         }
-        self.binary_present(&server, &cfg.lsp.server_paths)
+        if !self.binary_present(&server, &cfg.lsp.server_paths) {
+            return LspClaim::NotInstalled { server: server.name.clone(), hint: server.install_hint.clone() };
+        }
+        LspClaim::Served
     }
 
     /// Whether `server`'s executable can be found on this machine, memoised.

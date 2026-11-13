@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn the_families_a_scheduled_run_is_not_offered_hide_the_right_tools() {
         let off = crate::assistant::tools::families_off(&FAMILIES_OFF.map(String::from));
-        for hidden in ["bennu_build", "bennu_test_run", "run_start", "spawn_agent"] {
+        for hidden in ["bennu_check", "bennu_build", "bennu_test_run", "run_start", "cargo_run", "run_tool", "run_script", "spawn_agent"] {
             assert!(off.hides(hidden), "{hidden}");
         }
         for offered in ["edit_file", "search_text", "bennu_read_file", "ask_user"] {

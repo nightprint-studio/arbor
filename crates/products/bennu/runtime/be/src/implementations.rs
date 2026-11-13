@@ -39,28 +39,16 @@ fn bennu_implementations(
     ctx: &BennuState,
     args: ImplementationsArgs,
 ) -> Result<Option<UsagesResult>, String> {
-    if let Some(found) = crate::lsp_route::implementations(&args.file, &args.source, args.offset) {
-        return Ok(Some(found));
-    }
-    // A `.ptn`: the `impl`s of a trait, or of one of its methods, across the mod.
-    if let Some(found) = crate::patina_intel::implementations(ctx, &args.file, &args.source, args.offset) {
-        return Ok(found);
-    }
-    if !crate::intel::is_java_file(&args.file) {
-        return Ok(None);
-    }
-    let Some((key, items)) =
-        IndexService::global().implementations(&args.file, &args.source, args.offset)
-    else {
-        return Ok(None);
-    };
-
-    let mut usages: Vec<UsageHit> = Vec::new();
-    if let DeclKey::Method { owner, name } = &key {
-        usages.extend(statement_hits(&args.file, owner, name, &items));
-    }
-    usages.extend(items.into_iter().filter_map(usage_of));
-    Ok(Some(UsagesResult { target_label: format!("implementations of {}", key.label()), usages }))
+    // The one engine that serves the file answers (see `engine`); the Java side adds the mapper statements.
+    Ok(crate::engine::implementations(ctx, &args.file, &args.source, args.offset, || {
+        let (key, items) = IndexService::global().implementations(&args.file, &args.source, args.offset)?;
+        let mut usages: Vec<UsageHit> = Vec::new();
+        if let DeclKey::Method { owner, name } = &key {
+            usages.extend(statement_hits(&args.file, owner, name, &items));
+        }
+        usages.extend(items.into_iter().filter_map(usage_of));
+        Some(UsagesResult { target_label: format!("implementations of {}", key.label()), usages })
+    }))
 }
 
 /// The mapper statements implementing method `name`: one per mapper interface among the method's

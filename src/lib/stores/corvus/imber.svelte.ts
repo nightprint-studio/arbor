@@ -13,6 +13,7 @@
 import {
   hasAssistantKey, imberActions, imberCancel, imberCommitMessage, imberForget, imberReply, imberSend, imberSetMode, imberState, imberUndo, IMBER_TOPIC,
 } from '$lib/ipc/corvus/imber';
+import { imberCreditsStore } from '$lib/stores/imber-credits.svelte';
 import type { ImberAction, ImberEvent, ImberKind, ImberMessage, ImberMode, ImberState } from '$lib/types/corvus/imber';
 import { pendingApproval, scheduledText, upsertMessage } from '$lib/components/corvus/imber/imber-messages';
 import { setupTauriListeners } from '$lib/utils/tauri-listeners';
@@ -114,6 +115,8 @@ function createImberStore() {
         c.canRetry = e.ended === 'failed';
         // Imber may have changed the repository: the graph and the undo list catch up.
         graphStore.refresh();
+        // And the title bar's credit meter reads again, in the background.
+        void imberCreditsStore.refresh();
         void loadActions();
         break;
     }

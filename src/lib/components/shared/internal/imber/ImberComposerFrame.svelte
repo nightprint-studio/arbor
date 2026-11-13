@@ -21,6 +21,7 @@
     disabled = false,
     running = false,
     canSend = false,
+    sendWhileRunning = false,
     sendTooltip = 'Send',
     dropping = false,
     chips,
@@ -50,6 +51,9 @@
     /** A run is open: the send button becomes Stop. */
     running?: boolean;
     canSend?: boolean;
+    /** While it runs, a message can still be sent: Imber reads it after the step it is in. The product's
+     *  `onSend` decides what sending means then. */
+    sendWhileRunning?: boolean;
     sendTooltip?: string;
     /** Something is being dragged over the frame. */
     dropping?: boolean;
@@ -106,6 +110,11 @@
       <span class="grow"></span>
       {@render trailing?.()}
       {#if running}
+        {#if sendWhileRunning && canSend}
+          <IconButton tooltip="Send now — read after the current step" shortcut="Ctrl+Enter" variant="ghost" size={28} disabled={disabled} onclick={onSend}>
+            <ArrowUp size={15} />
+          </IconButton>
+        {/if}
         <span class="asst-ring"><IconButton tooltip="Stop" shortcut="Esc" variant="accent" size={28} onclick={onStop}><Square size={12} /></IconButton></span>
       {:else}
         <IconButton tooltip={sendTooltip} shortcut="Ctrl+Enter" variant="accent" size={28} disabled={!canSend || disabled} onclick={onSend}>

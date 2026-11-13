@@ -169,7 +169,13 @@ fn message(m: &Message) -> Value {
 fn block(b: &Block, m: &Message) -> Option<Value> {
     Some(match b {
         Block::Text { text } => json!({ "type": "text", "text": text }),
-        Block::ToolUse { id, name, input } => json!({ "type": "tool_use", "id": id, "name": name, "input": input }),
+        // The API takes only an object here. A call whose arguments did not parse (a reply cut off mid-argument)
+        // is kept with `null` — its result already tells the model to send it again — and must still go out as a
+        // valid block, or every later request of the conversation is refused with a 400.
+        Block::ToolUse { id, name, input } => {
+            let input = if input.is_object() { input.clone() } else { json!({}) };
+            json!({ "type": "tool_use", "id": id, "name": name, "input": input })
+        }
         Block::ToolResult { tool_use_id, content, is_error } => {
             let pictures: Vec<Value> = m
                 .blocks
@@ -299,9 +305,15 @@ impl AnthropicDecoder {
                     let text = if acc.json.trim().is_empty() { "{}" } else { acc.json.as_str() };
                     match serde_json::from_str::<Value>(text) {
                         Ok(input) if input.is_object() => {
-                            out.push(Event::ToolDone { id: acc.id, name: acc.name, input, valid: true })
+                            out.push(Event::ToolDone { id: acc.id, name: acc.name, input, problem: None })
                         }
-                        _ => out.push(Event::ToolDone { id: acc.id, name: acc.name, input: Value::Null, valid: false }),
+                        Ok(_) => out.push(Event::ToolDone {
+                            id: acc.id,
+                            name: acc.name,
+                            input: Value::Null,
+                            problem: Some("the arguments of this call were not a JSON object".into()),
+                        }),
+                        Err(e) => out.push(Event::ToolDone { id: acc.id, name: acc.name, input: Value::Null, problem: Some(malformed(text, &e)) }),
                     }
                 }
             }
@@ -344,6 +356,38 @@ impl Decoder for AnthropicDecoder {
         self.dispatch(&mut out);
         out
     }
+}
+
+/// Why arguments did not parse, in words the model can act on: where it went wrong and what was written
+/// there. Arguments stream as the model writes them (`eager_input_streaming`), so nothing upstream checked
+/// them: a quote or a backslash left unescaped inside a long string — a file body, a replacement — is the
+/// usual slip, and "not valid JSON" alone sends the model to resend the same thing.
+fn malformed(text: &str, e: &serde_json::Error) -> String {
+    let len = text.chars().count();
+    if e.is_eof() {
+        return format!(
+            "the arguments of this call stop short after {len} characters (the JSON never closes){}",
+            if len > 20_000 { "; a call this large is better split into smaller ones" } else { "" }
+        );
+    }
+    let at = offset_of(text, e.line(), e.column());
+    let from = text[..at].char_indices().rev().nth(60).map_or(0, |(i, _)| i);
+    let to = text[at..].char_indices().nth(40).map_or(text.len(), |(i, _)| at + i);
+    format!(
+        "the arguments of this call are not valid JSON ({e}, near «{}⟨here⟩{}»): inside a string every \" and \\ must be escaped",
+        &text[from..at],
+        &text[at..to]
+    )
+}
+
+/// The byte offset of serde's 1-based `line` and `column` (a column counts bytes), kept on a char boundary.
+fn offset_of(text: &str, line: usize, column: usize) -> usize {
+    let start: usize = text.split_inclusive('\n').take(line.saturating_sub(1)).map(str::len).sum();
+    let mut at = (start + column.saturating_sub(1)).min(text.len());
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
 }
 
 fn str_of(v: &Value, key: &str) -> String {
@@ -404,6 +448,18 @@ mod tests {
     }
 
     // ── going out ──
+
+    #[test]
+    fn a_call_whose_arguments_did_not_parse_goes_out_with_an_empty_object() {
+        let mut r = request();
+        r.messages = vec![
+            Message::user("go"),
+            Message::assistant(vec![Block::ToolUse { id: "t".into(), name: "edit_file".into(), input: Value::Null }]),
+            Message::tool_results(vec![Block::ToolResult { tool_use_id: "t".into(), content: "not run".into(), is_error: true }]),
+        ];
+        let body = Anthropic.body(&r);
+        assert_eq!(body["messages"][1]["content"][0]["input"], json!({}));
+    }
 
     #[test]
     fn the_conversation_itself_is_cached_up_to_its_last_block() {
@@ -611,7 +667,7 @@ data: {\"type\":\"message_stop\"}
             id: "toolu_9".into(),
             name: "read_file".into(),
             input: json!({"path": "src/A.java"}),
-            valid: true,
+            problem: None,
         }), "{events:?}");
         assert!(events.contains(&Event::Usage(Usage { input_tokens: 1200, output_tokens: 1, cache_read_tokens: 1000, ..Default::default() })));
         assert_eq!(events.last(), Some(&Event::Stop(StopReason::ToolUse)));
@@ -635,7 +691,7 @@ data: {\"type\":\"message_stop\"}
     fn a_tool_with_no_arguments_is_valid_and_empty() {
         let s = "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"list\",\"input\":{}}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
         let events = decode_all(&[s]);
-        assert!(events.contains(&Event::ToolDone { id: "t".into(), name: "list".into(), input: json!({}), valid: true }));
+        assert!(events.contains(&Event::ToolDone { id: "t".into(), name: "list".into(), input: json!({}), problem: None }));
     }
 
     #[test]
@@ -643,7 +699,22 @@ data: {\"type\":\"message_stop\"}
         // A stream cut short mid-argument: the JSON never closes.
         let s = "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"edit\",\"input\":{}}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\": \\\"A.ja\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
         let events = decode_all(&[s]);
-        assert!(events.contains(&Event::ToolDone { id: "t".into(), name: "edit".into(), input: Value::Null, valid: false }));
+        let problem = events.iter().find_map(|e| match e {
+            Event::ToolDone { input: Value::Null, problem: Some(p), .. } => Some(p.clone()),
+            _ => None,
+        });
+        assert!(problem.unwrap().contains("stop short after 14 characters"));
+    }
+
+    #[test]
+    fn a_slip_inside_the_arguments_is_shown_where_it_is() {
+        // An unescaped quote inside a string: the JSON goes wrong right after it.
+        let text = r#"{"path": "A.java", "text": "say "hi" now"}"#;
+        let e = serde_json::from_str::<Value>(text).unwrap_err();
+        let said = malformed(text, &e);
+        assert!(said.contains("⟨here⟩") && said.contains("say \"") && said.contains("expected"), "{said}");
+        assert_eq!(offset_of("ab\ncd", 2, 2), 4);
+        assert_eq!(offset_of("è", 1, 2), 0, "never inside a character");
     }
 
     #[test]

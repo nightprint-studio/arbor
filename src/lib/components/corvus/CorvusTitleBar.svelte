@@ -29,6 +29,7 @@
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
   import ProductIcon  from '$lib/components/shared/internal/ProductIcon.svelte';
   import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
+  import ImberCreditMeter from '$lib/components/shared/internal/imber/ImberCreditMeter.svelte';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import WindowControls from '$lib/components/shared/WindowControls.svelte';
   import WorkspaceDropdown from './workspace/WorkspaceDropdown.svelte';
@@ -194,6 +195,12 @@
         {/snippet}
       </Contribution>
     </div>
+  {/snippet}
+
+  <!-- Just left of the documentation button: what Imber's providers have left. The limits and the Admin key are
+       set in Bennu's settings, so there is no Settings button here. -->
+  {#snippet actions()}
+    <ImberCreditMeter />
   {/snippet}
 
   {#snippet trailing()}

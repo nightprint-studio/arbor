@@ -327,7 +327,7 @@ pub fn card_block(info: &ChildInfo) -> Value {
 // ── Asking the user on a child's behalf ──────────────────────────────────────────────────────────
 
 /// Say, in a question that goes to the user, which agent is asking: an access prompt from a child must not look
-/// like the parent's own. The block's shape is the panel's (`access`, `confirm`).
+/// like the parent's own. The block's shape is the panel's (`access`, `confirm`, `script`).
 pub fn label_prompt(block: &mut Value, agent_title: &str) {
     let tag = format!("Agent “{agent_title}”");
     let prefix = |v: &mut Value, pointer: &str, sep: &str| {
@@ -337,6 +337,11 @@ pub fn label_prompt(block: &mut Value, agent_title: &str) {
     };
     prefix(block, "/request/reason", ": ");
     prefix(block, "/confirm/title", " — ");
+    // A script card has no title of its own: the agent is named where it says why.
+    if let Some(script) = block.get_mut("script") {
+        let why = script.get("why").and_then(Value::as_str).unwrap_or("").trim().to_string();
+        script["why"] = Value::String(if why.is_empty() { format!("{tag} asks to run it.") } else { format!("{tag}: {why}") });
+    }
 }
 
 // ── Who owns a file ──────────────────────────────────────────────────────────────────────────────

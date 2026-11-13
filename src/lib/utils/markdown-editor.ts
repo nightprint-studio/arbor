@@ -30,7 +30,7 @@ import { tooltip } from '$lib/actions/tooltip';
 import { fenceGrammarName, fenceLanguage } from './fence-info';
 import './prism-shared';        // side-effect: registers every grammar
 import { syntaxTree } from '@codemirror/language';
-import type { SyntaxNodeRef } from '@lezer/common';
+import type { SyntaxNodeRef, Tree } from '@lezer/common';
 import {
   Decoration,
   type DecorationSet,
@@ -427,10 +427,10 @@ function isSafeHref(url: string): boolean {
 
 /** The target a `Link`/`Autolink` node points at, taken from its `URL` child — `null` for a
  *  reference link (`[label][ref]`), which has none, and for a scheme this editor won't follow. */
-function urlChildOf(view: EditorView, node: SyntaxNodeRef): string | null {
+function urlChildOf(s: MarkdownSurface, node: SyntaxNodeRef): string | null {
   const url = node.node.getChild('URL');
   if (!url) return null;
-  const raw = view.state.sliceDoc(url.from, url.to).trim();
+  const raw = s.slice(url.from, url.to).trim();
   return raw && isSafeHref(raw) ? raw : null;
 }
 
@@ -1282,6 +1282,8 @@ class TableWidget extends WidgetType {
   constructor(
     private readonly text: string,
     private readonly docPath: string | null,
+    /** Set when the table lives inside another document — a run of code comments. */
+    private readonly embedding: MarkdownEmbedding | null = null,
   ) { super(); }
 
   /**
@@ -1293,12 +1295,17 @@ class TableWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return other instanceof TableWidget
         && other.text === this.text
-        && other.docPath === this.docPath;
+        && other.docPath === this.docPath
+        && other.embedding?.linePrefix === this.embedding?.linePrefix
+        && other.embedding?.indent === this.embedding?.indent;
   }
 
   toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('div');
     wrap.className = 'cm-md-rendered-table-wrap';
+    // In a comment the widget replaces whole lines, indentation included: the table starts where
+    // the comment's text does, not at column 0. Padding, never margin — see the note on the wrap.
+    if (this.embedding?.indent) wrap.style.paddingLeft = `${this.embedding.indent}ch`;
     this.paint(wrap, view);
     // Same reason as the mermaid widget's: this one changes height too — a focused cell swaps to
     // its monospace source and can rewrap, a row is added, the toolbar appears. A block widget
@@ -1568,7 +1575,11 @@ class TableWidget extends WidgetType {
     mutate(model);
     const next = serializeGfmTable(model);
     if (next === this.text) return;
-    view.dispatch({ changes: { from: range.from, to: range.to, insert: next } });
+    // Inside a comment every line the table writes is a comment line again: without the prefix the
+    // first edit would turn the table into code.
+    const prefix = this.embedding?.linePrefix;
+    const insert = prefix == null ? next : next.split('\n').map((l) => prefix + l).join('\n');
+    view.dispatch({ changes: { from: range.from, to: range.to, insert } });
   }
 
   /** Where this table currently sits in the document. Resolved from the DOM at call time — the
@@ -1583,7 +1594,7 @@ class TableWidget extends WidgetType {
     } catch {
       return null;
     }
-    return tableRangeAt(view.state, pos);
+    return tableRangeAt(view.state, pos, this.embedding);
   }
 
   /** The widget owns its events: a click in a cell must place the caret in the CELL, not ask
@@ -1613,13 +1624,21 @@ function placeCaretAtEnd(el: HTMLElement) {
  * may be mid-parse, and "the run of consecutive lines containing a pipe" is exactly what a GFM
  * table is on disk.
  */
-function tableRangeAt(state: EditorState, pos: number): { from: number; to: number } | null {
+function tableRangeAt(
+  state: EditorState,
+  pos: number,
+  embedding: MarkdownEmbedding | null = null,
+): { from: number; to: number } | null {
+  // In a comment only the markdown half of a line counts: `a || b` on the code line after the
+  // table has a pipe too, and must not be swallowed into it.
+  const md = (text: string) => (embedding ? embedding.strip(text) : text);
   const first = state.doc.lineAt(pos);
-  if (!first.text.includes('|')) return null;
+  if (!md(first.text)?.includes('|')) return null;
   let last = first;
   while (last.number < state.doc.lines) {
     const next = state.doc.line(last.number + 1);
-    if (!next.text.includes('|') || !next.text.trim()) break;
+    const text = md(next.text);
+    if (text == null || !text.includes('|') || !text.trim()) break;
     last = next;
   }
   return { from: first.from, to: last.to };
@@ -1659,17 +1678,71 @@ function lineDeco(cls: string): Decoration {
 
 // ─── Live preview decoration plugin ─────────────────────────────────────
 
-function selectionTouchesRange(view: EditorView, from: number, to: number): boolean {
-  for (const r of view.state.selection.ranges) {
+export function selectionTouches(state: EditorState, from: number, to: number): boolean {
+  for (const r of state.selection.ranges) {
     if (r.to < from || r.from > to) continue;
     return true;
   }
   return false;
 }
 
-function lineSpan(view: EditorView, pos: number): { from: number; to: number } {
-  const line = view.state.doc.lineAt(pos);
-  return { from: line.from, to: line.to };
+// ─── Surfaces: where a markdown tree is drawn ───────────────────────────
+//
+// The walk below never touches the document directly: it speaks to a surface, in the **tree's**
+// coordinates. For a `.md` file the two coordinates are the same thing. For a run of `//` comments
+// in code they are not — the markdown is the comment text with every line's `// ` taken out — and
+// the surface maps each position back. One walk, so a fix to how `**bold**` renders lands in the
+// markdown editor and in the comments of a `.ptn` at once.
+
+/**
+ * How a markdown text sits inside a host document that is not markdown — a run of line comments.
+ * `null` on a surface means the document IS the markdown.
+ */
+export interface MarkdownEmbedding {
+  /** Written before every line a widget writes back: the comment's indentation and marker (`    // `). */
+  linePrefix: string;
+  /** The host lines' indentation, in columns: where a block widget's content starts. */
+  indent: number;
+  /** The markdown a host line carries, or `null` when the line is not part of the embedded text. */
+  strip(line: string): string | null;
+}
+
+/** Where a parsed markdown tree is drawn. Every position is in the tree's coordinates. */
+export interface MarkdownSurface {
+  readonly state: EditorState;
+  /** Length of the markdown text the tree was parsed from. */
+  readonly length: number;
+  readonly embedding: MarkdownEmbedding | null;
+  slice(from: number, to: number): string;
+  /** The markdown line holding `pos`. */
+  lineAt(pos: number): { from: number; to: number };
+  /** Whether the selection touches the range — the reveal rule every marker follows. */
+  touches(from: number, to: number): boolean;
+  /** A mark or an inline replace. */
+  inline(from: number, to: number, deco: Decoration): void;
+  /** A line decoration on the host line holding `pos`. */
+  line(pos: number, deco: Decoration): void;
+  /** A block widget standing in for the whole host lines the range spans. */
+  block(from: number, to: number, widget: WidgetType): void;
+}
+
+/** The surface of a markdown document: tree and document coordinates are the same. */
+function documentSurface(state: EditorState, entries: Range<Decoration>[]): MarkdownSurface {
+  return {
+    state,
+    length: state.doc.length,
+    embedding: null,
+    slice: (from, to) => state.sliceDoc(from, to),
+    lineAt: (pos) => {
+      const line = state.doc.lineAt(pos);
+      return { from: line.from, to: line.to };
+    },
+    touches: (from, to) => selectionTouches(state, from, to),
+    inline: (from, to, deco) => entries.push(deco.range(from, to)),
+    line: (pos, deco) => entries.push(deco.range(state.doc.lineAt(pos).from)),
+    block: (from, to, widget) =>
+      entries.push(Decoration.replace({ widget, block: true }).range(from, to)),
+  };
 }
 
 type PushFn = (from: number, to: number, deco: Decoration) => void;
@@ -1681,14 +1754,13 @@ type PushFn = (from: number, to: number, deco: Decoration) => void;
 // (HeaderMark / QuoteMark on a multi-line blockquote) fall back to
 // line-level scope so the whole line reveals together.
 function concealIfOff(
-  view: EditorView,
-  push: PushFn,
+  s: MarkdownSurface,
   from: number,
   to: number,
   scope: { from: number; to: number },
 ) {
-  if (!selectionTouchesRange(view, scope.from, scope.to)) {
-    push(from, to, concealMark);
+  if (!s.touches(scope.from, scope.to)) {
+    s.inline(from, to, concealMark);
   }
 }
 
@@ -1801,7 +1873,7 @@ function concatOffsetToAbs(
   return ranges[0]?.from ?? 0;
 }
 
-function highlightFencedCode(view: EditorView, node: SyntaxNodeRef, push: PushFn) {
+function highlightFencedCode(s: MarkdownSurface, node: SyntaxNodeRef) {
   let lang: string | null = null;
   const codeRanges: Array<{ from: number; to: number }> = [];
 
@@ -1812,7 +1884,7 @@ function highlightFencedCode(view: EditorView, node: SyntaxNodeRef, push: PushFn
   do {
     if (cur.name === 'CodeInfo') {
       // Only the first word names the language: ```ptn title="x" carries more after it.
-      lang = fenceLanguage(view.state.sliceDoc(cur.from, cur.to));
+      lang = fenceLanguage(s.slice(cur.from, cur.to));
     } else if (cur.name === 'CodeText') {
       codeRanges.push({ from: cur.from, to: cur.to });
     }
@@ -1831,11 +1903,12 @@ function highlightFencedCode(view: EditorView, node: SyntaxNodeRef, push: PushFn
   const segmentStarts: number[] = [];
   for (const r of codeRanges) {
     segmentStarts.push(code.length);
-    code += view.state.sliceDoc(r.from, r.to);
+    code += s.slice(r.from, r.to);
   }
 
   try {
     const tokens = Prism.tokenize(code, grammar);
+    const push: PushFn = (from, to, deco) => s.inline(from, to, deco);
     walkPrismTokens(tokens as (string | PrismTokenLike)[], 0, codeRanges, segmentStarts, push);
   } catch { /* malformed input or grammar — fall back to plain rendering */ }
 }
@@ -1852,338 +1925,345 @@ function highlightFencedCode(view: EditorView, node: SyntaxNodeRef, push: PushFn
  * the same reveal rule as every other marker in this editor: the line you are editing shows
  * what it really says.
  */
-function decorateBlockquote(view: EditorView, node: SyntaxNodeRef, push: PushFn) {
-  const first = view.state.doc.lineAt(node.from);
+function decorateBlockquote(s: MarkdownSurface, node: SyntaxNodeRef) {
+  const first = s.lineAt(node.from);
+  const firstText = s.slice(first.from, first.to);
   // `>` and the spaces after it are the quote mark; what follows is the head line's text.
-  const afterMark = first.text.replace(/^\s*>\s?/, '');
-  const markLength = first.text.length - afterMark.length;
+  const afterMark = firstText.replace(/^\s*>\s?/, '');
+  const markLength = firstText.length - afterMark.length;
   const head = ALERT_HEAD.exec(afterMark);
   const kind = head ? alertKindOf(head[2]) : null;
 
   let pos = node.from;
   while (pos <= node.to) {
-    const line = view.state.doc.lineAt(pos);
+    const line = s.lineAt(pos);
     if (kind) {
-      push(line.from, line.from, lineDeco(`cm-md-callout cm-md-callout-${kind}`));
-      if (line.from === first.from) push(line.from, line.from, lineDeco('cm-md-callout-head'));
+      s.line(line.from, lineDeco(`cm-md-callout cm-md-callout-${kind}`));
+      if (line.from === first.from) s.line(line.from, lineDeco('cm-md-callout-head'));
     } else {
-      push(line.from, line.from, blockquoteLine);
+      s.line(line.from, blockquoteLine);
     }
     if (line.to >= node.to) break;
     pos = line.to + 1;
   }
 
   if (!kind || !head) return;
-  if (selectionTouchesRange(view, first.from, first.to)) return;
+  if (s.touches(first.from, first.to)) return;
   // Replace `[!KIND]` — with its fold marker and the run of spaces after it, so the author's
   // title starts where the badge ends rather than a space further along.
   const from = first.from + markLength + head[1].length;
   const marker = `[!${head[2]}]${head[3]}${head[4]}`;
   const to = from + marker.length;
-  push(from, to, Decoration.replace({ widget: new AlertHeadWidget(kind, head[5].trim()) }));
+  s.inline(from, to, Decoration.replace({ widget: new AlertHeadWidget(kind, head[5].trim()) }));
   // The title the author wrote is *in* the badge now, so the text that follows on the line
   // would be a second copy of it.
-  if (head[5].length) push(to, first.to, Decoration.replace({}));
+  if (head[5].length) s.inline(to, first.to, Decoration.replace({}));
 }
 
 // ─── Main decoration builder ───────────────────────────────────────────
 
 function buildDecorations(view: EditorView): DecorationSet {
   const entries: Range<Decoration>[] = [];
-  const push: PushFn = (from, to, deco) => entries.push(deco.range(from, to));
-
-  for (const { from, to } of view.visibleRanges) {
-    syntaxTree(view.state).iterate({
-      from, to,
-      enter: (node) => {
-        const name = node.name;
-
-        // ── ATX headings ────────────────────────────────────────────────
-        if (name.startsWith('ATXHeading')) {
-          const level = parseInt(name.slice('ATXHeading'.length), 10) || 1;
-          const firstLine = view.state.doc.lineAt(node.from);
-          push(firstLine.from, firstLine.from, headingLine(level));
-          return;
-        }
-
-        // ── Setext headings ────────────────────────────────────────────
-        if (name === 'SetextHeading1' || name === 'SetextHeading2') {
-          const level = name === 'SetextHeading1' ? 1 : 2;
-          let pos = node.from;
-          while (pos <= node.to) {
-            const line = view.state.doc.lineAt(pos);
-            push(line.from, line.from, headingLine(level));
-            if (line.to >= node.to) break;
-            pos = line.to + 1;
-          }
-          return;
-        }
-
-        // ── Block-level markers — line-scoped conceal ─────────────────
-        if (name === 'HeaderMark') {
-          const scope = lineSpan(view, node.from);
-          const end = Math.min(node.to + 1, view.state.doc.length);
-          concealIfOff(view, push, node.from, end, scope);
-          return;
-        }
-        if (name === 'QuoteMark') {
-          const scope = lineSpan(view, node.from);
-          const end = Math.min(node.to + 1, view.state.doc.length);
-          concealIfOff(view, push, node.from, end, scope);
-          return;
-        }
-
-        // ── Blockquote line decoration (and GitHub alerts) ──────────────
-        if (name === 'Blockquote') {
-          decorateBlockquote(view, node, push);
-          return;
-        }
-
-        // ── Fenced + indented code blocks ───────────────────────────────
-        if (name === 'FencedCode') {
-          let pos = node.from;
-          while (pos <= node.to) {
-            const line = view.state.doc.lineAt(pos);
-            push(line.from, line.from, codeBlockLine);
-            if (line.to >= node.to) break;
-            pos = line.to + 1;
-          }
-          highlightFencedCode(view, node, push);
-          return;
-        }
-        if (name === 'CodeBlock') {
-          let pos = node.from;
-          while (pos <= node.to) {
-            const line = view.state.doc.lineAt(pos);
-            push(line.from, line.from, codeBlockLine);
-            if (line.to >= node.to) break;
-            pos = line.to + 1;
-          }
-          return;
-        }
-
-        // ── Horizontal rule ─────────────────────────────────────────────
-        if (name === 'HorizontalRule') {
-          const line = view.state.doc.lineAt(node.from);
-          push(line.from, line.from, hrLine);
-          if (!selectionTouchesRange(view, line.from, line.to)) {
-            push(node.from, node.to, concealMark);
-          }
-          return;
-        }
-
-        // ── Inline composites ──────────────────────────────────────────
-        // The composite gets its rendering decoration (bold/italic/etc.).
-        // The marker children (EmphasisMark, CodeMark, LinkMark, URL, …)
-        // are concealed below only when the selection sits OUTSIDE the
-        // composite — that's the per-component reveal: editing
-        // `**bold**` shows its `**` without revealing the sibling
-        // `*italic*` markers on the same line.
-        if (name === 'StrongEmphasis') { push(node.from, node.to, boldMark);   return; }
-        if (name === 'Emphasis')       { push(node.from, node.to, italicMark); return; }
-        if (name === 'Strikethrough')  { push(node.from, node.to, strikeMark); return; }
-        if (name === 'InlineCode')     { push(node.from, node.to, inlineCode); return; }
-        if (name === 'Link') {
-          // An anchor whether or not the source is revealed: a plain click edits, so there is
-          // nothing to protect, and Cmd+click follows the link you are in the middle of writing.
-          const url = urlChildOf(view, node);
-          push(node.from, node.to, url ? linkAnchor(url) : linkLabel);
-          return;
-        }
-        if (name === 'Autolink') {
-          // `<https://…>` — the URL *is* the label. It had no branch at all, so it fell to the
-          // "wrapped link" rule below and its URL child got concealed along with the angle
-          // brackets: the whole link disappeared from the rendered document.
-          const url = urlChildOf(view, node);
-          push(node.from, node.to, url ? linkAnchor(url) : linkLabel);
-          return;
-        }
-        if (name === 'Image') {
-          // Obsidian-style reveal: caret on the source → fall through to
-          // the per-marker conceal handlers so the user sees the editable
-          // `![alt](url)` form. Off-cursor → replace with a rendered
-          // <img>/<video>/<audio> (the renderer picks the kind from the
-          // URL's file extension).
-          if (selectionTouchesRange(view, node.from, node.to)) {
-            return;
-          }
-          const text = view.state.sliceDoc(node.from, node.to);
-          const m = /^!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/.exec(text);
-          if (m) {
-            const docPath = view.state.facet(markdownDocPath);
-            push(
-              node.from,
-              node.to,
-              Decoration.replace({ widget: new MediaWidget(m[1], m[2], docPath) }),
-            );
-            return false;
-          }
-          return;
-        }
-
-        // ── Inline markers — scope = parent component ──────────────────
-        if (
-          name === 'EmphasisMark'      ||
-          name === 'StrikethroughMark' ||
-          name === 'LinkMark'          ||
-          name === 'LinkTitle'
-        ) {
-          const scope = parentRange(node) ?? lineSpan(view, node.from);
-          concealIfOff(view, push, node.from, node.to, scope);
-          return;
-        }
-        // The language a fence declares. Left visible — it is what the block IS — but drawn as a
-        // LABEL rather than as code: same size, same monospace and same colour as the lines
-        // under it made `dig` read as the program's first statement.
-        if (name === 'CodeInfo') {
-          push(node.from, node.to, codeLangMark);
-          return;
-        }
-        if (name === 'CodeMark') {
-          // Two parents possible: InlineCode (one-char ticks) and
-          // FencedCode (the ```fences```). Either way, scope = parent
-          // node so the entire code component reveals together.
-          const scope = parentRange(node) ?? lineSpan(view, node.from);
-          concealIfOff(view, push, node.from, node.to, scope);
-          return;
-        }
-        if (name === 'URL') {
-          const parent = node.node.parent;
-          const parentName = parent?.name;
-          const wrappedInLink =
-            parentName === 'Link' ||
-            parentName === 'Image' ||
-            parentName === 'Autolink';
-
-          if (!wrappedInLink) {
-            // GFM bare autolink — the parser emits a top-level URL node
-            // whose parent is the containing block (typically Paragraph).
-            // When the URL stands alone in its block and points to media
-            // (extension or known video CDN like
-            // github.com/user-attachments) we replace it with a real
-            // <img>/<video>/<audio>, matching GitHub README rendering.
-            // Otherwise we just paint it as an accent-coloured link.
-            const urlText = view.state.sliceDoc(node.from, node.to);
-            const aloneInBlock =
-              parent != null &&
-              view.state.sliceDoc(parent.from, parent.to).trim() === urlText;
-            if (
-              aloneInBlock &&
-              isProbablyMediaUrl(urlText) &&
-              !selectionTouchesRange(view, node.from, node.to)
-            ) {
-              const docPath = view.state.facet(markdownDocPath);
-              push(
-                node.from,
-                node.to,
-                Decoration.replace({ widget: new MediaWidget('', urlText, docPath) }),
-              );
-              return false;
-            }
-            push(node.from, node.to, isSafeHref(urlText) ? linkAnchor(urlText) : linkLabel);
-            return;
-          }
-
-          // Inside an `Autolink` the URL is not a target hidden behind a label — it is the text
-          // the reader sees. Concealing it leaves an empty line.
-          if (parentName === 'Autolink') return;
-
-          // Wrapped link/image: dim when cursor is inside the wrapper,
-          // fully conceal otherwise (off-component only the label shows).
-          const scope = { from: parent!.from, to: parent!.to };
-          if (selectionTouchesRange(view, scope.from, scope.to)) {
-            push(node.from, node.to, linkUrlDim);
-          } else {
-            push(node.from, node.to, concealMark);
-          }
-          return;
-        }
-
-        // ── Tables (GFM) ────────────────────────────────────────────────
-        // Obsidian-style hybrid rendering:
-        //   • selection outside the table  → replace the whole block with
-        //     a real <table> widget (rendered cells, header, alignment,
-        //     inline markdown inside each cell).
-        //   • selection inside the table   → fall back to source-mode
-        //     line styling so the user can edit the raw pipes.
-        if (name === 'Table') {
-          // The block-replace `<table>` widget lives in a StateField
-          // (CodeMirror forbids block decorations from plugins). Here we
-          // only paint source-mode line styling for when the caret sits
-          // inside the table; when it's outside we skip the children so
-          // no inline marks get emitted under the now-hidden range.
-          const inside = selectionTouchesRange(view, node.from, node.to);
-          if (!inside) return false;
-          const lines: { from: number; to: number }[] = [];
-          let scan = node.from;
-          while (scan <= node.to) {
-            const ln = view.state.doc.lineAt(scan);
-            lines.push({ from: ln.from, to: ln.to });
-            if (ln.to >= node.to) break;
-            scan = ln.to + 1;
-          }
-          for (let i = 0; i < lines.length; i++) {
-            const ln = lines[i];
-            const classes = ['cm-md-table-line'];
-            if (i === 0)                classes.push('cm-md-table-first', 'cm-md-table-header-line');
-            if (i === 1)                classes.push('cm-md-table-sep-line');
-            if (i === lines.length - 1) classes.push('cm-md-table-last');
-            push(ln.from, ln.from, lineDeco(classes.join(' ')));
-          }
-          // Children (TableDelimiter pipes) iterate below in source mode.
-          return;
-        }
-        if (name === 'TableDelimiter') {
-          // Only style the `|` pipes when the user is editing in source
-          // mode. When the table is rendered as a widget the replace
-          // decoration already hides them.
-          if (selectionTouchesRange(view, node.from, node.to)) {
-            push(node.from, node.to, tableDelimMark);
-          } else {
-            // Check if we're inside a Table that currently has a caret.
-            // The parent chain is TableHeader/TableRow → Table.
-            let p = node.node.parent;
-            while (p && p.name !== 'Table') p = p.parent;
-            if (p && selectionTouchesRange(view, p.from, p.to)) {
-              push(node.from, node.to, tableDelimMark);
-            }
-          }
-          return;
-        }
-
-        // ── List markers + task list checkboxes ─────────────────────────
-        if (name === 'ListMark') {
-          const parent = node.node.parent;
-          const grandparent = parent ? parent.parent : null;
-          const isOrdered = grandparent?.name === 'OrderedList';
-          if (isOrdered) {
-            push(node.from, node.to, orderedMarker);
-          } else {
-            // Reveal the raw `-` / `*` / `+` while the cursor is on the
-            // item's line; otherwise replace with a real bullet glyph.
-            const line = view.state.doc.lineAt(node.from);
-            if (selectionTouchesRange(view, line.from, line.to)) {
-              push(node.from, node.to, bulletMarker);
-            } else {
-              push(node.from, node.to, bulletReplace);
-            }
-          }
-          return;
-        }
-        if (name === 'TaskMarker') {
-          const text = view.state.sliceDoc(node.from, node.to);
-          const checked = /x/i.test(text);
-          push(node.from, node.to, checked ? taskChecked : taskUnchecked);
-          return;
-        }
-      },
-    });
-  }
-
+  const surface = documentSurface(view.state, entries);
+  const tree = syntaxTree(view.state);
+  for (const { from, to } of view.visibleRanges) decorateMarkdown(tree, surface, from, to);
   // `Decoration.set` with `sort=true` orders line vs mark decorations by
   // their `startSide` automatically — safer than a hand-rolled comparator
   // that has to cast through private fields.
   return Decoration.set(entries, true);
+}
+
+/**
+ * The live-preview decorations of a markdown tree, between `from` and `to` (tree coordinates),
+ * drawn on `s`. The inline half of the editor: block widgets (tables, diagrams) are
+ * {@link markdownBlocks}', because CodeMirror only takes those from a state field.
+ */
+export function decorateMarkdown(tree: Tree, s: MarkdownSurface, from = 0, to = s.length): void {
+  tree.iterate({
+    from, to,
+    enter: (node) => {
+      const name = node.name;
+
+      // ── ATX headings ────────────────────────────────────────────────
+      if (name.startsWith('ATXHeading')) {
+        const level = parseInt(name.slice('ATXHeading'.length), 10) || 1;
+        const firstLine = s.lineAt(node.from);
+        s.line(firstLine.from, headingLine(level));
+        return;
+      }
+
+      // ── Setext headings ────────────────────────────────────────────
+      if (name === 'SetextHeading1' || name === 'SetextHeading2') {
+        const level = name === 'SetextHeading1' ? 1 : 2;
+        let pos = node.from;
+        while (pos <= node.to) {
+          const line = s.lineAt(pos);
+          s.line(line.from, headingLine(level));
+          if (line.to >= node.to) break;
+          pos = line.to + 1;
+        }
+        return;
+      }
+
+      // ── Block-level markers — line-scoped conceal ─────────────────
+      if (name === 'HeaderMark') {
+        const scope = s.lineAt(node.from);
+        const end = Math.min(node.to + 1, s.length);
+        concealIfOff(s, node.from, end, scope);
+        return;
+      }
+      if (name === 'QuoteMark') {
+        const scope = s.lineAt(node.from);
+        const end = Math.min(node.to + 1, s.length);
+        concealIfOff(s, node.from, end, scope);
+        return;
+      }
+
+      // ── Blockquote line decoration (and GitHub alerts) ──────────────
+      if (name === 'Blockquote') {
+        decorateBlockquote(s, node);
+        return;
+      }
+
+      // ── Fenced + indented code blocks ───────────────────────────────
+      if (name === 'FencedCode') {
+        let pos = node.from;
+        while (pos <= node.to) {
+          const line = s.lineAt(pos);
+          s.line(line.from, codeBlockLine);
+          if (line.to >= node.to) break;
+          pos = line.to + 1;
+        }
+        highlightFencedCode(s, node);
+        return;
+      }
+      if (name === 'CodeBlock') {
+        let pos = node.from;
+        while (pos <= node.to) {
+          const line = s.lineAt(pos);
+          s.line(line.from, codeBlockLine);
+          if (line.to >= node.to) break;
+          pos = line.to + 1;
+        }
+        return;
+      }
+
+      // ── Horizontal rule ─────────────────────────────────────────────
+      if (name === 'HorizontalRule') {
+        const line = s.lineAt(node.from);
+        s.line(line.from, hrLine);
+        if (!s.touches(line.from, line.to)) {
+          s.inline(node.from, node.to, concealMark);
+        }
+        return;
+      }
+
+      // ── Inline composites ──────────────────────────────────────────
+      // The composite gets its rendering decoration (bold/italic/etc.).
+      // The marker children (EmphasisMark, CodeMark, LinkMark, URL, …)
+      // are concealed below only when the selection sits OUTSIDE the
+      // composite — that's the per-component reveal: editing
+      // `**bold**` shows its `**` without revealing the sibling
+      // `*italic*` markers on the same line.
+      if (name === 'StrongEmphasis') { s.inline(node.from, node.to, boldMark);   return; }
+      if (name === 'Emphasis')       { s.inline(node.from, node.to, italicMark); return; }
+      if (name === 'Strikethrough')  { s.inline(node.from, node.to, strikeMark); return; }
+      if (name === 'InlineCode')     { s.inline(node.from, node.to, inlineCode); return; }
+      if (name === 'Link') {
+        // An anchor whether or not the source is revealed: a plain click edits, so there is
+        // nothing to protect, and Cmd+click follows the link you are in the middle of writing.
+        const url = urlChildOf(s, node);
+        s.inline(node.from, node.to, url ? linkAnchor(url) : linkLabel);
+        return;
+      }
+      if (name === 'Autolink') {
+        // `<https://…>` — the URL *is* the label. It had no branch at all, so it fell to the
+        // "wrapped link" rule below and its URL child got concealed along with the angle
+        // brackets: the whole link disappeared from the rendered document.
+        const url = urlChildOf(s, node);
+        s.inline(node.from, node.to, url ? linkAnchor(url) : linkLabel);
+        return;
+      }
+      if (name === 'Image') {
+        // Obsidian-style reveal: caret on the source → fall through to
+        // the per-marker conceal handlers so the user sees the editable
+        // `![alt](url)` form. Off-cursor → replace with a rendered
+        // <img>/<video>/<audio> (the renderer picks the kind from the
+        // URL's file extension).
+        if (s.touches(node.from, node.to)) {
+          return;
+        }
+        const text = s.slice(node.from, node.to);
+        const m = /^!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/.exec(text);
+        if (m) {
+          const docPath = s.state.facet(markdownDocPath);
+          s.inline(
+            node.from,
+            node.to,
+            Decoration.replace({ widget: new MediaWidget(m[1], m[2], docPath) }),
+          );
+          return false;
+        }
+        return;
+      }
+
+      // ── Inline markers — scope = parent component ──────────────────
+      if (
+        name === 'EmphasisMark'      ||
+        name === 'StrikethroughMark' ||
+        name === 'LinkMark'          ||
+        name === 'LinkTitle'
+      ) {
+        const scope = parentRange(node) ?? s.lineAt(node.from);
+        concealIfOff(s, node.from, node.to, scope);
+        return;
+      }
+      // The language a fence declares. Left visible — it is what the block IS — but drawn as a
+      // LABEL rather than as code: same size, same monospace and same colour as the lines
+      // under it made `dig` read as the program's first statement.
+      if (name === 'CodeInfo') {
+        s.inline(node.from, node.to, codeLangMark);
+        return;
+      }
+      if (name === 'CodeMark') {
+        // Two parents possible: InlineCode (one-char ticks) and
+        // FencedCode (the ```fences```). Either way, scope = parent
+        // node so the entire code component reveals together.
+        const scope = parentRange(node) ?? s.lineAt(node.from);
+        concealIfOff(s, node.from, node.to, scope);
+        return;
+      }
+      if (name === 'URL') {
+        const parent = node.node.parent;
+        const parentName = parent?.name;
+        const wrappedInLink =
+          parentName === 'Link' ||
+          parentName === 'Image' ||
+          parentName === 'Autolink';
+
+        if (!wrappedInLink) {
+          // GFM bare autolink — the parser emits a top-level URL node
+          // whose parent is the containing block (typically Paragraph).
+          // When the URL stands alone in its block and points to media
+          // (extension or known video CDN like
+          // github.com/user-attachments) we replace it with a real
+          // <img>/<video>/<audio>, matching GitHub README rendering.
+          // Otherwise we just paint it as an accent-coloured link.
+          const urlText = s.slice(node.from, node.to);
+          const aloneInBlock =
+            parent != null &&
+            s.slice(parent.from, parent.to).trim() === urlText;
+          if (
+            aloneInBlock &&
+            isProbablyMediaUrl(urlText) &&
+            !s.touches(node.from, node.to)
+          ) {
+            const docPath = s.state.facet(markdownDocPath);
+            s.inline(
+              node.from,
+              node.to,
+              Decoration.replace({ widget: new MediaWidget('', urlText, docPath) }),
+            );
+            return false;
+          }
+          s.inline(node.from, node.to, isSafeHref(urlText) ? linkAnchor(urlText) : linkLabel);
+          return;
+        }
+
+        // Inside an `Autolink` the URL is not a target hidden behind a label — it is the text
+        // the reader sees. Concealing it leaves an empty line.
+        if (parentName === 'Autolink') return;
+
+        // Wrapped link/image: dim when cursor is inside the wrapper,
+        // fully conceal otherwise (off-component only the label shows).
+        const scope = { from: parent!.from, to: parent!.to };
+        if (s.touches(scope.from, scope.to)) {
+          s.inline(node.from, node.to, linkUrlDim);
+        } else {
+          s.inline(node.from, node.to, concealMark);
+        }
+        return;
+      }
+
+      // ── Tables (GFM) ────────────────────────────────────────────────
+      // Obsidian-style hybrid rendering:
+      //   • selection outside the table  → replace the whole block with
+      //     a real <table> widget (rendered cells, header, alignment,
+      //     inline markdown inside each cell).
+      //   • selection inside the table   → fall back to source-mode
+      //     line styling so the user can edit the raw pipes.
+      if (name === 'Table') {
+        // The block-replace `<table>` widget lives in a StateField
+        // (CodeMirror forbids block decorations from plugins). Here we
+        // only paint source-mode line styling for when the caret sits
+        // inside the table; when it's outside we skip the children so
+        // no inline marks get emitted under the now-hidden range.
+        const inside = s.touches(node.from, node.to);
+        if (!inside) return false;
+        const lines: { from: number; to: number }[] = [];
+        let scan = node.from;
+        while (scan <= node.to) {
+          const ln = s.lineAt(scan);
+          lines.push({ from: ln.from, to: ln.to });
+          if (ln.to >= node.to) break;
+          scan = ln.to + 1;
+        }
+        for (let i = 0; i < lines.length; i++) {
+          const ln = lines[i];
+          const classes = ['cm-md-table-line'];
+          if (i === 0)                classes.push('cm-md-table-first', 'cm-md-table-header-line');
+          if (i === 1)                classes.push('cm-md-table-sep-line');
+          if (i === lines.length - 1) classes.push('cm-md-table-last');
+          s.line(ln.from, lineDeco(classes.join(' ')));
+        }
+        // Children (TableDelimiter pipes) iterate below in source mode.
+        return;
+      }
+      if (name === 'TableDelimiter') {
+        // Only style the `|` pipes when the user is editing in source
+        // mode. When the table is rendered as a widget the replace
+        // decoration already hides them.
+        if (s.touches(node.from, node.to)) {
+          s.inline(node.from, node.to, tableDelimMark);
+        } else {
+          // Check if we're inside a Table that currently has a caret.
+          // The parent chain is TableHeader/TableRow → Table.
+          let p = node.node.parent;
+          while (p && p.name !== 'Table') p = p.parent;
+          if (p && s.touches(p.from, p.to)) {
+            s.inline(node.from, node.to, tableDelimMark);
+          }
+        }
+        return;
+      }
+
+      // ── List markers + task list checkboxes ─────────────────────────
+      if (name === 'ListMark') {
+        const parent = node.node.parent;
+        const grandparent = parent ? parent.parent : null;
+        const isOrdered = grandparent?.name === 'OrderedList';
+        if (isOrdered) {
+          s.inline(node.from, node.to, orderedMarker);
+        } else {
+          // Reveal the raw `-` / `*` / `+` while the cursor is on the
+          // item's line; otherwise replace with a real bullet glyph.
+          const line = s.lineAt(node.from);
+          if (s.touches(line.from, line.to)) {
+            s.inline(node.from, node.to, bulletMarker);
+          } else {
+            s.inline(node.from, node.to, bulletReplace);
+          }
+        }
+        return;
+      }
+      if (name === 'TaskMarker') {
+        const text = s.slice(node.from, node.to);
+        const checked = /x/i.test(text);
+        s.inline(node.from, node.to, checked ? taskChecked : taskUnchecked);
+        return;
+      }
+    },
+  });
 }
 
 const livePreview = ViewPlugin.fromClass(
@@ -2209,14 +2289,6 @@ const livePreview = ViewPlugin.fromClass(
 // StateField that recomputes on every doc/selection change and renders
 // each `Table` node as a real `<table>` block whenever the caret sits
 // outside its range.
-
-function selectionTouches(state: EditorState, from: number, to: number): boolean {
-  for (const r of state.selection.ranges) {
-    if (r.to < from || r.from > to) continue;
-    return true;
-  }
-  return false;
-}
 
 // ─── Mermaid ────────────────────────────────────────────────────────────
 //
@@ -2286,65 +2358,58 @@ class MermaidWidget extends WidgetType {
 }
 
 /** The language a fence declares (`\`\`\`mermaid`), lower-cased, or `''`. */
-function fenceInfo(state: EditorState, node: SyntaxNodeRef): string {
+function fenceInfo(s: MarkdownSurface, node: SyntaxNodeRef): string {
   const cur = node.node.cursor();
   if (!cur.firstChild()) return '';
   do {
-    if (cur.name === 'CodeInfo') return state.sliceDoc(cur.from, cur.to).trim().toLowerCase();
+    if (cur.name === 'CodeInfo') return s.slice(cur.from, cur.to).trim().toLowerCase();
   } while (cur.nextSibling());
   return '';
 }
 
 /** The diagram source inside a fence — its `CodeText` children, without the ``` lines. */
-function mermaidBodyOf(state: EditorState, node: SyntaxNodeRef): string {
+function mermaidBodyOf(s: MarkdownSurface, node: SyntaxNodeRef): string {
   const cur = node.node.cursor();
   if (!cur.firstChild()) return '';
   let out = '';
   do {
-    if (cur.name === 'CodeText') out += state.sliceDoc(cur.from, cur.to);
+    if (cur.name === 'CodeText') out += s.slice(cur.from, cur.to);
   } while (cur.nextSibling());
   return out;
 }
 
 function buildTableBlocks(state: EditorState): DecorationSet {
   const entries: Range<Decoration>[] = [];
-  const docPath = state.facet(markdownDocPath);
-  syntaxTree(state).iterate({
+  markdownBlocks(syntaxTree(state), documentSurface(state, entries));
+  return Decoration.set(entries, true);
+}
+
+/** The block widgets of a markdown tree — tables and diagrams — drawn on `s`. */
+export function markdownBlocks(tree: Tree, s: MarkdownSurface): void {
+  const docPath = s.state.facet(markdownDocPath);
+  tree.iterate({
     enter: (node) => {
       if (node.name === 'Table') {
-        // No `selectionTouches` gate any more: a table stays a table with the caret in it, and
-        // the cell you are in is the only thing that shows its markdown (see `TableWidget`).
-        // The old behaviour — the whole grid collapsing into pipes because you clicked a word —
-        // is what this replaced.
-        const text = state.sliceDoc(node.from, node.to);
-        entries.push(
-          Decoration.replace({
-            widget: new TableWidget(text, docPath),
-            block: true,
-          }).range(node.from, node.to),
-        );
+        // No `touches` gate any more: a table stays a table with the caret in it, and the cell
+        // you are in is the only thing that shows its markdown (see `TableWidget`). The old
+        // behaviour — the whole grid collapsing into pipes because you clicked a word — is what
+        // this replaced.
+        const text = s.slice(node.from, node.to);
+        s.block(node.from, node.to, new TableWidget(text, docPath, s.embedding));
         return false; // never descend — children are hidden under the block widget
       }
       // A ```mermaid fence, drawn rather than printed. Same rule as the table above it: the
       // caret inside shows the source, and the block is never descended into (the syntax
       // highlighting under a picture would be work spent on nothing).
-      if (node.name === 'FencedCode' && fenceInfo(state, node) === 'mermaid') {
-        if (!selectionTouches(state, node.from, node.to)) {
-          const body = mermaidBodyOf(state, node);
-          if (body.trim()) {
-            entries.push(
-              Decoration.replace({
-                widget: new MermaidWidget(body),
-                block: true,
-              }).range(node.from, node.to),
-            );
-          }
+      if (node.name === 'FencedCode' && fenceInfo(s, node) === 'mermaid') {
+        if (!s.touches(node.from, node.to)) {
+          const body = mermaidBodyOf(s, node);
+          if (body.trim()) s.block(node.from, node.to, new MermaidWidget(body));
         }
         return false;
       }
     },
   });
-  return Decoration.set(entries, true);
 }
 
 const tableBlockField = StateField.define<DecorationSet>({
@@ -2371,495 +2436,512 @@ const tableBlockField = StateField.define<DecorationSet>({
 
 // ─── Theme ──────────────────────────────────────────────────────────────
 
-export const markdownTheme = EditorView.theme(
-  {
-    '&': {
-      height: '100%',
-      backgroundColor: 'var(--bg-base)',
-      color: 'var(--text-primary)',
-      fontFamily: 'var(--font-ui-sans)',
-      fontSize: '14px',
-    },
-    '&.cm-focused': { outline: 'none' },
-    '.cm-scroller': {
-      fontFamily: 'var(--font-ui-sans)',
-      lineHeight: '1.65',
-      overflow: 'auto',
-    },
-    // No `max-width` / `margin: 0 auto` here on purpose — that would create
-    // two empty side gutters inside the scroller that wouldn't map back to
-    // any `.cm-line`, so clicks in them go to dead space (you'd have to
-    // aim exactly at the text). Padding gives breathing room while keeping
-    // the whole content area click-active.
-    '.cm-content': {
-      padding: '24px 48px 48px 48px',
-      caretColor: 'var(--text-primary)',
-    },
-    // Keep each line a clean box: no per-line padding (line decorations
-    // add their own padding where needed). This makes CodeMirror's
-    // click-to-position hit-testing predictable, especially when line
-    // wrapping is on.
-    '.cm-line': { padding: '0' },
-    '.cm-selectionBackground, .cm-content ::selection': {
-      backgroundColor: 'var(--accent-subtle) !important',
-    },
-    '&.cm-focused .cm-selectionBackground': {
-      backgroundColor: 'var(--accent-subtle) !important',
-    },
-    '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text-primary)' },
-
-    // ── Headings ──────────────────────────────────────────────────────
-    // IMPORTANT: keep all spacing as padding (not margin) on line
-    // decorations. CodeMirror's hit-testing maps clicks to the `.cm-line`
-    // bounding box; `margin` shifts the rendered text outside that box
-    // and the gap becomes a dead zone (click lands "above the line" and
-    // the cursor goes to the wrong row). Padding keeps the spacing
-    // inside the line's own box so hit-testing stays accurate, especially
-    // with line wrapping where any vertical misalignment compounds.
-    '.cm-md-h1': {
-      fontSize: '1.85em', fontWeight: '700', lineHeight: '1.35',
-      paddingTop: '0.4em', paddingBottom: '0.25em',
-      color: 'var(--text-primary)',
-      borderBottom: '1px solid var(--border-subtle)',
-    },
-    '.cm-md-h2': {
-      fontSize: '1.5em', fontWeight: '700', lineHeight: '1.4',
-      paddingTop: '0.5em', paddingBottom: '0.2em',
-      color: 'var(--text-primary)',
-      borderBottom: '1px solid var(--border-subtle)',
-    },
-    '.cm-md-h3': {
-      fontSize: '1.25em', fontWeight: '700', lineHeight: '1.45',
-      paddingTop: '0.4em',
-      color: 'var(--text-primary)',
-    },
-    '.cm-md-h4': { fontSize: '1.1em',  fontWeight: '700', lineHeight: '1.5',  color: 'var(--text-primary)' },
-    '.cm-md-h5': { fontSize: '1em',    fontWeight: '700', lineHeight: '1.55', color: 'var(--text-secondary)' },
-    '.cm-md-h6': { fontSize: '0.95em', fontWeight: '700', lineHeight: '1.55', color: 'var(--text-muted)' },
-
-    // ── Marks ─────────────────────────────────────────────────────────
-    '.cm-md-conceal': { display: 'none' },
-    '.cm-md-bold':    { fontWeight: '700', color: 'var(--text-primary)' },
-    '.cm-md-italic':  { fontStyle: 'italic' },
-    '.cm-md-strike':  { textDecoration: 'line-through', color: 'var(--text-muted)' },
-    '.cm-md-inline-code': {
-      fontFamily: 'var(--font-code)',
-      fontSize: '0.92em',
-      background: 'var(--bg-overlay)',
-      border: '1px solid var(--border-subtle)',
-      borderRadius: '4px',
-      padding: '0 4px',
-      color: 'var(--syntax-string, var(--text-primary))',
-    },
-
-    // ── Block decorations ─────────────────────────────────────────────
-    '.cm-md-blockquote': {
-      borderLeft: '3px solid var(--accent)',
-      paddingLeft: '12px',
-      color: 'var(--text-secondary)',
-      fontStyle: 'italic',
-      background: 'rgba(77,120,204,0.04)',
-    },
-    // ── GitHub alerts ────────────────────────────────────────────────
-    //
-    // A band, not a quotation: the left rule is the kind's colour, the ground is a wash of it,
-    // and the text keeps its ordinary weight and slant — an alert is a thing to READ, and a box
-    // of italics is a box people skip. `--md-callout` is set per kind below, so every rule here
-    // is written once.
-    '.cm-md-callout': {
-      borderLeft: '3px solid var(--md-callout)',
-      paddingLeft: '12px',
-      background: 'color-mix(in srgb, var(--md-callout) 9%, transparent)',
-      color: 'var(--text-primary)',
-    },
-    '.cm-md-callout-head': {
-      paddingTop: '2px',
-      fontWeight: '600',
-    },
-    '.cm-md-callout-note':      { '--md-callout': 'var(--info, #4d9be6)' },
-    '.cm-md-callout-tip':       { '--md-callout': 'var(--success, #6a9956)' },
-    // Purple, as GitHub draws it — and as a *third* colour, which is the point: note is blue
-    // and the accent is blue too in most themes, so borrowing it here would make the two kinds
-    // that mean the least alike look identical.
-    '.cm-md-callout-important': { '--md-callout': 'var(--syntax-constant, #9876aa)' },
-    '.cm-md-callout-warning':   { '--md-callout': 'var(--warning, #ffc44d)' },
-    '.cm-md-callout-caution':   { '--md-callout': 'var(--error, #e05252)' },
-    '.cm-md-callout-question':  { '--md-callout': 'var(--syntax-type, #4d9be6)' },
-    '.cm-md-callout-example':   { '--md-callout': 'var(--accent)' },
-    // A quotation IS the plain blockquote, dressed as a callout because that is how it was
-    // written: muted, and the only kind that keeps the italics.
-    '.cm-md-callout-quote':     { '--md-callout': 'var(--text-muted)', fontStyle: 'italic' },
-    // The badge that stands in for `[!WARNING]`.
-    '.cm-md-callout-badge': {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '6px',
-      color: 'var(--md-callout)',
-      fontWeight: '700',
-      letterSpacing: '0.01em',
-    },
-    '.cm-md-callout-badge svg': {
-      width: '15px',
-      height: '15px',
-      flex: 'none',
-    },
-    // A rendered diagram. Centred and given room, because it is a figure rather than a line of
-    // text — and on its own ground, so a diagram whose own background is transparent does not
-    // pick up the tint of the code block it replaced.
-    '.cm-md-mermaid': {
-      display: 'flex',
-      justifyContent: 'center',
-      padding: '12px 0',
-      overflowX: 'auto',
-    },
-    '.cm-md-mermaid svg': { maxWidth: '100%', height: 'auto' },
-    // A diagram that does not parse says why, in mermaid's own words, where the picture would
-    // have been — the source is one click away (put the caret in it) and the message names the
-    // line it stopped at.
-    '.cm-md-mermaid-error': {
-      display: 'block',
-      whiteSpace: 'pre-wrap',
-      fontFamily: 'var(--font-code)',
-      fontSize: '0.9em',
-      color: 'var(--error)',
-      background: 'color-mix(in srgb, var(--error) 8%, transparent)',
-      border: '1px solid color-mix(in srgb, var(--error) 35%, transparent)',
-      borderRadius: 'var(--radius-sm)',
-      padding: '10px 12px',
-    },
-    // The fence's language word: a caption on the block, not a line of it.
-    // ── The editable table ───────────────────────────────────────────
-    // A cell you can type in has to look like one: a focus ring that says where you are, and a
-    // hover that says the whole grid is live rather than a picture of one.
-    '.cm-md-rendered-table td, .cm-md-rendered-table th': { outline: 'none' },
-    '.cm-md-rendered-table td:hover, .cm-md-rendered-table th:hover': {
-      background: 'color-mix(in srgb, var(--accent) 7%, transparent)',
-    },
-    '.cm-md-rendered-table td:focus, .cm-md-rendered-table th:focus': {
-      background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
-      boxShadow: 'inset 0 0 0 2px var(--accent)',
-      // The focused cell shows its own source, which is code — and reads as code.
-      fontFamily: 'var(--font-code)',
-      fontSize: '0.92em',
-    },
-    // The structural controls. Out of the way until the table is used: a toolbar under every
-    // table in a long document would be a row of buttons every few paragraphs.
-    '.cm-md-table-tools': {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '2px',
-      padding: '3px 0 0',
-      opacity: '0',
-      transition: 'opacity var(--transition-fast, 120ms)',
-    },
-    '.cm-md-rendered-table-wrap:hover .cm-md-table-tools, .cm-md-rendered-table-wrap:focus-within .cm-md-table-tools': {
-      opacity: '1',
-    },
-    '.cm-md-table-tool': {
-      font: 'inherit',
-      fontSize: 'var(--font-size-2xs)',
-      lineHeight: '1',
-      padding: '3px 7px',
-      color: 'var(--text-muted)',
-      background: 'transparent',
-      border: '1px solid transparent',
-      borderRadius: 'var(--radius-sm)',
-      cursor: 'pointer',
-    },
-    '.cm-md-table-tool:hover': {
-      color: 'var(--text-primary)',
-      background: 'var(--bg-hover)',
-      borderColor: 'var(--border-subtle)',
-    },
-    '.cm-md-table-sep': {
-      width: '1px',
-      height: '13px',
-      margin: '0 4px',
-      background: 'var(--border-subtle)',
-    },
-    '.cm-md-code-lang': {
-      fontFamily: 'var(--font-ui-sans)',
-      fontSize: '0.78em',
-      fontStyle: 'italic',
-      letterSpacing: '0.03em',
-      color: 'var(--text-faint)',
-    },
-    '.cm-md-codeblock-line': {
-      fontFamily: 'var(--font-code)',
-      fontSize: '0.92em',
-      background: 'var(--bg-overlay)',
-      paddingLeft: '14px !important',
-      paddingRight: '14px !important',
-    },
-    '.cm-md-hr': {
-      borderBottom: '1px solid var(--border-subtle)',
-      paddingTop: '0.4em',
-      paddingBottom: '0.4em',
-    },
-
-    // ── Links ─────────────────────────────────────────────────────────
-    '.cm-md-link-label': { color: 'var(--accent)', textDecoration: 'underline', textUnderlineOffset: '2px' },
-    '.cm-content a[href]': { color: 'var(--accent)' },
-    // The hand and the underline appear only while the key that would follow the link is held —
-    // a pointer over text you are editing promises a jump that a plain click does not make.
-    '&.cm-md-follow .cm-content a[href]': { cursor: 'pointer' },
-    '&.cm-md-follow .cm-content a[href]:hover': {
-      textDecoration: 'underline',
-      textUnderlineOffset: '2px',
-      textDecorationThickness: '2px',
-    },
-    '.cm-md-link-url':   { color: 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.85em' },
-
-    // ── Lists ─────────────────────────────────────────────────────────
-    '.cm-md-list-marker': { color: 'var(--accent)', fontWeight: '600' },
-    '.cm-md-list-marker-bullet': {
-      // When the raw `-`/`*`/`+` is shown (cursor on that line) we still
-      // want it muted enough not to compete with the text — Obsidian dims
-      // the source marker on the active line so the typography stays
-      // calm.
-      color: 'var(--text-muted)',
-      fontWeight: '500',
-    },
-    '.cm-md-list-marker-ordered': {
-      // Slight monospace tabular feel so multi-digit numerators (10., 11.)
-      // align with single-digit ones.
-      fontVariantNumeric: 'tabular-nums',
-      color: 'var(--accent)',
-      fontWeight: '600',
-    },
-    '.cm-md-bullet-glyph': {
-      color: 'var(--accent)',
-      fontWeight: '700',
-      fontSize: '1.15em',
-      lineHeight: '1',
-      display: 'inline-block',
-      // The replaced range is exactly the marker char (1 col). Keep the
-      // glyph the same advance so caret positioning around it stays
-      // predictable.
-      width: '1ch',
-      textAlign: 'center',
-      transform: 'translateY(-0.05em)',
-    },
-
-    // ── Tables (GFM) ──────────────────────────────────────────────────
-    // Each table line gets `cm-md-table-line`. Role-specific classes layer
-    // on top: header (bold + tinted bg), separator (thin divider, dimmed
-    // dashes), first/last (rounded corners + outer border).
-    '.cm-md-table-line': {
-      fontFamily: 'var(--font-code)',
-      fontSize: '0.92em',
-      background: 'var(--bg-overlay)',
-      paddingLeft: '14px !important',
-      paddingRight: '14px !important',
-      lineHeight: '1.7',
-      borderLeft: '1px solid var(--border-subtle)',
-      borderRight: '1px solid var(--border-subtle)',
-    },
-    '.cm-md-table-first': {
-      paddingTop: '6px !important',
-      borderTop: '1px solid var(--border-subtle)',
-      borderTopLeftRadius: 'var(--radius-md, 6px)',
-      borderTopRightRadius: 'var(--radius-md, 6px)',
-    },
-    '.cm-md-table-last': {
-      paddingBottom: '6px !important',
-      borderBottom: '1px solid var(--border-subtle)',
-      borderBottomLeftRadius: 'var(--radius-md, 6px)',
-      borderBottomRightRadius: 'var(--radius-md, 6px)',
-    },
-    '.cm-md-table-header-line': {
-      fontWeight: '700',
-      color: 'var(--text-primary)',
-      background: 'var(--bg-overlay-strong, var(--bg-overlay))',
-      borderBottom: '1px solid var(--border-default, var(--border-subtle))',
-    },
-    '.cm-md-table-sep-line': {
-      color: 'var(--text-muted)',
-      fontSize: '0.78em',
-      lineHeight: '1',
-      paddingTop: '2px !important',
-      paddingBottom: '2px !important',
-      borderBottom: '1px solid var(--border-default, var(--border-subtle))',
-      letterSpacing: '0.05em',
-    },
-    '.cm-md-table-delim': {
-      color: 'var(--accent)',
-      opacity: '0.55',
-      fontWeight: '600',
-    },
-
-    // ── The table widget ─────────────────────────────────────────────
-    //
-    // ⚠️⚠️ **PADDING, never MARGIN, on a block widget's root.** CodeMirror measures a widget by
-    // its box, and a margin is outside the box: 10px top and bottom meant the table occupied 20
-    // more pixels on screen than the height map believed, so every line BELOW it was drawn about
-    // one line lower than CodeMirror thought it was. Reported as "to put the caret on a line I
-    // have to click the one above" — a symptom that names neither tables nor margins, which is
-    // why it survived two wrong guesses (a stale measure, then an async resize).
-    //
-    // The border and the background move onto an inner box so the padding does not draw as a
-    // 10px-taller frame around the table.
-    '.cm-md-rendered-table-wrap': {
-      padding: '10px 0',
-    },
-    '.cm-md-rendered-table-box': {
-      border: '1px solid var(--border-default, var(--border-subtle))',
-      borderRadius: 'var(--radius-md, 6px)',
-      overflow: 'hidden',
-      background: 'var(--bg-base)',
-    },
-    '.cm-md-rendered-table': {
-      borderCollapse: 'collapse',
-      width: '100%',
-      fontFamily: 'var(--font-ui-sans)',
-      fontSize: '0.95em',
-      lineHeight: '1.55',
-    },
-    '.cm-md-rendered-table th, .cm-md-rendered-table td': {
-      padding: '7px 12px',
-      borderRight: '1px solid var(--border-subtle)',
-      borderBottom: '1px solid var(--border-subtle)',
-      textAlign: 'left',
-      verticalAlign: 'top',
-      color: 'var(--text-primary)',
-    },
-    '.cm-md-rendered-table th:last-child, .cm-md-rendered-table td:last-child': {
-      borderRight: 'none',
-    },
-    '.cm-md-rendered-table tr:last-child td': {
-      borderBottom: 'none',
-    },
-    '.cm-md-rendered-table thead th': {
-      background: 'var(--bg-overlay)',
-      fontWeight: '700',
-      color: 'var(--text-primary)',
-      borderBottom: '1px solid var(--border-default, var(--border-subtle))',
-    },
-    '.cm-md-rendered-table tbody tr:nth-child(even) td': {
-      background: 'rgba(255,255,255,0.02)',
-    },
-    '.cm-md-rendered-table code': {
-      fontFamily: 'var(--font-code)',
-      fontSize: '0.9em',
-      background: 'var(--bg-overlay)',
-      border: '1px solid var(--border-subtle)',
-      borderRadius: '4px',
-      padding: '0 4px',
-      color: 'var(--syntax-string, var(--text-primary))',
-    },
-    '.cm-md-rendered-table a': {
-      color: 'var(--accent)',
-      textDecoration: 'underline',
-      textUnderlineOffset: '2px',
-    },
-    '.cm-md-rendered-table strong': { fontWeight: '700', color: 'var(--text-primary)' },
-    '.cm-md-rendered-table em':     { fontStyle: 'italic' },
-    '.cm-md-rendered-table s':      { textDecoration: 'line-through', color: 'var(--text-muted)' },
-
-    // Inline images (rendered tables + future inline image support).
-    // `max-height` keeps oversized assets from blowing up a single cell;
-    // `object-fit: contain` preserves aspect ratio. Falls back to a muted
-    // `![alt]` chip when the URL can't be loaded.
-    '.cm-md-rendered-image': {
-      maxWidth: '100%',
-      maxHeight: '220px',
-      objectFit: 'contain',
-      display: 'inline-block',
-      verticalAlign: 'middle',
-      borderRadius: '4px',
-      background: 'var(--bg-overlay)',
-    },
-    '.cm-md-rendered-video': {
-      maxWidth: '100%',
-      maxHeight: '360px',
-      display: 'block',
-      borderRadius: '4px',
-      background: '#000',
-      outline: 'none',
-    },
-    '.cm-md-rendered-audio': {
-      width: '100%',
-      maxWidth: '420px',
-      display: 'block',
-    },
-    '.cm-md-broken-image': {
-      fontStyle: 'italic',
-      color: 'var(--text-muted)',
-      fontFamily: 'var(--font-code)',
-      fontSize: '0.9em',
-    },
-
-    // ── External-media card (fallback when inline playback fails) ────
-    '.cm-md-external-media-card': {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '12px',
-      padding: '10px 14px',
-      margin: '6px 0',
-      maxWidth: '100%',
-      background: 'var(--bg-overlay)',
-      border: '1px solid var(--border-subtle)',
-      borderRadius: 'var(--radius-md, 6px)',
-      color: 'var(--text-primary)',
-      textDecoration: 'none',
-      cursor: 'pointer',
-      transition: 'background 120ms, border-color 120ms',
-    },
-    '.cm-md-external-media-card:hover': {
-      background: 'var(--bg-overlay-strong, var(--bg-overlay))',
-      borderColor: 'var(--accent)',
-      textDecoration: 'none',
-    },
-    '.cm-md-external-media-icon': {
-      flex: '0 0 auto',
-      width: '32px',
-      height: '32px',
-      borderRadius: '50%',
-      background: 'var(--accent)',
-      color: 'var(--accent-fg, #fff)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontSize: '14px',
-      paddingLeft: '2px', // optical centering for the play triangle
-    },
-    '.cm-md-external-media-labels': {
-      flex: '1 1 auto',
-      display: 'flex',
-      flexDirection: 'column',
-      minWidth: '0',
-    },
-    '.cm-md-external-media-title': {
-      fontWeight: '600',
-      color: 'var(--text-primary)',
-      fontSize: '0.95em',
-    },
-    '.cm-md-external-media-sub': {
-      color: 'var(--text-muted)',
-      fontSize: '0.8em',
-      fontFamily: 'var(--font-code)',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap',
-    },
-    '.cm-md-external-media-arrow': {
-      flex: '0 0 auto',
-      color: 'var(--text-muted)',
-      fontSize: '1.1em',
-    },
-
-    // ── Task list checkboxes ──────────────────────────────────────────
-    '.cm-md-task-unchecked': {
-      color: 'var(--text-muted)',
-      fontFamily: 'var(--font-code)',
-    },
-    '.cm-md-task-checked': {
-      color: 'var(--success, #6a9956)',
-      fontFamily: 'var(--font-code)',
-    },
+/**
+ * How a markdown document looks as a page: the prose font, the margins, the caret. Only a `.md`
+ * editor wants this — a code editor that renders its comments as markdown keeps its own.
+ */
+const MARKDOWN_DOCUMENT_SPEC = {
+  '&': {
+    height: '100%',
+    backgroundColor: 'var(--bg-base)',
+    color: 'var(--text-primary)',
+    fontFamily: 'var(--font-ui-sans)',
+    fontSize: '14px',
   },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-scroller': {
+    fontFamily: 'var(--font-ui-sans)',
+    lineHeight: '1.65',
+    overflow: 'auto',
+  },
+  // No `max-width` / `margin: 0 auto` here on purpose — that would create
+  // two empty side gutters inside the scroller that wouldn't map back to
+  // any `.cm-line`, so clicks in them go to dead space (you'd have to
+  // aim exactly at the text). Padding gives breathing room while keeping
+  // the whole content area click-active.
+  '.cm-content': {
+    padding: '24px 48px 48px 48px',
+    caretColor: 'var(--text-primary)',
+  },
+  // Keep each line a clean box: no per-line padding (line decorations
+  // add their own padding where needed). This makes CodeMirror's
+  // click-to-position hit-testing predictable, especially when line
+  // wrapping is on.
+  '.cm-line': { padding: '0' },
+  '.cm-selectionBackground, .cm-content ::selection': {
+    backgroundColor: 'var(--accent-subtle) !important',
+  },
+  '&.cm-focused .cm-selectionBackground': {
+    backgroundColor: 'var(--accent-subtle) !important',
+  },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text-primary)' },
+
+};
+
+/**
+ * How the rendered markdown elements look — headings, marks, callouts, tables, lists. Shared by
+ * the markdown editor and by every surface that draws markdown inside another document (see
+ * `utils/comment-markdown.ts`), so the two cannot drift.
+ */
+const MARKDOWN_ELEMENT_SPEC = {
+  // ── Headings ──────────────────────────────────────────────────────
+  // IMPORTANT: keep all spacing as padding (not margin) on line
+  // decorations. CodeMirror's hit-testing maps clicks to the `.cm-line`
+  // bounding box; `margin` shifts the rendered text outside that box
+  // and the gap becomes a dead zone (click lands "above the line" and
+  // the cursor goes to the wrong row). Padding keeps the spacing
+  // inside the line's own box so hit-testing stays accurate, especially
+  // with line wrapping where any vertical misalignment compounds.
+  '.cm-md-h1': {
+    fontSize: '1.85em', fontWeight: '700', lineHeight: '1.35',
+    paddingTop: '0.4em', paddingBottom: '0.25em',
+    color: 'var(--text-primary)',
+    borderBottom: '1px solid var(--border-subtle)',
+  },
+  '.cm-md-h2': {
+    fontSize: '1.5em', fontWeight: '700', lineHeight: '1.4',
+    paddingTop: '0.5em', paddingBottom: '0.2em',
+    color: 'var(--text-primary)',
+    borderBottom: '1px solid var(--border-subtle)',
+  },
+  '.cm-md-h3': {
+    fontSize: '1.25em', fontWeight: '700', lineHeight: '1.45',
+    paddingTop: '0.4em',
+    color: 'var(--text-primary)',
+  },
+  '.cm-md-h4': { fontSize: '1.1em',  fontWeight: '700', lineHeight: '1.5',  color: 'var(--text-primary)' },
+  '.cm-md-h5': { fontSize: '1em',    fontWeight: '700', lineHeight: '1.55', color: 'var(--text-secondary)' },
+  '.cm-md-h6': { fontSize: '0.95em', fontWeight: '700', lineHeight: '1.55', color: 'var(--text-muted)' },
+
+  // ── Marks ─────────────────────────────────────────────────────────
+  '.cm-md-conceal': { display: 'none' },
+  '.cm-md-bold':    { fontWeight: '700', color: 'var(--text-primary)' },
+  '.cm-md-italic':  { fontStyle: 'italic' },
+  '.cm-md-strike':  { textDecoration: 'line-through', color: 'var(--text-muted)' },
+  '.cm-md-inline-code': {
+    fontFamily: 'var(--font-code)',
+    fontSize: '0.92em',
+    background: 'var(--bg-overlay)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: '4px',
+    padding: '0 4px',
+    color: 'var(--syntax-string, var(--text-primary))',
+  },
+
+  // ── Block decorations ─────────────────────────────────────────────
+  '.cm-md-blockquote': {
+    borderLeft: '3px solid var(--accent)',
+    paddingLeft: '12px',
+    color: 'var(--text-secondary)',
+    fontStyle: 'italic',
+    background: 'rgba(77,120,204,0.04)',
+  },
+  // ── GitHub alerts ────────────────────────────────────────────────
+  //
+  // A band, not a quotation: the left rule is the kind's colour, the ground is a wash of it,
+  // and the text keeps its ordinary weight and slant — an alert is a thing to READ, and a box
+  // of italics is a box people skip. `--md-callout` is set per kind below, so every rule here
+  // is written once.
+  '.cm-md-callout': {
+    borderLeft: '3px solid var(--md-callout)',
+    paddingLeft: '12px',
+    background: 'color-mix(in srgb, var(--md-callout) 9%, transparent)',
+    color: 'var(--text-primary)',
+  },
+  '.cm-md-callout-head': {
+    paddingTop: '2px',
+    fontWeight: '600',
+  },
+  '.cm-md-callout-note':      { '--md-callout': 'var(--info, #4d9be6)' },
+  '.cm-md-callout-tip':       { '--md-callout': 'var(--success, #6a9956)' },
+  // Purple, as GitHub draws it — and as a *third* colour, which is the point: note is blue
+  // and the accent is blue too in most themes, so borrowing it here would make the two kinds
+  // that mean the least alike look identical.
+  '.cm-md-callout-important': { '--md-callout': 'var(--syntax-constant, #9876aa)' },
+  '.cm-md-callout-warning':   { '--md-callout': 'var(--warning, #ffc44d)' },
+  '.cm-md-callout-caution':   { '--md-callout': 'var(--error, #e05252)' },
+  '.cm-md-callout-question':  { '--md-callout': 'var(--syntax-type, #4d9be6)' },
+  '.cm-md-callout-example':   { '--md-callout': 'var(--accent)' },
+  // A quotation IS the plain blockquote, dressed as a callout because that is how it was
+  // written: muted, and the only kind that keeps the italics.
+  '.cm-md-callout-quote':     { '--md-callout': 'var(--text-muted)', fontStyle: 'italic' },
+  // The badge that stands in for `[!WARNING]`.
+  '.cm-md-callout-badge': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    color: 'var(--md-callout)',
+    fontWeight: '700',
+    letterSpacing: '0.01em',
+  },
+  '.cm-md-callout-badge svg': {
+    width: '15px',
+    height: '15px',
+    flex: 'none',
+  },
+  // A rendered diagram. Centred and given room, because it is a figure rather than a line of
+  // text — and on its own ground, so a diagram whose own background is transparent does not
+  // pick up the tint of the code block it replaced.
+  '.cm-md-mermaid': {
+    display: 'flex',
+    justifyContent: 'center',
+    padding: '12px 0',
+    overflowX: 'auto',
+  },
+  '.cm-md-mermaid svg': { maxWidth: '100%', height: 'auto' },
+  // A diagram that does not parse says why, in mermaid's own words, where the picture would
+  // have been — the source is one click away (put the caret in it) and the message names the
+  // line it stopped at.
+  '.cm-md-mermaid-error': {
+    display: 'block',
+    whiteSpace: 'pre-wrap',
+    fontFamily: 'var(--font-code)',
+    fontSize: '0.9em',
+    color: 'var(--error)',
+    background: 'color-mix(in srgb, var(--error) 8%, transparent)',
+    border: '1px solid color-mix(in srgb, var(--error) 35%, transparent)',
+    borderRadius: 'var(--radius-sm)',
+    padding: '10px 12px',
+  },
+  // The fence's language word: a caption on the block, not a line of it.
+  // ── The editable table ───────────────────────────────────────────
+  // A cell you can type in has to look like one: a focus ring that says where you are, and a
+  // hover that says the whole grid is live rather than a picture of one.
+  '.cm-md-rendered-table td, .cm-md-rendered-table th': { outline: 'none' },
+  '.cm-md-rendered-table td:hover, .cm-md-rendered-table th:hover': {
+    background: 'color-mix(in srgb, var(--accent) 7%, transparent)',
+  },
+  '.cm-md-rendered-table td:focus, .cm-md-rendered-table th:focus': {
+    background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+    boxShadow: 'inset 0 0 0 2px var(--accent)',
+    // The focused cell shows its own source, which is code — and reads as code.
+    fontFamily: 'var(--font-code)',
+    fontSize: '0.92em',
+  },
+  // The structural controls. Out of the way until the table is used: a toolbar under every
+  // table in a long document would be a row of buttons every few paragraphs.
+  '.cm-md-table-tools': {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '2px',
+    padding: '3px 0 0',
+    opacity: '0',
+    transition: 'opacity var(--transition-fast, 120ms)',
+  },
+  '.cm-md-rendered-table-wrap:hover .cm-md-table-tools, .cm-md-rendered-table-wrap:focus-within .cm-md-table-tools': {
+    opacity: '1',
+  },
+  '.cm-md-table-tool': {
+    font: 'inherit',
+    fontSize: 'var(--font-size-2xs)',
+    lineHeight: '1',
+    padding: '3px 7px',
+    color: 'var(--text-muted)',
+    background: 'transparent',
+    border: '1px solid transparent',
+    borderRadius: 'var(--radius-sm)',
+    cursor: 'pointer',
+  },
+  '.cm-md-table-tool:hover': {
+    color: 'var(--text-primary)',
+    background: 'var(--bg-hover)',
+    borderColor: 'var(--border-subtle)',
+  },
+  '.cm-md-table-sep': {
+    width: '1px',
+    height: '13px',
+    margin: '0 4px',
+    background: 'var(--border-subtle)',
+  },
+  '.cm-md-code-lang': {
+    fontFamily: 'var(--font-ui-sans)',
+    fontSize: '0.78em',
+    fontStyle: 'italic',
+    letterSpacing: '0.03em',
+    color: 'var(--text-faint)',
+  },
+  '.cm-md-codeblock-line': {
+    fontFamily: 'var(--font-code)',
+    fontSize: '0.92em',
+    background: 'var(--bg-overlay)',
+    paddingLeft: '14px !important',
+    paddingRight: '14px !important',
+  },
+  '.cm-md-hr': {
+    borderBottom: '1px solid var(--border-subtle)',
+    paddingTop: '0.4em',
+    paddingBottom: '0.4em',
+  },
+
+  // ── Links ─────────────────────────────────────────────────────────
+  '.cm-md-link-label': { color: 'var(--accent)', textDecoration: 'underline', textUnderlineOffset: '2px' },
+  '.cm-content a[href]': { color: 'var(--accent)' },
+  // The hand and the underline appear only while the key that would follow the link is held —
+  // a pointer over text you are editing promises a jump that a plain click does not make.
+  '&.cm-md-follow .cm-content a[href]': { cursor: 'pointer' },
+  '&.cm-md-follow .cm-content a[href]:hover': {
+    textDecoration: 'underline',
+    textUnderlineOffset: '2px',
+    textDecorationThickness: '2px',
+  },
+  '.cm-md-link-url':   { color: 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.85em' },
+
+  // ── Lists ─────────────────────────────────────────────────────────
+  '.cm-md-list-marker': { color: 'var(--accent)', fontWeight: '600' },
+  '.cm-md-list-marker-bullet': {
+    // When the raw `-`/`*`/`+` is shown (cursor on that line) we still
+    // want it muted enough not to compete with the text — Obsidian dims
+    // the source marker on the active line so the typography stays
+    // calm.
+    color: 'var(--text-muted)',
+    fontWeight: '500',
+  },
+  '.cm-md-list-marker-ordered': {
+    // Slight monospace tabular feel so multi-digit numerators (10., 11.)
+    // align with single-digit ones.
+    fontVariantNumeric: 'tabular-nums',
+    color: 'var(--accent)',
+    fontWeight: '600',
+  },
+  '.cm-md-bullet-glyph': {
+    color: 'var(--accent)',
+    fontWeight: '700',
+    fontSize: '1.15em',
+    lineHeight: '1',
+    display: 'inline-block',
+    // The replaced range is exactly the marker char (1 col). Keep the
+    // glyph the same advance so caret positioning around it stays
+    // predictable.
+    width: '1ch',
+    textAlign: 'center',
+    transform: 'translateY(-0.05em)',
+  },
+
+  // ── Tables (GFM) ──────────────────────────────────────────────────
+  // Each table line gets `cm-md-table-line`. Role-specific classes layer
+  // on top: header (bold + tinted bg), separator (thin divider, dimmed
+  // dashes), first/last (rounded corners + outer border).
+  '.cm-md-table-line': {
+    fontFamily: 'var(--font-code)',
+    fontSize: '0.92em',
+    background: 'var(--bg-overlay)',
+    paddingLeft: '14px !important',
+    paddingRight: '14px !important',
+    lineHeight: '1.7',
+    borderLeft: '1px solid var(--border-subtle)',
+    borderRight: '1px solid var(--border-subtle)',
+  },
+  '.cm-md-table-first': {
+    paddingTop: '6px !important',
+    borderTop: '1px solid var(--border-subtle)',
+    borderTopLeftRadius: 'var(--radius-md, 6px)',
+    borderTopRightRadius: 'var(--radius-md, 6px)',
+  },
+  '.cm-md-table-last': {
+    paddingBottom: '6px !important',
+    borderBottom: '1px solid var(--border-subtle)',
+    borderBottomLeftRadius: 'var(--radius-md, 6px)',
+    borderBottomRightRadius: 'var(--radius-md, 6px)',
+  },
+  '.cm-md-table-header-line': {
+    fontWeight: '700',
+    color: 'var(--text-primary)',
+    background: 'var(--bg-overlay-strong, var(--bg-overlay))',
+    borderBottom: '1px solid var(--border-default, var(--border-subtle))',
+  },
+  '.cm-md-table-sep-line': {
+    color: 'var(--text-muted)',
+    fontSize: '0.78em',
+    lineHeight: '1',
+    paddingTop: '2px !important',
+    paddingBottom: '2px !important',
+    borderBottom: '1px solid var(--border-default, var(--border-subtle))',
+    letterSpacing: '0.05em',
+  },
+  '.cm-md-table-delim': {
+    color: 'var(--accent)',
+    opacity: '0.55',
+    fontWeight: '600',
+  },
+
+  // ── The table widget ─────────────────────────────────────────────
+  //
+  // ⚠️⚠️ **PADDING, never MARGIN, on a block widget's root.** CodeMirror measures a widget by
+  // its box, and a margin is outside the box: 10px top and bottom meant the table occupied 20
+  // more pixels on screen than the height map believed, so every line BELOW it was drawn about
+  // one line lower than CodeMirror thought it was. Reported as "to put the caret on a line I
+  // have to click the one above" — a symptom that names neither tables nor margins, which is
+  // why it survived two wrong guesses (a stale measure, then an async resize).
+  //
+  // The border and the background move onto an inner box so the padding does not draw as a
+  // 10px-taller frame around the table.
+  '.cm-md-rendered-table-wrap': {
+    padding: '10px 0',
+  },
+  '.cm-md-rendered-table-box': {
+    border: '1px solid var(--border-default, var(--border-subtle))',
+    borderRadius: 'var(--radius-md, 6px)',
+    overflow: 'hidden',
+    background: 'var(--bg-base)',
+  },
+  '.cm-md-rendered-table': {
+    borderCollapse: 'collapse',
+    width: '100%',
+    fontFamily: 'var(--font-ui-sans)',
+    fontSize: '0.95em',
+    lineHeight: '1.55',
+  },
+  '.cm-md-rendered-table th, .cm-md-rendered-table td': {
+    padding: '7px 12px',
+    borderRight: '1px solid var(--border-subtle)',
+    borderBottom: '1px solid var(--border-subtle)',
+    textAlign: 'left',
+    verticalAlign: 'top',
+    color: 'var(--text-primary)',
+  },
+  '.cm-md-rendered-table th:last-child, .cm-md-rendered-table td:last-child': {
+    borderRight: 'none',
+  },
+  '.cm-md-rendered-table tr:last-child td': {
+    borderBottom: 'none',
+  },
+  '.cm-md-rendered-table thead th': {
+    background: 'var(--bg-overlay)',
+    fontWeight: '700',
+    color: 'var(--text-primary)',
+    borderBottom: '1px solid var(--border-default, var(--border-subtle))',
+  },
+  '.cm-md-rendered-table tbody tr:nth-child(even) td': {
+    background: 'rgba(255,255,255,0.02)',
+  },
+  '.cm-md-rendered-table code': {
+    fontFamily: 'var(--font-code)',
+    fontSize: '0.9em',
+    background: 'var(--bg-overlay)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: '4px',
+    padding: '0 4px',
+    color: 'var(--syntax-string, var(--text-primary))',
+  },
+  '.cm-md-rendered-table a': {
+    color: 'var(--accent)',
+    textDecoration: 'underline',
+    textUnderlineOffset: '2px',
+  },
+  '.cm-md-rendered-table strong': { fontWeight: '700', color: 'var(--text-primary)' },
+  '.cm-md-rendered-table em':     { fontStyle: 'italic' },
+  '.cm-md-rendered-table s':      { textDecoration: 'line-through', color: 'var(--text-muted)' },
+
+  // Inline images (rendered tables + future inline image support).
+  // `max-height` keeps oversized assets from blowing up a single cell;
+  // `object-fit: contain` preserves aspect ratio. Falls back to a muted
+  // `![alt]` chip when the URL can't be loaded.
+  '.cm-md-rendered-image': {
+    maxWidth: '100%',
+    maxHeight: '220px',
+    objectFit: 'contain',
+    display: 'inline-block',
+    verticalAlign: 'middle',
+    borderRadius: '4px',
+    background: 'var(--bg-overlay)',
+  },
+  '.cm-md-rendered-video': {
+    maxWidth: '100%',
+    maxHeight: '360px',
+    display: 'block',
+    borderRadius: '4px',
+    background: '#000',
+    outline: 'none',
+  },
+  '.cm-md-rendered-audio': {
+    width: '100%',
+    maxWidth: '420px',
+    display: 'block',
+  },
+  '.cm-md-broken-image': {
+    fontStyle: 'italic',
+    color: 'var(--text-muted)',
+    fontFamily: 'var(--font-code)',
+    fontSize: '0.9em',
+  },
+
+  // ── External-media card (fallback when inline playback fails) ────
+  '.cm-md-external-media-card': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '10px 14px',
+    margin: '6px 0',
+    maxWidth: '100%',
+    background: 'var(--bg-overlay)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: 'var(--radius-md, 6px)',
+    color: 'var(--text-primary)',
+    textDecoration: 'none',
+    cursor: 'pointer',
+    transition: 'background 120ms, border-color 120ms',
+  },
+  '.cm-md-external-media-card:hover': {
+    background: 'var(--bg-overlay-strong, var(--bg-overlay))',
+    borderColor: 'var(--accent)',
+    textDecoration: 'none',
+  },
+  '.cm-md-external-media-icon': {
+    flex: '0 0 auto',
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    background: 'var(--accent)',
+    color: 'var(--accent-fg, #fff)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '14px',
+    paddingLeft: '2px', // optical centering for the play triangle
+  },
+  '.cm-md-external-media-labels': {
+    flex: '1 1 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: '0',
+  },
+  '.cm-md-external-media-title': {
+    fontWeight: '600',
+    color: 'var(--text-primary)',
+    fontSize: '0.95em',
+  },
+  '.cm-md-external-media-sub': {
+    color: 'var(--text-muted)',
+    fontSize: '0.8em',
+    fontFamily: 'var(--font-code)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  '.cm-md-external-media-arrow': {
+    flex: '0 0 auto',
+    color: 'var(--text-muted)',
+    fontSize: '1.1em',
+  },
+
+  // ── Task list checkboxes ──────────────────────────────────────────
+  '.cm-md-task-unchecked': {
+    color: 'var(--text-muted)',
+    fontFamily: 'var(--font-code)',
+  },
+  '.cm-md-task-checked': {
+    color: 'var(--success, #6a9956)',
+    fontFamily: 'var(--font-code)',
+  },
+};
+
+export const markdownTheme = EditorView.theme(
+  { ...MARKDOWN_DOCUMENT_SPEC, ...MARKDOWN_ELEMENT_SPEC },
   { dark: true },
 );
+
+/** The element styles alone, for a host editor that keeps its own page. */
+export const markdownElementsTheme = EditorView.theme(MARKDOWN_ELEMENT_SPEC);
 
 // Syntax highlighting fallback for fenced-code inner content (the inner
 // language parser is loaded lazily by lang-markdown when available; without

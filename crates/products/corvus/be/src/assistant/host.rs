@@ -124,12 +124,14 @@ pub struct ImberHost {
     /// Calls shown as an approval card: their result goes on the card instead of a second receipt.
     carded: Mutex<HashSet<String>>,
     retrying: AtomicBool,
+    /// The model's context window, when known: what each request's `max_tokens` is cut to fit.
+    pub window: Option<u64>,
 }
 
 impl ImberHost {
     #[allow(clippy::too_many_arguments)]
     pub fn new(session: Arc<Session>, state: Arc<CorvusState>, handle: tokio::runtime::Handle, root: String, conversation_id: String, mode: Mode, chat: bool, unattended: bool) -> Self {
-        Self { session, state, handle, root, conversation_id, mode, chat, unattended, carded: Mutex::new(HashSet::new()), retrying: AtomicBool::new(false) }
+        Self { session, state, handle, root, conversation_id, mode, chat, unattended, carded: Mutex::new(HashSet::new()), retrying: AtomicBool::new(false), window: None }
     }
 
     /// The plan a plan tool is about, in full, for the card — `None` for any other tool or an unknown plan.
@@ -189,6 +191,10 @@ impl Host for ImberHost {
         if self.chat { Vec::new() } else { tools::specs() }
     }
 
+    fn context_window(&self) -> Option<u64> {
+        self.window
+    }
+
     fn gate(&self, call: &ToolCall) -> Gate {
         let risk = classify(&call.name, &call.input);
         if self.unattended {
@@ -239,11 +245,11 @@ impl Host for ImberHost {
                 s.view().text(&t);
                 s.push_message_soon();
             }
-            AgentEvent::ToolDone { id, name, input, summary, ok } => {
+            AgentEvent::ToolDone { id, name, input, summary, ok, timing } => {
                 if lock(&self.carded).contains(&id) {
                     s.view().update("/approval/id", &id, |b| b["approval"]["result"] = json!({ "ok": ok, "detail": summary }));
                 } else {
-                    s.view().tool(&id, &name, &input, &summary, ok);
+                    s.view().tool(&id, &name, &input, &summary, ok, timing);
                 }
                 s.push_message();
             }
@@ -255,8 +261,14 @@ impl Host for ImberHost {
                 s.view().begin_attempt();
                 s.emit("status", json!({ "status": "thinking" }));
             }
-            AgentEvent::ToolStart { name, .. } => s.emit("status", json!({ "status": "tool", "tool": name })),
+            AgentEvent::ToolStart { name, .. } => {
+                s.emit("status", json!({ "status": "tool", "tool": name }));
+                // Flush the text streamed since the last throttled push: the tool may take long.
+                s.push_message();
+            }
             AgentEvent::Thinking(_) => s.emit("status", json!({ "status": "thinking" })),
+            // Corvus's thread has no row for a model step: the receipts carry their own times.
+            AgentEvent::Responded { .. } => {}
         }
     }
 

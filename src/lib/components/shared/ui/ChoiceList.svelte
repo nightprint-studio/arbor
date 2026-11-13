@@ -1,7 +1,8 @@
 <script lang="ts">
   /**
    * A list of choices, one per row — pick one, or tick several — with an "Other…" row that opens a field
-   * for what the list did not think of.
+   * for what the list did not think of. That field is a growing multi-line box, because the answer the list
+ * did not think of is often a paragraph, not a word; picking the row puts the caret in it.
    *
    * The shape a question takes when its answers are a handful of sentences rather than a word: each row
    * is a whole target (label above, what choosing it means below), the chosen ones take the accent, and
@@ -15,7 +16,8 @@
     description?: string;
   }
 
-  import Input from './Input.svelte';
+  import { tick, type Snippet } from 'svelte';
+  import Textarea from './Textarea.svelte';
 
   const OTHER = '__other__';
 
@@ -29,6 +31,8 @@
     otherPlaceholder = 'Your answer',
     name,
     disabled = false,
+    description,
+    onsubmit,
   }: {
     options: Choice[];
     /** Tick several instead of picking one. */
@@ -43,7 +47,13 @@
     /** Groups the radios of one list (single mode). Unique per list on a page. */
     name: string;
     disabled?: boolean;
+    /** Renders an option's description (e.g. as Markdown). Without it the description is plain text. */
+    description?: Snippet<[Choice]>;
+    /** Ctrl/Cmd+Enter in the free field — the caller's "next" or "send". */
+    onsubmit?: () => void;
   } = $props();
+
+  let otherField = $state<HTMLTextAreaElement | undefined>();
 
   const otherOn = $derived(value.includes(OTHER));
 
@@ -51,6 +61,7 @@
     if (disabled) return;
     if (multi) value = value.includes(v) ? value.filter((x) => x !== v) : [...value, v];
     else value = [v];
+    if (v === OTHER && value.includes(OTHER)) void tick().then(() => otherField?.focus());
   }
 </script>
 
@@ -69,7 +80,7 @@
       <span class="mark" class:square={multi} aria-hidden="true"></span>
       <span class="text">
         <span class="label">{o.label}</span>
-        {#if o.description}<span class="why">{o.description}</span>{/if}
+        {#if o.description}<span class="why">{#if description}{@render description(o)}{:else}{o.description}{/if}</span>{/if}
       </span>
     </label>
   {/each}
@@ -89,7 +100,7 @@
         <span class="text"><span class="label">{otherLabel}</span></span>
       </label>
       {#if otherOn}
-        <div class="field"><Input bind:value={other} placeholder={otherPlaceholder} /></div>
+        <div class="field"><Textarea framed bind:value={other} bind:element={otherField} placeholder={otherPlaceholder} minRows={3} maxRows={12} ariaLabel={otherLabel} {onsubmit} /></div>
       {/if}
     </div>
   {/if}

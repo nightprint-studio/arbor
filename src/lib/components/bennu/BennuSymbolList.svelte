@@ -65,9 +65,11 @@
   /** A file a language server owns — its outline comes from the server rather than from a local
    *  scan, which is why this branch is asynchronous and the other two are not. */
   const isLsp    = $derived(bennuLspStore.servesFile(activePath));
+  /** `.ptn` — outline from the Patina package, through the same backend call as a server's. */
+  const isPatina = $derived(!!activePath && /\.ptn$/i.test(activePath));
   /** `.merula` — outline from Merula's own Tree-sitter parse (tracks → sections, lets, fns), in the WebView. */
   const isMerula = $derived(!!activePath && /\.merula$/i.test(activePath));
-  const supported = $derived(isJava || isMarkup || isLsp || isMerula);
+  const supported = $derived(isJava || isMarkup || isLsp || isPatina || isMerula);
 
   // ── Node model ──────────────────────────────────────────────────────────────
   // A single tree-node shape the shared `Tree` renders. `java` nodes come from
@@ -147,7 +149,8 @@
     const path = activePath;
     const java = isJava;
     const markup = isMarkup;
-    const lsp = isLsp;
+    // A `.ptn` takes the server's path: the backend answers it from the Patina package.
+    const lsp = isLsp || isPatina;
     const merula = isMerula;
     if (timer) clearTimeout(timer);
     if (!path || !(java || markup || lsp || merula)) { roots = []; return; }

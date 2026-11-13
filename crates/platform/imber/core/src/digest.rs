@@ -43,7 +43,7 @@ pub struct Digest {
 pub fn digest_value(tool: &str, value: &Value) -> Option<Digest> {
     match tool {
         "bennu_problems" | "bennu_check_file" => problems(value),
-        "bennu_build" => build(value),
+        "bennu_check" | "bennu_build" => build(value),
         "bennu_test_run" => tests(value),
         "bennu_references" => references(value),
         _ => None,

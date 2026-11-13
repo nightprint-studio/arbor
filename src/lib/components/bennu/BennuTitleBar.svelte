@@ -36,6 +36,7 @@
   import { windowMenuItems } from '$lib/utils/window-menu';
   import WorkspaceTabs from '$lib/components/shared/internal/WorkspaceTabs.svelte';
   import BennuRunConfigSelect from './BennuRunConfigSelect.svelte';
+  import ImberCreditMeter from '$lib/components/shared/internal/imber/ImberCreditMeter.svelte';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { isPatinaPath } from '$lib/stores/bennu/patina-build';
@@ -347,6 +348,14 @@
 
   <!-- Right cluster head: the Run / Debug / overflow run-controls, then a small
        gap before the app buttons (palette · docs · settings). -->
+  <!-- Just left of the documentation button: what Imber's providers have left. -->
+  {#snippet actions()}
+    <ImberCreditMeter
+      onSettings={() => bennuUiStore.openSettings('assistant-cost')}
+      onAction={(a) => bennuUiStore.openSettings(a === 'add_admin_key' ? 'assistant' : 'assistant-cost')}
+    />
+  {/snippet}
+
   {#snippet trailing()}
     {#if bennuDiagnosticsStore.jdkMissing && !isCargo}
       <button

@@ -60,6 +60,69 @@ pub struct ProjectSummary {
     pub index: Option<IndexSummary>,
     /// What to do next, in words — written for a caller that has just arrived.
     pub next_steps: Vec<String>,
+    /// Per language of the project, the engine that serves it and which questions it answers. Engines differ (a
+    /// Lua server has no implementations, the Java index no outline, Patina no callers); a tool asked something
+    /// its engine does not answer says so.
+    pub languages: Vec<LanguageAnswers>,
+}
+
+/// One engine of a project, and what it answers.
+#[derive(Debug, Serialize)]
+pub struct LanguageAnswers {
+    /// The engine: `bennu-index`, a language server's name, `Patina package`, …
+    pub engine: String,
+    /// The files it serves (`.rs`, `.lua`, `Cargo.toml`, …).
+    pub files: Vec<String>,
+    /// What it answers, with the tool that asks.
+    pub answers: Vec<String>,
+    /// What it does not answer.
+    pub missing: Vec<String>,
+    /// For a language server not running yet: its lists are what a server may answer, until its handshake says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// The engines of the project at `root` and what each answers — computed when a project is summarised, never in
+/// the standing instructions.
+fn languages_of(root: &str, java: bool) -> Vec<LanguageAnswers> {
+    use crate::engine::{answers, Engine, Question};
+    let line = |engine: String, files: Vec<String>, kind: &Engine, features: Option<bennu_lsp::prelude::ServerFeatures>, note: Option<String>| {
+        let able = answers(kind, features);
+        let word = |q: &Question| match q.tool() {
+            Some(tool) => format!("{} ({tool})", q.label()),
+            None => q.label().to_string(),
+        };
+        LanguageAnswers {
+            engine,
+            files,
+            answers: able.iter().map(word).collect(),
+            missing: Question::ALL.iter().filter(|q| !able.contains(q)).map(word).collect(),
+            note,
+        }
+    };
+    let root_path = Path::new(root);
+    let mut out = Vec::new();
+    if java {
+        out.push(line("bennu-index".into(), [".java", ".jsp", ".xml", ".properties"].map(String::from).to_vec(), &Engine::Java, None, None));
+    }
+    for server in crate::lsp_registry::LspRegistry::global().servers_at_root(root) {
+        let note = match (server.confirmed, server.features.is_some()) {
+            (true, _) => None,
+            (false, true) => Some("not running yet: this is what the server is expected to answer; its own list replaces it when it starts".to_string()),
+            (false, false) => Some("not running yet, and a server of your own: it says what it answers when it starts".to_string()),
+        };
+        let files = server.extensions.iter().map(|e| format!(".{e}")).collect();
+        out.push(line(server.name, files, &Engine::Lsp, server.features, note));
+    }
+    if root_path.join("Cargo.toml").is_file() {
+        out.push(line("Cargo manifest engine".into(), vec!["Cargo.toml".into()], &Engine::CargoManifest, None, None));
+    }
+    let has_mods = crate::patina_intel::is_mod_root(root_path)
+        || std::fs::read_dir(root_path.join("mods")).is_ok_and(|d| d.flatten().any(|e| crate::patina_intel::is_mod_root(&e.path())));
+    if has_mods {
+        out.push(line("Patina package".into(), vec![".ptn".into()], &Engine::Patina, None, None));
+    }
+    out
 }
 
 /// The index's state, flattened out of the fuller stats the inspector panel uses.
@@ -136,6 +199,7 @@ fn bennu_project_summary(
             (false, Some(s)) => format!("{} ({})", s.name, s.state),
             (false, None) => "none — no language server is running for this project".to_string(),
         },
+        languages: languages_of(&info.root, java),
         index: java.then(|| IndexSummary {
             ready: stats.ready,
             types: stats.types,
@@ -372,20 +436,18 @@ pub struct SymbolAt {
     title = "Identify the symbol at a position",
     safety = read,
 ))]
-fn bennu_symbol_at(_ctx: &BennuState, args: SymbolAtArgs) -> Result<SymbolAt, String> {
+fn bennu_symbol_at(ctx: &BennuState, args: SymbolAtArgs) -> Result<SymbolAt, String> {
     let file = project_paths::in_root(&args.root, &args.file)?;
+    // An engine that answers neither question says so, rather than "nothing at this position".
+    crate::engine::can_answer(&file, crate::engine::Question::Hover).or_else(|_| crate::engine::can_answer(&file, crate::engine::Question::Declaration))?;
     let contents = read_source(&args.root, &file)?;
     let column = args.column.unwrap_or(1);
     let (offset, line_text) = offset_of(&contents, args.line, column)?;
 
-    // Same routing the editor's own handlers use: a language-server-backed file is
-    // answered by its server, and only a Java one falls through to Bennu's resolver.
-    // Skipping that would send a Rust buffer into the Java resolver, which parses
-    // anything as Java and answers confidently about the wrong file.
-    let symbol = crate::lsp_route::hover(&file, &contents, offset)
-        .unwrap_or_else(|| IndexService::global().hover(&file, &contents, offset));
-    let declaration = crate::lsp_route::declaration(&file, &contents, offset)
-        .unwrap_or_else(|| IndexService::global().declaration(&file, &contents, offset));
+    // The editor's own router (`engine`): the one engine that serves the file answers — a language server,
+    // the Patina package, the shader engine or the Java index — and no other is asked.
+    let symbol = crate::engine::hover(ctx, &file, &contents, offset);
+    let declaration = crate::engine::declaration(ctx, &file, &contents, offset);
 
     let note = match (&symbol, &declaration) {
         // Before the caret is blamed: an engine that cannot answer yet, or ever, says nothing
@@ -843,18 +905,19 @@ pub struct OutlineResult {
 /// Flattened rather than nested, with a `depth`, because that is what a caller scans; the nesting
 /// is still legible and nothing has to be walked to count what is there.
 ///
-/// **Language-server files only** (Rust, TypeScript, Svelte, …). A Java file has no server, so it
-/// comes back empty with a note saying so — that is a limit of this tool, not a finding about the
-/// file. For Java use `bennu_find_symbol`, `bennu_symbol_at` or `bennu_references`.
+/// From the engine that serves the file: a language server (Rust, TypeScript, Svelte, Lua, …), the
+/// Java parse tree (types, methods, fields — the Structure panel's), or the Patina package for a
+/// `.ptn`. A file no engine outlines is refused with what its engine does answer.
 #[arbor_rpc::handler(mcp(
     title = "List what a file declares",
     safety = read,
 ))]
-fn bennu_outline(_ctx: &BennuState, args: OutlineArgs) -> Result<OutlineResult, String> {
+fn bennu_outline(ctx: &BennuState, args: OutlineArgs) -> Result<OutlineResult, String> {
     let file = project_paths::in_root(&args.root, &args.file)?;
+    crate::engine::can_answer(&file, crate::engine::Question::Outline)?;
     let source = read_source(&args.root, &file)?;
     let total_lines = source.lines().count() as u32;
-    let tree = crate::lsp_route::document_symbols(&file, &source);
+    let tree = crate::engine::document_symbols(ctx, &file, &source);
 
     let mut entries = Vec::new();
     flatten_outline(&tree, &source, 0, &mut entries);
@@ -866,20 +929,20 @@ fn bennu_outline(_ctx: &BennuState, args: OutlineArgs) -> Result<OutlineResult, 
     Ok(OutlineResult { total_lines, entries, note })
 }
 
-/// Why an outline is empty when no server is still warming up.
-///
-/// A Java file is the case that matters: this tool is served by language servers only, none exists
-/// for Java, and "the file declares nothing" would be read as a statement about a class that has
-/// plenty. Said outright, with the tools that do answer on Java.
+/// Why an outline is empty when no server is still warming up: the engine that serves the file found nothing, or
+/// nothing serves it.
 fn outline_empty_note(file: &str) -> String {
-    match crate::lsp_route::owns(file) {
-        true => "The language server reports no declarations in this file.".to_string(),
-        false => "Nothing was outlined — and that says nothing about the file: this tool is served by \
-                  language servers only, and none serves this file type (there is no server for \
-                  Java). For Java use bennu_find_symbol, bennu_symbol_at, bennu_references or \
-                  bennu_check_file."
-            .to_string(),
+    use crate::engine::Engine;
+    match crate::engine::engine_for(file) {
+        Engine::Unserved(why) => format!("Nothing was outlined — and that says nothing about the file: {why}."),
+        other => format!("{} reports no declarations in this file.", capitalized(other.label())),
     }
+}
+
+/// `the Java index` → `The Java index`, for a label that opens a sentence.
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 /// Walk a symbol tree into the flat list with a depth.
@@ -962,12 +1025,12 @@ pub struct ProblemsResult {
 ///
 /// The cheap "did I break anything". A language server has already run the project's own checker
 /// and publishes as it finishes, including for files nobody has opened, so this is a read of an
-/// answer that already exists rather than a build that produces one. `bennu_build` is still the
+/// answer that already exists rather than a build that produces one. `bennu_check` is still the
 /// call when you want a compile; this is the one for after an edit.
 ///
 /// **Not for Java.** There is no language server for Java, so on a Maven project this reports
 /// nothing — which says nothing about the code. Java problems come from `bennu_check_file`, one
-/// file at a time, or from `bennu_build`.
+/// file at a time, or from `bennu_check`.
 ///
 /// Files come heaviest first, and the cap is spent in that order: a file that did not fit is
 /// listed with its `count` and `truncated: true`.
@@ -1142,7 +1205,7 @@ fn problems_note(o: &ProblemsOutcome) -> Option<String> {
     Some(match o.ecosystem {
         Ecosystem::Maven => "Nothing is reported — and it never will be for Java: this tool reads \
                              language-server diagnostics and there is no server for Java. Use \
-                             bennu_check_file on the files you changed, or bennu_build."
+                             bennu_check_file on the files you changed, or bennu_check."
             .to_string(),
         _ => "Nothing is currently reported. That is not the same as a clean build: a server that \
               has not finished its first check has published nothing yet — bennu_index_stats says \
@@ -1227,9 +1290,9 @@ pub struct CallersResult {
 /// `reaches` asks it directly: give a name and the search stops at the first caller matching it,
 /// reporting the path. Absent, it returns the whole tree to `depth`.
 ///
-/// Answered by the language server's call hierarchy (or, on a Java file, by Bennu's reference
-/// index), so it follows calls rather than text — a function reached through a trait object is
-/// found, and a comment naming it is not.
+/// Answered by the engine that serves the file — a language server's call hierarchy, Bennu's
+/// reference index on a Java file, the Patina package on a `.ptn` — so it follows calls rather than
+/// text: a function reached through a trait object is found, and a comment naming it is not.
 ///
 /// A walk that was cut — by `limit`, or because callers exist past `depth` — says so in `note`
 /// and never claims a function is "not reached".
@@ -1237,7 +1300,7 @@ pub struct CallersResult {
     title = "Find who calls a function, transitively",
     safety = read,
 ))]
-fn bennu_callers(_ctx: &BennuState, args: CallersArgs) -> Result<CallersResult, String> {
+fn bennu_callers(ctx: &BennuState, args: CallersArgs) -> Result<CallersResult, String> {
     let (file, line, column) = resolve_position(
         &args.root,
         args.symbol.as_deref(),
@@ -1246,11 +1309,12 @@ fn bennu_callers(_ctx: &BennuState, args: CallersArgs) -> Result<CallersResult, 
         args.column.unwrap_or(1),
     )?;
     let source = read_source(&args.root, &file)?;
+    crate::engine::can_answer(&file, crate::engine::Question::Callers)?;
     let (offset, line_text) = offset_of(&source, line, column)?;
     let depth = args.depth.unwrap_or(2).clamp(1, 5);
     let limit = args.limit.unwrap_or(200).clamp(1, 2_000);
 
-    let Some(root_item) = prepare_callers(&file, &source, offset).into_iter().next() else {
+    let Some(root_item) = crate::engine::prepare_hierarchy(ctx, &file, &source, offset, true).into_iter().next() else {
         return Ok(CallersResult {
             target: String::new(),
             callers: Vec::new(),
@@ -1287,7 +1351,7 @@ fn bennu_callers(_ctx: &BennuState, args: CallersArgs) -> Result<CallersResult, 
                 break 'walk;
             }
             visited += 1;
-            for caller in incoming_callers(&args.root, &file, item.handle) {
+            for caller in crate::engine::hierarchy_step(ctx, &file, item.handle, "incoming") {
                 if !seen.insert((caller.file.clone(), caller.start)) {
                     continue;
                 }
@@ -1388,69 +1452,6 @@ fn callers_note(
     }
 }
 
-/// The call-hierarchy root at a position, from whichever engine owns the file.
-///
-/// A language server for its files, Bennu's own reference index for Java — the same split the
-/// editor's hierarchy panel makes, so a Java project is no longer answered "nothing" by a tool
-/// that only ever asked servers.
-fn prepare_callers(
-    file: &str,
-    source: &str,
-    offset: usize,
-) -> Vec<bennu_proto::prelude::HierarchyNode> {
-    if crate::intel::is_java_file(file) {
-        return IndexService::global()
-            .prepare_hierarchy(file, source, offset, true)
-            .into_iter()
-            .map(java_hierarchy_node)
-            .collect();
-    }
-    crate::lsp_route::prepare_hierarchy(file, source, offset, true)
-}
-
-/// One level of callers of the node `handle` names. `file` picks the engine, as for
-/// [`prepare_callers`]; the handle is only meaningful to the engine that issued it.
-fn incoming_callers(
-    root: &str,
-    file: &str,
-    handle: serde_json::Value,
-) -> Vec<bennu_proto::prelude::HierarchyNode> {
-    use bennu_intel::prelude::{HierarchyDirection, HierarchyHandle};
-
-    if crate::intel::is_java_file(file) {
-        let Some(direction) = HierarchyDirection::from_wire("incoming") else { return Vec::new() };
-        let Ok(handle) = serde_json::from_value::<HierarchyHandle>(handle) else {
-            return Vec::new();
-        };
-        return IndexService::global()
-            .hierarchy_step(file, &handle, direction)
-            .into_iter()
-            .map(java_hierarchy_node)
-            .collect();
-    }
-    crate::lsp_route::hierarchy_step(root, handle, "incoming")
-}
-
-/// A Java engine item as the wire node the walk consumes.
-///
-/// Mirrors `hierarchy.rs`'s own conversion, which is private to that handler; call sites are left
-/// out because the walk reads the caller's declaration, not where inside it the call sits.
-fn java_hierarchy_node(item: bennu_intel::prelude::HierarchyItem) -> bennu_proto::prelude::HierarchyNode {
-    bennu_proto::prelude::HierarchyNode {
-        handle: serde_json::to_value(&item.handle).unwrap_or(serde_json::Value::Null),
-        name: item.name,
-        kind: item.kind,
-        detail: item.detail,
-        file: item.file,
-        start: item.start,
-        end: item.end,
-        line: item.line,
-        col: item.col,
-        preview: item.preview,
-        call_sites: Vec::new(),
-    }
-}
-
 /// A position, from either address: a `symbol` name or an explicit file/line/column.
 ///
 /// Extracted the moment a second tool needed it. The by-name half is the one that matters — a
@@ -1537,16 +1538,17 @@ pub struct ImplementorsResult {
     safety = read,
 ))]
 fn bennu_implementors(
-    _ctx: &BennuState,
+    ctx: &BennuState,
     args: ImplementorsArgs,
 ) -> Result<ImplementorsResult, String> {
     let file = project_paths::in_root(&args.root, &args.file)?;
+    crate::engine::can_answer(&file, crate::engine::Question::Implementations)?;
     let source = read_source(&args.root, &file)?;
     let column = args.column.unwrap_or(1);
     let (offset, line_text) = offset_of(&source, args.line, column)?;
     let limit = args.limit.unwrap_or(200).clamp(1, 2_000);
 
-    let Some(found) = implementations_at(&file, &source, offset) else {
+    let Some(found) = implementations_at(ctx, &file, &source, offset) else {
         // No engine produced a target. Said plainly rather than as an empty list: an empty result
         // here would be a claim about the code that nothing actually checked.
         return Ok(ImplementorsResult {
@@ -1880,17 +1882,16 @@ fn find_symbol_via_server(
 
 /// The implementations of what sits at `offset`, from whichever engine owns `file`.
 ///
-/// A language server for its own files; for Java, Bennu's subtype map — the same one the editor's
+/// Through the editor's router (`engine`): a language server or the Patina package for their files; for Java, Bennu's subtype map — the same one the editor's
 /// go-to-implementation descends. `None` means no engine produced a target (no engine for the file
 /// type, an index still building, or a position that is not on a type or an overridable method).
 /// A Java implementor in a dependency jar has no file to point at and is dropped.
-fn implementations_at(file: &str, source: &str, offset: usize) -> Option<bennu_proto::prelude::UsagesResult> {
-    if let Some(found) = crate::lsp_route::implementations(file, source, offset) {
-        return Some(found);
-    }
-    if !crate::intel::is_java_file(file) {
-        return None;
-    }
+fn implementations_at(ctx: &BennuState, file: &str, source: &str, offset: usize) -> Option<bennu_proto::prelude::UsagesResult> {
+    crate::engine::implementations(ctx, file, source, offset, || java_implementations(file, source, offset))
+}
+
+/// The Java side of [`implementations_at`]: Bennu's subtype map.
+fn java_implementations(file: &str, source: &str, offset: usize) -> Option<bennu_proto::prelude::UsagesResult> {
     let (key, items) = IndexService::global().implementations(file, source, offset)?;
     let usages = items
         .into_iter()
@@ -1916,14 +1917,13 @@ fn no_implementations_target_note(root: &str, file: &str) -> String {
     if let Some(waiting) = not_ready_note(root, file) {
         return waiting;
     }
-    match crate::intel::is_java_file(file) || crate::lsp_route::owns(file) {
-        true => "Nothing to look up here: the position is not on a type, an interface or an \
+    use crate::engine::Engine;
+    match crate::engine::engine_for(file) {
+        Engine::Lsp | Engine::Java | Engine::Patina => "Nothing to look up here: the position is not on a type, an interface or an \
                  overridable method. Check it with bennu_symbol_at."
             .to_string(),
-        false => "This question is answered by a language server or by Bennu's Java index, and \
-                  neither serves this file type. Nothing was checked — this is not a statement \
-                  about the code."
-            .to_string(),
+        Engine::Unserved(why) => format!("Nothing was checked — this is not a statement about the code: {why}."),
+        other => format!("This file is served by {}, which has no implementations to look up. Nothing was checked.", other.label()),
     }
 }
 
@@ -1942,12 +1942,9 @@ fn not_ready_note(root: &str, file: &str) -> Option<String> {
              Check bennu_index_stats and try again."
                 .to_string(),
         ),
-        Ecosystem::Plain if !crate::lsp_route::owns(file) => Some(
-            "This folder has no pom.xml or Cargo.toml, so Bennu builds no Java index for it and \
-             none will appear — and no language server serves this file. Nothing here can resolve \
-             it, and waiting will not change that."
-                .to_string(),
-        ),
+        Ecosystem::Plain => crate::engine::engine_for(file).unserved_reason().map(|why| {
+            format!("This folder has no Java build, so Bennu builds no Java index for it — and {why}. Nothing here can resolve it, and waiting will not change that.")
+        }),
         _ => None,
     }
 }
@@ -2116,24 +2113,23 @@ one with `truncated` set was cut by `limit` (default 500) and is incomplete: rai
 file that could not be read is skipped and named in `note`.",
 ))]
 fn bennu_rename_plan_at(
-    _ctx: &BennuState,
+    ctx: &BennuState,
     args: RenameAtArgs,
 ) -> Result<RenamePlanForAgent, String> {
     if args.new_name.trim().is_empty() {
         return Err("new_name must not be empty".to_string());
     }
     let file = project_paths::in_root(&args.root, &args.file)?;
+    crate::engine::can_answer(&file, crate::engine::Question::Rename)?;
     let source = read_source(&args.root, &file)?;
     let (offset, _) = offset_of(&source, args.line, args.column.unwrap_or(1))?;
     let limit = args.limit.unwrap_or(500).clamp(1, 10_000);
 
-    // The same two-step the editor's own handler uses: a language-server-backed file plans
-    // through its server, everything else through the Java engine. A file a server owns is NEVER
-    // handed on to the Java engine when the server comes back empty-handed — that engine parses
-    // anything as Java, and "the server refused" is the answer, not a cue to ask someone else.
-    let preview = match crate::lsp_route::rename_plan(&file, &source, offset, &args.new_name) {
-        Some(answer) => answer,
-        None => IndexService::global()
+    // The editor's own router (`engine`): the engine that serves the file plans it, and a refusal is the
+    // answer, never a cue to ask the Java engine — which parses anything as Java.
+    let preview = match crate::engine::rename_plan(ctx, &file, &source, offset, &args.new_name) {
+        Ok(answer) => answer,
+        Err(()) => IndexService::global()
             .plan_rename(&file, &source, offset, &args.new_name)
             .map(crate::rename::preview_of),
     };
@@ -2256,19 +2252,20 @@ fn rename_empty_note(root: &str, file: &str) -> String {
     if let Some(waiting) = not_ready_note(root, file) {
         return waiting;
     }
-    if crate::lsp_route::owns(file) {
-        return "The language server planned no rename here: the position is not on a renameable \
+    use crate::engine::Engine;
+    match crate::engine::engine_for(file) {
+        Engine::Lsp => "The language server planned no rename here: the position is not on a renameable \
                 identifier (check it with bennu_symbol_at), or the server refused — a Rust `mod` \
                 rename needs a file move, which it will not plan. Its reason is in Bennu's log."
-            .to_string();
-    }
-    match crate::intel::is_java_file(file) {
-        true => "Nothing to rename here: the position is not on a renameable identifier. Check it \
+            .to_string(),
+        Engine::Patina => "The Patina package planned no rename here: the position is not on a renameable name of the mod. \
+                Check it with bennu_symbol_at."
+            .to_string(),
+        Engine::Java => "Nothing to rename here: the position is not on a renameable identifier. Check it \
                  with bennu_symbol_at."
             .to_string(),
-        false => "Nothing to rename here: no engine serves this file type, so nothing could plan \
-                  a rename for it."
-            .to_string(),
+        Engine::Unserved(why) => format!("Nothing to rename here: {why}."),
+        other => format!("Nothing to rename here: this file is served by {}, which does not rename.", other.label()),
     }
 }
 
@@ -2587,6 +2584,7 @@ fn bennu_references_at(
         args.column.unwrap_or(1),
     )?;
     let args = ReferencesAtArgs { file: file.clone(), line, column: Some(column), ..args };
+    crate::engine::can_answer(&args.file, crate::engine::Question::References)?;
 
     let source = read_source(&args.root, &args.file)?;
     // `resolve_position` has made `file` absolute against `root`; everything below uses that one.
@@ -2624,8 +2622,7 @@ fn bennu_references_at(
     // rather than guessed at. Asked once, by the same routing the lookup used; `None` is a
     // perfectly ordinary answer (a local, or an engine with nothing to say) and simply means no
     // site is marked.
-    let declared = crate::lsp_route::declaration(&args.file, &source, offset)
-        .unwrap_or_else(|| IndexService::global().declaration(&args.file, &source, offset));
+    let declared = crate::engine::declaration(ctx, &args.file, &source, offset);
 
     // Both engines report a byte column, which is off by the number of accented characters
     // before it on exactly the sources this editor exists for. Recomputed here against each
@@ -2737,8 +2734,8 @@ fn wait_note_for(readiness: crate::lsp_registry::ServerReadiness) -> Option<Stri
             };
             Some(format!(
                 "{name} is {doing}, so this is not an answer yet — an empty result here means the \
-                 server has nothing loaded to answer from, not that nothing was found. Try again \
-                 in a few seconds."
+                 server has nothing loaded to answer from, not that nothing was found. Call \
+                 bennu_wait_ready with this file, then ask again."
             ))
         }
         ServerReadiness::Failed { name, message } => Some(format!(
@@ -2748,7 +2745,7 @@ fn wait_note_for(readiness: crate::lsp_registry::ServerReadiness) -> Option<Stri
         )),
         ServerReadiness::Idle { name } => Some(format!(
             "{name} serves this file but has not been started, so there is nothing to answer from \
-             yet. Call bennu_project_summary on the project root first."
+             yet. Call bennu_wait_ready with this file (it starts the server and waits), then ask again."
         )),
         ServerReadiness::Absent | ServerReadiness::Ready { .. } => None,
     }
@@ -2784,14 +2781,18 @@ fn index_caveat(root: &str, file: &str) -> String {
                 .to_string()
         }),
         // No Java index here, now or later: "try again" would send a caller back for nothing.
-        Ecosystem::Plain => server_wait_note(file).unwrap_or_else(|| match crate::lsp_route::owns(file) {
-            true => "The language server has finished loading this project, so this is an answer \
-                     rather than a wait."
-                .to_string(),
-            false => "This folder has no pom.xml or Cargo.toml, so there is no Java index and none \
-                      will be built, and no language server serves this file — nothing analysed \
-                      it, so this is not a finding."
-                .to_string(),
+        Ecosystem::Plain => server_wait_note(file).unwrap_or_else(|| {
+            use crate::engine::Engine;
+            match crate::engine::engine_for(file) {
+                Engine::Lsp => "The language server has finished loading this project, so this is an answer \
+                         rather than a wait."
+                    .to_string(),
+                Engine::Unserved(why) => format!("Nothing analysed this file, so this is not a finding: {why}."),
+                Engine::Java => "This folder has no Java build, so there is no Java index and none will be built — \
+                         nothing analysed this file, so this is not a finding."
+                    .to_string(),
+                other => format!("This file is served by {}, which has answered, so this is an answer rather than a wait.", other.label()),
+            }
         }),
         Ecosystem::Maven => match IndexService::global().index_stats(root).ready {
             true => "The index has finished building, so this is an answer rather than a wait."
@@ -3054,12 +3055,19 @@ fn rust_test_entry(t: bennu_test::prelude::RustTest) -> TestEntry {
 // Bennu's own Tests panel fills in live while the caller waits.
 
 /// Args for [`bennu_test_run`].
+///
+/// Unknown fields are refused: a selection sent under a name this struct does not have (`filter`, `crate`)
+/// would otherwise be dropped in silence, leaving `tests` and `module` empty — which is the whole workspace,
+/// the most expensive run there is, answering a request for the cheapest.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RunTestsAtArgs {
     /// Absolute path to the project root.
     pub root: String,
     /// Which tests to run, spelled the way `bennu_tests` spells them
-    /// (`OrderTest#computesTotal`, `orders::tests::works`). Empty runs everything in `module`
+    /// (`OrderTest#computesTotal`, `orders::tests::works`). On Cargo a module prefix (`cli` or
+    /// `cli::`) runs every test under that module, and a crate's package name alone runs that
+    /// crate. Empty runs everything in `module`
     /// when that is given, and the whole project when it is not — which on a large project is
     /// minutes, so name what you changed.
     #[serde(default)]
@@ -3077,10 +3085,47 @@ pub struct RunTestsAtArgs {
     /// has no effect, and the report's `note` says so.
     #[serde(default)]
     pub include_ignored: bool,
+    /// Cargo only: run **only** the `#[ignore]`d tests of the selection (libtest's `--ignored`) — the slow or
+    /// windowed ones a crate keeps out of the ordinary run. Wins over `include_ignored`.
+    #[serde(default)]
+    pub ignored_only: bool,
+    /// nextest only: a filter expression (`-E`), for a selection names cannot say —
+    /// `test(/^play::/) & package(vz-regression)`, `test(~slow) - test(flaky)`. Combines with `module`
+    /// and `tests`; with `runner: cargo` it is refused.
+    #[serde(default)]
+    pub filter: Option<String>,
     /// Give up after this many seconds and report what had finished. Default 600, capped
     /// at 3600. Lower it when you are running one crate and a hang would be a finding.
     #[serde(default)]
     pub timeout_seconds: Option<u64>,
+    /// Cargo only: features to enable for the run (`["serde", "dev-tools"]`) — what a test behind
+    /// `#[cfg(feature = "…")]` needs to be compiled and run at all. `bennu_cargo_workspace` lists
+    /// each crate's features.
+    #[serde(default)]
+    pub features: Vec<String>,
+    /// Cargo only: enable every feature of the selected crates.
+    #[serde(default)]
+    pub all_features: bool,
+    /// Cargo only: leave the default features off.
+    #[serde(default)]
+    pub no_default_features: bool,
+    /// Cargo only: `cargo` (`cargo test`) or `nextest` (`cargo nextest run`). Leave it out and
+    /// the workspace decides: nextest when it has a `.config/nextest.toml` and cargo-nextest is
+    /// installed, cargo test otherwise. Doc-tests always run with cargo test.
+    #[serde(default)]
+    pub runner: Option<String>,
+}
+
+/// The runner a test request names: `cargo`, `nextest`, or nothing (the workspace decides). Anything else is an
+/// error rather than a silent default, so a typo is not a run with the wrong tool.
+fn requested_runner(word: Option<&str>) -> Result<Option<bennu_test::prelude::CargoRunner>, String> {
+    use bennu_test::prelude::CargoRunner;
+    match word.map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+        None | Some("") => Ok(None),
+        Some("cargo") | Some("cargo test") => Ok(Some(CargoRunner::Cargo)),
+        Some("nextest") | Some("cargo nextest") => Ok(Some(CargoRunner::Nextest)),
+        Some(other) => Err(format!("`{other}` is not a test runner: use `cargo` or `nextest`, or leave it out.")),
+    }
 }
 
 /// How long a waited-on run may take before the watchdog stops it.
@@ -3158,11 +3203,19 @@ fn bennu_test_run(
 fn test_class(args: &RunTestsAtArgs) -> String {
     let mut tests = args.tests.clone();
     tests.sort();
+    let mut features = args.features.clone();
+    features.sort();
     format!(
-        "test:{}|{}|{}",
+        "test:{}|{}|{}|{}|{}|{}|{:?}|{}|{}",
         tests.join(","),
         args.module.as_deref().map(str::trim).unwrap_or(""),
-        args.include_ignored
+        args.include_ignored,
+        features.join(","),
+        args.all_features,
+        args.no_default_features,
+        args.runner,
+        args.ignored_only,
+        args.filter.as_deref().map(str::trim).unwrap_or("")
     )
 }
 
@@ -3180,6 +3233,12 @@ fn run_tests_now(
                 root: args.root.clone(),
                 scope,
                 include_ignored: args.include_ignored,
+                ignored_only: args.ignored_only,
+                filter_expr: args.filter.clone(),
+                features: args.features.clone(),
+                all_features: args.all_features,
+                no_default_features: args.no_default_features,
+                runner: requested_runner(args.runner.as_deref())?,
             },
             crate::build_queue::BuildGuard::already_held(),
         )?;
@@ -3189,7 +3248,11 @@ fn run_tests_now(
         let deadline = crate::tests::Deadline::arm(handle.run_id, limit);
         let collector = std::sync::Arc::new(crate::test_report::Collector::default());
         let end = run.drive(Some(collector.clone()));
-        let mut report = report_of(&collector, "cargo", end, handle.widened, args.tests.len());
+        let kind = match handle.runner { bennu_test::prelude::CargoRunner::Nextest => "nextest", bennu_test::prelude::CargoRunner::Cargo => "cargo" };
+        let mut report = report_of(&collector, kind, end, handle.widened, args.tests.len());
+        if let Some(note) = handle.runner_note {
+            prepend_note(&mut report, note);
+        }
         note_deadline(&mut report, deadline.disarm());
         return Ok(report);
     }
@@ -3338,7 +3401,7 @@ fn cargo_scope(
     ctx: &BennuState,
     args: &RunTestsAtArgs,
 ) -> Result<bennu_test::prelude::CargoTestScope, String> {
-    use bennu_test::prelude::{CargoTestScope, RustCaseRef, RustTestKind};
+    use bennu_test::prelude::CargoTestScope;
 
     if args.tests.is_empty() {
         return Ok(match args.module.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
@@ -3346,39 +3409,78 @@ fn cargo_scope(
             None => CargoTestScope::Workspace,
         });
     }
-    let found = crate::cargo_tests::bennu_discover_cargo_tests(
-        ctx,
-        crate::cargo_tests::DiscoverArgs {
-            root: args.root.clone(),
-            file: None,
-            force: false,
-        },
-    )?;
+    let discover = |force: bool| {
+        crate::cargo_tests::bennu_discover_cargo_tests(
+            ctx,
+            crate::cargo_tests::DiscoverArgs { root: args.root.clone(), file: None, force },
+        )
+    };
+    let mut found = discover(false)?;
+    // Discovery is cached per workspace: a test written since (by the user, or by an assistant a minute ago) is
+    // not in it. A name that misses is looked for again in a fresh walk before it is called missing.
+    if bennu_test::prelude::select_cases(&found, &args.tests).is_err() {
+        found = discover(true)?;
+    }
 
-    let mut cases = Vec::new();
-    let mut missing = Vec::new();
-    for wanted in &args.tests {
-        match found.iter().find(|t| &t.path == wanted) {
-            Some(test) => cases.push(RustCaseRef {
-                package: test.package.clone(),
-                target: test.target.clone(),
-                path: test.path.clone(),
-                // A parameterised function's real cases are `path::case_1`, `case_2`, … —
-                // asking libtest for `path` exactly would run none of them.
-                exact: !matches!(test.kind, RustTestKind::Parameterized),
-            }),
-            None => missing.push(wanted.as_str()),
+    match bennu_test::prelude::select_cases(&found, &args.tests) {
+        Ok(cases) => Ok(CargoTestScope::Cases { cases }),
+        // A crate's name where a test or module was expected: the caller wants that crate, and saying so is
+        // kinder than an error — but only when nothing else was named, or the run would quietly be wider.
+        Err(missing) if args.tests.len() == 1 && package_named(&found, &missing[0]).is_some() => {
+            Ok(CargoTestScope::Package { package: package_named(&found, &missing[0]).unwrap_or_default() })
         }
+        Err(missing) => Err(format!(
+            "No test in the workspace at `{}` is named {}, and no module holds tests under that name. If \
+             the tests are in another project, pass that project's root as `root`. Names come from \
+             bennu_tests — libtest paths (`module::tests::name`), or a module prefix (`cli` or `cli::`) to \
+             run every test under it; not file paths or function names on their own. To run a whole crate, \
+             pass its package name as `module` (crates with tests here: {}); for a selection names cannot \
+             say, `filter` takes a nextest expression. Modules that hold tests, by crate and binary:\n{}",
+            args.root,
+            missing.join(", "),
+            packages_of(&found).join(", "),
+            modules_of(&found, args.module.as_deref())
+        )),
     }
-    if !missing.is_empty() {
-        return Err(format!(
-            "No test in this workspace is named {}. Names come from bennu_tests — they are \
-             libtest paths (`module::tests::name`), not file paths or function names on \
-             their own.",
-            missing.join(", ")
-        ));
+}
+
+/// The package `name` stands for — spelled with `-` or `_`, as Cargo accepts both on the command line.
+fn package_named(found: &[bennu_test::prelude::RustTest], name: &str) -> Option<String> {
+    let want = name.trim().replace('-', "_");
+    found.iter().map(|t| &t.package).find(|p| p.replace('-', "_") == want).cloned()
+}
+
+/// The first-level modules that hold tests, per crate and target (`fulcrum-editor (test suite): forno::,
+/// modali::`), so a selection that missed can be spelled right the second time. One crate when `module` names
+/// one; capped either way.
+fn modules_of(found: &[bennu_test::prelude::RustTest], module: Option<&str>) -> String {
+    use std::collections::{BTreeMap, BTreeSet};
+    let want = module.map(|m| m.trim().replace('-', "_")).filter(|m| !m.is_empty());
+    let mut by_home: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for t in found {
+        if want.as_ref().is_some_and(|w| t.package.replace('-', "_") != *w) {
+            continue;
+        }
+        let head = t.path.split("::").next().unwrap_or(&t.path);
+        let module = if t.path.contains("::") { format!("{head}::") } else { t.path.clone() };
+        by_home.entry(format!("{} ({})", t.package, t.target.label())).or_default().insert(module);
     }
-    Ok(CargoTestScope::Cases { cases })
+    let lines: Vec<String> = by_home
+        .iter()
+        .take(30)
+        .map(|(home, mods)| {
+            let shown: Vec<&str> = mods.iter().take(25).map(String::as_str).collect();
+            let more = if mods.len() > shown.len() { format!(", … {} more", mods.len() - shown.len()) } else { String::new() };
+            format!("- {home}: {}{more}", shown.join(", "))
+        })
+        .collect();
+    if lines.is_empty() { "(none)".into() } else { lines.join("\n") }
+}
+
+/// The packages discovery found tests in, sorted and once each.
+fn packages_of(found: &[bennu_test::prelude::RustTest]) -> Vec<String> {
+    let set: std::collections::BTreeSet<&str> = found.iter().map(|t| t.package.as_str()).collect();
+    set.into_iter().map(str::to_string).collect()
 }
 
 // ── Problems in one file ────────────────────────────────────────────────────────
@@ -3502,26 +3604,19 @@ fn bennu_check_file(ctx: &BennuState, args: CheckFileArgs) -> Result<CheckResult
 
 /// Whether anything beyond the generic encoding and naming scans looks at this file type.
 ///
-/// Mirrors the routes in `intel::route_diagnostics`: a language server's files, a Cargo manifest,
-/// a shader, a JSP, a Java source, and XML (bean and mapper files).
+/// Any file an engine serves (see `engine`): a language server's, a Cargo manifest, a shader, a `.ptn`, a `.ron`,
+/// or one the Java index reads.
 fn has_language_check(file: &str) -> bool {
-    if crate::lsp_route::owns(file) || crate::intel::is_java_file(file) {
-        return true;
-    }
-    let lower = file.replace('\\', "/").to_ascii_lowercase();
-    lower.ends_with("/cargo.toml")
-        || [".xml", ".jsp", ".jspx", ".wgsl"].iter().any(|ext| lower.ends_with(ext))
+    // The router decides, so this cannot drift from what `intel::route_diagnostics` actually asks.
+    crate::engine::engine_for(file).unserved_reason().is_none()
 }
 
 /// The note for a file type no check exists for.
 fn unchecked_file_note(file: &str) -> String {
-    let ext = Path::new(file)
-        .extension()
-        .map(|e| format!(".{}", e.to_string_lossy()))
-        .unwrap_or_else(|| "extensionless".to_string());
+    let why = crate::engine::engine_for(file).unserved_reason().map(str::to_string).unwrap_or_else(|| "no check applies to it".into());
     format!(
-        "No check applies to {ext} files: only the generic encoding scan ran, and it found nothing. \
-         That is not a statement about the file's content — nothing parsed it."
+        "Only the generic encoding scan ran, and it found nothing: {why}. That is not a statement about the \
+         file's content — nothing parsed it."
     )
 }
 
@@ -4027,6 +4122,30 @@ pub struct BuildProjectArgs {
     /// changed. Omit it to compile everything.
     #[serde(default)]
     pub module: Option<String>,
+    /// Cargo only: check for this target triple (`wasm32-wasip2`, `wasm32-unknown-unknown`)
+    /// instead of the host — "does it compile for wasm?" — without the tests, which would not
+    /// compile there. Produces nothing; bennu_build produces the files. The target must be
+    /// installed (`rustup target add …`).
+    #[serde(default)]
+    pub target: Option<String>,
+}
+
+/// Args for [`bennu_build_artifacts`].
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BuildArtifactsArgs {
+    /// Absolute path to the project root (a Cargo project).
+    pub root: String,
+    /// Build only this crate (a Cargo package name) and what it depends on. Omit it to build the
+    /// whole workspace.
+    #[serde(default)]
+    pub module: Option<String>,
+    /// The target triple to build for (`wasm32-wasip2`, `wasm32-unknown-unknown`,
+    /// `x86_64-pc-windows-gnu`); default the host. It must be installed (`rustup target add …`).
+    #[serde(default)]
+    pub target: Option<String>,
+    /// The profile (`release`, or one of the workspace's own); default the dev profile.
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 /// One thing the compiler said, addressed the way a caller can act on.
@@ -4064,20 +4183,29 @@ pub struct BuildReport {
     /// project since it last compiled. A guess from the edit record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attribution: Option<String>,
+    /// From bennu_build: the files the build left in its output folder (`.wasm`, libraries,
+    /// binaries), as absolute paths, newest first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<String>,
 }
 
-/// Compile the project and report what the compiler said.
+/// Check that the project compiles and report what the compiler said.
 ///
 /// The answer to "does this build" — which nothing else here can give, because
 /// `bennu_check_file` reads what the language server last published and that is the last
 /// `cargo check` *the user's editor ran*, on the file *as it was saved*. After editing,
 /// this is what tells you whether the edit compiles.
 ///
-/// Runs `cargo check` on a Cargo root — `check`, not `build`: the answer wanted is the
-/// diagnostics, and reaching them without linking is several times faster. On a Maven root
+/// Runs `cargo check --all-targets` on a Cargo root — `check`, not `build`: the answer wanted is
+/// the diagnostics, and reaching them without linking is several times faster; all targets, so
+/// an error in the tests (`cfg(test)`) fails it as the language server's Problems would. On a Maven root
 /// it runs `mvn -o compile`, falling back to `javac`, and skips entirely when nothing has
 /// changed since the last successful compile (reported as the `up-to-date` tool, which is a
 /// real pass).
+///
+/// With a `target` (Cargo only) it checks that triple instead of the host, without the tests. It
+/// produces nothing: when the built files themselves are wanted (a `.wasm` to install, a release
+/// binary), use bennu_build.
 ///
 /// Name a `module` unless you mean the whole project. It needs approval because compiling
 /// runs code the project supplies — `build.rs`, proc macros, Maven plugins — which is
@@ -4086,13 +4214,42 @@ pub struct BuildReport {
 /// A compile that fails is a normal result carrying its diagnostics, not an error; an error
 /// here means no compiler could be started at all.
 #[arbor_rpc::handler(mcp(
-    name = "bennu_build",
-    title = "Compile the project and report the errors",
+    name = "bennu_check",
+    title = "Check that the project compiles and report the errors",
     safety = destructive,
 ))]
 fn bennu_build_project(ctx: &BennuState, args: BuildProjectArgs) -> Result<BuildReport, String> {
-    let served = crate::build::compile_project(ctx, &args.root, args.module.as_deref())?;
-    let queue = crate::build_queue::served_note(crate::build_queue::Kind::Build, &args.root, &served);
+    let flavor = crate::build::CargoFlavor::check(args.target.as_deref())?;
+    compile_report(ctx, &args.root, args.module.as_deref(), &flavor)
+}
+
+/// Build a Cargo project's files and say where they are.
+///
+/// A real `cargo build` of the library and binaries (not the tests) for the host or a `target`
+/// triple, with the dev profile or a `profile` (`release`…). The answer is bennu_check's — the
+/// compiler's problems — plus `artifacts`: the files it left in `target/<triple>/<profile>/`,
+/// newest first, such as the `.wasm` of a wasm target. Use it when the output itself is wanted (to
+/// install or copy it); to know whether the code compiles, bennu_check is faster.
+///
+/// Cargo only. It needs approval like bennu_check, for the same reason: compiling runs code the
+/// project supplies.
+#[arbor_rpc::handler(mcp(
+    name = "bennu_build",
+    title = "Build the project's files (Cargo)",
+    safety = destructive,
+))]
+fn bennu_build_artifacts(ctx: &BennuState, args: BuildArtifactsArgs) -> Result<BuildReport, String> {
+    if !crate::build::is_cargo_root(Path::new(&args.root)) {
+        return Err("bennu_build builds a Cargo project's files; this project is not one. To check that it compiles, use bennu_check".into());
+    }
+    let flavor = crate::build::CargoFlavor::build(args.target.as_deref(), args.profile.as_deref())?;
+    compile_report(ctx, &args.root, args.module.as_deref(), &flavor)
+}
+
+/// The compile both tools run, as the report they answer with.
+fn compile_report(ctx: &BennuState, root: &str, module: Option<&str>, flavor: &crate::build::CargoFlavor) -> Result<BuildReport, String> {
+    let served = crate::build::compile_project(ctx, root, module, flavor)?;
+    let queue = crate::build_queue::served_note(crate::build_queue::Kind::Build, root, &served);
     let target = served.target.clone();
     let outcome = served.value;
 
@@ -4116,19 +4273,34 @@ fn bennu_build_project(ctx: &BennuState, args: BuildProjectArgs) -> Result<Build
         "warning" => 1,
         _ => 2,
     });
+    // The signal first: while it does not compile, the warnings are noise — often a hundred of them from another
+    // project's crates — and they bury the one error that matters. Counted, not listed. With no error, the warnings
+    // of crates outside this project (path dependencies on another checkout) are counted, not listed, either.
+    let left_out = left_out_warnings(&mut problems, root, errors > 0);
     let truncated = problems.len().saturating_sub(MAX_BUILD_PROBLEMS);
     problems.truncate(MAX_BUILD_PROBLEMS);
     let attribution = (!outcome.ok)
         .then(|| {
             let errors = problems.iter().filter(|p| p.severity == "error").map(|p| (p.file.clone(), p.line, p.message.clone())).collect();
-            crate::build_attribution::explain(&args.root, &target, errors)
+            crate::build_attribution::explain(root, &target, errors)
         })
         .flatten();
+
+    let (artifacts, where_note) = match (flavor.mode, outcome.ok) {
+        (crate::build::CargoMode::Build, true) => built_artifacts(root, flavor),
+        _ => (Vec::new(), None),
+    };
+    let note = [build_note(&outcome.tool, outcome.ok, errors, truncated, &outcome.raw), where_note, left_out]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let note = (!note.is_empty()).then(|| note.join(" "));
 
     Ok(BuildReport {
         queue,
         attribution,
-        note: build_note(&outcome.tool, outcome.ok, errors, truncated, &outcome.raw),
+        artifacts,
+        note,
         tool: outcome.tool,
         ok: outcome.ok,
         errors,
@@ -4136,6 +4308,75 @@ fn bennu_build_project(ctx: &BennuState, args: BuildProjectArgs) -> Result<Build
         problems,
         truncated,
     })
+}
+
+/// Take out of `problems` the warnings not worth listing — all of them while there are errors, otherwise those in
+/// files outside `root` — and say how many went.
+fn left_out_warnings(problems: &mut Vec<BuildProblem>, root: &str, has_errors: bool) -> Option<String> {
+    let root = std::path::Path::new(root);
+    let foreign = |p: &BuildProblem| {
+        // Cargo names a crate of another checkout relative to the root, as `../fulcrum/…`.
+        p.file.as_deref().map(std::path::Path::new).is_some_and(|file| {
+            if file.is_absolute() { !file.starts_with(root) } else { file.starts_with("..") }
+        })
+    };
+    let before = problems.len();
+    let mut outside = 0usize;
+    problems.retain(|p| {
+        if p.severity != "warning" {
+            return true;
+        }
+        if has_errors {
+            return false;
+        }
+        let keep = !foreign(p);
+        outside += usize::from(!keep);
+        keep
+    });
+    let gone = before - problems.len();
+    match (gone, has_errors) {
+        (0, _) => None,
+        (n, true) => Some(format!("{n} warning(s) left out while it does not compile: fix the errors, then check again to see them.")),
+        (_, false) => Some(format!("{outside} warning(s) in crates outside this project left out.")),
+    }
+}
+
+/// The most artifacts a build lists.
+const MAX_ARTIFACTS: usize = 30;
+
+/// What a `cargo build` for a target or a profile left in its output folder, and a note when that folder is not
+/// the project's own `target/` — a conversation that builds apart has its own, and a script that copies from
+/// `target/` would install an older build.
+fn built_artifacts(root: &str, flavor: &crate::build::CargoFlavor) -> (Vec<String>, Option<String>) {
+    let separate = crate::build_queue::separate_target_dir(root);
+    let base = separate
+        .clone()
+        .or_else(|| std::env::var_os("CARGO_TARGET_DIR").map(std::path::PathBuf::from))
+        .unwrap_or_else(|| Path::new(root).join("target"));
+    let dir = base.join(flavor.artifact_subdir());
+    // The top level of the profile folder holds the artifacts; `deps/`, `build/`, `.fingerprint/` and the `.d`
+    // dependency lists are cargo's own.
+    let mut found: Vec<(std::time::SystemTime, String)> = std::fs::read_dir(&dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+                .filter(|e| !e.file_name().to_string_lossy().ends_with(".d") && !e.file_name().to_string_lossy().starts_with('.'))
+                .map(|e| (e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), e.path().display().to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    let artifacts: Vec<String> = found.into_iter().take(MAX_ARTIFACTS).map(|(_, p)| p).collect();
+    let note = match (separate.is_some(), artifacts.is_empty()) {
+        (true, _) => Some(format!(
+            "This conversation builds into a target directory of its own, so the artifacts are in {} — not in the project's target/: a script that copies from target/ would install an older build.",
+            dir.display()
+        )),
+        (false, true) => Some(format!("The build succeeded but left no artifact in {} (a crate with no library or binary for this target?).", dir.display())),
+        (false, false) => None,
+    };
+    (artifacts, note)
 }
 
 /// What a build result cannot say for itself.
@@ -4567,7 +4808,7 @@ mod wait_note_tests {
     #[test]
     fn a_server_nobody_started_names_the_call_that_starts_it() {
         let note = wait_note_for(ServerReadiness::Idle { name: "rust-analyzer".into() }).unwrap();
-        assert!(note.contains("bennu_project_summary"), "{note}");
+        assert!(note.contains("bennu_wait_ready"), "{note}");
     }
 
     #[test]
@@ -4582,6 +4823,27 @@ mod wait_note_tests {
 #[cfg(test)]
 mod honesty_tests {
     use super::*;
+
+    fn problem(severity: &str, file: &str) -> BuildProblem {
+        BuildProblem { severity: severity.into(), file: Some(file.into()), line: Some(1), column: Some(1), message: "m".into() }
+    }
+
+    #[test]
+    fn while_it_does_not_compile_only_the_errors_are_listed() {
+        let mut problems = vec![problem("error", "/p/voriz/src/a.rs"), problem("warning", "/p/fulcrum/src/b.rs"), problem("warning", "/p/voriz/src/c.rs")];
+        let note = left_out_warnings(&mut problems, "/p/voriz", true).unwrap();
+        assert_eq!(problems.len(), 1);
+        assert!(note.starts_with("2 warning(s) left out"), "{note}");
+    }
+
+    #[test]
+    fn with_no_error_the_warnings_of_other_projects_are_counted_not_listed() {
+        let mut problems = vec![problem("warning", "/p/fulcrum/src/b.rs"), problem("warning", "/p/voriz/src/c.rs"), problem("warning", "src/d.rs"), problem("warning", "../fulcrum/src/e.rs")];
+        let note = left_out_warnings(&mut problems, "/p/voriz", false).unwrap();
+        assert_eq!(problems.len(), 2);
+        assert!(note.starts_with("2 warning(s) in crates outside"), "{note}");
+        assert!(left_out_warnings(&mut problems, "/p/voriz", false).is_none());
+    }
 
     #[test]
     fn an_unknown_symbol_kind_is_refused_and_omitting_it_means_both() {

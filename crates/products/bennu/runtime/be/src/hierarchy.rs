@@ -6,15 +6,13 @@
 //! calls these and never has to know which of the two answered — which is what stopped Ctrl+H and
 //! Ctrl+Shift+H being hidden on the one language the product exists for.
 //!
-//! Routed on the file, exactly like `format`: a Java buffer goes to the index, everything else to
-//! the server that covers it.
+//! Routed by `engine`, like every other question: a Java buffer goes to the index, a `.ptn` to the Patina
+//! package (who calls), everything else to the server that covers it.
 
 use bennu_core::prelude::BennuState;
-use bennu_intel::prelude::{HierarchyDirection, HierarchyHandle, HierarchyItem};
+use bennu_intel::prelude::HierarchyItem;
 use bennu_proto::prelude::{HierarchyCallSite, HierarchyNode};
 use serde::Deserialize;
-
-use crate::index_service::IndexService;
 
 /// Args for [`bennu_hierarchy_prepare`].
 #[derive(Deserialize)]
@@ -32,15 +30,11 @@ pub struct PrepareArgs {
 /// The item at the caret a hierarchy can be built from, or an empty list when there is none.
 #[arbor_rpc::handler]
 fn bennu_hierarchy_prepare(
-    _ctx: &BennuState,
+    ctx: &BennuState,
     args: PrepareArgs,
 ) -> Result<Vec<HierarchyNode>, String> {
-    if crate::intel::is_java_file(&args.file) {
-        let items =
-            IndexService::global().prepare_hierarchy(&args.file, &args.source, args.offset, args.calls);
-        return Ok(items.into_iter().map(node_of).collect());
-    }
-    Ok(crate::lsp_route::prepare_hierarchy(&args.file, &args.source, args.offset, args.calls))
+    // The one engine that serves the file answers (see `engine`): Java's index, Patina's package, or a server.
+    Ok(crate::engine::prepare_hierarchy(ctx, &args.file, &args.source, args.offset, args.calls))
 }
 
 /// Args for [`bennu_hierarchy_step`].
@@ -57,28 +51,15 @@ pub struct StepArgs {
 
 /// One level of a hierarchy, expanded from a node's handle.
 #[arbor_rpc::handler]
-fn bennu_hierarchy_step(_ctx: &BennuState, args: StepArgs) -> Result<Vec<HierarchyNode>, String> {
-    if crate::intel::is_java_file(&args.scope) {
-        // A handle this engine did not issue, or a direction this build has never heard of. Both
-        // answer nothing rather than guessing: hanging the wrong list under an expanded node is a
-        // worse outcome than an empty one, and it is a state a newer frontend can produce.
-        let Some(direction) = HierarchyDirection::from_wire(&args.direction) else {
-            return Ok(Vec::new());
-        };
-        let Ok(handle) = serde_json::from_value::<HierarchyHandle>(args.item) else {
-            return Ok(Vec::new());
-        };
-        let items = IndexService::global().hierarchy_step(&args.scope, &handle, direction);
-        return Ok(items.into_iter().map(node_of).collect());
-    }
-    Ok(crate::lsp_route::hierarchy_step(&args.scope, args.item, &args.direction))
+fn bennu_hierarchy_step(ctx: &BennuState, args: StepArgs) -> Result<Vec<HierarchyNode>, String> {
+    Ok(crate::engine::hierarchy_step(ctx, &args.scope, args.item, &args.direction))
 }
 
 /// A Java engine item on the wire.
 ///
 /// The handle is serialised here rather than carried as JSON through the engine: it is a typed enum
 /// in there, which is what keeps `step` from having to interpret something it did not issue.
-fn node_of(item: HierarchyItem) -> HierarchyNode {
+pub(crate) fn node_of(item: HierarchyItem) -> HierarchyNode {
     HierarchyNode {
         name: item.name,
         kind: item.kind,

@@ -52,6 +52,7 @@ import {
 } from '$lib/components/shared/ui/code-editor';
 import type { Extension } from '@codemirror/state';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
+import { commentMarkdown } from '$lib/utils/comment-markdown';
 import { xml } from '@codemirror/legacy-modes/mode/xml';
 import { css, sCSS, less } from '@codemirror/legacy-modes/mode/css';
 import { properties } from '@codemirror/legacy-modes/mode/properties';
@@ -315,11 +316,11 @@ const luaLang = lspLanguage('lua', lua, {
   block: { open: '--[[', close: ']]' },
 });
 const goLang = lspLanguage('go', go, { line: '//', block: { open: '/*', close: '*/' } });
-// Rust: the legacy mode for the instant local colour, plus everything a language server adds.
+// Rust: the legacy mode for the instant local colour, plus everything a language server adds —
+// and its `//`, `///` and `//!` comments drawn as live markdown, which is what rustdoc reads them as.
 // Built once — the identity has to be stable or the editor remounts on every keystroke.
-const rustLang = lspLanguage('rust', rust, {
-  line: '//',
-  block: { open: '/*', close: '*/' },
+const rustLang = lspLanguageFrom('rust', [StreamLanguage.define(rust), commentMarkdown('//')], {
+  commentTokens: { line: '//', block: { open: '/*', close: '*/' } },
 });
 /**
  * RON — geode's content format, what a Bevy asset is written in, and the shape a debugger value

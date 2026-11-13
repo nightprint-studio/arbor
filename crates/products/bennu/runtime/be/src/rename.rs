@@ -44,19 +44,10 @@ pub struct RenameArgs {
 /// isn't on a renameable identifier.
 #[arbor_rpc::handler]
 fn bennu_rename_plan(ctx: &BennuState, args: RenameArgs) -> Result<Option<RenamePreview>, String> {
-    // A server-backed file plans through its own server. Its edits are never `inferred` — a
-    // language server resolved them, so unlike the Java engine's same-name-method heuristic
-    // there is no guesswork for the preview to flag.
-    if let Some(preview) =
-        crate::lsp_route::rename_plan(&args.file, &args.source, args.offset, &args.new_name)
-    {
-        return Ok(preview);
-    }
-    // A `.ptn`: the extension that serves it plans the rename across the mod; its edits are resolved, never
-    // inferred.
-    if let Some(preview) =
-        crate::patina_intel::rename_plan(ctx, &args.file, &args.source, args.offset, &args.new_name)
-    {
+    // The one engine that serves the file plans it (see `engine`). A server's or the Patina package's edits are
+    // resolved, never `inferred`, so unlike the Java engine's same-name-method heuristic there is no guesswork
+    // for the preview to flag.
+    if let Ok(preview) = crate::engine::rename_plan(ctx, &args.file, &args.source, args.offset, &args.new_name) {
         return Ok(preview);
     }
     let plan =
@@ -77,17 +68,10 @@ fn bennu_rename_plan(ctx: &BennuState, args: RenameArgs) -> Result<Option<Rename
 /// half of what renaming a type *is*.
 #[arbor_rpc::handler]
 fn bennu_rename_apply(ctx: &BennuState, args: RenameArgs) -> Result<RenameApplyResult, String> {
-    // A server-backed file: the server's edits, and no move. A rename that has to move a file is a
-    // Java rule (the public-type/filename tie), and LSP expresses file operations in a channel this
-    // seam does not carry — inventing one here would be guessing on the server's behalf.
-    if let Some(edits) =
-        crate::lsp_route::rename_apply(&args.file, &args.source, args.offset, &args.new_name)
-    {
-        return Ok(RenameApplyResult { edits, file_rename: None });
-    }
-    if let Some(edits) =
-        crate::patina_intel::rename_apply(ctx, &args.file, &args.source, args.offset, &args.new_name)
-    {
+    // Another engine's edits, and no move. A rename that has to move a file is a Java rule (the public-type /
+    // filename tie), and LSP expresses file operations in a channel this seam does not carry — inventing one
+    // here would be guessing on the server's behalf.
+    if let Ok(edits) = crate::engine::rename_apply(ctx, &args.file, &args.source, args.offset, &args.new_name) {
         return Ok(RenameApplyResult { edits, file_rename: None });
     }
     let plan =

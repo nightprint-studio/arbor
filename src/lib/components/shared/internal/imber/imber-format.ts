@@ -2,6 +2,8 @@
  * How the Imber chat writes numbers and times — pure, shared by every product's panel.
  */
 
+import type { WorkItem } from './imber-types';
+
 /** `37500` → `37.5K`, `1000000` → `1M`; below a thousand, the number itself. */
 export function formatTokens(tokens: number): string {
   if (tokens < 1000) return String(Math.round(tokens));
@@ -36,6 +38,45 @@ export function formatPrice(input: number, output: number): string {
   // Whole dollars bare (`$4`), fractions to the cent (`$0.10`, `$2.50`).
   const p = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
   return `$${p(input)} / $${p(output)}`;
+}
+
+/** `420` → `420 ms`, `8200` → `8.2s`, `192000` → `3m 12s`, `3_900_000` → `1h 5m`. */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${trim((ms / 1000).toFixed(1))}s`;
+  if (ms < 3_600_000) {
+    const m = Math.floor(ms / 60_000);
+    const s = Math.round((ms % 60_000) / 1000);
+    return s ? `${m}m ${s}s` : `${m}m`;
+  }
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.round((ms % 3_600_000) / 60_000);
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** Where a run's time went: the model's answers, the tools running, and the user answering cards. */
+export interface TimeSplit {
+  model: number;
+  tools: number;
+  waiting: number;
+  /** Whether any of it was recorded — older conversations have no times. */
+  known: boolean;
+}
+
+/** The time split of a run's rows. */
+export function splitTime(items: WorkItem[]): TimeSplit {
+  const split: TimeSplit = { model: 0, tools: 0, waiting: 0, known: false };
+  for (const item of items) {
+    if (item.kind === 'step') {
+      split.model += item.step.ms;
+      split.known = true;
+    } else if (item.call.ms !== undefined) {
+      split.tools += item.call.ms;
+      split.waiting += item.call.waitMs ?? 0;
+      split.known = true;
+    }
+  }
+  return split;
 }
 
 const MINUTE = 60_000;

@@ -8,7 +8,9 @@
    * summary. Opening the line shows where the tokens went.
    *
    * Every figure here is an estimate (four characters to a token): the bar steers, and the count the
-   * API returns after a request is the one to trust. It says so.
+   * API returns after a request is the one to trust. It says so. While a run goes, the figures move with
+   * each request instead of waiting for the run to end; once the provider has counted a request, every estimate
+   * is corrected by how far off it was (Bennu's `token_scale`).
    */
   import { ChevronRight, Minimize2 } from 'lucide-svelte';
   import StackedBar from '$lib/components/shared/ui/StackedBar.svelte';
@@ -83,7 +85,7 @@
         The cache is why a long conversation stays cheap.
       </p>
     {/if}
-    <p class="note">An estimate, at about four characters a token. The exact count comes back with each answer.</p>
+    <p class="note">An estimate by characters, corrected by what the provider counted for the last request; the exact count comes back with each answer.</p>
     <div class="actions">
       <Button
         variant={tone === 'ok' ? 'ghost' : 'secondary'}

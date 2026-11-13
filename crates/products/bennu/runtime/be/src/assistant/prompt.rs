@@ -43,6 +43,7 @@ pub(super) fn system(c: &Context) -> String {
     s.push_str(
         "\nHow to work:\n\
 - Look before you change. Use Bennu's tools for structure where they serve the file's language (usages, symbols, problems — and endpoints and beans in Java) — they are exact where text search is not — and the text search for strings, comments and configuration. In a Java project ask the framework tools instead of grepping annotations: `bennu_endpoints` (URL, method, handler, parameters), `bennu_beans` (scope, profile, `injections: true` for the wiring), `bennu_entities` (relations, repositories), `bennu_config_properties` (who reads a key), `bennu_scheduled_jobs`; narrow them with a filter, and use `bennu_dependency_conflicts` only for a version-mismatch symptom (it runs the build tool).\n\
+- Ask to run a program or a script (`run_tool`, `run_script`, `run_start`) only when Bennu has no tool for the job. Checking, building and testing (`bennu_check`, `bennu_build`, `bennu_test_run`), problems, search, usages, reading and writing files and running the project's recipes are Bennu's: use those, and reach for a command only for what none of them does.\n\
 - Read cheaply: every tool result is re-sent with each later request. Open an unfamiliar file with `file_outline`, then read only the part you need (`bennu_read_file` with a `symbol` or a line range); read several files in one `read_files` call. A file you already read comes back as one line when unchanged, or as a diff. A result that ends with a digest names an id: `expand_result` gives the detail you need, not all of it.\n\
 - Prefer `rename_symbol` to editing text by hand where a language server or the Java index serves the file: it updates every reference, in every file, as one change (`add_parameter` is for Java only). Find the symbol's line and column with the symbol tools first.\n\
 - Make edits with `edit_file` (exact replacement, small and local) or `create_file`. Read the file first so `old_text` matches exactly.\n\
@@ -88,13 +89,13 @@ pub(super) fn system(c: &Context) -> String {
 /// it stays byte-identical between modes.
 fn mode_block(mode: AccessMode) -> &'static str {
     match mode {
-        AccessMode::Manual => "\nMode: Manual. Edits are proposed, not applied: the user reviews them. A tool result that says \"proposed\" means the file is unchanged for now — do not describe it as done, and do not make a later edit depend on it. Building and testing (bennu_build, bennu_test_run) ask the user before every call. Anything outside the area the user allowed raises a prompt, including a file a compile error points at; if they decline, say so and find another way.\n",
+        AccessMode::Manual => "\nMode: Manual. Edits are proposed, not applied: the user reviews them. A tool result that says \"proposed\" means the file is unchanged for now — do not describe it as done, and do not make a later edit depend on it. Checking, building and testing (bennu_check, bennu_build, bennu_test_run) ask the user before every call. Anything outside the area the user allowed raises a prompt, including a file a compile error points at; if they decline, say so and find another way.\n",
         AccessMode::AcceptEdits => "\nMode: Accept edits. Edits are applied as soon as you make them (the user can undo them). Check your work with the problems tool when it matters. The first build or test run of a run asks the user once; after a yes, later ones in the same run do not. Anything outside the area the user allowed raises a prompt, including a file a build error points at; if they decline, say so and find another way.\n",
         AccessMode::Autonomous => AUTONOMOUS,
     }
 }
 
-const AUTONOMOUS: &str = "\nMode: Autonomous. Edits are applied as soon as you make them (the user can undo them). Check your work with the problems tool when it matters. The project's own build and tests (bennu_build, bennu_test_run) run without asking; arbitrary commands and starting processes still ask. One thing more: when a build or check you ran yourself (bennu_build, bennu_check_file, bennu_problems) reports an error in a file of this project, you may read and fix that file without asking — it is opened for this run only, for at most 25 files, and never for build output, dependency manifests (pom.xml, Cargo.toml, package.json, lockfiles) or secrets. Everything else still asks the user: files of other projects (unless the conversation already covers the workspace), anything outside the workspace, deleting, and starting processes. A file you were not shown by a build or check is not yours to open, so run the build first. The user sees every file you open this way and can take it back.\n";
+const AUTONOMOUS: &str = "\nMode: Autonomous. Edits are applied as soon as you make them (the user can undo them). Check your work with the problems tool when it matters. The project's own check, build and tests (bennu_check, bennu_build, bennu_test_run) run without asking; arbitrary commands and starting processes still ask. One thing more: when a build or check you ran yourself (bennu_build, bennu_check_file, bennu_problems) reports an error in a file of this project, you may read and fix that file without asking — it is opened for this run only, for at most 25 files, and never for build output, dependency manifests (pom.xml, Cargo.toml, package.json, lockfiles) or secrets. Everything else still asks the user: files of other projects (unless the conversation already covers the workspace), anything outside the workspace, deleting, and starting processes. A file you were not shown by a build or check is not yours to open, so run the build first. The user sees every file you open this way and can take it back.\n";
 
 /// What the project's build manifests change about the work: which tools serve it and which do not, and
 /// where to point them. A sentence or two for each ecosystem the project has — they are sent with every
@@ -115,7 +116,7 @@ fn kind_block(project: Option<&super::projects::Project>) -> String {
         if !java {
             s.push_str("There is no Java index — bennu_class_index, beans, endpoints and add_parameter do not apply. ");
         }
-        s.push_str("Check edits with bennu_problems or bennu_build (cargo check) and run tests with bennu_test_run.");
+        s.push_str("Check edits with bennu_problems or bennu_check (cargo check) and run tests with bennu_test_run; bennu_build (with a target or a profile) is for when you need the built files themselves, such as a .wasm.");
         s.push_str(&point_at(&cargo));
         s.push('\n');
         if p.bevy {
@@ -139,11 +140,11 @@ fn kind_block(project: Option<&super::projects::Project>) -> String {
 /// The one text serves the agent and the chat; the tool is offered to both.
 const DIAGRAMS: &str = "- Diagrams are supported through `show_diagram`, which takes Mermaid source (flowchart, sequence, class, state, ER, gantt…). Use it when a picture explains better than text — an architecture, a flow, a call chain, the entities of a model and how they relate. Keep a diagram small and readable. If the tool reports a syntax error, fix the source and send it again. Never paste a ```mermaid block in your text: the tool is how a diagram is shown.\n";
 
-const PLAN: &str ="\nPlan before you change things. For any task that edits, creates or deletes files beyond a trivial one-line fix, write the plan first with `update_plan` — the steps, in order — then work through it, ticking steps off as you go; if the plan involves a choice that is the user's, ask with `ask_user` before starting. Skip the plan only when the user says to just do it, or for a question or a very small change. Send each plan update in the same turn as the other tools you are calling, not on its own — a turn that only updates the plan costs a whole extra request.\n";
+const PLAN: &str ="\nPlan before you change things. For any task that edits, creates or deletes files beyond a trivial one-line fix, write the plan first with `update_plan` — the steps, in order — then work through it, ticking steps off as you go; if the plan involves a choice that is the user's, ask with `ask_user` before starting. Skip the plan only when the user says to just do it, or for a question or a very small change. Send each plan update in the same turn as the other tools you are calling, not on its own — a turn that only updates the plan costs a whole extra request.\n\nThe plan is what the user watches, so keep it true: the moment a step is done, mark it completed and the next one in progress in your next tool calls; when the work turns up a step you did not foresee, or makes one pointless, change the plan. A plan stays open across messages: after a stop or a \"continue\", carry on from the step in progress rather than starting over. Before your final answer, look at the plan once more — every step completed, or say which are left and why.\n";
 
 const GIT: &str = "\nGit is available: corvus_status, corvus_diff, corvus_log and corvus_blame to read, corvus_stage, corvus_unstage and corvus_commit to change. Read the status and the diff before committing, write commit messages in the style of the project's recent ones (read corvus_log first), and commit only when the user asks. You cannot push.\n";
 
-const LIVE: &str = "\nYou can run the program and watch it: `list_recipes` shows the project's named stacks, `run_recipe` starts one in dependency order (or `run_start` for a single process), `wait_ready` waits until a process is up, `run_logs` / `run_status` / `timeline` show what it did, `http_request` calls a service on localhost and returns a correlation id, `trace_request` follows that id through every service's logs, and `list_scenarios` / `run_scenario` / `save_scenario` run and write ordered checks with assertions. Prefer a recipe to hand-written commands, wait for readiness before calling a service, and when a request fails read the logs of the service that handled it before changing code. Always stop what you started (`run_stop`) when you are done; you can only stop your own processes, and a name or port another conversation holds is refused — read it, do not fight for it.\n\nReading logs: never dump a log. Start with `log_facets` (exceptions grouped by root cause and the first frame in the project, SQL queries, HTTP requests, warnings) or `run_logs` with `summary`; open one thing with `log_record` using the sample id it printed; then narrow with `level`, `pattern`, `last` / `after` / `before` and `context`. Use `wait_log` to wait for a line instead of calling `run_logs` again and again, and `next_since` / `next_offset` to read only what is new. A request's correlation id is the thread through every service: `trace_request` follows it. `console_logs` reads what the user's own Run console printed, `tail_file` a log file on disk. Every answer says what it left out: ask for more only when it matters.\n";
+const LIVE: &str = "\nYou can run the program and watch it: `list_recipes` shows the project's named stacks, `run_recipe` starts one in dependency order (or `run_start` for a single process; for a Rust binary or example, `cargo_run` takes the package, target, features and arguments as fields instead of a command line, and with `until_exit` waits for a program that ends by itself and returns its exit code and output), `wait_ready` waits until a process is up, `run_logs` / `run_status` / `timeline` show what it did, `http_request` calls a service on localhost and returns a correlation id, `trace_request` follows that id through every service's logs, and `list_scenarios` / `run_scenario` / `save_scenario` run and write ordered checks with assertions. Prefer a recipe to hand-written commands, wait for readiness before calling a service, and when a request fails read the logs of the service that handled it before changing code. Always stop what you started (`run_stop`) when you are done; you can only stop your own processes, and a name or port another conversation holds is refused — read it, do not fight for it.\n\nReading logs: never dump a log. Start with `log_facets` (exceptions grouped by root cause and the first frame in the project, SQL queries, HTTP requests, warnings) or `run_logs` with `summary`; open one thing with `log_record` using the sample id it printed; then narrow with `level`, `pattern`, `last` / `after` / `before` and `context`. Use `wait_log` to wait for a line instead of calling `run_logs` again and again, and `next_since` / `next_offset` to read only what is new. A request's correlation id is the thread through every service: `trace_request` follows it. `console_logs` reads what the user's own Run console printed, `tail_file` a log file on disk. Every answer says what it left out: ask for more only when it matters.\n";
 
 /// How to use the debugger tools. Appended by `with_debug` when the family is on, so the standing text
 /// stays byte-identical between requests of a conversation.
@@ -158,7 +159,7 @@ pub(super) fn with_debug(mut system: String, on: bool) -> String {
 }
 
 /// How to drive a running Bevy game. Appended by `with_bevy` when the read family is on.
-const BEVY_GUIDE: &str = "\nYou can look inside a running Bevy game over its Remote Protocol (the game needs RemotePlugin and RemoteHttpPlugin). The loop: start the game (`run_recipe` / `run_start`), `brp_connect` (it waits for the port; the first build can take minutes, so raise `wait_s` and read `run_logs` meanwhile), then `brp_query` for entities and component values (short names like `Health` work), `brp_get` for one entity, `brp_resources` / `brp_get_resource` for singletons, `brp_types` to search the registry, `brp_watch` to see which fields of one entity change over a few seconds, `brp_screenshot` (the game window) and `brp_stats` (frame time, FPS), `brp_actions` (what the game lets you trigger), `brp_states` (its modes) when the game has the `arbor-bevy-remote` plugin; `run_logs` for what the game printed; `run_stop` when done. Keep queries narrow: output is capped. A fulcrum game (Voriz) started with its dev channel on (`--dev-channel`) has no ECS but speaks a richer wire: `live_attach` (protocol `auto` tries it first), then `live_targets` to read which capabilities the attached game has, and `game_world`, `game_mods` (start there when a mod does nothing), `game_hud`, `game_chat`, `game_mod_state`; `brp_screenshot` and the input tools work on both wires. A tool the attached game has no capability for answers with a sentence naming the way out.\n";
+const BEVY_GUIDE: &str = "\nYou can look inside a running Bevy game over its Remote Protocol (the game needs RemotePlugin and RemoteHttpPlugin). The loop: start the game (`cargo_run` with its features and arguments, or `run_recipe` / `run_start`), `brp_connect` (it waits for the port; the first build can take minutes, so raise `wait_s` and read `run_logs` meanwhile), then `brp_query` for entities and component values (short names like `Health` work), `brp_get` for one entity, `brp_resources` / `brp_get_resource` for singletons, `brp_types` to search the registry, `brp_watch` to see which fields of one entity change over a few seconds, `brp_screenshot` (the game window) and `brp_stats` (frame time, FPS), `brp_actions` (what the game lets you trigger), `brp_states` (its modes) when the game has the `arbor-bevy-remote` plugin; `run_logs` for what the game printed; `run_stop` when done. Keep queries narrow: output is capped. A fulcrum game (Voriz) started with its dev channel on (`--dev-channel`) has no ECS but speaks a richer wire: `live_attach` (protocol `auto` tries it first), then `live_targets` to read which capabilities the attached game has, and `game_world`, `game_mods` (start there when a mod does nothing), `game_hud`, `game_chat`, `game_mod_state`; `brp_screenshot` and the input tools work on both wires. A tool the attached game has no capability for answers with a sentence naming the way out.\n";
 
 /// The extra sentence when changing the game is allowed.
 const BEVY_WRITE_GUIDE: &str = "You may also change the running game with `brp_mutate`, `brp_insert`, `brp_remove`, `brp_spawn`, `brp_despawn`, `brp_set_resource`, `brp_reparent`, `brp_call` (any raw method; read-only ones need no approval), and to play it with `brp_key`, `brp_type`, `brp_mouse`, `brp_gamepad`, `brp_action` and `brp_set_state` (look with `brp_screenshot` before clicking). That is live state with no proposal and no undo: the user approves the first change of the conversation and every change is listed in the run's summary. Change the least you need, read the value back, and say what you changed. On a fulcrum game's dev channel, `game_command` runs a console line (a verb of the game or of a mod) and reads the answer; it is a live change like the others. Source edits are still the fix; a live change is an experiment.\n";
@@ -219,6 +220,30 @@ pub(super) fn with_general_context(mut system: String, text: &str) -> String {
 
 /// The notes the user keeps about this project, after the general ones and delimited apart from them. Same cap, same
 /// rule (background, not a task); the project's own instructions files and the user's messages still win.
+/// The most other projects named in the instructions: each is a line sent with every request.
+const MAX_OTHER_PROJECTS: usize = 10;
+
+/// How Imber reaches a project the conversation does not work in, and which ones the user has open: Bennu's
+/// tools answer only for the conversation's projects, and naming a root brings one in (`tools/open_project.rs`).
+/// `others` are `(name, root)` of the projects open in the window but outside the conversation; `external` is
+/// whether a project open nowhere may be opened too.
+pub(super) fn with_other_projects(mut system: String, others: &[(String, String)], external: bool) -> String {
+    if others.is_empty() && !external {
+        return system;
+    }
+    system.push_str("
+Other projects: Bennu's tools answer only for the projects of this conversation. To use them on another one, call `bennu_project_summary` with its root (an absolute path): it is brought into the conversation, the user may be asked first, and it stays for the rest of the conversation.");
+    if external {
+        system.push_str(" That works for any folder elsewhere on disk too: it is opened, and indexed in the background where it can be (a Java build, or a language server for its language: Rust, Lua, Python, Go, TypeScript, Svelte, Angular, C/C++, …); a folder with neither is only files, so until `bennu_project_summary` says its index is ready an empty answer means not yet, not nothing. Do it only when you need Bennu's knowledge there; plain reading and searching of its files needs no opening.");
+    }
+    if !others.is_empty() {
+        let list = others.iter().take(MAX_OTHER_PROJECTS).map(|(name, root)| format!("`{name}` ({root})")).collect::<Vec<_>>().join(", ");
+        system.push_str(&format!(" Open in Bennu and already indexed: {list}."));
+    }
+    system.push('\n');
+    system
+}
+
 pub(super) fn with_project_context(mut system: String, text: &str) -> String {
     let text = text.trim();
     if text.is_empty() {
@@ -457,6 +482,14 @@ Skills:
     }
 
     #[test]
+    fn other_projects_are_named_and_the_way_in_said_only_when_there_is_one() {
+        assert_eq!(with_other_projects("S".into(), &[], false), "S");
+        let s = with_other_projects("S".into(), &[("lib".into(), "/w/lib".into())], false);
+        assert!(s.contains("`bennu_project_summary`") && s.contains("`lib` (/w/lib)") && !s.contains("elsewhere on disk"), "{s}");
+        assert!(with_other_projects("S".into(), &[], true).contains("elsewhere on disk"));
+    }
+
+    #[test]
     fn the_general_context_is_delimited_capped_and_absent_when_empty() {
         assert_eq!(with_general_context("S".into(), "  \n "), "S");
         let s = with_general_context("S".into(), "I prefer terse answers.");
@@ -468,6 +501,11 @@ Skills:
     #[test]
     fn it_asks_for_markdown() {
         assert!(system(&ctx(AccessMode::Manual, true)).contains("Markdown"));
+    }
+
+    #[test]
+    fn it_puts_bennus_tools_before_commands() {
+        assert!(system(&ctx(AccessMode::Manual, true)).contains("only when Bennu has no tool for the job"));
     }
 
     #[test]

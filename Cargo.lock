@@ -1373,6 +1373,9 @@ dependencies = [
  "base64 0.22.1",
  "fulcrum-debug-channel",
  "fulcrum-dev-channel",
+ "fulcrum-map-scan",
+ "fulcrum-trace",
+ "fulcrum-vision",
  "postcard",
  "schemars 1.2.1",
  "serde",
@@ -3932,9 +3935,65 @@ name = "fulcrum-dev-channel"
 version = "0.1.0"
 dependencies = [
  "fulcrum-debug-channel",
+ "fulcrum-map-scan",
+ "fulcrum-vision",
  "postcard",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "fulcrum-fnv"
+version = "0.1.0"
+
+[[package]]
+name = "fulcrum-map-doc"
+version = "0.1.0"
+dependencies = [
+ "fulcrum-fnv",
+ "fulcrum-map-schema",
+ "fulcrum-orientation",
+ "ron",
+ "serde",
+]
+
+[[package]]
+name = "fulcrum-map-scan"
+version = "0.1.0"
+dependencies = [
+ "fulcrum-map-doc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fulcrum-map-schema"
+version = "0.1.0"
+dependencies = [
+ "inventory",
+ "ron",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fulcrum-orientation"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "fulcrum-trace"
+version = "0.1.0"
+
+[[package]]
+name = "fulcrum-vision"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -20,7 +20,7 @@
 //!    nothing, so the attempt is simply thrown away — its partial text is withdrawn from the thread —
 //!    and made again. What the failed attempt was billed for still counts, once.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -72,8 +72,11 @@ pub enum AgentEvent {
     Text(String),
     Thinking(String),
     ToolStart { id: String, name: String },
+    /// The model's answer to request `iteration` has arrived whole, before its calls run: how long it took
+    /// (retries and their waits included), how long until the first thing streamed, and what it wrote.
+    Responded { iteration: u32, ms: u64, first_ms: Option<u64>, output_tokens: u64 },
     /// The call finished: `ok` is false for a refusal or an error; `summary` is a line for the thread.
-    ToolDone { id: String, name: String, input: Value, ok: bool, summary: String },
+    ToolDone { id: String, name: String, input: Value, ok: bool, summary: String, timing: CallTiming },
     Usage(Usage),
     /// The request failed for a reason that can pass; it is sent again after `wait_secs`. `attempt` of about
     /// `max`. What the failed attempt billed has already been reported as [`AgentEvent::Usage`].
@@ -89,6 +92,26 @@ pub trait Host {
     /// A last look at the request before it goes out — the place to make a conversation that has grown
     /// too large smaller. Called before every request of the run, the first included.
     fn prepare(&self, _request: &mut Request) {}
+    /// The model's context window, in tokens, when the host knows it. With it, every request asks for the
+    /// request's `max_tokens` (the model's ceiling) cut to what the window has left — see [`crate::output`].
+    /// Without it, `max_tokens` goes out as given.
+    fn context_window(&self) -> Option<u64> {
+        None
+    }
+    /// The model has ended its turn. A note here is sent back as one more message and the loop goes on — for
+    /// what the host knows is left undone and the model may have lost track of (a plan with open steps). The
+    /// host says it at most once per run: `None` lets the run end.
+    fn before_finish(&self) -> Option<String> {
+        None
+    }
+    /// The conversation's known gap between the character estimate and the provider's count (see
+    /// [`crate::tokens::scale_of`]), so the first request of a run is already measured right. 1 when unknown.
+    fn token_scale(&self) -> f64 {
+        1.0
+    }
+    /// A request came back counted, and the gap is now `scale`: for the host's own estimates (compaction, the
+    /// meter) and to remember for the conversation's next run.
+    fn learned_token_scale(&self, _scale: f64) {}
     /// May this call run? Blocks while the user is asked.
     fn gate(&self, call: &ToolCall) -> Gate;
     /// Run it. `Err` becomes an error result the model reads.
@@ -198,10 +221,25 @@ impl Tally {
     }
 }
 
+/// Where a tool call's time went: waiting for the user's answer (an approval card) and running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CallTiming {
+    pub wait_ms: u64,
+    pub run_ms: u64,
+}
+
+fn millis(since: Instant) -> u64 {
+    since.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
 /// What one request produced.
 struct Turn {
+    /// When this attempt was sent, and how long until the first text, thinking or call streamed in.
+    started: Instant,
+    first_ms: Option<u64>,
     text: String,
-    calls: Vec<(ToolCall, bool)>,
+    /// Each call with the reason its arguments could not be used, when they could not.
+    calls: Vec<(ToolCall, Option<String>)>,
     stop: StopReason,
     usage: Usage,
     /// An `error` event came in the stream.
@@ -218,6 +256,9 @@ struct Failed {
 
 fn absorb(events: Vec<Event>, turn: &mut Turn, host: &dyn Host) {
     for event in events {
+        if turn.first_ms.is_none() && matches!(event, Event::Text(_) | Event::Thinking(_) | Event::ToolStart { .. }) {
+            turn.first_ms = Some(millis(turn.started));
+        }
         match event {
             Event::Text(t) => {
                 turn.text.push_str(&t);
@@ -225,8 +266,8 @@ fn absorb(events: Vec<Event>, turn: &mut Turn, host: &dyn Host) {
             }
             Event::Thinking(t) => host.event(AgentEvent::Thinking(t)),
             Event::ToolStart { id, name } => host.event(AgentEvent::ToolStart { id, name }),
-            Event::ToolDone { id, name, input, valid } => {
-                turn.calls.push((ToolCall { id, name, input }, valid));
+            Event::ToolDone { id, name, input, problem } => {
+                turn.calls.push((ToolCall { id, name, input }, problem));
             }
             Event::Usage(u) => {
                 turn.usage = turn.usage.merge(u);
@@ -244,7 +285,7 @@ fn absorb(events: Vec<Event>, turn: &mut Turn, host: &dyn Host) {
 /// One attempt at one request.
 fn read_turn(provider: &dyn Provider, transport: &dyn Transport, http: &HttpRequest, host: &dyn Host) -> Result<Turn, Failed> {
     let mut decoder = provider.decoder();
-    let mut turn = Turn { text: String::new(), calls: Vec::new(), stop: StopReason::EndTurn, usage: Usage::default(), failure: None, stopped: false };
+    let mut turn = Turn { started: Instant::now(), first_ms: None, text: String::new(), calls: Vec::new(), stop: StopReason::EndTurn, usage: Usage::default(), failure: None, stopped: false };
 
     let sent = transport.stream(http, &mut |chunk| {
         if host.cancelled() {
@@ -321,6 +362,10 @@ fn read_turn_retrying(provider: &dyn Provider, transport: &dyn Transport, http: 
 /// added in [`Outcome::added`], so the host persists exactly the new part.
 pub fn run(provider: &dyn Provider, transport: &dyn Transport, host: &dyn Host, key: &str, mut request: Request, max_iterations: u32) -> Outcome {
     let mut tally = Tally::default();
+    // What the request was given is the most a response may have; each request asks for that, less when the
+    // conversation has grown into the room the answer needs.
+    let ceiling = request.max_tokens;
+    let mut scale = host.token_scale();
 
     for iteration in 1..=max_iterations {
         if host.cancelled() {
@@ -328,6 +373,10 @@ pub fn run(provider: &dyn Provider, transport: &dyn Transport, host: &dyn Host, 
         }
         request.tools = host.tools();
         host.prepare(&mut request);
+        let estimated = crate::output::input_estimate(&request);
+        if let Some(window) = host.context_window() {
+            request.max_tokens = crate::output::output_budget(ceiling, window, crate::tokens::scaled(estimated, scale));
+        }
         // The host may have decided, while preparing, that this request must not be made (a spending
         // limit): it says so by cancelling.
         if host.cancelled() {
@@ -340,12 +389,19 @@ pub fn run(provider: &dyn Provider, transport: &dyn Transport, host: &dyn Host, 
         headers.push(provider.auth_header(key));
         let http = HttpRequest { url: endpoint.url, headers, body: provider.body(&request).to_string() };
 
+        let asked = Instant::now();
         let turn = match read_turn_retrying(provider, transport, &http, host, &mut tally) {
             Ok(turn) => turn,
             Err(Stop::Cancelled) => return tally.end(Ended::Cancelled, request.messages),
             Err(Stop::Failed(error)) => return tally.fail(request.messages, error),
         };
+        host.event(AgentEvent::Responded { iteration, ms: millis(asked), first_ms: turn.first_ms, output_tokens: turn.usage.output_tokens });
         tally.spend(turn.usage);
+        // What the provider counted for this request corrects every estimate after it.
+        if let Some(learned) = crate::tokens::scale_of(turn.usage.prompt_tokens(), estimated) {
+            scale = learned;
+            host.learned_token_scale(learned);
+        }
 
         let mut blocks: Vec<Block> = Vec::new();
         if !turn.text.is_empty() {
@@ -365,20 +421,38 @@ pub fn run(provider: &dyn Provider, transport: &dyn Transport, host: &dyn Host, 
         }
         match turn.stop {
             StopReason::ToolUse => {}
-            StopReason::EndTurn => return tally.end(Ended::Done, request.messages),
+            StopReason::EndTurn => match host.before_finish() {
+                Some(note) => {
+                    let message = Message::user(note);
+                    request.messages.push(message.clone());
+                    tally.added.push(message);
+                    continue;
+                }
+                None => return tally.end(Ended::Done, request.messages),
+            },
             other => return tally.end(Ended::Incomplete(other), request.messages),
         }
 
         let mut results: Vec<Block> = Vec::new();
         // Placed after every result: a provider wants the answers to a turn's calls first.
         let mut pictures: Vec<Block> = Vec::new();
-        for (call, valid) in &turn.calls {
-            let result = if !valid {
-                Err("the arguments of this call were incomplete or not valid JSON, so it was not run — send it again".to_string())
+        for (call, problem) in &turn.calls {
+            // The gate may stop on a card until the user answers: that wait is theirs, not the tool's.
+            let mut timing = CallTiming::default();
+            let result = if let Some(problem) = problem {
+                Err(format!("{problem}, so it was not run — send it again"))
             } else {
-                match host.gate(call) {
+                let gated = Instant::now();
+                let gate = host.gate(call);
+                timing.wait_ms = millis(gated);
+                match gate {
                     Gate::Refuse(reason) => Err(reason),
-                    Gate::Run => host.run(call),
+                    Gate::Run => {
+                        let ran = Instant::now();
+                        let result = host.run(call);
+                        timing.run_ms = millis(ran);
+                        result
+                    }
                 }
             };
             let summary = host.summarize(call, &result);
@@ -388,6 +462,7 @@ pub fn run(provider: &dyn Provider, transport: &dyn Transport, host: &dyn Host, 
                 input: call.input.clone(),
                 ok: result.is_ok(),
                 summary,
+                timing,
             });
             let images = if result.is_ok() { host.take_images(call) } else { Vec::new() };
             results.push(match result {

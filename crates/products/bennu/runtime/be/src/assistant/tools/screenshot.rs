@@ -333,14 +333,27 @@ impl ToolHost {
         if bytes.len() as u64 > MAX_IMAGE_BYTES {
             return Err(format!("the picture is {} MB, more than the model can be sent; ask for a smaller `max_width`", bytes.len() / 1_000_000));
         }
-        let (w, h) = image_dimensions(bytes).unwrap_or((0, 0));
-        let path = store::save(&self.session.conversation_id, bytes, "image/png")?;
-        let tokens = estimate_image_tokens(w, h);
+        self.attach_picture(call_id, bytes, "image/png", caption)
+    }
+
+    /// Attach a picture of any kind the model reads (PNG, JPEG, GIF, WebP) to the call `call_id`, like a screenshot.
+    /// A size the header does not say (GIF, WebP) is counted at the most a picture can cost.
+    pub(super) fn attach_picture(&self, call_id: &str, bytes: &[u8], media_type: &str, caption: &str) -> Result<String, String> {
+        if bytes.len() as u64 > MAX_IMAGE_BYTES {
+            return Err(format!("the picture is {} MB, more than the model can be sent (at most {} MB)", bytes.len() / 1_000_000, MAX_IMAGE_BYTES / 1_000_000));
+        }
+        let dims = image_dimensions(bytes);
+        let (w, h) = dims.unwrap_or((0, 0));
+        let path = store::save(&self.session.conversation_id, bytes, media_type)?;
+        let tokens = if dims.is_some() { estimate_image_tokens(w, h) } else { estimate_image_tokens(u32::MAX, u32::MAX) };
         store::hold(
             call_id,
-            store::Pending { image: ImageRef { media_type: "image/png".to_string(), path, tokens }, width: w, height: h, caption: caption.to_string() },
+            store::Pending { image: ImageRef { media_type: media_type.to_string(), path, tokens }, width: w, height: h, caption: caption.to_string() },
         );
-        Ok(format!("{w}x{h}, about {tokens} tokens"))
+        Ok(match dims {
+            Some(_) => format!("{w}x{h}, about {tokens} tokens"),
+            None => format!("about {tokens} tokens at most"),
+        })
     }
 
     /// The pictures the call that just ran left behind, drawn in the thread and handed to the loop.

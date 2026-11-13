@@ -67,6 +67,10 @@ export interface CargoRunHandle {
    *  to diagnose from a result tree alone. */
   command: string;
   widened: string | null;
+  /** `cargo` or `nextest` — nextest runs where the workspace configures it (`.config/nextest.toml`). */
+  runner?: 'cargo' | 'nextest';
+  /** Said about the runner when it is not the one the workspace implies (nextest configured but not installed). */
+  runner_note?: string | null;
 }
 
 // ── events ───────────────────────────────────────────────────────────────────

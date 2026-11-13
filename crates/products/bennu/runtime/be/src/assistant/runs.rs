@@ -36,10 +36,24 @@ struct Registry {
     cancel: HashMap<String, Arc<AtomicBool>>,
     prompts: HashMap<String, Sender<Value>>,
     grants: HashMap<String, Vec<Grant>>,
+    /// Projects Imber brought into a conversation during a run, by root: its later runs work in them too.
+    opened: HashMap<String, Vec<String>>,
     proposals: HashMap<String, Vec<PendingEdit>>,
     revokers: HashMap<String, Revoker>,
     /// Set by "retry now" while a run waits to send a failed request again.
     skip_wait: HashMap<String, Arc<AtomicBool>>,
+    /// What the user wrote while the run worked, by run, not yet read: delivered before its next request. The
+    /// entry exists from the run's start until [`close_notes`], so a note can never land in a run that has
+    /// already read its last one.
+    notes: HashMap<String, Vec<UserNote>>,
+}
+
+/// A message the user wrote while a run was working.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct UserNote {
+    /// The panel's id for it, so the panel can tell when it has been read.
+    pub id: String,
+    pub text: String,
 }
 
 /// Takes back one of the files a run opened for itself; says whether there was such a grant.
@@ -57,7 +71,30 @@ pub(super) fn begin(run_id: &str) -> Arc<AtomicBool> {
     let mut r = reg();
     r.cancel.insert(run_id.to_string(), Arc::clone(&flag));
     r.skip_wait.insert(run_id.to_string(), Arc::new(AtomicBool::new(false)));
+    r.notes.insert(run_id.to_string(), Vec::new());
     flag
+}
+
+/// Leave a message for a run that is working. False when it is not (any more) taking them: the panel then sends
+/// it as an ordinary message.
+pub(super) fn queue_note(run_id: &str, note: UserNote) -> bool {
+    match reg().notes.get_mut(run_id) {
+        Some(list) => {
+            list.push(note);
+            true
+        }
+        None => false,
+    }
+}
+
+/// The messages waiting for a run, taken: it reads them now.
+pub(super) fn take_notes(run_id: &str) -> Vec<UserNote> {
+    reg().notes.get_mut(run_id).map(std::mem::take).unwrap_or_default()
+}
+
+/// The run reads no more messages: what is still waiting comes back, for the panel to put back in the box.
+pub(super) fn close_notes(run_id: &str) -> Vec<UserNote> {
+    reg().notes.remove(run_id).unwrap_or_default()
 }
 
 /// The user asked a run that is waiting to retry to try now. False when the run is not going.
@@ -81,6 +118,7 @@ pub(super) fn finish(run_id: &str) {
     r.cancel.remove(run_id);
     r.revokers.remove(run_id);
     r.skip_wait.remove(run_id);
+    r.notes.remove(run_id);
 }
 
 /// Let the panel take back a file the run opened for itself, while the run goes on.
@@ -157,6 +195,19 @@ pub(super) fn remember_grants(conversation: &str, grants: Vec<Grant>) {
     reg().grants.insert(conversation.to_string(), grants);
 }
 
+/// The projects Imber brought into this conversation in earlier runs (while Arbor stays open, like its grants).
+pub(super) fn opened_projects(conversation: &str) -> Vec<String> {
+    reg().opened.get(conversation).cloned().unwrap_or_default()
+}
+
+pub(super) fn remember_opened_project(conversation: &str, root: &str) {
+    let mut r = reg();
+    let list = r.opened.entry(conversation.to_string()).or_default();
+    if !list.iter().any(|x| x == root) {
+        list.push(root.to_string());
+    }
+}
+
 pub(super) fn store_proposal(proposal_id: &str, edits: Vec<PendingEdit>) {
     reg().proposals.insert(proposal_id.to_string(), edits);
 }
@@ -175,6 +226,20 @@ pub(super) fn pending_elsewhere(file: &str, except: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_note_reaches_a_working_run_once_and_none_after_it_stopped_reading() {
+        let run = "r-notes-test";
+        begin(run);
+        let note = |id: &str| UserNote { id: id.into(), text: "use the other module".into() };
+        assert!(queue_note(run, note("n1")));
+        assert_eq!(take_notes(run), vec![note("n1")]);
+        assert!(take_notes(run).is_empty(), "read once");
+        assert!(queue_note(run, note("n2")));
+        assert_eq!(close_notes(run), vec![note("n2")], "what was not read comes back");
+        assert!(!queue_note(run, note("n3")), "a run that stopped reading takes no more");
+        finish(run);
+    }
 
     #[test]
     fn cancelling_sets_the_flag_of_that_run_only() {

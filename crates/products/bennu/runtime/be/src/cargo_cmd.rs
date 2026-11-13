@@ -72,6 +72,16 @@ pub fn cargo_launcher() -> std::ffi::OsString {
     rustup_bin("cargo")
 }
 
+/// Whether `cargo nextest` would run: its `cargo-nextest` binary in cargo's `bin` or on `PATH`. A look at the
+/// filesystem, not a spawn — it is asked before every test run.
+pub fn nextest_installed() -> bool {
+    let exe = format!("cargo-nextest{}", std::env::consts::EXE_SUFFIX);
+    if bennu_cargo::prelude::cargo_home().is_some_and(|home| home.join("bin").join(&exe).is_file()) {
+        return true;
+    }
+    std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(&exe).is_file()))
+}
+
 // ── bennu_cargo_workspace ──────────────────────────────────────────────────────
 
 /// Args for the handlers that take a project root.

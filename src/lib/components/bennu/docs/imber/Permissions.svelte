@@ -49,10 +49,13 @@
     <tr><td><strong>Delete (inside the reach)</strong></td><td>Asks</td><td>Free, but a call removing more than 50 files asks</td><td>Same as Accept edits</td></tr>
     <tr><td><strong>Delete in the Temp area</strong></td><td>Free</td><td>Free</td><td>Free</td></tr>
     <tr><td><strong>Delete outside the reach, or a whole project or allowed folder</strong></td><td>Asks</td><td>Asks</td><td>Asks</td></tr>
-    <tr><td><strong>Build or run the tests of the project (<code>bennu_build</code>, <code>bennu_test_run</code>)</strong></td><td>Asks on every call</td><td>Asks once per run</td><td>Free</td></tr>
+    <tr><td><strong>Check, build or run the tests of the project (<code>bennu_check</code>, <code>bennu_build</code>, <code>bennu_test_run</code>)</strong></td><td>Asks on every call</td><td>Asks once per run</td><td>Free</td></tr>
     <tr><td><strong>Other things that execute code (cargo run, npm scripts, run configurations, launching a program)</strong></td><td>Asks</td><td>Asks</td><td>Asks</td></tr>
     <tr><td><strong>Other Bennu tools that change something</strong></td><td>Asks</td><td>Free</td><td>Free</td></tr>
     <tr><td><strong>Start a process (<code>run_start</code>)</strong></td><td>Asks every time</td><td>Asks every time</td><td>Asks every time</td></tr>
+    <tr><td><strong>Run a Rust binary or example (<code>cargo_run</code>)</strong></td><td>Asks the first time for each target in a conversation; then free with any features, arguments or environment</td><td>Same</td><td>Same</td></tr>
+    <tr><td><strong>Run a program you set up (<code>run_tool</code>)</strong></td><td>As the tool says (every call, once per conversation, never); every call when the tool changes things</td><td>As the tool says</td><td>As the tool says</td></tr>
+    <tr><td><strong>Run a script of the project that is not one of your programs (<code>run_script</code>)</strong></td><td>Asks every time, showing the script: decline, run once, or run and add it to your programs (then it is asked about once per conversation). A script added this way asks again when its content changes</td><td>Same</td><td>Same</td></tr>
     <tr><td><strong>Run a recipe or a scenario</strong></td><td>Asks once per content of the recipes file or scenario</td><td>Same</td><td>Same</td></tr>
     <tr><td><strong>HTTP request to localhost</strong></td><td>GET, HEAD, OPTIONS free; any other method asks unless the port belongs to a process it started</td><td>Same</td><td>Same</td></tr>
     <tr><td><strong>Debugger: set breakpoints, read the stack and values, step</strong></td><td>Free</td><td>Free</td><td>Free</td></tr>
@@ -64,7 +67,8 @@
     <tr><td><strong>Git: read (status, diff, log, blame)</strong></td><td>Free once git is switched on</td><td>Free</td><td>Free</td></tr>
     <tr><td><strong>Git: stage, unstage</strong></td><td>Asks</td><td>Free</td><td>Free</td></tr>
     <tr><td><strong>Git: commit</strong></td><td>Asks</td><td>Asks</td><td>Asks. Push does not exist</td></tr>
-    <tr><td><strong>A path outside the reach</strong></td><td>One prompt: Deny, Allow reading, Allow reading and writing, for that folder, for the session</td><td>Same</td><td>Same, except the build-error case below. "Anywhere on disk" never asks</td></tr>
+    <tr><td><strong>Bring in another project for Bennu's tools</strong></td><td>Open in Bennu: free inside the reach, the access card outside it. Not open: the access card outside the reach (a yes also indexes it); inside it, as <em>Opening other projects</em> says (asks by default)</td><td>Same</td><td>Same, except that by default a project not open in Bennu but inside the reach opens without asking</td></tr>
+    <tr><td><strong>A path outside the reach</strong></td><td>One prompt: Deny, Allow reading, Allow reading and writing, for that folder, for the session. It says what the call wants there (read, search, change, create, delete), and the grant that lets it go on is the highlighted button</td><td>Same</td><td>Same, except the build-error case below. "Anywhere on disk" never asks</td></tr>
     <tr><td><strong>A file named by an error of Imber's own build or check (inside the project)</strong></td><td>The prompt says the build reported an error there</td><td>Same</td><td>Opened for reading and writing without a prompt, for that run, shown with a Revoke button</td></tr>
     <tr><td><strong>Read a secret file (<code>.env</code>, keys)</strong></td><td>Asks every time</td><td>Asks every time</td><td>Asks every time</td></tr>
     <tr><td><strong>Write a secret file, or anything under <code>.git</code></strong></td><td>Refused</td><td>Refused</td><td>Refused</td></tr>
@@ -77,7 +81,7 @@
 
 <h2>Autonomous and the build-error files</h2>
 <p>
-  Under Autonomous, a file named by an <em>error</em> of a build or check Imber ran itself (<code>bennu_build</code>, <code>bennu_check_file</code>, <code>bennu_problems</code>) and located inside the project you are in is opened for reading and writing, for that run only, without a prompt. Limits: at most 25 files a run; never anything under build output or fetched code (<code>target</code>, <code>build</code>, <code>out</code>, <code>dist</code>, <code>node_modules</code>, generated folders); never a dependency manifest or lockfile (<code>pom.xml</code>, <code>Cargo.toml</code>, <code>package.json</code>); never a secret. The thread shows each one ("Access granted to … because the build reports an error there") with a <em>Revoke</em> button, and the access ends with the run. Files of another project open this way only when the reach is <em>all open projects</em>; otherwise it asks. In Manual and Accept edits the prompt for such a file says why it is being asked.
+  Under Autonomous, a file named by an <em>error</em> of a build or check Imber ran itself (<code>bennu_check</code>, <code>bennu_build</code>, <code>bennu_check_file</code>, <code>bennu_problems</code>) and located inside the project you are in is opened for reading and writing, for that run only, without a prompt. Limits: at most 25 files a run; never anything under build output or fetched code (<code>target</code>, <code>build</code>, <code>out</code>, <code>dist</code>, <code>node_modules</code>, generated folders); never a dependency manifest or lockfile (<code>pom.xml</code>, <code>Cargo.toml</code>, <code>package.json</code>); never a secret. The thread shows each one ("Access granted to … because the build reports an error there") with a <em>Revoke</em> button, and the access ends with the run. Files of another project open this way only when the reach is <em>all open projects</em>; otherwise it asks. In Manual and Accept edits the prompt for such a file says why it is being asked.
 </p>
 
 <h2>Revoking access</h2>
@@ -87,7 +91,7 @@
 
 <h2>Hard limits no mode changes</h2>
 <ul>
-  <li>No shell. Imber cannot run an arbitrary command; processes start only through <code>run_start</code> (asks), recipes and scenarios (ask), or the project's own build and test commands.</li>
+  <li>No shell. Imber cannot run an arbitrary command; processes start only through <code>run_start</code> (asks), <code>cargo_run</code> (asks once per target), recipes and scenarios (ask), the programs you set up in Settings (each with the arguments and variables you allowed), or the project's own build and test commands. Neither <code>cargo_run</code> nor <code>run_tool</code> goes through a shell.</li>
   <li>Secret files (<code>.env</code>, keys) are never written; reading one asks every time.</li>
   <li><code>.git</code> is never changed by file tools.</li>
   <li>Deleting the project folder itself, an allowed folder, or anything outside the reach always asks.</li>

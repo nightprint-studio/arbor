@@ -27,7 +27,10 @@ pub use crate::cargo_discover::{
 };
 
 // Selection: the `cargo test` command line for a chosen scope.
-pub use crate::cargo_selector::{cargo_plan, CargoPlan, CargoTestScope, RustCaseRef};
+pub use crate::cargo_selector::{cargo_plan, cargo_plan_with, select_cases, CargoPlan, CargoRunOptions, CargoRunner, CargoTestScope, RustCaseRef};
+
+// nextest's output: one stream, a verdict per test naming its binary.
+pub use crate::nextest_report::{binary_target, NextestEvent, NextestParser};
 
 // Results: the run's two output streams, read line by line.
 pub use crate::cargo_report::{

@@ -60,8 +60,12 @@ impl Default for Limits {
 #[derive(Debug, Clone)]
 pub struct StartSpec {
     pub name: String,
-    /// A shell command line (`cmd /C` on Windows, `sh -c` elsewhere).
+    /// A shell command line (`cmd /C` on Windows, `sh -c` elsewhere) — or, when [`argv`](Self::argv) is set,
+    /// only the text shown for the process.
     pub command: String,
+    /// A program and its arguments, run directly with no shell in between: nothing in them is expanded, split or
+    /// chained. Empty means `command` is a shell line.
+    pub argv: Vec<String>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
     /// Ports it is expected to listen on: refused up front when one is already taken.
@@ -241,7 +245,14 @@ impl Manager {
             return Err(format!("port {p} is already in use by something else; stop it or pick another port"));
         }
 
-        let mut cmd = shell_command(&spec.command);
+        let mut cmd = match spec.argv.split_first() {
+            Some((program, args)) => {
+                let mut cmd = Command::new(program);
+                cmd.args(args);
+                cmd
+            }
+            None => shell_command(&spec.command),
+        };
         cmd.current_dir(&spec.cwd).envs(spec.env.iter().cloned());
         // stdin null, not inherited: a backend's fd 0 is the protocol pipe, and a child that puts its
         // stdin in non-blocking mode (Node does) would break ours (see bennu-be's child.rs).
@@ -595,6 +606,7 @@ impl Manager {
                     let spec = StartSpec {
                         name: service.name.clone(),
                         command: service.command.clone(),
+                        argv: Vec::new(),
                         cwd,
                         env: service.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                         ports: service.ports.clone(),
@@ -667,7 +679,10 @@ fn shell_command(command: &str) -> Command {
     }
     #[cfg(not(windows))]
     {
-        let mut cmd = Command::new("sh");
+        // bash when the machine has it: a command line written by hand (or by a model) uses its forms —
+        // `<(…)`, `[[ … ]]`, `{a,b}` — and plain `sh` refuses them with a syntax error. `sh` is the fallback.
+        let shell = ["/bin/bash", "/usr/bin/bash"].into_iter().find(|p| std::path::Path::new(p).is_file()).unwrap_or("sh");
+        let mut cmd = Command::new(shell);
         cmd.arg("-c").arg(command);
         cmd
     }
@@ -687,6 +702,7 @@ mod tests {
         StartSpec {
             name: name.into(),
             command: command.into(),
+            argv: Vec::new(),
             cwd: std::env::temp_dir(),
             env: Vec::new(),
             ports: Vec::new(),
@@ -731,6 +747,18 @@ mod tests {
         let events = m.timeline().query(&Default::default());
         assert!(events.iter().any(|e| e.kind == EventKind::Log && e.text.trim() == "hello"));
         assert!(events.iter().any(|e| e.kind == EventKind::ProcessExited));
+    }
+
+    /// With `argv` nothing is read by a shell: `;` and `$HOME` reach the program as they were written.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_with_arguments_runs_without_a_shell() {
+        let m = manager();
+        let info = m.start(StartSpec { argv: vec!["echo".into(), "a;b".into(), "$HOME".into()], ..spec("direct", "echo a;b $HOME") }).unwrap();
+        wait_until("exit", || m.get(&info.id).unwrap().phase.is_finished());
+        let (info, lines) = m.logs(&info.id, &LogQuery::default()).unwrap();
+        assert_eq!(info.exit_code, Some(0));
+        assert!(lines.iter().any(|l| l.text.trim() == "a;b $HOME"), "{lines:?}");
     }
 
     #[test]

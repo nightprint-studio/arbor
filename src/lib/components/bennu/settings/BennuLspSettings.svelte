@@ -195,6 +195,12 @@
             ariaLabel={`Enable ${srv.name}`}
           />
         </div>
+        {#if srv.answers?.length}
+          <!-- What it can be asked — the same list Imber is told, so a missing feature is known before it is wanted. -->
+          <div class="lsp-srv-answers">
+            Answers: {srv.answers.join(', ')}{#if !srv.answers_confirmed}<span class="lsp-expected" use:tooltip={'From the server\'s documentation. Replaced by what the server declares once it has run.'}> (expected)</span>{/if}
+          </div>
+        {/if}
         {#if srv.path}
           <div class="lsp-srv-path" use:tooltip={srv.path}>{srv.path}</div>
         {:else}
@@ -276,6 +282,8 @@ initialization_options = ""`}</pre>
     font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-disabled);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .lsp-srv-answers { font-size: var(--font-size-2xs); color: var(--text-secondary); }
+  .lsp-expected { color: var(--text-muted); }
   .lsp-run-msg { font-size: var(--font-size-xs); color: var(--warning); line-height: 1.4; }
   .lsp-install { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
   .lsp-install-cmd {

@@ -16,6 +16,7 @@
 //! extension listed here that is missing there opens as grey text with a working server behind
 //! it. Lua and Go shipped that way. Adding a server means adding its `case` there too.
 
+use crate::session::ServerFeatures;
 use std::path::{Path, PathBuf};
 
 /// A language server Bennu can start.
@@ -450,6 +451,39 @@ fn dependency_source_dirs() -> Vec<PathBuf> {
 /// The built-in spec with this id.
 pub fn spec_by_id(id: &str) -> Option<&'static ServerSpec> {
     BUILTIN_SERVERS.iter().find(|s| s.id == id)
+}
+
+/// What a built-in server is expected to answer, from its own documentation — shown before it has started, and
+/// replaced by what its handshake declares once it runs (see [`crate::session::LspSession::server_features`]).
+/// Never used to refuse a request: a server that turned out to do more than this table says must not be held back
+/// by it. `None` for a server not in the catalogue.
+pub fn expected_features(id: &str) -> Option<ServerFeatures> {
+    let all = ServerFeatures {
+        completion: true,
+        hover: true,
+        definition: true,
+        references: true,
+        implementations: true,
+        rename: true,
+        outline: true,
+        workspace_symbols: true,
+        call_hierarchy: true,
+        formatting: true,
+    };
+    Some(match id {
+        "rust-analyzer" | "gopls" | "typescript" | "clangd" => all,
+        // No go-to-implementation, and it does not format.
+        "pyright" => ServerFeatures { implementations: false, formatting: false, ..all },
+        // Answers through the TypeScript service inside it; no workspace-wide name search, no call hierarchy.
+        "svelte" => ServerFeatures { workspace_symbols: false, call_hierarchy: false, ..all },
+        // The template side of Angular: completion, hover, definition, references and rename.
+        "angular" => ServerFeatures { implementations: false, outline: false, workspace_symbols: false, call_hierarchy: false, formatting: false, ..all },
+        // LuaLS: no implementations, no call hierarchy.
+        "lua" => ServerFeatures { implementations: false, call_hierarchy: false, ..all },
+        // A shader is one module: no references across files, no rename, no implementations, no callers.
+        "wgsl-analyzer" => ServerFeatures { references: false, implementations: false, rename: false, workspace_symbols: false, call_hierarchy: false, ..all },
+        _ => return None,
+    })
 }
 
 /// The lowercase extension of `file`, without the dot. Empty when it has none.

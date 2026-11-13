@@ -3,7 +3,7 @@
    * The skills manager — which of the skills on disk the assistant is allowed to know about.
    *
    * A skill is a folder with a `SKILL.md` (the format Claude Code uses) found in the project's
-   * `.bennu/skills` or `.claude/skills`, or in the user's own folders. Nothing reaches the model until it
+   * `.bennu/skills` or `.claude/skills`, or in the user's own folders (the ones picked in Settings included). Nothing reaches the model until it
    * is ticked here: the assistant gets only a one-line index of the enabled ones and loads a body when a
    * task calls for it. Folders that could not be used are listed with the reason, so a skill that "does
    * not show up" explains itself.
@@ -113,7 +113,7 @@
         {:else if shown.length === 0 && invalid.length === 0}
           <EmptyState
             message={query ? 'No skill matches.' : 'No skills found.'}
-            description={query ? undefined : 'Put a folder with a SKILL.md in .bennu/skills or .claude/skills of the project, or in Bennu’s skills folder.'}
+            description={query ? undefined : 'Put a folder with a SKILL.md in .bennu/skills or .claude/skills of the project, in Bennu’s skills folder, or in a folder added under Settings › Imber › Tools and skills.'}
           />
         {:else}
           <RowList items={shown} key={(s) => s.id} dimmed={(s) => s.shadowed}>

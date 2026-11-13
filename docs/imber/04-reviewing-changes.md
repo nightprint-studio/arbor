@@ -15,7 +15,7 @@ Whatever Imber changes can be read first, written all-or-nothing, undone afterwa
 
 In Manual mode a change is a **proposal**: a card in the thread listing the files with their added and removed lines. Nothing is written yet. A change made by one tool call (an edit across files, a rename, a replace over a folder) is one proposal, written all or nothing.
 
-**Review** opens the proposal as a diff, unified or side by side, with the files in a list on the left (`↑` / `↓` move between them). Decide with **Apply all** (`Ctrl+Enter`) or **Reject all**. A rejected card turns red and keeps its files readable; an applied one stays as a record and can be undone. A proposal that touches a file of another project names it as `project:path`.
+**Review** — on the card, or any file row of it — opens the proposal as a syntax-highlighted diff over most of the window, unified or side by side (the switch is in the header), with the files on the left, each with its folder and a bar of what it adds and removes (`↑` / `↓` or `J` / `K` move between them). The Review button itself shows the size of the change. Decide with **Apply all** (`Ctrl+Enter`) or **Reject all**. A rejected card turns red and keeps its files readable; an applied one stays as a record and can be undone. A proposal that touches a file of another project names it as `project:path`.
 
 ## Applied changes and Undo
 

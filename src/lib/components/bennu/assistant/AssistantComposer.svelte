@@ -12,7 +12,7 @@
    */
   import {
     ArrowUp, Eye, FlaskConical, ChevronDown, FileText, TextCursorInput, ShieldCheck, Zap, Lock, HardDrive,
-    Gauge, MessageSquare, SlidersHorizontal, Ruler, BookText, ListTodo, WandSparkles, GitBranch, Copy, Ban, Bot, Hammer, Scale, Network, Paperclip,
+    Gauge, MessageSquare, SlidersHorizontal, Ruler, BookText, ListTodo, WandSparkles, GitBranch, Copy, Ban, Bot, Hammer, Scale, Network, Paperclip, Infinity as InfinityIcon,
   } from 'lucide-svelte';
   import { decisionInfo, effectiveDecisionLevel } from './assistant-decision';
   import { subagentsLabel } from './assistant-agents';
@@ -37,6 +37,7 @@
   import { pastedPictures, droppedFiles, dragHasFiles } from './assistant-attach-paste';
   import { createPasteHandlers } from './assistant-composer-paste';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import AssistantNote from './AssistantNote.svelte';
   import { MODES, modeInfo } from './assistant-mode';
   import type { AccessScope, AssistantEffort } from './assistant-types';
 
@@ -199,6 +200,15 @@
           buildItem,
           subagentsItem,
           {
+            // On or off said three ways — the word on the right, the tinted icon, the tick — because a run with no step
+            // limit is the one setting here that changes how long it goes on, and a tick alone was easy to miss.
+            kind: 'item', id: 'non-stop', label: 'Non-stop', icon: InfinityIcon, active: store.chatNonStop,
+            iconColor: store.chatNonStop ? 'var(--warning)' : undefined,
+            meta: store.chatNonStop ? 'On' : 'Off', metaColor: store.chatNonStop ? 'var(--warning)' : undefined,
+            subtitle: store.chatNonStop ? 'No step limit in this conversation — the spending limits still stop it' : `This conversation stops after ${store.maxSteps} steps`,
+            onclick: () => store.setChatNonStop(!store.chatNonStop),
+          },
+          {
             kind: 'submenu', id: 'may', label: 'Permissions', icon: Lock,
             items: [
               { kind: 'item', id: 'edit', label: 'Edit files', subtitle: 'Through Bennu’s tools, never a shell', active: store.allowEdits, onclick: () => store.setAllowEdits(!store.allowEdits) },
@@ -257,7 +267,7 @@
   const settingsTip = $derived(
     store.chatOnly
       ? `Chat only · ${effortLabel || 'no effort'} · ${formatTokens(store.maxContext)}`
-      : `${effortLabel || 'no effort'} · ${formatTokens(store.maxContext)} · ${scopeLabel}`,
+      : `${effortLabel || 'no effort'} · ${formatTokens(store.maxContext)} · ${scopeLabel}${store.chatNonStop ? ' · non-stop' : ''}`,
   );
 
   const canSend = $derived(store.draft.trim().length > 0 || files.count > 0);
@@ -332,7 +342,20 @@
   }
 
   async function send() {
-    if (!canSend || store.running) return;
+    if (!canSend) return;
+    // While it works, the text goes to the run as a note it reads after the current step. Files wait for the
+    // next ordinary message: a note is words only.
+    if (store.running) {
+      const text = store.draft;
+      if (!text.trim()) return;
+      if (files.count > 0) toastStore.show('Files go with your next message, once Imber has finished.', 'info');
+      if (await store.sendNote(text)) {
+        if (store.draft === text) store.draft = '';
+      } else {
+        toastStore.show('Imber has just finished: send it again.', 'info');
+      }
+      return;
+    }
     // A dry run shows the request that would go and keeps the draft, so it can be sent for real next.
     const text = store.draft;
     const consumed = await store.send(text, { attachments: files.snapshot() });
@@ -341,11 +364,18 @@
   }
 </script>
 
+{#if store.pendingNotes.length}
+  <div class="pending-notes">
+    {#each store.pendingNotes as n (n.id)}<AssistantNote text={n.text} pending />{/each}
+  </div>
+{/if}
+
 <ImberComposerFrame
   bind:value={store.draft}
   bind:element={textEl}
   placeholder={store.chatOnly ? 'Ask anything…' : 'Ask about this project, or tell it what to change…'}
   running={store.running}
+  sendWhileRunning
   {canSend}
   sendTooltip={store.dryRun ? 'Preview the request — dry run is on' : 'Send'}
   {dropping}
@@ -395,8 +425,8 @@
   {#snippet controls()}
     <Dropdown items={modelItems} position="fixed" direction="up" width="300px">
       {#snippet trigger({ open, toggle })}
-        <Button variant="ghost" size="xs" ariaExpanded={open} ariaHaspopup="menu" tooltip="Model" onclick={toggle}>
-          <span class="lbl"><i class="model-dot"></i>{store.model.name}<ChevronDown size={11} /></span>
+        <Button variant="ghost" size="sm" ariaExpanded={open} ariaHaspopup="menu" tooltip="Model" onclick={toggle}>
+          <span class="lbl"><i class="model-dot"></i>{store.model.name}<ChevronDown size={12} /></span>
         </Button>
       {/snippet}
     </Dropdown>
@@ -404,7 +434,11 @@
     <Dropdown items={settingsItems} position="fixed" direction="up" width="270px">
       {#snippet trigger({ open, toggle })}
         <IconButton tooltip={`Settings — ${settingsTip}`} size={24} active={open} ariaHasPopup ariaExpanded={open} onclick={toggle}>
-          <SlidersHorizontal size={14} />
+          <span class="settings-ico">
+            <SlidersHorizontal size={14} />
+            <!-- Seen without opening the menu: this conversation runs with no step limit. -->
+            {#if store.chatNonStop && !store.chatOnly}<span class="nonstop-mark"><InfinityIcon size={9} strokeWidth={2.6} /></span>{/if}
+          </span>
         </IconButton>
       {/snippet}
     </Dropdown>
@@ -423,12 +457,12 @@
     {#if !store.chatOnly}
       <Dropdown items={modeItems} position="fixed" direction="up" width="340px">
         {#snippet trigger({ open, toggle })}
+          <!-- Only the icon takes the warning colour: the word stays readable, the risk still shows. -->
           <Button
-            variant="ghost" size="xs" ariaExpanded={open} ariaHaspopup="menu"
-            color={current.tone === 'warning' ? 'var(--warning)' : undefined}
+            variant="ghost" size="sm" ariaExpanded={open} ariaHaspopup="menu"
             tooltip={{ content: `Mode — ${current.label}`, description: current.description }} onclick={toggle}
           >
-            <span class="lbl"><ModeIcon size={12} />{current.label}<ChevronDown size={11} /></span>
+            <span class="lbl"><span class="mode-ico" class:warn={current.tone === 'warning'}><ModeIcon size={13} /></span>{current.label}<ChevronDown size={12} /></span>
           </Button>
         {/snippet}
       </Dropdown>
@@ -453,7 +487,7 @@
         {store.pressing.level === 'reached' ? 'Limit reached' : `${store.pressing.percent}% of ${store.pressing.period} limit`}
       </span>
     {/if}
-    {#if store.active}<span class="cost" title="What this conversation has cost">{formatEur(store.eur(store.active.cost))}</span>{/if}
+    {#if store.active}<span class="cost" class:live={store.running} title={store.running ? 'What this conversation has cost — updated with each request while the run goes' : 'What this conversation has cost'}>{formatEur(store.eur(store.active.cost))}</span>{/if}
   {/snippet}
 </ImberComposerFrame>
 
@@ -470,6 +504,7 @@
 {/if}
 
 <style>
+  .pending-notes { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
   /* An icon and its text sit apart; the buttons they are in do not space their own children. */
   .lbl { display: inline-flex; align-items: center; gap: 6px; }
   .model-dot {
@@ -479,5 +514,13 @@
   .limit { margin-left: auto; flex-shrink: 0; font-size: var(--font-size-2xs); color: var(--warning); }
   .limit.reached { color: var(--danger); font-weight: 600; }
   .limit + .cost { margin-left: 8px; }
+  .mode-ico { display: inline-flex; }
+  .settings-ico { position: relative; display: inline-flex; }
+  .nonstop-mark {
+    position: absolute; right: -6px; bottom: -5px; display: inline-flex; padding: 0 1px;
+    border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--warning);
+  }
+  .mode-ico.warn { color: var(--warning); }
+  .cost.live { color: var(--accent); }
   .cost { margin-left: auto; flex-shrink: 0; font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 </style>

@@ -267,6 +267,9 @@
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
   import { bennuWorktreeStore } from '$lib/stores/bennu/assistant-worktree.svelte';
   import { bennuAgentsStore } from '$lib/stores/bennu/assistant-agents.svelte';
+  import { bennuAssistantTray } from '$lib/stores/bennu/assistant-tray.svelte';
+  import { latestPlan } from '$lib/components/bennu/assistant/assistant-plan';
+  import { pendingProposals } from '$lib/components/bennu/assistant/assistant-proposal';
   import { assistantAttachmentsStore } from '$lib/stores/bennu/assistant-attachments.svelte';
   import { assistantLayoutStore } from '$lib/stores/bennu/assistant-layout.svelte';
   import { bennuImberSchedules } from '$lib/stores/bennu/imber-schedules.svelte';
@@ -2285,6 +2288,11 @@
       { id: 'assistant-decisions', title: 'Imber:Decisions in this conversation…', icon: 'SlidersHorizontal', action: () => run(() => { showAssistant(); bennuAssistantStore.openDecision(); }), when: true },
       // Sub-agents: helpers with a clean context. The verbs are the panel's, for the conversation in front of you.
       { id: 'assistant-agents-cycle', title: 'Imber:Sub-agents in this conversation — next (follow settings → on → off)', icon: 'Network', action: () => run(() => { showAssistant(); bennuAssistantStore.cycleChatSubagents(); }), when: !bennuAssistantStore.chatOnly },
+      // The tray over the composer: what the conversation has going on, each in its own panel.
+      { id: 'assistant-tray-plan', title: 'Imber:Show the plan', icon: 'ListTodo', action: () => run(() => { showAssistant(); bennuAssistantTray.show('plan'); }), when: !!bennuAssistantStore.active && latestPlan(bennuAssistantStore.active.messages) !== null },
+      { id: 'assistant-tray-agents', title: 'Imber:Show the sub-agents', icon: 'Bot', action: () => run(() => { showAssistant(); bennuAssistantTray.show('agents'); }), when: bennuAgentsStore.list(bennuAssistantStore.activeId).length > 0 },
+      { id: 'assistant-tray-edits', title: 'Imber:Show the edits to review', icon: 'FilePen', action: () => run(() => { showAssistant(); bennuAssistantTray.show('edits'); }), when: !!bennuAssistantStore.active && pendingProposals(bennuAssistantStore.active.messages).length > 0 },
+      { id: 'assistant-non-stop', title: `Imber:Non-stop in this conversation — ${bennuAssistantStore.chatNonStop ? 'turn off' : 'turn on (no step limit)'}`, icon: 'Repeat', action: () => run(() => { showAssistant(); bennuAssistantStore.setChatNonStop(!bennuAssistantStore.chatNonStop); }), when: !bennuAssistantStore.chatOnly && !!bennuAssistantStore.activeId },
       { id: 'assistant-agents-open', title: 'Imber:Open the latest sub-agent’s thread…', icon: 'Bot', action: () => run(() => { showAssistant(); void bennuAgentsStore.openLatest(bennuAssistantStore.activeId); }), when: bennuAgentsStore.list(bennuAssistantStore.activeId).length > 0 },
       { id: 'assistant-agents-stop', title: 'Imber:Stop all sub-agents', icon: 'Square', action: () => run(() => void bennuAgentsStore.stopAll(bennuAssistantStore.activeId)), when: bennuAgentsStore.running(bennuAssistantStore.activeId) > 0 },
       { id: 'assistant-mode-cycle', title: 'Imber:Next mode (Manual → Accept edits → Autonomous)', icon: 'Repeat', shortcut: 'Ctrl+Shift+Q', action: () => run(() => bennuAssistantStore.cycleMode()), when: true },

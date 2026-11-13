@@ -18,7 +18,7 @@
 
   // A run in that conversation reads the queued note on its own: the card has nothing left to offer.
   $effect(() => {
-    if (card && store.running && store.runConversationId === card.conversationId) assistantStopStore.dismiss(card.conversationId);
+    if (card && store.isRunning(card.conversationId)) assistantStopStore.dismiss(card.conversationId);
   });
 </script>
 

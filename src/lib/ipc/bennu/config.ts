@@ -45,6 +45,10 @@ export interface BennuAssistantLimits {
   schedule_run_eur: number;
   /** Scheduled runs allowed per day; 0 = no cap. */
   schedule_runs_per_day: number;
+  /** The account's credit balance in dollars, as read in the Claude Console; 0 = not entered. */
+  credit_usd: number;
+  /** When `credit_usd` was entered, epoch ms: what is left is estimated from what was spent since. */
+  credit_set_at: number;
 }
 
 export interface BennuAssistantConfig {
@@ -76,6 +80,8 @@ export interface BennuAssistantConfig {
   debug_mutate_enabled?: boolean;
   /** Skills the user enabled, as `<scope>/<name>` ids. An allow-list: none until ticked. */
   skills_on: string[];
+  /** Folders of skills picked by hand, besides the well-known ones. Each holds skill folders, or is one. */
+  skill_folders?: string[];
   /** `ask_forks` | `ask_big` | `decide`. */
   decision_level: string;
   /** The user's own words about decisions. */
@@ -86,6 +92,8 @@ export interface BennuAssistantConfig {
   subagents_enabled: boolean;
   /** Minutes an unused assistant debug session lives. */
   debug_idle_minutes: number;
+  /** Requests one run may make before it stops and asks to be told to continue (5-300; 0 or absent: 40). */
+  max_steps?: number;
   /** Start a run by itself when the debugger stops while the assistant is idle. */
   auto_continue_on_stop: boolean;
   /** Wrap code pasted into the composer in a fenced block with its language. */
@@ -96,6 +104,44 @@ export interface BennuAssistantConfig {
   side_model: string;
   /** The user's standing context for every conversation; empty adds nothing. */
   general_context?: string;
+  /** Programs on this machine Imber may run (`run_tool`). */
+  external_tools?: ExternalTool[];
+  /** Opening a project that is not open in Bennu but that Imber may read: `ask` | `autonomous` | `allowed` | `never`. */
+  open_projects?: OpenProjectsWord;
+  /** A system notification when Imber waits for an answer and no Bennu window has the focus. */
+  notify_questions?: boolean;
+  /** A system notification when a run ends and no Bennu window has the focus. */
+  notify_done?: boolean;
+}
+
+/** When Imber may open and index a project that is not open in Bennu (one outside its reach always asks for access). */
+export type OpenProjectsWord = 'ask' | 'autonomous' | 'allowed' | 'never';
+
+/** When a call of an external tool asks the user first. */
+export type ExternalToolApproval = 'every_call' | 'conversation' | 'never';
+
+/** Mirrors the BE `ExternalTool`: a program on this machine the user lets Imber run, with no shell in between. */
+export interface ExternalTool {
+  /** What Imber calls it: lowercase letters, digits, - and _. */
+  name: string;
+  /** What it does and when to use it — what the model reads. */
+  description: string;
+  /** Absolute path of the program. */
+  program: string;
+  /** Arguments always passed first. */
+  args: string[];
+  /** Imber may add its own arguments after the fixed ones. */
+  extra_args: boolean;
+  /** Variables always set. */
+  env: Record<string, string>;
+  /** Variables Imber may set; any other is refused. */
+  env_keys: string[];
+  /** It changes things rather than only reading: in manual mode every call asks. */
+  writes: boolean;
+  approval: ExternalToolApproval;
+  /** Seconds before a call is stopped with its process tree (1-3600). */
+  timeout_s: number;
+  enabled: boolean;
 }
 
 /** Mirrors the BE `BennuConfig` (snake_case, field-for-field). */

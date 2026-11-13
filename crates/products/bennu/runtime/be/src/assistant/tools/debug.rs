@@ -619,9 +619,9 @@ impl ToolHost {
         let plan = debug_launch::plan(input, &configs)?;
 
         // Fresh classes, or the debugger shows code that is not the code on disk. Cheap when nothing changed.
-        let built = crate::build_queue::with_context(self.caller_context(), || crate::build::compile_project(&self.session.ctx, &root, plan.module.as_deref()))?.value;
+        let built = crate::build_queue::with_context(self.caller_context(), || crate::build::compile_project(&self.session.ctx, &root, plan.module.as_deref(), &crate::build::CargoFlavor::default()))?.value;
         if !built.ok {
-            return Err(format!("the build failed with {} problem(s), so nothing was launched. Fix them first (bennu_problems, bennu_build).", built.diagnostics.len()));
+            return Err(format!("the build failed with {} problem(s), so nothing was launched. Fix them first (bennu_problems, bennu_check).", built.diagnostics.len()));
         }
 
         // The launch gets a sink that also keeps the program's output: the panel sees what it always sees.

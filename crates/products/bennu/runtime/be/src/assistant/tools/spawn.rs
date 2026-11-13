@@ -235,7 +235,9 @@ impl ToolHost {
             view.push(json!({ "type": "notice", "level": "info", "text": format!("Resumed by main: {}", plan.task.chars().take(300).collect::<String>()) }));
         }
         let mut session = Session::new(id.clone(), id.clone(), self.session.root.clone(), mode, std::sync::Arc::new(subagents::NullSink), ctx, cancel, policy, view);
-        session.projects = self.session.projects.clone();
+        session.set_projects(self.session.projects());
+        // An agent works in what its parent opened; it does not open more projects itself.
+        session.may_open_projects = false;
         session.title = self.session.title.clone();
         session.build_isolation = self.session.build_isolation;
         session.prompt_via = Some((Arc::clone(&self.session), plan.title.clone()));
@@ -419,6 +421,7 @@ fn lost_report(id: &str) -> String {
 
 /// The system prompt of an agent: the conversation's own, as for a plain run, and what an agent is.
 fn child_system(session: &Session, setup: &AgentSetup, read_only: bool) -> String {
+    let projects = session.projects();
     let instructions = if read_only { "" } else { setup.instructions.as_str() };
     let mut system = prompt::system(&prompt::Context {
         root: &session.root,
@@ -430,7 +433,7 @@ fn child_system(session: &Session, setup: &AgentSetup, read_only: bool) -> Strin
         hide_authors: false,
         skills: "",
         plan: false,
-        projects: &session.projects,
+        projects: &projects,
         live: false,
         worktree: setup.worktree,
     });
@@ -714,7 +717,7 @@ mod tests {
             let family = family_of(&t.name);
             assert!(matches!(family, None | Some(Family::Read) | Some(Family::Project) | Some(Family::Bevy)), "{} ({family:?}) is offered to a reader", t.name);
         }
-        for must_not in ["edit_file", "edit_files", "create_file", "delete_file", "rename_symbol", "replace_in_files", "structural_replace", "local_history", "bennu_build", "run_start", SPAWN, REQUEST, RESUME] {
+        for must_not in ["edit_file", "edit_files", "create_file", "delete_file", "rename_symbol", "replace_in_files", "structural_replace", "local_history", "bennu_check", "bennu_build", "run_start", SPAWN, REQUEST, RESUME] {
             assert!(!offered.iter().any(|t| t.name == must_not), "{must_not} is offered to a reader");
         }
     }

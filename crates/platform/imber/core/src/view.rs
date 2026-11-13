@@ -7,10 +7,15 @@
 
 use serde_json::{json, Value};
 
+use crate::agent::CallTiming;
+
+/// A gate that held a call at least this long stopped on a card for the user; a shorter one only checked.
+const USER_WAIT_MS: u64 = 500;
+
 /// How a tool is shown: the icon family the thread uses for it.
 pub fn tool_kind(name: &str) -> &'static str {
     match name {
-        "edit_file" | "create_file" | "delete_file" | "bennu_write_file" => "edit",
+        "edit_file" | "create_file" | "delete_file" | "bennu_write_file" | "merula_render" => "edit",
         "search_text" | "find_files" => "search",
         "ask_user" => "search",
         "load_skill" => "read",
@@ -118,15 +123,28 @@ impl View {
         self.blocks.push(block);
     }
 
-    pub fn tool(&mut self, id: &str, name: &str, input: &Value, detail: &str, ok: bool) {
+    /// The receipt of a finished call, with how long it ran and — when a card stopped it — how long it waited for
+    /// the user.
+    pub fn tool(&mut self, id: &str, name: &str, input: &Value, detail: &str, ok: bool, timing: CallTiming) {
         let label = match subject(input) {
             Some(s) => format!("{} {s}", title_of(name)),
             None => title_of(name),
         };
-        self.push(json!({
-            "type": "tool",
-            "call": { "id": id, "kind": tool_kind(name), "label": label, "detail": detail, "ok": ok },
-        }));
+        let mut call = json!({ "id": id, "kind": tool_kind(name), "label": label, "detail": detail, "ok": ok, "ms": timing.run_ms });
+        if timing.wait_ms >= USER_WAIT_MS {
+            call["waitMs"] = json!(timing.wait_ms);
+        }
+        self.push(json!({ "type": "tool", "call": call }));
+    }
+
+    /// The model's answer to one request arrived: how long it took, how long until it started, what it wrote.
+    /// Recorded where it happened in the thread — after the answer's text, before its calls' receipts.
+    pub fn step(&mut self, ms: u64, first_ms: Option<u64>, output_tokens: u64) {
+        let mut step = json!({ "ms": ms, "outputTokens": output_tokens });
+        if let Some(first) = first_ms {
+            step["firstMs"] = json!(first);
+        }
+        self.push(json!({ "type": "step", "step": step }));
     }
 
     /// Change a block in place, found by the id held in `key` (`call.id`, `request.id`, `set.id`,
@@ -180,7 +198,7 @@ mod tests {
         let mut v = View::new("m".into(), "x".into(), 0);
         v.text("Hel");
         v.text("lo");
-        v.tool("t", "search_text", &json!({"pattern": "total"}), "3 matches", true);
+        v.tool("t", "search_text", &json!({"pattern": "total"}), "3 matches", true, CallTiming { wait_ms: 3, run_ms: 12 });
         v.text("Done");
         let s = v.snapshot();
         let blocks = s["blocks"].as_array().unwrap();
@@ -221,10 +239,23 @@ mod tests {
     #[test]
     fn a_tool_receipt_names_what_it_touched_and_what_came_back() {
         let mut v = View::new("m".into(), "x".into(), 0);
-        v.tool("t1", "bennu_read_file", &json!({"file": "C:\\p\\src\\Order.java"}), "412 lines", true);
+        v.tool("t1", "bennu_read_file", &json!({"file": "C:\\p\\src\\Order.java"}), "412 lines", true, CallTiming::default());
         let call = &v.snapshot()["blocks"][0]["call"];
         assert_eq!(call["kind"], "read");
         assert_eq!(call["label"], "Read file Order.java");
+    }
+
+    #[test]
+    fn a_receipt_keeps_its_run_time_and_a_wait_only_when_a_card_held_it() {
+        let mut v = View::new("m".into(), "x".into(), 0);
+        v.tool("t1", "search_text", &json!({}), "3 matches", true, CallTiming { wait_ms: 4, run_ms: 37 });
+        v.tool("t2", "delete_file", &json!({}), "done", true, CallTiming { wait_ms: 9_000, run_ms: 5 });
+        v.step(8_200, Some(2_100), 640);
+        let s = v.snapshot();
+        assert_eq!(s["blocks"][0]["call"]["ms"], 37);
+        assert!(s["blocks"][0]["call"].get("waitMs").is_none(), "a quick check is not a wait");
+        assert_eq!(s["blocks"][1]["call"]["waitMs"], 9_000);
+        assert_eq!(s["blocks"][2]["step"], json!({ "ms": 8_200, "firstMs": 2_100, "outputTokens": 640 }));
     }
 
     #[test]

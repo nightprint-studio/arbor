@@ -16,7 +16,6 @@ use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::DeclarationTarget;
 use serde::Deserialize;
 
-use crate::index_service::IndexService;
 
 /// Args for [`bennu_declaration`].
 #[derive(Deserialize)]
@@ -37,22 +36,8 @@ fn bennu_declaration(
     ctx: &BennuState,
     args: DeclarationArgs,
 ) -> Result<Option<DeclarationTarget>, String> {
-    // A language-server-backed file (a `.rs` in a Cargo workspace) is answered by its server.
-    // The fall-through matters: routing a Rust buffer into the Java resolver would not fail
-    // quietly — that resolver parses anything as Java, so an identifier that happens to exist in
-    // the Java index becomes a confident jump into the wrong file.
-    if let Some(target) = crate::lsp_route::declaration(&args.file, &args.source, args.offset) {
-        return Ok(target);
-    }
-    // A shader. Before the index for the same reason a `.rs` is: the Java resolver parses
-    // anything as Java, so an identifier that happens to exist in the Java index becomes a
+    // The one engine that serves the file answers (see `engine`). Never the Java resolver for a file that is not
+    // Java's: it parses anything as Java, so an identifier that happens to exist in the index would become a
     // confident jump into the wrong file.
-    if let Some(target) = crate::wgsl_intel::declaration(&args.file, &args.source, args.offset) {
-        return Ok(target);
-    }
-    // A `.ptn`, across its mod. Before the index for the same reason as the shader.
-    if let Some(target) = crate::patina_intel::declaration(ctx, &args.file, &args.source, args.offset) {
-        return Ok(target);
-    }
-    Ok(IndexService::global().declaration(&args.file, &args.source, args.offset))
+    Ok(crate::engine::declaration(ctx, &args.file, &args.source, args.offset))
 }

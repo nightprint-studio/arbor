@@ -11,7 +11,7 @@
 - Imber: Permissions and modes: Manual, Accept edits and Autonomous modes, the four reaches, and one table of what asks when.
 - Imber: Reviewing changes: Proposals, outdated proposals, Undo, Local History and the isolated copy with Apply.
 - Imber: Tools it can use: Every family of tools with its purpose, how to switch one off, git access and several projects.
-- Imber: Running and observing: Managed processes, recipes, scenarios, requests, log reading, the shared build queue and build-error attribution.
+- Imber: Running and observing: Managed processes, cargo run, the programs you set up, recipes, scenarios, requests, log reading, the shared build queue and build-error attribution.
 - Imber: Debugging with Imber: Breakpoints, launching and attaching, stops and snapshots, and the off-by-default tools that change a running program.
 - Imber: Bevy games and the profiler: Looking into a running Bevy game over BRP, changing it behind a separate switch, and reading a profiler recording.
 - Imber: Screenshots and diagrams: Seeing a front end on localhost and drawing Mermaid diagrams in the thread.
@@ -131,6 +131,7 @@ Every conversation with Imber is saved on disk, listed by the title in the panel
 The title in the header is a switcher. It lists your conversations, today's first, each with the model it used, when it was last touched and what it cost. The open one shows as saved. Choosing a row opens that conversation, with its thread and its context meter.
 
 - **New conversation**: the pencil-and-square button in the header, or the command *Imber: New conversation in an isolated copy* for a conversation in a copy.
+- **Title**: in its first reply Imber names the conversation after the task (a few words, in your language), and the tab follows at once. Afterwards it changes the title only when you ask it to; a title you set yourself stays yours.
 - **Rename**: the pencil next to the title.
 - **Delete**: the trash next to the title, or *Delete conversation* in the **…** menu. It asks first. Deleting a conversation also removes its isolated copy, its index and the processes started in it. The money it cost stays counted against your limits: costs are kept in a ledger of their own.
 
@@ -156,18 +157,35 @@ With no conversation open the panel shows its home. An agent home offers six sta
 
 ## What is in the thread
 
+The thread follows new text while you are at its end; scroll up and it stays where you are, scroll back to the end and it follows again. Each conversation reopens where you left it — closing the panel or switching conversation and coming back lands at the same place, or at the end if that is where you were. Expanded over the editor (`Ctrl+Shift+U`) the thread is a wide column and the conversation and its context meter share one row.
+
 - Your messages on the right; Imber's as flowing Markdown (headings, lists, tables, quotes, highlighted code) that you can select. Hover an answer to copy it or **open it as a document**, a Markdown editor where you can edit and save it without changing the conversation. Hover your own message to copy it.
-- Tools it used, folded into one line that opens on demand ("Read 2 files · Searched once").
+- Tools it used, folded into one line that opens on demand ("Read 2 files · Searched once · 41s"). Inside, each call says how long it ran, always at the right edge (and, in amber, how long it waited for your answer on a card); its icon turns red when it failed or was refused, and hovering it shows the whole of what came back, and a *Model answered* row says how long each answer of the model took and how many tokens it wrote; hover it to see how much of that was waiting for the first token.
+- Under a finished answer, where its time went: the total, then *model*, *tools* and *waiting for you* apart — the way to tell a slow tool from a model that writes a lot.
 - Cards for proposals (Imber › Reviewing changes), questions, access prompts, the step plan, sub-agents, live runs and debugger stops.
 - Notices in the thread: a compaction, a limit reached, an access grant, a system note about another conversation.
 
 ## The step plan
 
-For work with several steps Imber writes a plan first and ticks the steps off. The card lists them (done, in progress, still to do) with a bar and "3 of 7 · 43%". The percentage is steps done over steps planned: it says how much of the list is done, not how long the rest will take, and it goes down if the plan grows. The plan costs a few hundred output tokens per update, a few cents for a task of several steps. Questions and small changes get no plan. **Step plan** in the composer's settings menu (and in Settings › Imber) switches it off; the tool and its instruction are then not sent at all.
+For work with several steps Imber writes a plan first and ticks the steps off. The card lists them (done, in progress, still to do) with a bar and "3 of 7 · 43%". The percentage is steps done over steps planned: it says how much of the list is done, not how long the rest will take, and it goes down if the plan grows. The plan costs a few hundred output tokens per update, a few cents for a task of several steps. Questions and small changes get no plan. **Step plan** in the composer's settings menu (and in Settings › Imber) switches it off; the tool and its instruction are then not sent at all. The plan is also part of what Imber reads back: after a stop, a *continue* or a compaction it still has the latest plan, word for word, and a new message in a conversation whose plan is still open reminds it where the plan got to. While it works, a plan left untouched for five tool calls is recalled to it with the step in progress, so steps are ticked as they are done; and if it ends its answer with steps still open, it is asked once to tick them or to say what is left.
+
+## The strip on the message box
+
+A strip on top of the message box says what the conversation has going on, so you never scroll back to find a card. **Plan** shows the steps done (*3/6*) and names the step being worked on, with the plan's progress as a line along the strip's foot; **Agents** says how many are running, and **Review** how many proposals wait for your decision. Each segment is there only when it has something to show. Press one to open its panel over the thread — every step of the plan, with the one in progress brought to the middle and marked *Now*; every sub-agent with its Stop; every proposal with *Review…*. Press it again, Esc or a click outside closes it. The command palette opens the same panels (*Imber: Show the plan*, *Show the sub-agents*, *Show the edits to review*).
+
+## Writing while it works
+
+You do not have to wait or stop Imber to say something. While it works, write in the message box and press `Ctrl+Enter` (or the arrow beside Stop): the message waits above the box, marked *Waiting*, and Imber reads it before its next request — after the tool it is running, without stopping. In the thread it then stands where it was read, as *You, while it worked*. Words only: files go with your next ordinary message. If the run ends before reading it, the message comes back into the box for you to send.
+
+## Steps and non-stop
+
+A run makes at most **Steps per run** requests to the model (Settings › Imber › Conversations, 40 by default; a step is one request, however many tools it calls). When it gets there it stops with “Stopped after N steps” and waits for you to say *continue*, which picks up where it was.
+
+**Non-stop**, in the composer's settings menu or the command palette (*Imber: Non-stop in this conversation*), lifts that cap for one conversation: its runs go on until the work is done or you stop them. The spending limits still stop it, and a scheduled run in that conversation keeps the cap. The choice is kept with the conversation. While it is on, the settings button carries a small ∞ and the menu's row reads *On*.
 
 ## Several conversations at once
 
-Two conversations can run on the same project. A file one of them is changing is reserved to it until its run ends: the other is refused, naming the conversation, and can wait or work elsewhere (reading is never blocked). Services and debug sessions belong to the conversation that started them. Builds queue. See Imber › Running and observing.
+Several conversations can work at the same time: start one, open another and send — each has its own run, its own status line and its own Stop, and the conversation list marks the ones working with *Working*. Two conversations can run on the same project. A file one of them is changing is reserved to it until its run ends: the other is refused, naming the conversation, and can wait or work elsewhere (reading is never blocked). Services and debug sessions belong to the conversation that started them. Builds queue. See Imber › Running and observing.
 
 ---
 
@@ -211,10 +229,13 @@ Always allowed on top of the reach: the **extra folders** you added in Settings 
 | **Delete (inside the reach)** | Asks | Free, but a call removing more than 50 files asks | Same as Accept edits |
 | **Delete in the Temp area** | Free | Free | Free |
 | **Delete outside the reach, or a whole project or allowed folder** | Asks | Asks | Asks |
-| **Build or run the tests of the project (`bennu_build`, `bennu_test_run`)** | Asks on every call | Asks once per run | Free |
+| **Check, build or run the tests of the project (`bennu_check`, `bennu_build`, `bennu_test_run`)** | Asks on every call | Asks once per run | Free |
 | **Other things that execute code (cargo run, npm scripts, run configurations, launching a program)** | Asks | Asks | Asks |
 | **Other Bennu tools that change something** | Asks | Free | Free |
 | **Start a process (`run_start`)** | Asks every time | Asks every time | Asks every time |
+| **Run a Rust binary or example (`cargo_run`)** | Asks the first time for each target in a conversation; then free with any features, arguments or environment | Same | Same |
+| **Run a program you set up (`run_tool`)** | As the tool says (every call, once per conversation, never); every call when the tool changes things | As the tool says | As the tool says |
+| **Run a script of the project that is not one of your programs (`run_script`)** | Asks every time, showing the script: decline, run once, or run and add it to your programs (then it is asked about once per conversation). A script added this way asks again when its content changes | Same | Same |
 | **Run a recipe or a scenario** | Asks once per content of the recipes file or scenario | Same | Same |
 | **HTTP request to localhost** | GET, HEAD, OPTIONS free; any other method asks unless the port belongs to a process it started | Same | Same |
 | **Debugger: set breakpoints, read the stack and values, step** | Free | Free | Free |
@@ -226,7 +247,8 @@ Always allowed on top of the reach: the **extra folders** you added in Settings 
 | **Git: read (status, diff, log, blame)** | Free once git is switched on | Free | Free |
 | **Git: stage, unstage** | Asks | Free | Free |
 | **Git: commit** | Asks | Asks | Asks. Push does not exist |
-| **A path outside the reach** | One prompt: Deny, Allow reading, Allow reading and writing, for that folder, for the session | Same | Same, except the build-error case below. "Anywhere on disk" never asks |
+| **Bring in another project for Bennu's tools** | Open in Bennu: free inside the reach, the access card outside it. Not open: the access card outside the reach (a yes also indexes it); inside it, as *Opening other projects* says (asks by default) | Same | Same, except that by default a project not open in Bennu but inside the reach opens without asking |
+| **A path outside the reach** | One prompt: Deny, Allow reading, Allow reading and writing, for that folder, for the session. It says what the call wants there (read, search, change, create, delete), and the grant that lets it go on is the highlighted button | Same | Same, except the build-error case below. "Anywhere on disk" never asks |
 | **A file named by an error of Imber's own build or check (inside the project)** | The prompt says the build reported an error there | Same | Opened for reading and writing without a prompt, for that run, shown with a Revoke button |
 | **Read a secret file (`.env`, keys)** | Asks every time | Asks every time | Asks every time |
 | **Write a secret file, or anything under `.git`** | Refused | Refused | Refused |
@@ -236,7 +258,7 @@ A grant you give (reading, or reading and writing) lasts for the session and app
 
 ## Autonomous and the build-error files
 
-Under Autonomous, a file named by an *error* of a build or check Imber ran itself (`bennu_build`, `bennu_check_file`, `bennu_problems`) and located inside the project you are in is opened for reading and writing, for that run only, without a prompt. Limits: at most 25 files a run; never anything under build output or fetched code (`target`, `build`, `out`, `dist`, `node_modules`, generated folders); never a dependency manifest or lockfile (`pom.xml`, `Cargo.toml`, `package.json`); never a secret. The thread shows each one ("Access granted to … because the build reports an error there") with a *Revoke* button, and the access ends with the run. Files of another project open this way only when the reach is *all open projects*; otherwise it asks. In Manual and Accept edits the prompt for such a file says why it is being asked.
+Under Autonomous, a file named by an *error* of a build or check Imber ran itself (`bennu_check`, `bennu_build`, `bennu_check_file`, `bennu_problems`) and located inside the project you are in is opened for reading and writing, for that run only, without a prompt. Limits: at most 25 files a run; never anything under build output or fetched code (`target`, `build`, `out`, `dist`, `node_modules`, generated folders); never a dependency manifest or lockfile (`pom.xml`, `Cargo.toml`, `package.json`); never a secret. The thread shows each one ("Access granted to … because the build reports an error there") with a *Revoke* button, and the access ends with the run. Files of another project open this way only when the reach is *all open projects*; otherwise it asks. In Manual and Accept edits the prompt for such a file says why it is being asked.
 
 ## Revoking access
 
@@ -244,7 +266,7 @@ Press *Revoke* on an access card to take back a folder before the session ends. 
 
 ## Hard limits no mode changes
 
-- No shell. Imber cannot run an arbitrary command; processes start only through `run_start` (asks), recipes and scenarios (ask), or the project's own build and test commands.
+- No shell. Imber cannot run an arbitrary command; processes start only through `run_start` (asks), `cargo_run` (asks once per target), recipes and scenarios (ask), the programs you set up in Settings (each with the arguments and variables you allowed), or the project's own build and test commands. Neither `cargo_run` nor `run_tool` goes through a shell.
 - Secret files (`.env`, keys) are never written; reading one asks every time.
 - `.git` is never changed by file tools.
 - Deleting the project folder itself, an allowed folder, or anything outside the reach always asks.
@@ -261,7 +283,7 @@ Whatever Imber changes can be read first, written all-or-nothing, undone afterwa
 
 In Manual mode a change is a **proposal**: a card in the thread listing the files with their added and removed lines. Nothing is written yet. A change made by one tool call (an edit across files, a rename, a replace over a folder) is one proposal, written all or nothing.
 
-**Review** opens the proposal as a diff, unified or side by side, with the files in a list on the left (`↑` / `↓` move between them). Decide with **Apply all** (`Ctrl+Enter`) or **Reject all**. A rejected card turns red and keeps its files readable; an applied one stays as a record and can be undone. A proposal that touches a file of another project names it as `project:path`.
+**Review** — on the card, or any file row of it — opens the proposal as a syntax-highlighted diff over most of the window, unified or side by side (the switch is in the header), with the files on the left, each with its folder and a bar of what it adds and removes (`↑` / `↓` or `J` / `K` move between them). The Review button itself shows the size of the change. Decide with **Apply all** (`Ctrl+Enter`) or **Reject all**. A rejected card turns red and keeps its files readable; an applied one stays as a record and can be undone. A proposal that touches a file of another project names it as `project:path`.
 
 ## Applied changes and Undo
 
@@ -310,14 +332,15 @@ Imber acts only through a fixed set of tools, grouped in families; each family c
 | Family (Settings label) | Tools | What it is for |
 | --- | --- | --- |
 | **Read and search files** | `search_text`, `find_files`, `structural_search`, `bennu_read_file`, `read_files`, `file_outline` | Read a file (or several in one call), see a file's declarations with their line ranges, search text, find files by name, and find or count code by its shape (`structural_search`: the same query language as the Structural search window — holes for statements, members, parameters and modifiers, `or`, `in`, `as`, `inside`, `group` — answering with counts, a sample of places or the `group` table; it never writes). |
-| **Project intelligence** | `bennu_find_symbol`, `bennu_find_usages`, `bennu_references`, `bennu_callers`, `bennu_symbol_at`, `bennu_outline`, `bennu_check_file`, `bennu_problems`, `bennu_catalog`, `bennu_frameworks`, `bennu_module_graph`, `bennu_project_summary`, `bennu_tests`, `bennu_todos` and more | Bennu's own knowledge of the project: symbols, usages, beans, endpoints, framework catalogues, problems, tests, TODOs, the module graph, the profiler summary. |
+| **Project intelligence** | `bennu_find_symbol`, `bennu_find_usages`, `bennu_references`, `bennu_callers`, `bennu_symbol_at`, `bennu_outline`, `bennu_check_file`, `bennu_problems`, `bennu_catalog`, `bennu_frameworks`, `bennu_module_graph`, `bennu_project_summary`, `bennu_tests`, `bennu_todos` and more | Bennu's own knowledge of the project: symbols, usages, beans, endpoints, framework catalogues, problems, tests, TODOs, the module graph, the profiler summary. A question about a position (symbol, declaration, references, implementations, rename, problems) is answered by the one engine that serves the file — the editor's own: a language server for its languages, the Java index, the Patina package for `.ptn`, the shader engine for `.wgsl` without `wgsl-analyzer`. When nothing serves a file the answer says why (no server for the extension, the server not installed, no project of its kind above the file) instead of reporting nothing found. While a language server is still loading, its answers say so, and `bennu_wait_ready` (given a file of that language) starts the server if nobody has and waits until it can answer — 60 seconds by default, at most 300 — instead of asking again and again. Engines do not all answer the same questions — a Lua server has no implementations or callers, the shader engine no rename, a Cargo manifest only completion and problems — so a tool asked something its engine does not answer refuses it, saying what that engine does answer; and `bennu_project_summary` lists, per language of the project, which questions its engine answers (a language server's own list once it is running). |
 | **Framework model** | `bennu_endpoints`, `bennu_beans`, `bennu_entities`, `bennu_scheduled_jobs`, `bennu_config_properties`, `bennu_dependency_conflicts` | Typed, bounded lists built from the framework models: HTTP endpoints (Spring MVC / WebFlux, JAX-RS, servlets, Struts: method, path, handler, parameters, produces / consumes), DI beans (scope, profile, conditions, injection points and who injects them), JPA entities with relations and repositories, `@Scheduled` jobs, configuration keys and who reads them, and dependency version conflicts. Filter with `name` / `path` / `type` and a `limit`; a cut list says how many rows were left out. `bennu_dependency_conflicts` runs the build tool and is in the *Run* family. |
-| **Edit files** | `edit_file`, `edit_files`, `replace_in_files`, `create_file`, `delete_file` | Exact edits (one or a list across files, all or nothing), text or regular-expression replace over a folder with a dry run and a cap on files, create, delete. |
+| **Edit files** | `edit_file`, `edit_files`, `replace_in_files`, `create_file`, `delete_file` | Exact edits (one or a list across files, all or nothing), text or regular-expression replace over a folder with a cap on files and a dry run that shows every match with its line and what it would become, create, delete. Arguments that arrive broken are not run: Imber is told where they went wrong and sends them again. |
 | **Refactoring** | `rename_symbol`, `add_parameter` | Rename a symbol or add a parameter across every file that mentions it, from the project index, as one change. A renamed public type's file is renamed with it. |
 | **Structural search and replace** | `structural_replace` | Rewrite code by its shape, safer than a regular expression. (Searching by shape is `structural_search`, in the read family.) Both walk only the files Imber may reach: a folder outside its scope that you did not open for it, a secret file (`.env`, keys, certificates) and `.git` are skipped before they are read — they are in no count, table or sample — and for a rewrite so is anything it could not also change (a folder opened for reading only, or everything while editing is off). The answer says how many files were skipped, never which. |
 | **Local History** | `local_history` | List a file's revisions, show a diff, list deleted files, restore one. |
-| **Build, run and test** | `bennu_build`, `bennu_test_run`, `bennu_cargo_run`, `bennu_npm_run_script`, run configurations, launching a program | Anything that executes the project. See Imber › Permissions and modes for when each asks. |
-| **Live services** | `run_start`, `run_status`, `run_logs`, `run_stop`, `wait_ready`, `list_recipes`, `run_recipe`, `http_request`, `trace_request`, `timeline`, `list_scenarios`, `run_scenario`, `save_scenario`, `console_logs`, `tail_file`, `wait_log`, `log_facets`, `log_record` | Start the project's services, read their logs, call them over localhost, follow one request through every log, run scenarios. See Imber › Running and observing. |
+| **Build, run and test** | `bennu_check`, `bennu_build`, `bennu_test_run`, `bennu_cargo_run`, `bennu_npm_run_script`, `run_tool`, `run_script`, run configurations, launching a program | Anything that executes the project, and the programs and scripts you let it run. `bennu_check` says whether the project compiles: `cargo check` on Cargo (with a `target`, for that triple: "does it compile for wasm?"), `mvn compile` on Maven. `bennu_build` (Cargo) builds the files themselves — a real `cargo build` of the library and binaries for the host or a `target` (`wasm32-wasip2`…), with a `profile` (`release`…) — and its answer lists the artifacts it produced with their paths: the `.wasm` to install, for example, which a program you set up can then copy. A conversation that builds in its own target directory is told the artifacts are there, not in `target/`. `run_tool` runs the programs you set up in Settings › Imber (see Imber › Running and observing). On Cargo, `bennu_test_run` takes the features to enable (`features`, `all_features`, `no_default_features`), a module prefix (`cli::`) or a crate's package name as well as test names, and the runner — `cargo` or `nextest`; left out, nextest when the workspace has a `.config/nextest.toml`. With no `root`, a `module` that only another project of the conversation has runs in that project (also for `bennu_check` and `bennu_build`); otherwise name the project as `root`. A module prefix (`cli::`) runs every test under it, in each crate that has that module; a name not found is looked for again after a fresh scan, and the error lists the modules that hold tests, by crate and binary. `ignored_only` runs only the `#[ignore]`d tests of the selection, and `filter` takes a nextest filter expression (`-E`) for a selection names cannot say. When no test ran, the answer carries the compiler's (or Maven's) errors. While the project does not compile, `bennu_check` lists only the errors and counts the warnings; with no error, warnings from crates outside the project are counted, not listed. See Imber › Permissions and modes for when each asks. |
+| **Music (Merula)** | `merula_check`, `merula_render` | For `.merula` files, through Merula itself. `merula_check` (in the *Project* family) evaluates a file as Merula's editor does, without playing it, and lists every error and warning with its line and column — syntax, evaluation, instruments or samples the sound registry does not know, speech controls on a non-speech source — with the number of tracks and the length it renders. `merula_render` (in the *Run* family) checks the file, then renders it to OGG (or WAV) next to it or at `out`, and answers with the file, its length and size, or with the errors when there are any. The length is the file's `meta { cycles = "N" }`, else its arrangement's, else one cycle, unless `cycles` says otherwise. A render asks as the project's build does, by the mode, and shows in Merula's Downloads & Exports with its Stop; stopping the run stops it too. Imber cannot hear the result: you do. |
+| **Live services** | `run_start`, `cargo_run`, `run_status`, `run_logs`, `run_stop`, `wait_ready`, `list_recipes`, `run_recipe`, `http_request`, `trace_request`, `timeline`, `list_scenarios`, `run_scenario`, `save_scenario`, `console_logs`, `tail_file`, `wait_log`, `log_facets`, `log_record` | Start the project's services (a Rust binary or example with its features and arguments through `cargo_run`), read their logs, call them over localhost, follow one request through every log, run scenarios. See Imber › Running and observing. |
 | **Debugger** | `debug_set_breakpoint`, `debug_list_breakpoints`, `debug_remove_breakpoint`, `debug_launch`, `debug_attach`, `debug_wait_stop`, `debug_stack`, `debug_variables`, `debug_evaluate`, `debug_step`, `debug_resume`, `debug_detach`, `debug_output`, `debug_run_to`, `debug_break_on_exception`, `debug_select_thread` | Debug a Java program. See Imber › Debugging with Imber. |
 | **Look into a running Bevy game** | `brp_connect`, `brp_query`, `brp_get`, `brp_resources`, `brp_get_resource`, `brp_types`, `brp_watch`, `brp_screenshot`, `brp_stats`, `brp_actions`, `brp_states` | Read entities, components, resources and types over the Bevy Remote Protocol. Only for projects with a `Cargo.toml`. See Imber › Bevy games and the profiler. |
 | **Screenshots of a page** | `screenshot_page`, `page_diagnostics` | Look at a front end on localhost. See Imber › Screenshots and diagrams. |
@@ -332,7 +355,7 @@ Imber acts only through a fixed set of tools, grouped in families; each family c
 
 ## Tools that are always there
 
-`ask_user` (questions, Imber › Decisions and questions), `bennu_help` (the help about Bennu itself), `open_ui` (opens a panel or window), `show_diagram` (draws a Mermaid diagram), `show_image` (shows a picture or an SVG, Imber › Screenshots and diagrams), `load_skill` (only when you enabled a skill, Imber › Skills) and `expand_result` (returns the detail of a digest). In a chat only `bennu_help`, `open_ui`, `show_diagram` and `show_image` are offered.
+`ask_user` (questions, Imber › Decisions and questions), `bennu_help` (the help about Bennu itself), `open_ui` (opens a panel or window), `show_diagram` (draws a Mermaid diagram), `show_image` (shows a picture or an SVG, Imber › Screenshots and diagrams), `view_image` (Imber looks at an image file itself — a PNG, JPEG, GIF or WebP a program, script or test wrote — received like a screenshot, up to 3.5 MB; only the latest two pictures stay in what it reads), `load_skill` (only when you enabled a skill, Imber › Skills) and `expand_result` (returns the detail of a digest). In a chat only `bennu_help`, `open_ui`, `show_diagram` and `show_image` are offered.
 
 ## Switching a family off
 
@@ -352,6 +375,22 @@ Reading means commit messages and author names go to the provider. **Hide author
 
 With the reach set to *All open projects* Imber works across the projects open in the workspace, the one you are in first, up to *Projects at once* (6 by default; each is a line in its instructions, so a higher number costs a little on every request). It reads, searches and changes in all of them: a tool takes a project by name (or `name:path`), the text search and the file finder take `project: "all"`, and a change goes to the project that owns the file, which keeps its own Local History. A proposal names a file in another project as `name:path`.
 
+### Bringing in another project
+
+Bennu's tools answer only for the projects of the conversation. When Imber needs them on another one, it names that project's root — usually with `bennu_project_summary`, which also says how far the index is — and the project is brought into the conversation before the call runs. Its instructions list the other projects you have open in Bennu, so it knows which are there. What happens depends on two things:
+
+| The project | Imber may already read there | Imber may not read there |
+| --- | --- | --- |
+| **Open in Bennu** (already indexed) | It joins at once, without a question | The access card asks; a yes lets it join |
+| **Not open in Bennu** (any folder elsewhere) | As *Opening other projects* says (Settings › Imber › Access): ask, except in Autonomous (the default); always ask; open without asking; never | The access card asks, and says that a yes also opens and indexes it — the only question |
+
+- An opened project is indexed in the background, as an AI client's would be: until the index is ready, Bennu answers "not yet" rather than "nothing". It does not appear among your tabs, and it is closed after the idle time like any project nobody is looking at.
+- A project brought in stays part of the conversation for its later runs (while Arbor is open) and counts toward *Projects at once*; past that limit it is refused with the reason.
+- The thread says when a project joined or was opened.
+- Any language Bennu has a language server for works: opening a project starts every server whose root marker is at its root (`Cargo.toml`, `package.json`, `.luarc.json`, `go.mod`, `pyproject.toml`, `angular.json`, `svelte.config.js`, a server of your own…), and Imber's symbol, outline, references, callers, implementors, rename and problems tools answer from it. The framework model (endpoints, beans, entities) is Java's. See Language servers.
+- Any folder can be brought in, but only what can be indexed is: a Maven or Gradle build gets the Java index, and each language server whose root marker is there is started. A folder with neither joins as files.
+- Never the root of a disk or your home folder itself. Never from a scheduled run, a sub-agent (it works in its parent's projects) or an isolated copy (it sees only the copy). With *Never*, a project not open in Bennu is only files to Imber.
+
 ## Big answers are digests
 
 A build with sixty errors, a test run with forty failures, a long search or a long list of usages is answered with a digest (counts, distinct problems grouped, the files most affected and what was left out); `expand_result` returns the detail for one file, test or message. A file Imber already read comes back as one line when unchanged, and as the lines that differ when it changed.
@@ -366,10 +405,32 @@ The feature itself (processes, recipes, scenarios, the timeline, correlation ids
 
 ## Managed processes
 
-- `run_start` starts a named process with a command, a working folder, optional ports and a readiness check (a port, a log line or a health URL). It asks every time, showing the command.
+- `run_start` starts a named process with a command, a working folder, optional ports and a readiness check (a port, a log line or a health URL). It asks every time, showing the command. The line runs in `bash` where the machine has it (`sh` otherwise), and its `cwd` may be any project of the conversation, by name (`voriz:`, `voriz:crates/app`) — the same for `cargo_run`, whose `cwd` also decides which Cargo workspace it runs in, and for `run_tool`. Tools such as `cargo` and `mvn` are found even when Arbor was started from the Finder: at start it adds the usual tool folders (`~/.cargo/bin`, Homebrew, SDKMAN) to the `PATH` every process inherits. Imber is told to prefer Bennu's own tools for a check, a build, the tests or `cargo run` (`bennu_check`, `bennu_build`, `bennu_test_run`, `cargo_run`), which need no card and answer with the parsed result; a command stays available when one of them cannot do the job.
+- `cargo_run` runs a binary or an example of a Rust project — package, `bin` or `example`, features, `release` or a profile, the program's own arguments and environment variables — as a managed process like any other. Imber gives fields, never a command line, and the command is the one a run configuration with the same fields would run, without a shell. The first run of a target (package and binary) in a conversation asks; the yes covers that target again with any features, arguments or environment, and another target asks again. A compile error shows in its logs. A server returns at once (its output is read with `run_logs`, also after it ends); a program that does its work and ends is run with `until_exit`, which waits for it (5 minutes by default, at most 30) and answers with its exit code and the last lines it printed, stderr marked — build errors included.
 - `run_status`, `run_logs`, `wait_ready` and `run_stop` inspect, wait for and stop what the conversation started. Reading never asks; stopping what the run started does not ask.
 - The processes are the same ones the Live panel lists. Every process records its owner; a conversation stops only its own processes. A name or port that another conversation holds is refused instead of duplicated or killed, and a stack another conversation already runs is attached read-only.
 - A yes given to a recipes file in one conversation does not carry to another.
+
+## Programs you set up
+
+`run_tool` runs one of the programs listed in Settings › Imber › Tools and skills › *Programs it may run*, by name. Each declaration sets the program (an absolute path), the arguments always passed, whether Imber may add its own, the variables always set and the ones Imber may set, a time limit, whether it changes things, and when a call asks: every call, once per conversation, or never. A tool that changes things asks at every call in Manual mode, whatever it says.
+
+- The program runs directly, without a shell: each argument reaches it as written, so `;`, `|`, `$(…)` and wildcards are plain characters. An argument or a variable the declaration does not allow is refused before anything starts.
+- It runs in a folder of the project (its root unless Imber names one) and Imber gets back the exit code with standard output and standard error; a long output keeps its beginning and its end. Imber can also send text to its standard input.
+- A call that reaches its time limit, or a run you cancel, ends the program with its whole process tree.
+- With `background` the program starts as a managed process instead — for a watcher or a server — and is read and stopped like any other (`run_logs`, `run_stop`).
+- A yes given once per conversation lasts until you edit the tool. A scheduled run never uses these programs.
+- The settings page marks a tool that would not be offered (no program at that path, a name that is not allowed, no description) and says why.
+
+## Scripts of the project
+
+`run_script` runs a script of the project that is not one of your programs — `.sh`, `.bash`, `.py`, `.js`, `.ps1`, `.bat`/`.cmd` on Windows, or an executable file. It always asks first, with a card that shows the script's path, the command, why Imber wants to run it and its first lines. Three answers:
+
+- **Decline** — nothing runs, and Imber is told.
+- **Run once** — this call only.
+- **Run and add to my programs** — it runs, and a declaration is added to Settings › Imber › Tools and skills › *Programs it may run* (interpreter, script, "changes things", asked once per conversation), for you to give a description and refine. From then on Imber calls it with `run_tool`.
+
+The script runs through its interpreter, chosen by its extension, or directly when it is executable; arguments are passed one by one, with no shell. It runs like a program you set up: the exit code and the output come back, it is stopped after ten minutes, and `background` makes it a managed process. Imber can edit the project's files, so a yes is for the script *as it is*: a script that changed asks again, and the card says it changed. The same holds for a program you set up whose file is inside the project — or a script you handed to an interpreter in its fixed arguments: its approval covers that content, and even one set to *Never* asks again when the file has changed since it last ran in the conversation.
 
 ## Recipes and scenarios
 
@@ -524,7 +585,7 @@ When a picture explains better than text (an architecture, a flow, a call chain,
 
 ## Pictures in the thread
 
-`show_image` puts a picture in the thread: an image file of the project (PNG, JPEG, GIF, WebP or SVG) or an SVG Imber wrote itself, such as a logo or an icon. It shows as a small preview with a caption; click it, or focus it and press Enter, to open it large. When a message holds several pictures the **←** and **→** keys walk them and **Esc** closes.
+`show_image` puts a picture in the thread: an image file of the project (PNG, JPEG, GIF, WebP or SVG) or an SVG Imber wrote itself, such as a logo or an icon. It shows as a small preview with a caption; click it, or focus it and press Enter, to open it large. When a message holds several pictures the **←** and **→** keys walk them and **Esc** closes. In the large view a click on the picture zooms to 2× at that point and a second click fits it again; `+` and `−` zoom in steps up to 8× (`0` fits), `Ctrl`/`⌘` + wheel or a pinch zooms at the pointer, and a zoomed picture is moved by dragging or scrolling.
 
 - The picture is for you: Imber does not get its pixels back. To have it *look* at an image, attach the image.
 - A file is read like any other (the reach and the Read family apply, and a file outside the reach asks); a chat has no files, so it shows SVG it wrote. A file over 5 MB is not shown.
@@ -564,9 +625,10 @@ description: How to write a database migration in this project
 
 - each project's `.bennu/skills` and `.claude/skills`;
 - Bennu's own `skills` folder in its config folder;
+- the folders you add under **Settings › Imber › Tools and skills › More folders of skills**, in the order you added them — a folder that holds skill folders, or one that is a skill itself (it has a `SKILL.md`);
 - `~/.claude/skills`.
 
-A project skill hides a user skill of the same name, and `.bennu` wins over `.claude`.
+A project skill hides a user skill of the same name, and `.bennu` wins over `.claude`. Among your own folders the list above is the order: a skill in a folder you added wins over one of the same name in `~/.claude/skills`. Skills from an added folder are user skills, labelled with the folder's name.
 
 ## The skills manager
 
@@ -577,6 +639,7 @@ Enabling is an allow-list stored in the config (`skills_on`, ids of the form `us
 ## How a skill is used
 
 - Only a one-line index of the enabled skills (name and description) travels with each request.
+- The folder of an enabled skill is readable by Imber whatever the reach — its `SKILL.md` and the files it points at (references, examples) — without an access card; writing there follows the ordinary rules.
 - Imber loads a skill's text with `load_skill` when a task matches, or when you start your message with `/name`. Type `/` in the composer to pick from the enabled skills.
 - Limits: a skill's text is cut at 32 KB, at most 50 skills are read, and a description is cut at 240 characters.
 - Nothing in a skill is ever run. Other files in its folder are only named; Imber can read them with its ordinary tools only if the reach allows it.
@@ -613,7 +676,7 @@ What an agent spends is added to the conversation and counts against the spendin
 
 ## Seeing them
 
-- Above the thread an *Agents* list shows each agent's state, how long it has run and what it cost.
+- The *Agents* button in the tray over the message box says how many are running; it opens the list with each agent's state, how long it has run, what it cost, and its Stop.
 - The title opens its thread, read-only and live (*Imber: Open the latest sub-agent's thread…*). It reads as a chat between the two: the task Imber (badged *main*) gave it, then the agent's own messages (badged *sub-agent*), a writing mark while it works and, at the end, a line saying it handed its summary back, stopped or failed. The view follows the end of the thread unless you scrolled up.
 - Each agent has a Stop; *Stop all* and *Imber: Stop all sub-agents* stop them together.
 - A card for each stays in the thread: what it was asked, what it may do, its state, time and cost, and the start of its answer. While the agent runs the card's border moves. An agent's record and thread are kept on disk for as long as its conversation keeps them, so the Agents list and an agent's thread still open after a restart; an agent that was running when the app closed shows as stopped. What it read is not copied: the kept thread says *read this file*, not the file. Imber can continue a finished agent with `resume_agent` and a new instruction: it remembers what it concluded and reads again what it needs. The trash button on a finished agent deletes it; compacting the conversation, or deleting it, deletes them all.
@@ -721,13 +784,13 @@ Every request carries the whole conversation, so the cost depends less on how mu
 
 ## The context meter
 
-Above the composer a bar shows how full the model's window is, split into *tool definitions*, *Imber rules*, *project instructions*, the *skills index*, *files and search results*, and the *conversation*. It stays calm until 75%, turns amber there and red past 90%. Open the line for the breakdown and for how much of the last request came from the provider's cache. Every figure is an estimate (about four characters to a token); the exact count comes back with each answer.
+Above the composer a bar shows how full the model's window is, split into *tool definitions*, *Imber rules*, *project instructions*, the *skills index*, *files and search results*, and the *conversation*. It stays calm until 75%, turns amber there and red past 90%. Open the line for the breakdown and for how much of the last request came from the provider's cache. The figures move while a run goes, with each request, and so does the conversation's cost under the composer. They are estimates by characters, corrected by what the provider counted: four characters to a token is the rule for English prose, and code, JSON and other languages pack fewer into a token — near half as many on a real conversation. After each request Imber measures how far its estimate was from the provider's count, keeps that ratio with the conversation, and corrects the meter, the moment compaction starts and the room left for the answer with it.
 
 *Show what would be sent…* (the panel's **…** menu) lists the same parts for the next request, in the order the provider reads them, with the cost when the cache is cold and when it is warm.
 
 ## Models, prices and the context window
 
-The model list and prices are a file, `models.toml`, built in. **Settings › Imber › Models and prices › Create a price file** creates your own copy (`assistant-models.toml` in Bennu's config folder): an entry with the same id replaces the built-in one and any other id is added, so a price change or a new model needs an edit and a *Reload*, not a new build. An entry gives `[model.price]` (`input`, `output` and optionally `cache_read`, `cache_write_5m`, `cache_write_1h`), the `context_max` window, the `efforts` it accepts and, for a model that charges more for long prompts, `[model.long_prompt]` with `over_tokens` and its own rates. Cost is worked out request by request, with cache reads and writes at their own rates.
+The model list and prices are a file, `models.toml`, built in. **Settings › Imber › Models and prices › Create a price file** creates your own copy (`assistant-models.toml` in Bennu's config folder): an entry with the same id replaces the built-in one and any other id is added, so a price change or a new model needs an edit and a *Reload*, not a new build. An entry gives `[model.price]` (`input`, `output` and optionally `cache_read`, `cache_write_5m`, `cache_write_1h`), the `context_max` window, the `max_output` one response may have (thinking included; 32,000 when left out), the `efforts` it accepts and, for a model that charges more for long prompts, `[model.long_prompt]` with `over_tokens` and its own rates. Cost is worked out request by request, with cache reads and writes at their own rates. Each request lets the answer be as long as the model allows — its `max_output`, less only when the conversation fills so much of the window that there is no room for it: output is paid for as it is written, so a high ceiling costs nothing by itself, and the spending limits are what stop a run.
 
 The **context window** is the largest window Imber may use in a conversation, 50K up to 1M; a size the model cannot hold is listed but cannot be picked, and changing to a smaller model shrinks the window to fit.
 
@@ -737,7 +800,7 @@ The **context window** is the largest window Imber may use in a conversation, 50
 - **Long cache.** By default the tools and instructions are kept in the one-hour cache (Settings › Imber › Keep instructions cached for an hour) instead of the five-minute one. It costs a little more the first time and pays off when you pause for more than five minutes between messages or open another conversation in the same project.
 - **Reading the same thing twice.** A file already read comes back as one line when unchanged, and as the lines that differ when changed. `file_outline` and `read_files` help open big files by the part that matters.
 - **Big results are digests.** Counts, grouped problems, the files most affected, and a statement of what was left out. `expand_result` gives the detail.
-- **Old results are stubbed in a batch.** When many old file reads and search results have piled up they are replaced all at once by one-line stubs saying how to fetch them again, and the thread says so. In a batch, never one per message, because changing a message makes the cache start over from it.
+- **Old results are stubbed in a batch, and only when room runs out.** Once the conversation fills half the context window and many old file reads and search results have piled up — results of the request being worked on, and of files still being read or edited, stay whole — they are replaced all at once by one-line stubs saying how to fetch them again, and the thread says so. In a batch, never one per message, because changing a message makes the cache start over from it.
 
 ## Compacting
 
@@ -769,7 +832,10 @@ A failed request is told apart by what caused it, and only the causes that pass 
 Settings › Imber › Spending limits holds limits in euros: **per conversation** (default €5), **per day** (from midnight, your time; €10), **per week** (from Monday; off), **per month** (from the first; €50). `0` switches one off.
 
 - A conversation or a period at its limit does not start another request, and a run in progress stops before the request that would take it over; the thread says which limit.
-- The composer flags a limit from 80% of it (**Warn from**, adjustable) and shows what the conversation has cost.
+- The composer flags a limit from 80% of it (**Warn from**, adjustable) and shows what the conversation has cost, updated with each request while a run goes.
+- The title bar of Bennu and of Corvus has a credit meter, just left of the documentation button: Imber's spark in a ring. The ring fills with what the providers have left on average, and takes the colour of the worst one — amber when one is close to running out, red when one has. Pressed, it lists every provider (the active one first and open) with its figure; open a row for where the figure comes from. It reads in the background every few minutes and after each answer; **Refresh** asks again at once.
+- For Anthropic, the API does not report the credit left on the account, so it is **estimated**. Enter the balance shown in the Claude Console under **Settings › Imber › Models and cost › Credit balance**; the meter shows *~$… left*: that balance, less what was spent after you entered it. Nothing spent before is subtracted, older conversations included. With an **Admin key** (Settings › Imber) what is subtracted is your organization's real spending from Anthropic's cost report (from the day after, plus Imber's own for the rest of the day you entered it) — close to the real figure. Without one, only what Imber spent — a rough estimate, since anything else billed to the key is not seen; the row says which. Enter the balance again after a top-up, or now and then. Only an Anthropic organization has Admin keys; an individual account cannot.
+- With no balance entered, the figure is what is left of the tightest spending limit you set (or what this month has cost, with no limit).
 - Limits count what conversations still running have spent so far, so two at once cannot together pass a daily, weekly or monthly limit that neither passes alone.
 - Costs are recorded per run in a ledger of their own (`usage.jsonl` in the data folder): deleting a conversation does not hand its money back.
 - Prices are in dollars, so amounts are converted at the **Exchange rate** you keep by hand (default 0.92 euros per dollar); with no usable rate a dollar counts as a euro. The rate never moves on its own.
@@ -831,7 +897,7 @@ Every Imber setting, in the order of the page Settings › Imber: what it does, 
 
 - All settings below are in the `[assistant]` table of Bennu's config file for the active profile, `arbor/profiles//bennu/config.toml` (the limits in `[assistant.limits]`). The key is the name in the "Key" column.
 - The **API key** is never in a config file: it is in a credential vault of its own.
-- The **price list** is `assistant-models.toml` and your **own instructions** are `assistant-instructions.md`, both in the same Bennu config folder. Your own skills go in its `skills` folder.
+- The **price list** is `assistant-models.toml` and your **own instructions** are `assistant-instructions.md`, both in the same Bennu config folder. Your own skills go in its `skills` folder, or in any folder you add under Tools and skills.
 - Conversations, the spending ledger (`usage.jsonl`) and the git author mapping live in the data folder `arbor/data/bennu/assistant`. Isolated copies live in `assistant-worktrees` beside it.
 
 ## Connection
@@ -839,6 +905,7 @@ Every Imber setting, in the order of the page Settings › Imber: what it does, 
 | Setting | What it does | Default | Key | Per conversation |
 | --- | --- | --- | --- | --- |
 | **API key** | Your Anthropic key. Save, or Remove. | Not set | (vault) | No |
+| **Admin key (optional)** | An Anthropic Admin key, read only by the credit meter in the title bar to show what your organization really spent this month; never sent with a conversation. Only Anthropic organizations have Admin keys. | Not set | (vault) | No |
 
 ## Models and prices
 
@@ -865,6 +932,7 @@ Every Imber setting, in the order of the page Settings › Imber: what it does, 
 | **Warn from** | The composer flags a limit at this percentage of it (10 to 99). | 80 | `limits.warn_percent` | No |
 | **Scheduled run cap (EUR)** | The most one scheduled run may cost, in euros; it ends as incomplete when it gets there. 0 = no cap. | 1 | `limits.schedule_run_eur` | No |
 | **Scheduled runs per day** | How many scheduled runs may start in a day. 0 = no cap. | 24 | `limits.schedule_runs_per_day` | No |
+| **Credit balance** | The account's balance as the Claude Console shows it, in dollars, entered by hand (the API does not report it). Saving records the moment too: the title bar's meter estimates what is left from what is spent after it. Update, or Clear. | Not entered | `limits.credit_usd`, `limits.credit_set_at` | No |
 
 Each limit field also shows how much has been spent against it.
 
@@ -875,6 +943,7 @@ Each limit field also shows how much has been spent against it.
 | **Model** | What a new conversation starts with. | Opus 5.5 | `model` | Yes, composer |
 | **Largest context window** | The most Imber may put in one conversation. | 200K | `max_context` | Yes, composer |
 | **Effort** | How hard it thinks (Low to Max); disabled for a model with no effort setting. | High | `effort` | Yes, composer |
+| **Steps per run** | Requests to the model one run may make before it stops with “Stopped after N steps” and waits for you to say *continue* (5 to 300). A step is one request, however many tools it calls. Also applies to Imber in Corvus. | 40 | `max_steps` | No |
 | **Cheaper model for side jobs** | Writes compaction summaries and runs read-only sub-agents. Empty means the cheapest Haiku in the price list. | Default (cheapest Haiku) | `side_model` | No |
 | **Keep instructions cached for an hour** | Use the provider's one-hour cache for the instructions and tools. | On | `long_cache` | No |
 | **Step plan** | A visible plan with a percentage for multi-step work. | On | `plan_enabled` | Yes, composer |
@@ -887,6 +956,8 @@ Each limit field also shows how much has been spent against it.
 | **Your instructions about decisions** | Free text, up to 2,000 characters. | Empty | `decision_notes` | Yes: its own text is appended |
 | **General context** | Standing notes about you (role, stack, tone, language, rules) added to Imber's instructions in every conversation, agent or chat, inside a `` block. Written as a list, one note per item (`Enter` adds the next, `Alt+↑` / `↓` moves one); up to 4,000 characters in all. Edit it from this page, the panel's ⋯ menu or the command palette (*Imber: General context…*); Ctrl/Cmd+Enter saves. The same modal has a second tab, *This project*: notes about the open repository (conventions, what not to touch), kept in `.arbor/bennu/config.toml` under `[assistant]` and sent in a `` block only with conversations about it, under the same cap. What a whole team should read belongs in `CLAUDE.md`. | Empty | `general_context` | No |
 | **Debug session idle time** | Minutes before an unused debug session is ended (5 to 240). | 30 | `debug_idle_minutes` | No |
+| **Notifications › When it waits for you** | A system notification, and the Arbor icon asking for attention, when Imber stops on a question, an approval or a card while no Bennu window is in front. | On | `notify_questions` | No |
+| **Notifications › When a run ends** | The same when a run finishes or stops on an error while no Bennu window is in front. | Off | `notify_done` | No |
 | **Confirm costly changes** | Ask before a model or window change that makes a long conversation re-read its history at full price. | On | `confirm_cost_changes` | No |
 
 ## What it may reach
@@ -894,7 +965,8 @@ Each limit field also shows how much has been spent against it.
 | Setting | What it does | Default | Key | Per conversation |
 | --- | --- | --- | --- | --- |
 | **Reach** | This file, this project, all open projects, anywhere on disk. | This project | `scope` (`file`, `project`, `workspace`, `disk`) | Yes, composer |
-| **Projects at once** | With the reach "all open projects": how many projects one conversation works across (1 to 20). | 6 | `max_projects` | No |
+| **Projects at once** | With the reach "all open projects": how many projects one conversation works across (1 to 20). Projects Imber brings in count too. | 6 | `max_projects` | No |
+| **Opening other projects** | When Imber needs Bennu on a folder that is not open in Bennu (indexed where it can be: a Java build, or a language server) but that it may already read: *Ask, except in Autonomous* (`autonomous`), *Always ask* (`ask`), *Open where it may read* (`allowed`) or *Never* (`never`). A project open in Bennu joins without this question; one outside the reach is asked about with the access card. See Imber › Tools, Several projects. | Ask, except in Autonomous | `open_projects` | No |
 | **Edit files** | Off makes Imber read-only. | On | `allow_edits` | Yes, composer › Permissions |
 | **Use the Temp folders** | Scratch space outside the project. | On | `allow_temp` | Yes, composer › Permissions |
 | **Folders it may work in, besides the project** | Extra folders allowed in any reach. Add folder… opens the folder picker. | None | `extra_folders` | No |
@@ -904,6 +976,7 @@ Each limit field also shows how much has been spent against it.
 | Setting | What it does | Default | Key | Per conversation |
 | --- | --- | --- | --- | --- |
 | **One switch per family**: Read and search files, Project intelligence, Edit files, Refactoring, Structural search and replace, Local History, Build run and test, Debugger, Look into a running Bevy game, Screenshots of a page, Live services | A family that is off is not offered at all. | All on | `tool_families_off` (a list of the families switched off) | No |
+| **Programs it may run** | Programs on this machine Imber may call by name with `run_tool`. Each has a name, a description Imber reads, the program's absolute path (*Choose…* opens the explorer), fixed arguments (one per line) and variables (`KEY=value` per line), whether Imber may add arguments, which variables it may set, whether it changes things, when a call asks (every call, once per conversation, never), a time limit in seconds and an on/off switch. A tool the run would not offer is marked with the reason. In the Build run and test family. | None | `external_tools` | No |
 | **Let it change a running Bevy game** | Mutate, insert, remove, spawn, despawn, set a resource. Needs the Bevy family. | Off | `bevy_write_enabled` | No |
 | **Let it change the program it debugs** | Throw, return early, drop a frame, write a value. Needs the Debugger family. | Off | `debug_mutate_enabled` | No |
 | **Start a run when the program stops** | When the debugged program stops and Imber is idle, start a run (at most 3 an hour per conversation). | Off | `auto_continue_on_stop` | Yes, composer › Decisions |

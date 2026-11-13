@@ -18,7 +18,8 @@ fn classify_unattended(name: &str, safety: Option<Safety>) -> UnattendedKind {
         n if is_schedule_tool(n) && unattended_may_call(n) => UnattendedKind::ScheduleList,
         n if is_schedule_tool(n) => UnattendedKind::ScheduleChange,
         n if spawn::is_agent_tool(n) => UnattendedKind::Agent,
-        n if live::is_live_tool(n) || debug::is_debug_tool(n) || brp::is_brp_tool(n) || screenshot::is_screenshot_tool(n) || profile::is_profile_tool(n) => UnattendedKind::Process,
+        "merula_check" => UnattendedKind::Read,
+        n if live::is_live_tool(n) || n == cargo_run::NAME || n == merula::RENDER || external::is_external_tool(n) || script::is_script_tool(n) || debug::is_debug_tool(n) || brp::is_brp_tool(n) || screenshot::is_screenshot_tool(n) || profile::is_profile_tool(n) => UnattendedKind::Process,
         n => match safety {
             Some(Safety::Write) => UnattendedKind::CatalogWrite,
             Some(Safety::Destructive) if bennu_assistant::prelude::is_own_command(n) => UnattendedKind::OwnCommand,
@@ -37,6 +38,18 @@ fn schedule_approval(call: &ToolCall, applies_edits: bool) -> Option<(String, St
         "schedule_update" if !applies_edits => Some(("Change this schedule?".into(), format!("Schedule {}: {}", call.input.get("id").and_then(Value::as_str).unwrap_or("?"), "its time, prompt or on/off state changes."))),
         "schedule_delete" if !applies_edits => Some(("Delete this schedule?".into(), format!("Schedule {} is removed. Nothing it already did is undone.", call.input.get("id").and_then(Value::as_str).unwrap_or("?")))),
         _ => None,
+    }
+}
+
+/// The card's word for what a call wants to do in a folder: `read` (read a file), `list` (list or search it),
+/// `write`, `create` or `delete`.
+fn access_need(op: Op) -> &'static str {
+    match op {
+        Op::Read => "read",
+        Op::List => "list",
+        Op::Write => "write",
+        Op::Create => "create",
+        Op::Delete => "delete",
     }
 }
 
@@ -63,21 +76,39 @@ impl ToolHost {
             }
             "edit_files" => out.extend(self.edit_files_touched(input).into_iter().map(|p| (p, Op::Write))),
             // A tree-wide change needs the right to write across the folder it works in.
-            "replace_in_files" => out.push((str_of("path").unwrap_or_else(|| self.project().to_path_buf()), Op::Write)),
+            // A dry run only reads, so it is let through where reading is, without asking to write.
+            "replace_in_files" => {
+                let dry = input.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+                out.push((str_of("path").unwrap_or_else(|| self.project().to_path_buf()), if dry { Op::List } else { Op::Write }));
+            }
             "structural_replace" => out.push((self.project().to_path_buf(), Op::Write)),
             // Reads source across the whole project and changes nothing.
             "structural_search" => out.push((self.project().to_path_buf(), Op::List)),
             n if live::is_live_tool(n) => out.extend(self.live_touched(n, input)),
+            // Both run a program in a folder of the project, like run_start.
+            n if external::is_external_tool(n) => out.extend(self.external_touched(input)),
+            n if script::is_script_tool(n) => out.extend(self.script_touched(input)),
+            n if n == cargo_run::NAME => out.push((self.project().to_path_buf(), Op::List)),
             n if debug::is_debug_tool(n) => out.extend(self.debug_touched(n, input)),
             // `live_attach` aimed at a debugger is `debug_attach`: it reads the project folder like it.
             "live_attach" if brp::attaches_debugger(input) => out.extend(self.debug_touched("debug_attach", input)),
             // A game and a page on this machine: no file is read or written, the loopback rule is in the tool.
             n if brp::is_brp_tool(n) || screenshot::is_screenshot_tool(n) => {}
             "local_history" => out.extend(self.history_touched(input).into_iter().map(|(p, write)| (p, if write { Op::Write } else { Op::Read }))),
-            "ask_user" | "bennu_help" | "update_plan" | "open_ui" | "load_skill" | "show_diagram" => {}
+            "ask_user" | "bennu_help" | "update_plan" | "open_ui" | "load_skill" | "show_diagram" | "set_title" => {}
             n if is_schedule_tool(n) => {}
             // Showing a picture from a file is a read of that file; one the model wrote itself touches nothing.
-            "show_image" => out.extend(str_of("path").map(|p| (p, Op::Read))),
+            "show_image" | "view_image" => out.extend(str_of("path").map(|p| (p, Op::Read))),
+            // A `.merula` file is read (with the imports beside it); a render also writes the audio file.
+            n if merula::is_merula_tool(n) => {
+                out.extend(str_of("path").map(|p| (p, Op::Read)));
+                if n == merula::RENDER {
+                    if let Some(target) = self.merula_target(input) {
+                        let op = if target.exists() { Op::Write } else { Op::Create };
+                        out.push((target, op));
+                    }
+                }
+            }
             // A sub-agent's own calls cross this gate under its own, narrower policy; starting one touches nothing here.
             n if spawn::is_agent_tool(n) => {}
             n if reads::is_read_tool(n) => out.extend(self.read_touched(call).into_iter().map(|p| (p, Op::Read))),
@@ -122,7 +153,7 @@ impl ToolHost {
                             continue;
                         }
                         let question = self.access_question(path, &folder, &ask);
-                        self.ask_access(&folder, path, &question, ask.upgrade)?
+                        self.ask_access(&folder, path, &question, ask.upgrade, op)?
                     }
                     // A confirmation applies to this call only and is not recorded in the policy, so a
                     // "yes" is the answer — looping back would ask the same question again.
@@ -137,7 +168,11 @@ impl ToolHost {
     ///
     /// `upgrade` is the question of writing in a folder already opened for reading: anything but a yes leaves the
     /// folder read-only, and the model is told to adapt.
-    pub(super) fn ask_access(&self, folder: &Path, file: &Path, reason: &str, upgrade: bool) -> Result<(), String> {
+    ///
+    /// `op` is what the call that asked wants to do there; the card says it, so the user picks the grant that lets
+    /// the work go on rather than guessing — reading allowed for a call that writes would only bring the question
+    /// back.
+    pub(super) fn ask_access(&self, folder: &Path, file: &Path, reason: &str, upgrade: bool, op: Op) -> Result<(), String> {
         if self.session.unattended {
             return Err(format!("this is a scheduled run and nobody can allow access to {}: stay inside the project, or say that this needs a person", folder.display()));
         }
@@ -153,6 +188,7 @@ impl ToolHost {
                 "file": file.file_name().map(|n| n.to_string_lossy().to_string()),
                 "reason": reason,
                 "upgrade": upgrade,
+                "needs": access_need(op),
             },
         });
         let answer = self.session.ask(block, "/request/id", &request_id, |b, a| {
@@ -216,20 +252,9 @@ impl ToolHost {
         if self.off.hides(&call.name) {
             return Gate::Refuse("the user has switched that kind of tool off".into());
         }
-        let known = self.descriptor(&call.name).is_some()
-            || matches!(
-                call.name.as_str(),
-                "search_text" | "find_files" | "edit_file" | "edit_files" | "replace_in_files" | "create_file" | "delete_file" | "ask_user" | "rename_symbol"
-                    | "add_parameter" | "bennu_help" | "update_plan" | "local_history" | "structural_replace" | "structural_search" | "open_ui" | "load_skill" | "show_diagram" | "show_image"
-            )
-            || reads::is_read_tool(&call.name)
-            || spawn::is_agent_tool(&call.name)
-            || live::is_live_tool(&call.name)
-            || debug::is_debug_tool(&call.name)
-            || brp::is_brp_tool(&call.name)
-            || screenshot::is_screenshot_tool(&call.name)
-            || profile::is_profile_tool(&call.name)
-            || is_schedule_tool(&call.name);
+        // Every tool this host declares, from the declarations themselves: a second hand-kept list is one a new
+        // tool gets left out of — which is how `set_title` came to be offered and then refused on every call.
+        let known = self.descriptor(&call.name).is_some() || declared_names().contains(call.name.as_str()) || is_schedule_tool(&call.name);
         if !known {
             return Gate::Refuse(format!("`{}` is not a tool you have", call.name));
         }
@@ -248,6 +273,13 @@ impl ToolHost {
                 return Gate::Refuse(why);
             }
         }
+        // A Bennu tool aimed at a project the conversation does not work in: brought in, asked about, or refused —
+        // before the paths, so a project outside the reach gets one card that also says it will be indexed.
+        if self.descriptor(&call.name).is_some() && !self.is_git(&call.name) {
+            if let Err(why) = self.open_project_gate(&call.input) {
+                return Gate::Refuse(why);
+            }
+        }
         for (path, op) in self.touches(call) {
             if let Err(why) = self.authorize(&path, op) {
                 return Gate::Refuse(why);
@@ -256,6 +288,29 @@ impl ToolHost {
         // Starting processes, running recipes and scenarios, and writing to a port we did not start ask first.
         if live::is_live_tool(&call.name) {
             if let Err(why) = self.live_gate(&call.name, &call.input) {
+                return Gate::Refuse(why);
+            }
+        }
+        // A program the user declared asks as its declaration says; a cargo target asks the first time in a conversation.
+        if external::is_external_tool(&call.name) {
+            if let Err(why) = self.external_gate(&call.input) {
+                return Gate::Refuse(why);
+            }
+        }
+        // Rendering audio writes a file and runs Merula's renderer: it follows the mode as the project's own build does.
+        if call.name == merula::RENDER {
+            if let Err(why) = self.merula_render_gate(&call.input) {
+                return Gate::Refuse(why);
+            }
+        }
+        if call.name == cargo_run::NAME {
+            if let Err(why) = self.cargo_run_gate(&call.input) {
+                return Gate::Refuse(why);
+            }
+        }
+        // A script of the project is shown to the user, who runs it once, adds it to their programs, or declines.
+        if script::is_script_tool(&call.name) {
+            if let Err(why) = self.script_gate(&call.input) {
                 return Gate::Refuse(why);
             }
         }
@@ -363,9 +418,22 @@ fn catalog_path_args(input: &Value) -> Vec<(String, PathRole)> {
     out
 }
 
+/// The names of every tool [`super::all_specs`] declares, built once.
+fn declared_names() -> &'static std::collections::HashSet<String> {
+    static NAMES: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| super::all_specs().into_iter().map(|s| s.name).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_declared_tool_is_known_to_the_gate() {
+        for name in ["set_title", "view_image", "merula_check", "merula_render", "show_image", "search_text", "run_script", "cargo_run", "read_files"] {
+            assert!(declared_names().contains(name), "{name} is declared but the gate would refuse it");
+        }
+    }
 
     #[test]
     fn a_scheduled_run_can_read_and_propose_and_nothing_that_needs_a_person() {

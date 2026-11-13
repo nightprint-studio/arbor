@@ -47,6 +47,17 @@ export const bennuOverrides: Record<string, SceneOverride> = {
       },
     }),
   },
+  'bennu/settings/ExternalToolModal': {
+    props: () => ({
+      tool: {
+        name: 'lint', description: 'Checks files against the house style. Pass the paths as arguments.', program: '/usr/local/bin/lint',
+        args: ['--format', 'json'], extra_args: true, env: { RUST_LOG: 'info' }, env_keys: ['LEVEL'], writes: false,
+        approval: 'conversation', timeout_s: 120, enabled: true,
+      },
+      onSave: noop,
+      onClose: noop,
+    }),
+  },
   'bennu/BennuDebugValueModal': {
     props: () => ({
       inspect: {

@@ -114,6 +114,10 @@ pub struct Policy {
     pub workspace_roots: Vec<PathBuf>,
     /// Folders the user added by name. Allowed in any scope.
     pub extra_folders: Vec<PathBuf>,
+    /// Folders readable in any scope and never written by being here: what the user already chose to give
+    /// Imber to read — the folders of the skills they enabled, whose `SKILL.md` points at files beside it. A
+    /// write there follows the ordinary rules.
+    pub read_folders: Vec<PathBuf>,
     /// The system Temp folders, allowed (in any scope) while `allow_temp` is on.
     pub temp_dirs: Vec<PathBuf>,
     pub allow_temp: bool,
@@ -181,7 +185,8 @@ impl Policy {
         }
 
         // Where it is.
-        if !self.in_always_allowed(&path) && !self.in_scope(&path, op) && !self.run_granted(&path, op) && self.scope != Scope::Disk {
+        let readable = matches!(op, Op::Read | Op::List) && self.read_folders.iter().any(|f| within(&path, f));
+        if !readable && !self.in_always_allowed(&path) && !self.in_scope(&path, op) && !self.run_granted(&path, op) && self.scope != Scope::Disk {
             match self.grants.iter().find(|g| within(&path, &g.root)) {
                 // Opened for reading, and now something wants to write: the one case that asks again.
                 Some(g) if op.changes() && !g.write => {
@@ -437,6 +442,7 @@ mod tests {
             project_root: Some(p("work/app")),
             workspace_roots: vec![p("work/app"), p("work/lib")],
             extra_folders: vec![p("scratch/notes")],
+            read_folders: vec![p("home/skills/maps")],
             temp_dirs: vec![p("tmp")],
             allow_temp: true,
             allow_edits: true,
@@ -448,6 +454,14 @@ mod tests {
 
     fn check(scope: Scope, path: &str, op: Op) -> Decision {
         policy(scope).check(&p(path), op)
+    }
+
+    #[test]
+    fn an_enabled_skills_folder_is_read_in_any_scope_but_not_written() {
+        assert!(check(Scope::File, "home/skills/maps/references/legend.md", Op::Read).is_allowed());
+        assert!(check(Scope::Project, "home/skills/maps", Op::List).is_allowed());
+        assert!(!check(Scope::Project, "home/skills/maps/SKILL.md", Op::Write).is_allowed());
+        assert!(!check(Scope::Project, "home/skills/other/SKILL.md", Op::Read).is_allowed());
     }
 
     // ── what a scan may reach ──────────────────────────────────────────────────

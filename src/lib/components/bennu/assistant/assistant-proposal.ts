@@ -1,7 +1,7 @@
 /** What a proposal's card becomes when it is decided or made again — pure, so the rules can be tested. */
 
 import type { DecideResult, RemakeResult, UndoResult } from '$lib/ipc/bennu/assistant';
-import type { EditProposal } from './assistant-types';
+import type { AssistantMessage, EditProposal } from './assistant-types';
 
 /** The proposal after a decision came back. An `outdated` one keeps its files and marks the stale ones. */
 export function withDecision(p: EditProposal, r: DecideResult): EditProposal {
@@ -30,4 +30,9 @@ export function staleSummary(p: EditProposal): string {
 /** The proposal after an undo came back: `undone` once every file is back, otherwise it stays as it was. */
 export function withUndo(p: EditProposal, r: UndoResult): EditProposal {
   return r.status === 'undone' ? { ...p, status: 'undone' } : p;
+}
+
+/** The proposals of a conversation still waiting for a decision, oldest first — what the tray's Edits panel lists. */
+export function pendingProposals(messages: readonly AssistantMessage[]): EditProposal[] {
+  return messages.flatMap((m) => m.blocks.flatMap((b) => (b.type === 'proposal' && b.proposal.status === 'pending' ? [b.proposal] : [])));
 }

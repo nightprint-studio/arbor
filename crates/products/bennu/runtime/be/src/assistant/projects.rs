@@ -69,18 +69,29 @@ pub fn working_set(root: &str, open: &[String], cap: usize) -> Vec<Project> {
     }
     let mut out: Vec<Project> = Vec::new();
     for r in roots {
-        let base = Path::new(r).file_name().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "project".into());
-        let mut name = base.clone();
-        let mut n = 2;
-        while out.iter().any(|p| p.name.eq_ignore_ascii_case(&name)) {
-            name = format!("{base}-{n}");
-            n += 1;
-        }
-        let modules = modules_of(Path::new(r));
-        let bevy = modules.iter().filter(|m| m.kind == "Cargo").any(|m| is_bevy(&Path::new(r).join(&m.dir)));
-        out.push(Project { name, root: r.to_string(), modules, bevy });
+        let project = project_at(r, &out);
+        out.push(project);
     }
     out
+}
+
+/// The project at `root`, named so that it does not clash with any of `taken`.
+pub fn project_at(root: &str, taken: &[Project]) -> Project {
+    let base = Path::new(root).file_name().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "project".into());
+    let mut name = base.clone();
+    let mut n = 2;
+    while taken.iter().any(|p| p.name.eq_ignore_ascii_case(&name)) {
+        name = format!("{base}-{n}");
+        n += 1;
+    }
+    let modules = modules_of(Path::new(root));
+    let bevy = modules.iter().filter(|m| m.kind == "Cargo").any(|m| is_bevy(&Path::new(root).join(&m.dir)));
+    Project { name, root: root.to_string(), modules, bevy }
+}
+
+/// Whether two roots name the same folder, as far as the text says (separators and a trailing slash aside).
+pub fn same_root(a: &str, b: &str) -> bool {
+    normal(a) == normal(b)
 }
 
 /// Whether the manifest in `dir` names Bevy as a dependency. A light read — a line that starts with the crate's

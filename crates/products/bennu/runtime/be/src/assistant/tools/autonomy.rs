@@ -27,7 +27,7 @@ impl ToolHost {
         }
         let diagnostics: Vec<PathBuf> = self.session.diagnostics.lock().unwrap_or_else(|p| p.into_inner()).files().to_vec();
         let others: Vec<PathBuf> =
-            self.session.projects.iter().map(|p| PathBuf::from(&p.root)).filter(|r| r.as_path() != Path::new(&self.session.root)).collect();
+            self.session.projects().iter().map(|p| PathBuf::from(&p.root)).filter(|r| r.as_path() != Path::new(&self.session.root)).collect();
         let used = self.session.run_grants.lock().unwrap_or_else(|p| p.into_inner()).used();
         let scope = self.session.policy().scope;
         let verdict = decide_grant(&GrantQuery {

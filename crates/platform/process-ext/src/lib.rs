@@ -13,6 +13,7 @@
 
 pub mod job;
 pub mod locate;
+pub mod path_env;
 
 pub mod prelude;
 

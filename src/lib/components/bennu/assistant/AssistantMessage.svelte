@@ -13,20 +13,25 @@
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
   import AssistantConfirm from './AssistantConfirm.svelte';
+  import AssistantScriptRequest from './AssistantScriptRequest.svelte';
   import AssistantErrorNotice from './AssistantErrorNotice.svelte';
   import AssistantPlan from './AssistantPlan.svelte';
   import AssistantLiveSummary from './AssistantLiveSummary.svelte';
   import AssistantImage from './AssistantImage.svelte';
   import AssistantAttachments from './AssistantAttachments.svelte';
   import AssistantAgentCard from './AssistantAgentCard.svelte';
+  import AssistantTimeSplit from './AssistantTimeSplit.svelte';
+  import AssistantNote from './AssistantNote.svelte';
+  import { splitTime } from '$lib/components/shared/internal/imber/imber-format';
   import ImberCode from '$lib/components/shared/internal/imber/ImberCode.svelte';
   import ImberMessageFrame from '$lib/components/shared/internal/imber/ImberMessageFrame.svelte';
   import ImberTextBlock from '$lib/components/shared/internal/imber/ImberTextBlock.svelte';
   import ImberToolsFold from '$lib/components/shared/internal/imber/ImberToolsFold.svelte';
   import type { Picture } from './assistant-images';
+  import { messageAsText } from './assistant-copy';
   import AssistantDocModal from './AssistantDocModal.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
-  import type { AssistantMessage, AssistantMode, MessageBlock, ToolCall } from './assistant-types';
+  import type { AssistantMessage, AssistantMode, MessageBlock, ToolCall, WorkItem } from './assistant-types';
 
   let {
     message,
@@ -46,19 +51,35 @@
   const store = bennuAssistantStore;
   let docOpen = $state(false);
 
-  type Shown = Exclude<MessageBlock, { type: 'tool' }> | { type: 'tools'; calls: ToolCall[] };
+  type Shown = Exclude<MessageBlock, { type: 'tool' } | { type: 'step' }> | { type: 'tools'; calls: ToolCall[]; items: WorkItem[] };
 
-  // Runs of tool calls fold into one entry: "what it did on the way" is one line, opened if you care.
+  // Runs of tool calls fold into one entry: "what it did on the way" is one line, opened if you care. The
+  // model's answers between them go in the same fold, as rows of their own.
   const shown = $derived.by<Shown[]>(() => {
     const out: Shown[] = [];
     for (const b of message.blocks) {
-      if (b.type !== 'tool') { out.push(b); continue; }
-      const last = out.at(-1);
-      if (last?.type === 'tools') last.calls.push(b.call);
-      else out.push({ type: 'tools', calls: [b.call] });
+      if (b.type !== 'tool' && b.type !== 'step') { out.push(b); continue; }
+      let last = out.at(-1);
+      if (last?.type !== 'tools') {
+        last = { type: 'tools', calls: [], items: [] };
+        out.push(last);
+      }
+      if (b.type === 'tool') {
+        last.calls.push(b.call);
+        last.items.push({ kind: 'call', call: b.call });
+      } else {
+        last.items.push({ kind: 'step', step: b.step });
+      }
     }
     return out;
   });
+
+  /** The whole message's time split, for the line under it. */
+  const timeSplit = $derived(
+    splitTime(message.blocks.flatMap((b): WorkItem[] =>
+      b.type === 'tool' ? [{ kind: 'call', call: b.call }] : b.type === 'step' ? [{ kind: 'step', step: b.step }] : [],
+    )),
+  );
 
   const KIND_WORD = { read: ['Read', 'files'], search: ['Searched', 'times'], edit: ['Edited', 'files'], validate: ['Checked', 'files'], refactor: ['Planned', 'refactorings'] } as const;
 
@@ -67,6 +88,7 @@
     const counts = new Map<ToolCall['kind'], number>();
     for (const c of calls.filter((x) => x.ok !== false)) counts.set(c.kind, (counts.get(c.kind) ?? 0) + 1);
     const failed = calls.filter((x) => x.ok === false).length;
+    if (!calls.length) return 'Answered';
     return [...counts].map(([kind, n]) => {
       const [verb, noun] = KIND_WORD[kind];
       if (kind === 'search') return n === 1 ? `${verb} once` : `${verb} ${n} times`;
@@ -88,7 +110,7 @@
     ),
   );
 
-  const plainText = $derived(message.blocks.flatMap((b) => (b.type === 'text' ? [b.text] : b.type === 'code' ? [b.code] : b.type === 'diagram' ? ['```mermaid\n' + b.diagram.source + '\n```'] : [])).join('\n\n'));
+  const plainText = $derived(messageAsText(message.blocks));
 </script>
 
 <ImberMessageFrame
@@ -116,6 +138,8 @@
       <AssistantPlan plan={b.plan} />
     {:else if b.type === 'confirm'}
       <AssistantConfirm confirm={b.confirm} {conversationId} />
+    {:else if b.type === 'script'}
+      <AssistantScriptRequest script={b.script} {conversationId} />
     {:else if b.type === 'notice' && b.level === 'error' && (b.detail || b.canRetry)}
       <AssistantErrorNotice text={b.text} detail={b.detail} canRetry={b.canRetry} {last} />
     {:else if b.type === 'notice'}
@@ -129,7 +153,7 @@
     {:else if b.type === 'diagram'}
       <MermaidDiagram source={b.diagram.source} title={b.diagram.title} />
     {:else if b.type === 'tools'}
-      <ImberToolsFold summary={summary(b.calls)} calls={b.calls} />
+      <ImberToolsFold summary={summary(b.calls)} items={b.items} />
     {:else if b.type === 'proposal'}
       <AssistantProposal proposal={b.proposal} {conversationId} {mode} />
     {:else if b.type === 'live_summary'}
@@ -140,8 +164,11 @@
       <AssistantImage path={b.image.path} caption={b.image.caption} {gallery} />
     {:else if b.type === 'agent'}
       <AssistantAgentCard agent={b.agent} />
+    {:else if b.type === 'note'}
+      <AssistantNote text={b.note.text} />
     {/if}
   {/each}
+  {#if message.role === 'assistant' && timeSplit.known}<AssistantTimeSplit split={timeSplit} />{/if}
 
   {#snippet actions()}
     <IconButton tooltip="Open as a Markdown document — edit, copy or save" size={22} onclick={() => (docOpen = true)}><FilePen size={12} /></IconButton>

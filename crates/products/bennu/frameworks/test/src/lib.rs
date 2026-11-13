@@ -48,6 +48,7 @@ pub mod cargo_report;
 pub mod cargo_selector;
 pub mod console;
 pub mod discover;
+pub mod nextest_report;
 pub mod prelude;
 pub mod selector;
 pub mod surefire;

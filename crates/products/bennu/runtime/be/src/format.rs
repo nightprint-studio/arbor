@@ -45,27 +45,25 @@ pub struct FormatArgs {
 /// Reformat `source`. Empty when it is already formatted, or when nothing can format this file.
 #[arbor_rpc::handler]
 fn bennu_format(ctx: &BennuState, args: FormatArgs) -> Result<Vec<SourceEdit>, String> {
-    // A `.ptn` is formatted by the Patina package (`patina-fmt`, styled by the project's `patina-fmt.toml`), which also formats a selection. Its error — a syntax
-    // error, a wrong config file — is returned, so the editor can say it.
-    if let Some(answer) = crate::patina_intel::format(ctx, &args.file, &args.source, args.range.as_ref().map(|r| (r.start, r.end))) {
-        return answer;
-    }
     let cfg = bennu_core::config::load();
     let tab_size = args.tab_size.unwrap_or(cfg.indent_width).max(1) as usize;
     let spaces = args.insert_spaces.unwrap_or(!cfg.indent_with_tabs);
-
-    if crate::intel::is_java_file(&args.file) {
-        let root = crate::index_service::IndexService::global().root_for_file(&args.file);
-        let legacy = crate::format_style::legacy_layer(args.tab_size, args.insert_spaces);
-        let style = crate::format_style::resolve(root.as_deref(), Some(&args.file), &legacy);
-        let edits = match &args.range {
-            Some(r) => bennu_intentions::prelude::format_range(&args.source, r.start, r.end, &style),
-            None => bennu_intentions::prelude::format_edits(&args.source, &style),
-        };
-        return Ok(edits
-            .into_iter()
-            .map(|e| SourceEdit { file: args.file.clone(), start: e.start, end: e.end, new_text: e.replacement })
-            .collect());
+    // The one engine that serves the file formats it (see `engine`). A `.ptn` is formatted by the Patina package
+    // (`patina-fmt`, styled by the project's `patina-fmt.toml`), which also formats a selection; its error — a
+    // syntax error, a wrong config file — is returned, so the editor can say it.
+    let range = args.range.as_ref().map(|r| (r.start, r.end));
+    if let Some(answer) = crate::engine::format(ctx, &args.file, &args.source, range, tab_size as u32, spaces) {
+        return answer;
     }
-    Ok(crate::lsp_route::format(&args.file, &args.source, tab_size as u32, spaces))
+    let root = crate::index_service::IndexService::global().root_for_file(&args.file);
+    let legacy = crate::format_style::legacy_layer(args.tab_size, args.insert_spaces);
+    let style = crate::format_style::resolve(root.as_deref(), Some(&args.file), &legacy);
+    let edits = match &args.range {
+        Some(r) => bennu_intentions::prelude::format_range(&args.source, r.start, r.end, &style),
+        None => bennu_intentions::prelude::format_edits(&args.source, &style),
+    };
+    Ok(edits
+        .into_iter()
+        .map(|e| SourceEdit { file: args.file.clone(), start: e.start, end: e.end, new_text: e.replacement })
+        .collect())
 }

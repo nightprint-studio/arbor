@@ -118,6 +118,11 @@ export interface LspServerInfo {
    *  rebuilt — and a consumer that assumes it is there crashes the settings page on the
    *  version of the backend that was running when it was added. Read it with `?.`. */
   install?: string[];
+  /** What it answers (`hover`, `references`, `callers`, …): declared by a running session of it, or expected from
+   *  the catalogue before one has run. Empty for a server of your own that has not run yet. */
+  answers?: string[];
+  /** `answers` came from a running server rather than from the catalogue. */
+  answers_confirmed?: boolean;
 }
 
 /** What an install attempt did. */

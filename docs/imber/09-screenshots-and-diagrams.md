@@ -33,7 +33,7 @@ When a picture explains better than text (an architecture, a flow, a call chain,
 
 ## Pictures in the thread
 
-`show_image` puts a picture in the thread: an image file of the project (PNG, JPEG, GIF, WebP or SVG) or an SVG Imber wrote itself, such as a logo or an icon. It shows as a small preview with a caption; click it, or focus it and press Enter, to open it large. When a message holds several pictures the **←** and **→** keys walk them and **Esc** closes.
+`show_image` puts a picture in the thread: an image file of the project (PNG, JPEG, GIF, WebP or SVG) or an SVG Imber wrote itself, such as a logo or an icon. It shows as a small preview with a caption; click it, or focus it and press Enter, to open it large. When a message holds several pictures the **←** and **→** keys walk them and **Esc** closes. In the large view a click on the picture zooms to 2× at that point and a second click fits it again; `+` and `−` zoom in steps up to 8× (`0` fits), `Ctrl`/`⌘` + wheel or a pinch zooms at the pointer, and a zoomed picture is moved by dragging or scrolling.
 
 - The picture is for you: Imber does not get its pixels back. To have it *look* at an image, attach the image.
 - A file is read like any other (the reach and the Read family apply, and a file outside the reach asks); a chat has no files, so it shows SVG it wrote. A file over 5 MB is not shown.

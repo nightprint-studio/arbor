@@ -384,6 +384,7 @@ function createCargoTestStore() {
       widened = handle.widened;
       push(`> ${handle.command}`, 'meta');
       if (handle.widened) push(handle.widened, 'err');
+      if (handle.runner_note) push(handle.runner_note, 'meta');
     } catch (e) {
       running = false;
       stopTicker();

@@ -15,7 +15,6 @@ use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::HoverInfo;
 use serde::Deserialize;
 
-use crate::index_service::IndexService;
 
 /// Args for [`bennu_hover`].
 #[derive(Deserialize)]
@@ -32,19 +31,8 @@ pub struct HoverArgs {
 /// the file, its index is still building, or the caret isn't on a classifiable symbol.
 #[arbor_rpc::handler]
 fn bennu_hover(ctx: &BennuState, args: HoverArgs) -> Result<Option<HoverInfo>, String> {
-    // A server-backed file answers from its own server, whose hover is markdown — split into
-    // the card's signature / container / doc slots by `lsp_route`.
-    if let Some(card) = crate::lsp_route::hover(&args.file, &args.source, args.offset) {
-        return Ok(card);
-    }
-    // A shader: its own declarations with the comment block above them as documentation, and
-    // the language's built-ins with what the language says they are.
-    if let Some(card) = crate::wgsl_intel::hover(&args.file, &args.source, args.offset) {
-        return Ok(card);
-    }
-    // A `.ptn`: the declaration as written, from the extension that serves it.
-    if let Some(card) = crate::patina_intel::hover(ctx, &args.file, &args.source, args.offset) {
-        return Ok(card);
-    }
-    Ok(IndexService::global().hover(&args.file, &args.source, args.offset))
+    // The one engine that serves the file answers (see `engine`): a server's markdown hover is split into the
+    // card's signature / container / doc slots by `lsp_route`, a shader's comes with its comment block, a `.ptn`'s
+    // from the Patina package, a Java one from the index.
+    Ok(crate::engine::hover(ctx, &args.file, &args.source, args.offset))
 }

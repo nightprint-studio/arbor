@@ -15,7 +15,21 @@ export interface ToolCall {
   detail: string;
   /** False when it was refused or failed; absent in conversations saved before this was recorded. */
   ok?: boolean;
+  /** How long it ran, in milliseconds. Absent in conversations saved before this was recorded. */
+  ms?: number;
+  /** How long it waited for the user's answer on a card first — present only when it did. */
+  waitMs?: number;
 }
+
+/** One answer of the model in a run: how long the request took, until the first token, and what it wrote. */
+export interface ModelStep {
+  ms: number;
+  firstMs?: number;
+  outputTokens: number;
+}
+
+/** A row inside the tools fold: a tool call, or the model answer that asked for the calls after it. */
+export type WorkItem = { kind: 'call'; call: ToolCall } | { kind: 'step'; step: ModelStep };
 
 /** One conversation in the switcher. `meta` is the quiet figure at the row's edge (its cost); `subtitle` the line under the title. */
 export interface ConversationEntry {

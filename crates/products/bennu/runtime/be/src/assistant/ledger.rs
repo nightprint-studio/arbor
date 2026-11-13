@@ -75,6 +75,21 @@ pub(super) fn spent_from(text: &str, periods: &Periods, session_usd: f64) -> Spe
     spent
 }
 
+/// What the ledger text records from `since` (epoch ms) on, in dollars.
+pub(super) fn spent_since_in(text: &str, since: u64) -> f64 {
+    text.lines().filter_map(|l| serde_json::from_str::<Entry>(l).ok()).filter(|e| e.ts >= since).map(|e| e.usd).sum()
+}
+
+/// [`spent_since_in`] over the real file.
+pub(super) fn spent_since(since: u64) -> f64 {
+    spent_since_in(&std::fs::read_to_string(path()).unwrap_or_default(), since)
+}
+
+/// What the ledger records from `from` up to (not including) `until`, epoch ms, in dollars.
+pub(super) fn spent_between(from: u64, until: u64) -> f64 {
+    spent_since(from) - spent_since(until)
+}
+
 /// [`spent_from`] over the real file.
 pub(super) fn spent(periods: &Periods, session_usd: f64) -> Spent {
     let text = std::fs::read_to_string(path()).unwrap_or_default();
@@ -91,6 +106,13 @@ mod tests {
 
     fn ledger(entries: &[(u64, f64)]) -> String {
         entries.iter().map(|(t, u)| line(*t, *u)).collect::<Vec<_>>().join("\n")
+    }
+
+    #[test]
+    fn spending_since_an_instant_counts_only_what_came_after() {
+        let text = ledger(&[(100, 1.0), (200, 2.0), (300, 4.0)]);
+        assert_eq!(spent_since_in(&text, 200), 6.0);
+        assert_eq!(spent_since_in(&text, 301), 0.0);
     }
 
     #[test]

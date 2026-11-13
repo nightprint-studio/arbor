@@ -27,7 +27,8 @@ function createAssistantStopStore() {
   async function sendNow(conversationId: string) {
     const card = cards.find((c) => c.conversationId === conversationId);
     if (!card) return;
-    if (bennuAssistantStore.running) {
+    // Only a run of that conversation is in the way: another conversation working does not stop this one.
+    if (bennuAssistantStore.isRunning(conversationId)) {
       toastStore.show('Wait for Imber to finish, or stop it first.', 'warning');
       return;
     }

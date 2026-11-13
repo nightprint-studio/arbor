@@ -6,14 +6,14 @@
    *
    * Props-driven and free of any product store: Bennu and Corvus fill the slots with their own content
    * (conversation switcher, mode toggle, messages, composer), so the two panels look and behave the same
-   * and differ only in what they put in. The thread follows its end while the reader is at the bottom, and
-   * always jumps to it when `resetKey` changes (another conversation was opened).
+   * and differ only in what they put in. The thread follows its end until the reader scrolls up, and each
+   * conversation (`resetKey`) reopens where it was left — or at its end (`imber-follow`).
    */
-  import { tick, type Snippet } from 'svelte';
+  import { onDestroy, type Snippet } from 'svelte';
   import { Sparkles } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import './imber-motion.css';
-  import { isNearBottom } from './imber-thread';
+  import { ThreadFollower } from './imber-follow';
 
   let {
     title = 'Imber',
@@ -43,7 +43,7 @@
     wide?: boolean;
     /** Changes whenever the thread grew (a message, a streamed token); the thread follows it if the reader is at the bottom. */
     followKey?: unknown;
-    /** Changes when another conversation is shown; the thread then always lands at the bottom. */
+    /** Which conversation is shown; another one lands where it was left, or at its end. */
     resetKey?: string;
     /** The panel's root, for a product that moves the focus into it. */
     root?: HTMLElement;
@@ -59,18 +59,15 @@
     onheaderdblclick?: () => void;
   } = $props();
 
-  let lastReset = '';
+  let flow = $state<HTMLElement | undefined>(undefined);
+  let follower: ThreadFollower | null = null;
   $effect(() => {
-    void followKey;
-    const reset = resetKey;
-    const el = thread;
-    if (!el) return;
-    const jump = reset !== lastReset;
-    lastReset = reset;
-    if (jump || isNearBottom(el.scrollHeight, el.scrollTop, el.clientHeight)) {
-      void tick().then(() => el.scrollTo({ top: el.scrollHeight }));
-    }
+    if (!thread || !flow || follower) return;
+    follower = new ThreadFollower(thread, flow);
   });
+  $effect(() => { const key = resetKey; follower?.open(key); void thread; void flow; });
+  $effect(() => { void followKey; follower?.grew(); });
+  onDestroy(() => follower?.destroy());
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -85,8 +82,10 @@
     {/snippet}
 
     <div class="thread" class:home class:wide bind:this={thread}>
-      {#if home}{@render homeContent?.()}{/if}
-      {@render children?.()}
+      <div class="flow" bind:this={flow}>
+        {#if home}{@render homeContent?.()}{/if}
+        {@render children?.()}
+      </div>
     </div>
 
     {#snippet footer()}
@@ -98,22 +97,28 @@
 <style>
   .imber-root { height: 100%; min-height: 0; outline: none; display: flex; flex-direction: column; }
 
-  .thread {
-    flex: 1; min-height: 0;
-    overflow-y: auto;
+  /* The scroller; `.flow` is what it scrolls, and what the follower watches grow. No smooth scrolling: following
+     the end is a jump per change, and a scroll still animating reads as the reader having moved. */
+  /* No scroll anchoring either: the browser moving the view to keep a block in place is what made following
+     slip a little above the end; the follower keeps the end itself. */
+  .thread { flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; }
+  .flow {
     display: flex; flex-direction: column; gap: 18px;
+    min-height: 100%; box-sizing: border-box;
     padding: 14px 12px 18px;
-    scroll-behavior: smooth;
   }
 
-  /* Expanded: the thread is a centred column. Prose keeps a readable line length (`--asst-text-max`,
-     read by the message), code, diagrams, diffs and the live cards use the column's full width. */
-  .thread.wide:not(.home) {
-    --asst-text-max: 78ch;
-    padding-inline: max(12px, calc((100% - 1040px) / 2));
+  /* Expanded: the thread is a wide centred column — wide enough to use a big screen, narrow enough that the eye
+     does not travel across it. Prose keeps a readable line length (`--asst-text-max`, read by the message);
+     code, diagrams, diffs and the live cards use the column's full width. */
+  .thread.wide:not(.home) .flow {
+    --asst-text-max: 110ch;
+    padding-inline: max(16px, calc((100% - var(--imber-wide-max)) / 2));
   }
-  .composer-col.wide { max-width: 1040px; margin-inline: auto; width: 100%; }
+  .imber-root { --imber-wide-max: min(1480px, 94%); }
+  .composer-col.wide { max-width: var(--imber-wide-max); margin-inline: auto; width: 100%; }
 
   /* The home screen takes the whole panel, and paints its own padding. */
-  .thread.home { padding: 0; gap: 0; overflow: hidden; }
+  .thread.home { overflow: hidden; }
+  .thread.home .flow { padding: 0; gap: 0; height: 100%; }
 </style>

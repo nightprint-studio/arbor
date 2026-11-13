@@ -30,7 +30,7 @@
 
 <h2>Pictures in the thread</h2>
 <p>
-  <code>show_image</code> puts a picture in the thread: an image file of the project (PNG, JPEG, GIF, WebP or SVG) or an SVG Imber wrote itself, such as a logo or an icon. It shows as a small preview with a caption; click it, or focus it and press Enter, to open it large. When a message holds several pictures the <strong>←</strong> and <strong>→</strong> keys walk them and <strong>Esc</strong> closes.
+  <code>show_image</code> puts a picture in the thread: an image file of the project (PNG, JPEG, GIF, WebP or SVG) or an SVG Imber wrote itself, such as a logo or an icon. It shows as a small preview with a caption; click it, or focus it and press Enter, to open it large. When a message holds several pictures the <strong>←</strong> and <strong>→</strong> keys walk them and <strong>Esc</strong> closes. In the large view a click on the picture zooms to 2× at that point and a second click fits it again; <kbd>+</kbd> and <kbd>−</kbd> zoom in steps up to 8× (<kbd>0</kbd> fits), <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + wheel or a pinch zooms at the pointer, and a zoomed picture is moved by dragging or scrolling.
 </p>
 <ul>
   <li>The picture is for you: Imber does not get its pixels back. To have it <em>look</em> at an image, attach the image.</li>

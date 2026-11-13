@@ -129,7 +129,7 @@ pub struct BuildArgs {
 /// all").
 #[arbor_rpc::handler]
 fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String> {
-    let outcome = compile_project(ctx, &args.root, args.module.as_deref())?.value;
+    let outcome = compile_project(ctx, &args.root, args.module.as_deref(), &CargoFlavor::default())?.value;
     Ok(BuildResult { tool: outcome.tool, ok: outcome.ok, diagnostics: outcome.diagnostics })
 }
 
@@ -146,18 +146,108 @@ pub(crate) fn compile_project(
     ctx: &BennuState,
     root_path: &str,
     module: Option<&str>,
+    flavor: &CargoFlavor,
 ) -> Result<Served<CompileOutcome>, String> {
     let module = module.map(str::trim).filter(|m| !m.is_empty());
-    let label = match (is_cargo_root(Path::new(root_path)), module) {
-        (true, Some(package)) => format!("cargo check -p {package}"),
-        (true, None) => "cargo check --workspace".to_string(),
+    let cargo = is_cargo_root(Path::new(root_path));
+    if !flavor.is_plain() && !cargo {
+        return Err("a build of the artifacts, or a check for another target, is for a Cargo project; this one is built by its own tool (Maven, Gradle or a Patina mod): use bennu_check".into());
+    }
+    let label = match (cargo, module) {
+        (true, _) => cargo_line(module, flavor),
         (false, Some(module)) => format!("build {module}"),
         (false, None) => "build".to_string(),
     };
-    let class = format!("build:{}", module.unwrap_or(""));
+    // A build for another target or profile is another piece of work: never coalesced with a plain check.
+    let class = format!("build:{}:{:?}:{}:{}", module.unwrap_or(""), flavor.mode, flavor.target.as_deref().unwrap_or(""), flavor.profile.as_deref().unwrap_or(""));
     crate::build_queue::coalesced(ctx.event_sink(), root_path, QueueKind::Build, class, &label, |o: &CompileOutcome| o.ok, || {
-        compile_project_now(ctx, root_path, module)
+        compile_project_now(ctx, root_path, module, flavor)
     })
+}
+
+/// What a compile of a Cargo project is for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum CargoMode {
+    /// `cargo check`: the diagnostics, nothing produced. What the Build button and `bennu_check` run.
+    #[default]
+    Check,
+    /// `cargo build`: the artifacts, for `bennu_build`.
+    Build,
+}
+
+/// How a Cargo project is compiled. The default is the check the Build button runs — `cargo check --all-targets`,
+/// which produces nothing. A check for a `target` checks that triple (`cargo check --target …`, without the tests,
+/// which would not compile for a wasm target). A build is the real thing — `cargo build` for that triple and
+/// profile, whose artifacts land in `target/<triple>/<profile>/` (a `.wasm` for a wasm target).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct CargoFlavor {
+    pub(crate) mode: CargoMode,
+    /// `--target <triple>`, e.g. `wasm32-wasip2`.
+    pub(crate) target: Option<String>,
+    /// `--profile <name>`; `release` is `--release`. A build only.
+    pub(crate) profile: Option<String>,
+}
+
+/// A triple or a profile from a caller's words: blank means absent, and one word of letters, digits, `-`, `_` and
+/// `.` is all that reaches cargo's command line.
+fn cargo_word(what: &str, v: Option<&str>) -> Result<Option<String>, String> {
+    match v.map(str::trim).filter(|v| !v.is_empty()) {
+        None => Ok(None),
+        Some(v) if v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) => Ok(Some(v.to_string())),
+        Some(v) => Err(format!("`{v}` is not a {what}: one word of letters, digits, - _ .")),
+    }
+}
+
+impl CargoFlavor {
+    /// A check, for the host or for `target`.
+    pub(crate) fn check(target: Option<&str>) -> Result<Self, String> {
+        Ok(Self { mode: CargoMode::Check, target: cargo_word("target triple", target)?, profile: None })
+    }
+
+    /// A build, for the host or `target`, with the default profile or `profile`.
+    pub(crate) fn build(target: Option<&str>, profile: Option<&str>) -> Result<Self, String> {
+        Ok(Self { mode: CargoMode::Build, target: cargo_word("target triple", target)?, profile: cargo_word("profile name", profile)? })
+    }
+
+    /// The plain check of the Build button: every target, for the host. The only flavor a project of another build
+    /// tool can be compiled with.
+    pub(crate) fn is_plain(&self) -> bool {
+        self.mode == CargoMode::Check && self.target.is_none()
+    }
+
+    /// The folder under the target directory the artifacts land in: `<triple>/<profile dir>` or `<profile dir>`.
+    /// Cargo names the `dev` profile's folder `debug` and every other profile's after itself.
+    pub(crate) fn artifact_subdir(&self) -> PathBuf {
+        let profile = match self.profile.as_deref() {
+            None | Some("dev") => "debug",
+            Some(p) => p,
+        };
+        match &self.target {
+            Some(t) => PathBuf::from(t).join(profile),
+            None => PathBuf::from(profile),
+        }
+    }
+}
+
+/// The command line, as the queue and the progress line show it.
+fn cargo_line(module: Option<&str>, flavor: &CargoFlavor) -> String {
+    let mut line = match flavor.mode {
+        CargoMode::Check => "cargo check".to_string(),
+        CargoMode::Build => "cargo build".to_string(),
+    };
+    match module {
+        Some(package) => line.push_str(&format!(" -p {package}")),
+        None => line.push_str(" --workspace"),
+    }
+    if let Some(t) = &flavor.target {
+        line.push_str(&format!(" --target {t}"));
+    }
+    match flavor.profile.as_deref() {
+        Some("release") => line.push_str(" --release"),
+        Some(p) => line.push_str(&format!(" --profile {p}")),
+        None => {}
+    }
+    line
 }
 
 /// The compile itself, with the turn already taken.
@@ -165,6 +255,7 @@ fn compile_project_now(
     ctx: &BennuState,
     root_path: &str,
     module: Option<&str>,
+    flavor: &CargoFlavor,
 ) -> Result<CompileOutcome, String> {
     let sink = ctx.event_sink();
     let root = PathBuf::from(root_path);
@@ -173,15 +264,8 @@ fn compile_project_now(
     let outcome = if is_cargo_root(&root) {
         // Says what is running to whoever is waiting on the call — the only thing a caller with no
         // build panel would otherwise have during the minute this takes.
-        sink.progress(
-            &match module {
-                Some(package) => format!("cargo check -p {package}"),
-                None => "cargo check --workspace".to_string(),
-            },
-            None,
-            None,
-        );
-        let (ok, raw) = run_cargo_check(&root, root_path, module)?;
+        sink.progress(&cargo_line(module, flavor), None, None);
+        let (ok, raw) = run_cargo(&root, root_path, module, flavor)?;
         finish_compile("cargo", ok, raw, &sink, &root)
     } else if !root.join("pom.xml").is_file() && !is_gradle_root(&root) && crate::patina_intel::is_mod_root(&root) {
         // A Patina mod opened as the project: no Maven, Cargo or Gradle build, but a `manifest.ron` with `.ptn` sources. The real compiler
@@ -721,7 +805,13 @@ fn finish_compile(
     }
 }
 
-/// `cargo check --message-format=short` in `root`, over `package` or the whole workspace.
+/// `cargo check --all-targets --message-format=short` in `root`, over `package` or the whole workspace — or, for a
+/// [`CargoFlavor`] with a target or a profile, `cargo build` for that triple and profile (no `--all-targets`: the
+/// artifacts are wanted, and the tests would not build for a wasm target anyway).
+///
+/// `--all-targets` so the tests (`cfg(test)`), examples and benches are checked too: it is what the language
+/// server checks, and without it a build answered "ok" while the Problems view listed errors in the tests —
+/// two answers to "does it compile" that disagreed.
 ///
 /// `--workspace` when no package is named, because the root of a Cargo workspace is a
 /// *virtual* manifest with no code of its own: without it, pressing Build on a workspace
@@ -732,10 +822,13 @@ fn finish_compile(
 /// fallback compiler to try, unlike the `mvn` → `javac` path: `rustc` invoked by hand
 /// cannot resolve a single dependency, so offering it would produce a wall of
 /// unresolved-import errors that say nothing about the code.
-fn run_cargo_check(root: &Path, root_path: &str, package: Option<&str>) -> Result<(bool, String), String> {
+fn run_cargo(root: &Path, root_path: &str, package: Option<&str>, flavor: &CargoFlavor) -> Result<(bool, String), String> {
     let launcher = cargo_launcher();
     let mut cmd = Command::new(&launcher);
-    cmd.current_dir(root).arg("check");
+    cmd.current_dir(root).arg(match flavor.mode {
+        CargoMode::Check => "check",
+        CargoMode::Build => "build",
+    });
     // One package instead of the workspace when the caller named one. On a workspace of twenty
     // crates that is the difference between a check you wait out and one you read — and after
     // editing a single crate it is also the only part of the answer that changed.
@@ -743,6 +836,20 @@ fn run_cargo_check(root: &Path, root_path: &str, package: Option<&str>) -> Resul
         Some(package) => cmd.arg("-p").arg(package),
         None => cmd.arg("--workspace"),
     };
+    if flavor.is_plain() {
+        cmd.arg("--all-targets");
+    } else {
+        // Another target, or a build for its artifacts: the library and binaries, not the tests — which for a wasm
+        // target would not even compile.
+        if let Some(t) = &flavor.target {
+            cmd.arg("--target").arg(t);
+        }
+        match flavor.profile.as_deref() {
+            Some("release") => cmd.arg("--release"),
+            Some(p) => cmd.arg("--profile").arg(p),
+            None => &mut cmd,
+        };
+    }
     cmd.arg("--message-format=short").arg("--color=never");
     // A conversation that builds apart compiles into a target directory of its own.
     crate::build_queue::apply_target_dir(&mut cmd, root_path);
@@ -973,7 +1080,7 @@ pub(crate) fn ensure_compiled(ctx: &BennuState, root: &str) -> Result<(), String
     if !build_freshness::assess(Path::new(root), None).plan.needs_compile {
         return Ok(());
     }
-    let outcome = compile_project(ctx, root, None)?.value;
+    let outcome = compile_project(ctx, root, None, &CargoFlavor::default())?.value;
     if outcome.ok {
         return Ok(());
     }
@@ -1822,6 +1929,22 @@ fn merge_output(stdout: &[u8], stderr: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_check_and_a_build_say_what_they_run_and_where_a_build_lands() {
+        let check = CargoFlavor::default();
+        assert!(check.is_plain());
+        assert_eq!(cargo_line(Some("app"), &check), "cargo check -p app");
+        let wasm_check = CargoFlavor::check(Some("wasm32-wasip2")).unwrap();
+        assert!(!wasm_check.is_plain());
+        assert_eq!(cargo_line(None, &wasm_check), "cargo check --workspace --target wasm32-wasip2");
+        let wasm = CargoFlavor::build(Some(" wasm32-wasip2 "), Some("release")).unwrap();
+        assert_eq!(cargo_line(None, &wasm), "cargo build --workspace --target wasm32-wasip2 --release");
+        assert_eq!(wasm.artifact_subdir(), PathBuf::from("wasm32-wasip2").join("release"));
+        assert_eq!(CargoFlavor::build(None, Some("dev")).unwrap().artifact_subdir(), PathBuf::from("debug"));
+        assert!(CargoFlavor::build(Some("x; rm -rf /"), None).is_err());
+        assert!(CargoFlavor::check(Some(" ")).unwrap().is_plain());
+    }
 
     #[test]
     fn parses_plain_javac_error() {

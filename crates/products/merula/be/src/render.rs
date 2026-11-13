@@ -76,7 +76,7 @@ pub(crate) fn resolve_export_config(
 }
 
 /// Resolve the effective [`RenderConfig`] by overlaying `opts` onto `base`.
-fn resolve_config(base: RenderConfig, opts: &RenderOpts) -> RenderConfig {
+pub(crate) fn resolve_config(base: RenderConfig, opts: &RenderOpts) -> RenderConfig {
     RenderConfig {
         sample_rate: opts.sample_rate.unwrap_or(base.sample_rate),
         bit_depth: match opts.bit_depth.as_deref() {

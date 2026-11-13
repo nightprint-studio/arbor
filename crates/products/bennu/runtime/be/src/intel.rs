@@ -92,45 +92,17 @@ fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<Compl
 
 /// What the engine that owns the file answers — the half of completion that is not abbreviations.
 fn engine_completion(ctx: &BennuState, args: &CompletionArgs) -> Result<Vec<CompletionItem>, String> {
-    // A language server needs the live buffer to answer at all — the caret offset is in its
-    // coordinates. Without one there is nothing to ask, and falling through to the Java index
-    // for a `.rs` file would be worse than answering nothing.
-    if let Some(source) = args.source.as_deref() {
-        if let Some(items) = crate::lsp_route::completion(&args.file, args.offset, source) {
-            return Ok(items);
-        }
-    } else if crate::lsp_route::owns(&args.file) {
-        return Ok(Vec::new());
-    }
-    // A `Cargo.toml` — answered from the manifest schema and this machine's crate catalogue. Routed
-    // before the index for the same reason a `.rs` file is: the Java engine has nothing to say about
-    // it, and letting it answer would offer Java members inside a manifest.
-    if let Some(items) =
-        crate::cargo_intel::completion(&args.file, args.offset, args.source.as_deref())
-    {
-        return Ok(items);
-    }
-    // A shader, with no server to ask. Routed here for the same reason: the Java index has
-    // nothing to say about a `.wgsl`, and letting it answer would offer Java members inside
-    // a fragment shader.
-    if let Some(items) =
-        crate::wgsl_intel::completion(&args.file, args.offset, args.source.as_deref())
-    {
-        return Ok(items);
-    }
-    // A `.ptn`, answered by the `language-intel` extension that serves it. Before the index for the same reason
-    // as the shader: the Java engine would offer Java members inside a mod script.
-    if let Some(items) =
-        crate::patina_intel::completion(ctx, &args.file, args.offset, args.source.as_deref())
-    {
-        return Ok(items);
-    }
-    Ok(IndexService::global().completion(
-        &args.file,
-        args.offset,
-        args.source.as_deref(),
-        bennu_complete::prelude::MatchCase::from_flag(args.case_sensitive),
-    ))
+    // The one engine that serves the file answers (see `engine`). A language server needs the live buffer — the
+    // caret offset is in its coordinates — so without one it answers nothing, which is still better than the
+    // Java index offering Java members inside a `.rs`, a manifest, a shader or a mod script.
+    Ok(crate::engine::completion(ctx, &args.file, args.offset, args.source.as_deref(), || {
+        IndexService::global().completion(
+            &args.file,
+            args.offset,
+            args.source.as_deref(),
+            bennu_complete::prelude::MatchCase::from_flag(args.case_sensitive),
+        )
+    }))
 }
 
 /// One JSP action reference to check for existence: its qualified name plus the byte
@@ -228,43 +200,33 @@ pub(crate) fn bennu_diagnostics(
 /// The file's own diagnostics: whichever single route claims it (language server, manifest, shader,
 /// JSP actions, or the Java validator) answers, and the others are not consulted.
 fn route_diagnostics(ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
-    // A language-server-backed file first. Its diagnostics are **pushed** by the server (for
-    // Rust they arrive when `cargo check` finishes, seconds after a save), so this call reads the
-    // last publish rather than computing anything — which is why it is cheap enough to sit on the
-    // same debounce as the Java validation, and why it ignores the fast/full `resolved` tier: a
-    // server has only one answer.
-    if let Some(mut diags) = crate::lsp_route::diagnostics(&args.file, args.source.as_deref()) {
-        // …plus whatever a framework extension has to say about the same file. A server answering
-        // for a language does not mean nothing else has anything to add: rust-analyzer reports what
-        // the compiler reports, and a pair of Bevy systems that contend over a resource with nothing
-        // ordering them compiles perfectly. Returning the server's answer alone here is what made
-        // every extension diagnostic on a `.rs` unreachable.
-        diags.extend(crate::frameworks::diagnostics_for(&args.file, args.source.as_deref()));
-        return Ok(diags);
-    }
-    // A `Cargo.toml`. Its own validator rather than a language server's: rust-analyzer reports very
-    // little about a manifest, and what it does report arrives only after a reload — whereas a typo
-    // in a key name is worth a squiggle the moment it is typed.
-    if let Some(diags) = crate::cargo_intel::diagnostics(&args.file, args.source.as_deref()) {
-        return Ok(diags);
-    }
-    // A shader, compiled by naga right here. Below the language-server route on purpose:
-    // `wgsl-analyzer` knows about the whole composed module and this knows about one file,
-    // so when the server is installed it wins. This is what a shader gets without it.
-    if let Some(diags) = crate::wgsl_intel::diagnostics(&args.file, args.source.as_deref()) {
-        return Ok(diags);
-    }
-    // A `.ptn`: syntax, names, types, contexts and capabilities, from the extension that serves it.
-    if let Some(diags) = crate::patina_intel::diagnostics(ctx, &args.file, args.source.as_deref()) {
-        return Ok(diags);
-    }
-    // A `.ron`: syntax everywhere, and a check against the Rust type its directive names on the
-    // full tier. Not a language-server file (rust-analyzer has never heard of one), so nothing
-    // above can claim it.
-    if let Some(diags) =
-        crate::ron_intel::diagnostics(&args.file, args.source.as_deref(), args.resolved.unwrap_or(true))
-    {
-        return Ok(diags);
+    // The one engine that serves the file answers (see `engine`); a Java file, and a file no engine claims (which
+    // may still have framework problems — a Spring YAML), go on to the validator and the framework checks below.
+    use crate::engine::Engine;
+    match crate::engine::engine_for(&args.file) {
+        // Its diagnostics are **pushed** by the server (for Rust they arrive when `cargo check` finishes, seconds
+        // after a save), so this reads the last publish rather than computing anything — cheap enough for the
+        // Java validation's debounce, and blind to the fast/full `resolved` tier: a server has only one answer.
+        Engine::Lsp => {
+            let mut diags = crate::lsp_route::diagnostics(&args.file, args.source.as_deref()).unwrap_or_default();
+            // …plus what a framework extension has to say about the same file: rust-analyzer reports what the
+            // compiler reports, and a pair of Bevy systems that contend over a resource with nothing ordering
+            // them compiles perfectly.
+            diags.extend(crate::frameworks::diagnostics_for(&args.file, args.source.as_deref()));
+            return Ok(diags);
+        }
+        // Its own validator rather than a language server's: rust-analyzer reports very little about a manifest,
+        // and only after a reload — whereas a typo in a key name is worth a squiggle the moment it is typed.
+        Engine::CargoManifest => return Ok(crate::cargo_intel::diagnostics(&args.file, args.source.as_deref()).unwrap_or_default()),
+        // Compiled by naga right here: what a shader gets when `wgsl-analyzer` is not installed (it wins when it is).
+        Engine::Wgsl => return Ok(crate::wgsl_intel::diagnostics(&args.file, args.source.as_deref()).unwrap_or_default()),
+        // Syntax, names, types, contexts and capabilities, from the extension that serves `.ptn`.
+        Engine::Patina => return Ok(crate::patina_intel::diagnostics(ctx, &args.file, args.source.as_deref()).unwrap_or_default()),
+        // Syntax everywhere, and a check against the Rust type its directive names on the full tier.
+        Engine::Ron => {
+            return Ok(crate::ron_intel::diagnostics(&args.file, args.source.as_deref(), args.resolved.unwrap_or(true)).unwrap_or_default())
+        }
+        Engine::Java | Engine::Unserved(_) => {}
     }
     // Action refs to check: the FE's explicit list when present, else — for a JSP — the
     // refs the BE extracts itself (reusing `bennu-web`'s scan), so squiggles work with no

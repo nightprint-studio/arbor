@@ -40,26 +40,16 @@ pub(crate) fn bennu_references(
     ctx: &BennuState,
     args: ReferencesArgs,
 ) -> Result<Option<UsagesResult>, String> {
-    // A server-backed file answers from its own server. `origin_file` is a Java-only concern
-    // (a caret inside a decompiled library view, which has no equivalent here), so the plain
-    // path is the only one that needs routing.
-    if let Some(usages) = crate::lsp_route::references(&args.file, &args.source, args.offset) {
-        return Ok(usages);
-    }
-    // A shader, scoped to its own file — see `wgsl_intel::references` for why not wider.
-    if let Some(usages) = crate::wgsl_intel::references(&args.file, &args.source, args.offset) {
-        return Ok(usages);
-    }
-    // A `.ptn`, across its mod.
-    if let Some(usages) = crate::patina_intel::references(ctx, &args.file, &args.source, args.offset) {
-        return Ok(usages);
-    }
-    let service = IndexService::global();
-    let result = match &args.origin_file {
-        Some(origin) => service.find_usages_from(origin, &args.file, &args.source, args.offset),
-        None => service.find_usages(&args.file, &args.source, args.offset),
-    };
-    Ok(result.map(usages_result_of))
+    // The one engine that serves the file answers (see `engine`). `origin_file` is a Java-only concern (a caret
+    // inside a decompiled library view), so only the Java side reads it.
+    Ok(crate::engine::references(ctx, &args.file, &args.source, args.offset, || {
+        let service = IndexService::global();
+        let result = match &args.origin_file {
+            Some(origin) => service.find_usages_from(origin, &args.file, &args.source, args.offset),
+            None => service.find_usages(&args.file, &args.source, args.offset),
+        };
+        result.map(usages_result_of)
+    }))
 }
 
 /// Map an intel [`ReferencesResult`] onto the wire [`UsagesResult`].

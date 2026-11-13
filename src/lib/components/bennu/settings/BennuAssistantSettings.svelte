@@ -7,27 +7,32 @@
    * held by the frontend after it is typed — the page only learns whether one is stored.
    */
   import { onMount } from 'svelte';
-  import { KeyRound, Sliders, ShieldCheck, FolderOpen, X, Plus, Wallet, GitBranch, Wrench, WandSparkles } from 'lucide-svelte';
+  import { KeyRound, Sliders, ShieldCheck, Wallet, GitBranch, Wrench, WandSparkles, Coins, TerminalSquare } from 'lucide-svelte';
   import Callout from '$lib/components/shared/ui/Callout.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
-  import Input from '$lib/components/shared/ui/Input.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
-  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
-  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
+  import AssistantFolderList from './AssistantFolderList.svelte';
+  import AssistantKeyField from './AssistantKeyField.svelte';
+  import AssistantBalanceField from './AssistantBalanceField.svelte';
+  import ExternalToolList from './ExternalToolList.svelte';
+  import ImberNotificationsCard from './ImberNotificationsCard.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
-  import { createModelsTemplate, deleteAssistantKey, hasAssistantKey, storeAssistantKey } from '$lib/ipc/bennu/assistant';
+  import { createModelsTemplate } from '$lib/ipc/bennu/assistant';
+  import { imberCreditsStore } from '$lib/stores/imber-credits.svelte';
   import { formatEur, formatPrice, formatTokens } from '../assistant/assistant-format';
   import { MODES } from '../assistant/assistant-mode';
   import { DECISION_LEVELS, MAX_DECISION_NOTES } from '../assistant/assistant-decision';
+  import { MAX_MAX_STEPS, MIN_MAX_STEPS } from '../assistant/assistant-steps';
   import Textarea from '$lib/components/shared/ui/Textarea.svelte';
   import type { DecisionLevel } from '../assistant/assistant-decision';
   import type { AccessScope, AssistantEffort, AssistantMode } from '../assistant/assistant-types';
+  import type { OpenProjectsWord } from '$lib/ipc/bennu/config';
 
   /** The page of the Imber branch of Settings this renders: each is a few of the cards below. */
   type Page = 'connection' | 'conversations' | 'access' | 'tools' | 'cost';
@@ -37,14 +42,12 @@
     connection: { title: 'Imber', lead: 'The key it uses to reach the model. Its other settings are in the pages below.' },
     conversations: { title: 'Conversations', lead: 'How a new conversation starts: mode, effort, context and helpers.' },
     access: { title: 'Access', lead: 'What Imber may reach — folders, projects, git — and when it asks.' },
-    tools: { title: 'Tools and skills', lead: 'Which groups of tools it may use, and the skills it can load.' },
+    tools: { title: 'Tools and skills', lead: 'Which groups of tools it may use, the programs on this machine it may run, and the skills it can load.' },
     cost: { title: 'Models and cost', lead: 'The models on offer with their prices, and the limits on what it may spend.' },
   };
 
   const s = bennuAssistantStore;
 
-  let key = $state('');
-  let saved = $state(false);
 
   const modelOptions = $derived(s.models.map((m) => ({
     value: m.id,
@@ -67,11 +70,18 @@
     { id: 'refactor', label: 'Refactoring', description: 'Rename a symbol and add a parameter, across every file that mentions it.' },
     { id: 'structural', label: 'Structural search and replace', description: 'Rewrite code by its shape — safer than a regular expression.' },
     { id: 'history', label: 'Local History', description: 'Read what a file used to say, and restore it or a deleted file.' },
-    { id: 'run', label: 'Build, run and test', description: 'Anything that executes the project. Each asks first.' },
+    { id: 'run', label: 'Build, run and test', description: 'Anything that executes the project, and the programs below. Each asks first.' },
     { id: 'debug', label: 'Debugger', description: 'Set breakpoints and logpoints, run or attach to a Java program under the debugger (each launch asks first), read the stack and values at a stop, step. You watch the same stop in the Debug panel.' },
     { id: 'bevy', label: 'Look into a running Bevy game', description: 'Connect to a game over its Remote Protocol and read entities, components, resources and types. Only for projects with a Cargo.toml.' },
     { id: 'screenshot', label: 'Screenshots of a page', description: 'Look at a front end on localhost: a picture, plus console errors and failed requests with Playwright. Pictures are expensive in tokens; only the latest two stay in the conversation.' },
-    { id: 'live', label: 'Live services', description: 'Start services of the project (each start asks first; a recipe once per file), read their logs, call them over localhost, follow a request through every log, run scenarios.' },
+    { id: 'live', label: 'Live services', description: 'Start services of the project (each start asks first; a recipe once per file; a Rust binary with its features and arguments once per target), read their logs, call them over localhost, follow a request through every log, run scenarios.' },
+  ];
+
+  const OPEN_PROJECTS: { value: OpenProjectsWord; label: string; description: string }[] = [
+    { value: 'autonomous', label: 'Ask, except in Autonomous', description: 'In Autonomous mode it opens and indexes the project by itself; in the other modes it asks. The default.' },
+    { value: 'ask', label: 'Always ask', description: 'A card in every mode before a project is opened and indexed.' },
+    { value: 'allowed', label: 'Open where it may read', description: 'Opened without asking in every mode, wherever the reach already lets it read.' },
+    { value: 'never', label: 'Never', description: 'A project not open in Bennu is only files to it: reading, searching and editing, no Bennu tools.' },
   ];
 
   const MODE_OPTIONS = MODES.map((m) => ({ value: m.id, label: m.label, description: m.description }));
@@ -83,25 +93,13 @@
     { value: 'disk', label: 'Anywhere on disk', description: 'Beyond the workspace, without asking. Outside the other levels, one prompt decides read-only or read & write.' },
   ];
 
-  let picking = $state(false);
 
   onMount(() => {
     void s.start();
     void s.refreshSkills();
-    hasAssistantKey().then((has) => (saved = has)).catch(() => {});
   });
 
-  async function save() {
-    if (!key.trim()) return;
-    try {
-      await storeAssistantKey(key);
-      saved = true;
-      key = '';
-      toastStore.show('Key stored in Imber’s vault.', 'success');
-    } catch (e) {
-      toastStore.show(`Could not store the key: ${e}`, 'error');
-    }
-  }
+
 
   const LIMIT_ROWS = [
     { period: 'session', key: 'session_eur', label: 'Per conversation', hint: 'The most one conversation may cost in total.' },
@@ -128,14 +126,7 @@
     }
   }
 
-  async function remove() {
-    try {
-      await deleteAssistantKey();
-      saved = false;
-    } catch (e) {
-      toastStore.show(`Could not remove the key: ${e}`, 'error');
-    }
-  }
+
 </script>
 
 <div class="section-header">
@@ -150,18 +141,14 @@
     The key lives in a vault of its own — apart from the one holding your git tokens — and never in a config file.
     Only the backend reads it, when a request is made.
   </Callout>
-  <FormRow label="API key" description="Your Anthropic API key. Stored once, in the vault; shown here only as set or not set.">
-    <div class="key">
-      <Input type="password" bind:value={key} placeholder={saved ? '••••••••••••••••' : 'sk-ant-…'} />
-      <Button variant="primary" size="sm" disabled={!key.trim()} onclick={save}>Save</Button>
-      {#if saved}
-        <Badge variant="tone" tone="success" size="sm">Set</Badge>
-        <Button variant="ghost" size="sm" onclick={remove}>Remove</Button>
-      {:else}
-        <Badge variant="tone" tone="neutral" size="sm">Not set</Badge>
-      {/if}
-    </div>
-  </FormRow>
+  <AssistantKeyField provider="anthropic" label="API key" description="Your Anthropic API key. Stored once, in the vault; shown here only as set or not set." />
+  <AssistantKeyField
+    provider="anthropic-admin"
+    label="Admin key (optional)"
+    placeholder="sk-ant-admin…"
+    description="Only for the credit meter in the title bar: with it, the meter shows what your Anthropic organization really spent this month, read from Anthropic's cost report. It is never sent with a conversation. Only an Anthropic organization has Admin keys (created by an admin in the Claude Console); an individual account cannot. The credit left on the account is not reported by the API either way."
+    onchange={() => void imberCreditsStore.refresh(true)}
+  />
 </div>
 {/if}
 
@@ -231,6 +218,11 @@
                    ariaLabel="Scheduled runs per day" onchange={(v) => s.setLimits({ schedule_runs_per_day: Math.max(0, Math.round(Number(v) || 0)) })} />
   </FormRow>
 </div>
+
+<div class="card">
+  <div class="card-section-title"><Coins size={12} /> Credit left</div>
+  <AssistantBalanceField />
+</div>
 {/if}
 
 {#if page === 'conversations'}
@@ -245,6 +237,9 @@
   <FormRow label="Effort" description="How hard it thinks before answering. Higher is more thorough and costs more; the models that have no such setting ignore it.">
     <Select value={s.effort ?? ''} options={EFFORT_OPTIONS} narrow disabled={s.effortLevels.length === 0}
             placeholder="Not available" onchange={(v) => s.setEffort(v as AssistantEffort)} ariaLabel="Effort" />
+  </FormRow>
+  <FormRow label="Steps per run" description="How many requests to the model one run may make before it stops and asks you to say “continue” — the brake for a model going round in circles. A step is one request, however many tools it calls in it. Higher lets long tasks finish in one go; each step costs money.">
+    <NumberStepper value={s.maxSteps} min={MIN_MAX_STEPS} max={MAX_MAX_STEPS} step={10} ariaLabel="Steps per run" onchange={(v) => s.setMaxSteps(Number(v))} />
   </FormRow>
   <FormRow label="Cheaper model for side jobs" description="Compacting a conversation is written by this model instead of the conversation's own, which is a fraction of the cost. Left on the default, it is the cheapest Haiku-class model in the price list. Also what read-only helper agents will use.">
     <Select value={s.sideModel} options={[{ value: '', label: 'Default (cheapest Haiku)' }, ...modelOptions]} onchange={(v) => s.setSideModel(String(v))} ariaLabel="Model for side jobs" />
@@ -291,6 +286,7 @@
     </Callout>
   {/if}
 </div>
+<ImberNotificationsCard />
 {/if}
 
 {#if page === 'access'}
@@ -298,7 +294,7 @@
   <div class="card-section-title"><ShieldCheck size={12} /> What it may reach</div>
   <Callout variant="info" title="Narrow by default, never a shell">
     It works through Bennu's own tools — files, search, usages, beans, endpoints, rename, add parameter — and a few text
-    tools of its own. It cannot run a program, and <strong>deleting</strong> follows the mode: free in its Temp folder, free inside what you allowed unless the mode is Manual, always asked outside it.
+    tools of its own. It runs nothing through a shell — only the project's builds and tests, the services you let it start and the programs you set up — and <strong>deleting</strong> follows the mode: free in its Temp folder, free inside what you allowed unless the mode is Manual, always asked outside it.
   </Callout>
   <FormRow stacked label="Reach" description="Where it may read and change. The composer shows it and lets you narrow it for one conversation.">
     <RadioGroup value={s.scope} options={SCOPES} appearance="card" size="sm" block onchange={(v) => s.setScope(v as AccessScope)} />
@@ -307,6 +303,9 @@
     <NumberStepper value={s.maxProjects} min={1} max={20} step={1} ariaLabel="Projects at once"
                    onchange={(v) => s.setMaxProjects(Number(v) || 6)} />
   </FormRow>
+  <FormRow stacked label="Opening other projects" description="When Imber needs Bennu's tools on a project this conversation does not work in. One you have open in Bennu is already indexed and joins without this question (outside the reach, the access card asks). A project outside the reach is asked about with the access card alone, which says it will be opened and indexed. This decides for any folder that is not open in Bennu but that Imber may already read; it is indexed where it can be (a Java build, or a language server for its language).">
+    <RadioGroup value={s.openProjects} options={OPEN_PROJECTS} appearance="card" size="sm" block onchange={(v) => s.setOpenProjects(v as OpenProjectsWord)} />
+  </FormRow>
   <FormRow label="Edit files" description="Off, and it can only read and answer.">
     <Toggle checked={s.allowEdits} onchange={(v) => s.setAllowEdits(v)} ariaLabel="Edit files" />
   </FormRow>
@@ -314,22 +313,14 @@
     <Toggle checked={s.allowTemp} onchange={(v) => s.setAllowTemp(v)} ariaLabel="Use the Temp folders" />
   </FormRow>
 
-  <div class="folders">
-    <div class="folders-head">
-      <span><FolderOpen size={12} /> Folders it may work in, besides the project</span>
-      <Button variant="ghost" size="xs" onclick={() => (picking = true)}>
-        <Plus size={11} /> Add folder…
-      </Button>
-    </div>
-    {#each s.extraFolders as f (f)}
-      <div class="folder">
-        <span class="path">{f}</span>
-        <IconButton tooltip="Remove" size={20} onclick={() => s.removeFolder(f)}><X size={11} /></IconButton>
-      </div>
-    {:else}
-      <p class="empty">None — only the project.</p>
-    {/each}
-  </div>
+  <AssistantFolderList
+    label="Folders it may work in, besides the project"
+    paths={s.extraFolders}
+    empty="None — only the project."
+    pickerTitle="Add a folder Imber may work in"
+    onadd={(path) => s.addFolder(path)}
+    onremove={(path) => s.removeFolder(path)}
+  />
 </div>
 {/if}
 
@@ -355,6 +346,13 @@
 
 {#if page === 'tools'}
 <div class="card">
+  <div class="card-section-title"><TerminalSquare size={12} /> Programs it may run</div>
+  <ExternalToolList />
+</div>
+{/if}
+
+{#if page === 'tools'}
+<div class="card">
   <div class="card-section-title"><WandSparkles size={12} /> Skills</div>
   <FormRow label="Skills" description="Folders with a SKILL.md — in the project's .bennu/skills or .claude/skills, or in your own — that teach Imber how you want a kind of task done. None is known to it until you enable it; it sees only a one-line index and loads a skill when a task calls for it. Type / in the composer to use one.">
     <div class="key">
@@ -362,33 +360,19 @@
       <Button variant="secondary" size="sm" onclick={() => s.openSkills()}>Skills…</Button>
     </div>
   </FormRow>
-</div>
-{/if}
-
-{#if page === 'access'}
-{#if picking}
-  <FileExplorerModal
-    mode="folder"
-    title="Add a folder Imber may work in"
-    onConfirm={(path) => { s.addFolder(path); picking = false; }}
-    onCancel={() => (picking = false)}
+  <AssistantFolderList
+    label="More folders of skills"
+    paths={s.skillFolders}
+    empty="None — only the project's, Bennu's and ~/.claude/skills."
+    pickerTitle="Add a folder of skills"
+    onadd={(path) => s.addSkillFolder(path)}
+    onremove={(path) => s.removeSkillFolder(path)}
   />
-{/if}
+</div>
 {/if}
 
 <style>
   .file-note { margin: 0; padding: 0 14px 10px; font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); overflow-wrap: anywhere; }
   .key { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .key :global(input) { min-width: 220px; }
-
-  .folders { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px 12px; }
-  .folders-head { display: flex; align-items: center; justify-content: space-between; font-size: var(--font-size-xs); color: var(--text-secondary); }
-  .folders-head span { display: inline-flex; align-items: center; gap: 6px; }
-  .folder {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 4px 6px 4px 10px; border-radius: var(--radius-sm);
-    background: var(--bg-overlay);
-  }
-  .path { font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-primary); }
-  .empty { margin: 0; font-size: var(--font-size-xs); color: var(--text-muted); }
 </style>

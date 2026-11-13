@@ -18,7 +18,7 @@
   <thead><tr><th>Project</th><th><kbd>Ctrl</kbd> + <kbd>F9</kbd> runs</th></tr></thead>
   <tbody>
     <tr><td>Maven</td><td><code>mvn compile</code>, under the JDK the project declares</td></tr>
-    <tr><td>Cargo</td><td><code>cargo check</code> — the button is for diagnostics, and <code>check</code> reaches them without linking</td></tr>
+    <tr><td>Cargo</td><td><code>cargo check --all-targets</code> — the button is for diagnostics, and <code>check</code> reaches them without linking; all targets, so errors in the tests count, as they do in Problems</td></tr>
   </tbody>
 </table>
 <p>

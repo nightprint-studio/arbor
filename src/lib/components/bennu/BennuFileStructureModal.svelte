@@ -133,7 +133,8 @@
     const path = activePath;
     const src = source;
     const ext = extOf(path);
-    if (!path || ext === 'java' || MARKUP_EXTS.has(ext) || !bennuLspStore.servesFile(path)) {
+    // A `.ptn` is answered by the Patina package through the same backend call as a server's outline.
+    if (!path || ext === 'java' || MARKUP_EXTS.has(ext) || (!bennuLspStore.servesFile(path) && ext !== 'ptn')) {
       lspItems = [];
       return;
     }

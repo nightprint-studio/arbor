@@ -5,7 +5,7 @@
 //! * **Accept edits** — edits inside the scope are applied at once; anything outside is asked about.
 //! * **Autonomous** — like accept edits, but a *file the build itself names* may be opened without asking.
 //!
-//! The project's **own build and test commands** (`bennu_build`, `bennu_test_run`) follow the mode too, through
+//! The project's **own build and test commands** (`bennu_check`, `bennu_build`, `bennu_test_run`) follow the mode too, through
 //! [`must_ask_own_command`]: asked on every call in manual, once per run in accept-edits, never in autonomous.
 //! They run code the project supplies, which is why they ask at all; they are the checks a working agent
 //! repeats dozens of times, which is why asking each time is friction with little information in it.
@@ -70,7 +70,7 @@ impl AccessMode {
 }
 
 /// The tools that run the project's own build or tests: nothing the model typed, only what the project defines.
-pub const OWN_COMMANDS: [&str; 2] = ["bennu_build", "bennu_test_run"];
+pub const OWN_COMMANDS: [&str; 3] = ["bennu_check", "bennu_build", "bennu_test_run"];
 
 pub fn is_own_command(tool: &str) -> bool {
     OWN_COMMANDS.contains(&tool)
@@ -244,7 +244,7 @@ pub fn diagnostic_files(tool: &str, result: &Value, root: &Path) -> Vec<PathBuf>
     let list = |key: &str| result.get(key).and_then(Value::as_array).cloned().unwrap_or_default();
     let mut out: Vec<PathBuf> = Vec::new();
     match tool {
-        "bennu_build" => {
+        "bennu_check" | "bennu_build" => {
             for p in list("problems").iter().filter(|p| is_error(*p)) {
                 out.extend(p.get("file").and_then(Value::as_str).and_then(at));
             }

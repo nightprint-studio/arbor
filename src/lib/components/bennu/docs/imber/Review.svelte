@@ -10,7 +10,7 @@
   In Manual mode a change is a <strong>proposal</strong>: a card in the thread listing the files with their added and removed lines. Nothing is written yet. A change made by one tool call (an edit across files, a rename, a replace over a folder) is one proposal, written all or nothing.
 </p>
 <p>
-  <strong>Review</strong> opens the proposal as a diff, unified or side by side, with the files in a list on the left (<kbd>↑</kbd> / <kbd>↓</kbd> move between them). Decide with <strong>Apply all</strong> (<kbd>Ctrl</kbd> + <kbd>Enter</kbd>) or <strong>Reject all</strong>. A rejected card turns red and keeps its files readable; an applied one stays as a record and can be undone. A proposal that touches a file of another project names it as <code>project:path</code>.
+  <strong>Review</strong> — on the card, or any file row of it — opens the proposal as a syntax-highlighted diff over most of the window, unified or side by side (the switch is in the header), with the files on the left, each with its folder and a bar of what it adds and removes (<kbd>↑</kbd> / <kbd>↓</kbd> or <kbd>J</kbd> / <kbd>K</kbd> move between them). The Review button itself shows the size of the change. Decide with <strong>Apply all</strong> (<kbd>Ctrl</kbd> + <kbd>Enter</kbd>) or <strong>Reject all</strong>. A rejected card turns red and keeps its files readable; an applied one stays as a record and can be undone. A proposal that touches a file of another project names it as <code>project:path</code>.
 </p>
 
 <h2>Applied changes and Undo</h2>

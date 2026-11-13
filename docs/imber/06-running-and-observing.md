@@ -1,7 +1,7 @@
 ---
 title: "Imber: Running and observing"
-summary: "Managed processes, recipes, scenarios, requests, log reading, the shared build queue and build-error attribution."
-keywords: ["live", "process", "recipe", "scenario", "logs", "timeline", "build queue", "build isolation", "who broke the build"]
+summary: "Managed processes, cargo run, the programs you set up, recipes, scenarios, requests, log reading, the shared build queue and build-error attribution."
+keywords: ["live", "process", "recipe", "scenario", "logs", "timeline", "build queue", "build isolation", "who broke the build", "cargo run", "features", "external tools", "run_tool", "executable"]
 related: ["Imber: Tools it can use", "Imber: Debugging with Imber", "Imber: Permissions and modes"]
 source: src/lib/components/bennu/docs/imber/Running.svelte
 ---
@@ -15,10 +15,32 @@ The feature itself (processes, recipes, scenarios, the timeline, correlation ids
 
 ## Managed processes
 
-- `run_start` starts a named process with a command, a working folder, optional ports and a readiness check (a port, a log line or a health URL). It asks every time, showing the command.
+- `run_start` starts a named process with a command, a working folder, optional ports and a readiness check (a port, a log line or a health URL). It asks every time, showing the command. The line runs in `bash` where the machine has it (`sh` otherwise), and its `cwd` may be any project of the conversation, by name (`voriz:`, `voriz:crates/app`) — the same for `cargo_run`, whose `cwd` also decides which Cargo workspace it runs in, and for `run_tool`. Tools such as `cargo` and `mvn` are found even when Arbor was started from the Finder: at start it adds the usual tool folders (`~/.cargo/bin`, Homebrew, SDKMAN) to the `PATH` every process inherits. Imber is told to prefer Bennu's own tools for a check, a build, the tests or `cargo run` (`bennu_check`, `bennu_build`, `bennu_test_run`, `cargo_run`), which need no card and answer with the parsed result; a command stays available when one of them cannot do the job.
+- `cargo_run` runs a binary or an example of a Rust project — package, `bin` or `example`, features, `release` or a profile, the program's own arguments and environment variables — as a managed process like any other. Imber gives fields, never a command line, and the command is the one a run configuration with the same fields would run, without a shell. The first run of a target (package and binary) in a conversation asks; the yes covers that target again with any features, arguments or environment, and another target asks again. A compile error shows in its logs. A server returns at once (its output is read with `run_logs`, also after it ends); a program that does its work and ends is run with `until_exit`, which waits for it (5 minutes by default, at most 30) and answers with its exit code and the last lines it printed, stderr marked — build errors included.
 - `run_status`, `run_logs`, `wait_ready` and `run_stop` inspect, wait for and stop what the conversation started. Reading never asks; stopping what the run started does not ask.
 - The processes are the same ones the Live panel lists. Every process records its owner; a conversation stops only its own processes. A name or port that another conversation holds is refused instead of duplicated or killed, and a stack another conversation already runs is attached read-only.
 - A yes given to a recipes file in one conversation does not carry to another.
+
+## Programs you set up
+
+`run_tool` runs one of the programs listed in Settings › Imber › Tools and skills › *Programs it may run*, by name. Each declaration sets the program (an absolute path), the arguments always passed, whether Imber may add its own, the variables always set and the ones Imber may set, a time limit, whether it changes things, and when a call asks: every call, once per conversation, or never. A tool that changes things asks at every call in Manual mode, whatever it says.
+
+- The program runs directly, without a shell: each argument reaches it as written, so `;`, `|`, `$(…)` and wildcards are plain characters. An argument or a variable the declaration does not allow is refused before anything starts.
+- It runs in a folder of the project (its root unless Imber names one) and Imber gets back the exit code with standard output and standard error; a long output keeps its beginning and its end. Imber can also send text to its standard input.
+- A call that reaches its time limit, or a run you cancel, ends the program with its whole process tree.
+- With `background` the program starts as a managed process instead — for a watcher or a server — and is read and stopped like any other (`run_logs`, `run_stop`).
+- A yes given once per conversation lasts until you edit the tool. A scheduled run never uses these programs.
+- The settings page marks a tool that would not be offered (no program at that path, a name that is not allowed, no description) and says why.
+
+## Scripts of the project
+
+`run_script` runs a script of the project that is not one of your programs — `.sh`, `.bash`, `.py`, `.js`, `.ps1`, `.bat`/`.cmd` on Windows, or an executable file. It always asks first, with a card that shows the script's path, the command, why Imber wants to run it and its first lines. Three answers:
+
+- **Decline** — nothing runs, and Imber is told.
+- **Run once** — this call only.
+- **Run and add to my programs** — it runs, and a declaration is added to Settings › Imber › Tools and skills › *Programs it may run* (interpreter, script, "changes things", asked once per conversation), for you to give a description and refine. From then on Imber calls it with `run_tool`.
+
+The script runs through its interpreter, chosen by its extension, or directly when it is executable; arguments are passed one by one, with no shell. It runs like a program you set up: the exit code and the output come back, it is stopped after ten minutes, and `background` makes it a managed process. Imber can edit the project's files, so a yes is for the script *as it is*: a script that changed asks again, and the card says it changed. The same holds for a program you set up whose file is inside the project — or a script you handed to an interpreter in its fixed arguments: its approval covers that content, and even one set to *Never* asks again when the file has changed since it last ran in the conversation.
 
 ## Recipes and scenarios
 

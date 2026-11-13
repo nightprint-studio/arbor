@@ -194,6 +194,14 @@
   so where the picture would have been, in mermaid's words, naming the line.
 </p>
 
+<h3>Markdown in comments</h3>
+<p>
+  In <strong>Rust</strong> and <strong>Patina</strong> files, a run of whole-line <code>//</code>, <code>///</code> or <code>//!</code>
+  comments with the same indentation is a Markdown document, drawn the way the Markdown editor draws one — headings, emphasis,
+  lists, callouts, fenced code, diagrams and editable tables. The <code>//</code> shows only on the caret's line, and a table
+  edited cell by cell keeps it when written back. A comment after code on the same line stays plain text.
+</p>
+
 <h2>Find and replace</h2>
 <p>
   <kbd>Ctrl+F</kbd> opens a slim bar in the editor's top-right corner, over the code rather than above it. The word under a selection fills the field, every change

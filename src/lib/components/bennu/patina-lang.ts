@@ -33,6 +33,11 @@
  * What it cannot tell is what needs the index: a parameter from a local, a `mut` binding from another, a trait
  * from a struct. That is a semantic layer the backend would have to send.
  *
+ * ## Comments are markdown
+ *
+ * A run of full-line `//` (or `///`) comments renders live, as the markdown editor does: headings, emphasis, lists,
+ * fenced code, callouts and tables — the shared walk in `utils/comment-markdown.ts`. The caret's line shows its `//`.
+ *
  * ## Folding
  *
  * A stream mode carries no tree, so blocks fold by their braces: a line whose last real `{` opens a block that
@@ -49,6 +54,7 @@ import { backendCompletionSource, backendHoverSource, eagerBackendCompletionSour
 import { patinaIndent } from './patina-indent';
 import { patinaLinkRange } from './patina-link';
 import { stringContext } from './patina-strings';
+import { commentMarkdown } from '$lib/utils/comment-markdown';
 
 /** Patina's keywords, as its lexer has them — reserved-for-later words included, so they read as reserved. */
 const KEYWORDS = new Set([
@@ -452,7 +458,15 @@ export const patinaLanguage: LanguageDescriptor = {
   id: 'patina',
   createParser: () => Promise.reject(new Error('patina: highlighted by a stream mode')),
   classify: () => null,
-  cmExtension: [StreamLanguage.define(patinaMode), patinaHighlight, foldService.of(patinaExtraFold), braceFold, patinaIndent],
+  // Comments are markdown, drawn live as in the markdown editor: a run of `//` lines is one document.
+  cmExtension: [
+    StreamLanguage.define(patinaMode),
+    patinaHighlight,
+    foldService.of(patinaExtraFold),
+    braceFold,
+    patinaIndent,
+    commentMarkdown('//'),
+  ],
   // `use …` collassa da solo all'apertura (impostazione "fold imports"), come gli import di Java.
   importFold: useBlockRange,
   // The gutter: the ranges come from `braceFold` above, not from a grammar.

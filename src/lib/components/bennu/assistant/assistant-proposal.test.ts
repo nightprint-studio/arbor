@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { redoRequest, staleSummary, withDecision, withRemade, withUndo } from './assistant-proposal';
-import type { EditProposal, ProposedFile } from './assistant-types';
+import { pendingProposals, redoRequest, staleSummary, withDecision, withRemade, withUndo } from './assistant-proposal';
+import type { AssistantMessage, EditProposal, ProposedFile } from './assistant-types';
 
 const file = (path: string, extra: Partial<ProposedFile> = {}): ProposedFile => ({ path, added: 1, removed: 0, hunks: [], ...extra });
 const proposal = (files: ProposedFile[], status: EditProposal['status'] = 'pending'): EditProposal => ({ id: 'pr-1', files, status });
@@ -56,5 +56,16 @@ describe('a proposal after an undo', () => {
   it('stays applied when a file changed since, and nothing else about it moves', () => {
     const p = proposal([file('a')], 'applied');
     expect(withUndo(p, { status: 'applied', files: [], stale: ['a'] })).toBe(p);
+  });
+});
+
+describe('the proposals still waiting', () => {
+  it('lists only the pending ones, across messages, oldest first', () => {
+    const msg = (id: string, blocks: AssistantMessage['blocks']) => ({ id, role: 'assistant', at: 0, blocks }) as AssistantMessage;
+    const messages = [
+      msg('a', [{ type: 'proposal', proposal: { ...proposal([file('a.rs')]), id: 'p1' } }, { type: 'proposal', proposal: { ...proposal([file('b.rs')], 'applied'), id: 'p2' } }]),
+      msg('b', [{ type: 'text', text: 'and one more' }, { type: 'proposal', proposal: { ...proposal([file('c.rs')]), id: 'p3' } }]),
+    ];
+    expect(pendingProposals(messages).map((p) => p.id)).toEqual(['p1', 'p3']);
   });
 });

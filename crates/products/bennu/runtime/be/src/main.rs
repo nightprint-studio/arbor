@@ -177,6 +177,7 @@ mod intel;
 // and no catalogue entry claims `.java` — Bennu's own engine is the better answer for it.
 mod lsp;
 mod lsp_registry;
+mod lsp_wait;
 mod lsp_route;
 // Refactor rename (docs §5 #10-12): `bennu_rename_plan` (preview) / `bennu_rename_apply`
 // (edits) — best-effort, config-aware, off the per-project semantic engine.
@@ -193,6 +194,7 @@ mod completion_doc;
 mod completion_picked;
 mod create_method_in;
 mod generate_hint;
+mod engine;
 mod hover;
 // What the editor draws AROUND a call rather than in it: `bennu_signature_help` (the parameter
 // strip for the call the caret is inside) and `bennu_inlay_hints` (argument names, inferred `var`
@@ -622,6 +624,9 @@ fn main() {
     if arbor_process_ext::prelude::run_watchdog_if_requested() {
         return;
     }
+    // Inherited from the shell already; done again for a backend started on its own (a dev run, a test harness),
+    // so `cargo`, `mvn` and the rest are found by everything it starts.
+    arbor_process_ext::prelude::widen_process_path();
 
     // Seed the active profile FIRST — CRITICAL. Without this, `bennu_config_dir()` /
     // `bennu_data_dir()` (which the domain modules read directly) silently resolve the

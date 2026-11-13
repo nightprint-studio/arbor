@@ -20,10 +20,14 @@ description: How to write a database migration in this project
 <ul>
   <li>each project's <code>.bennu/skills</code> and <code>.claude/skills</code>;</li>
   <li>Bennu's own <code>skills</code> folder in its config folder;</li>
+  <li>the folders you add under <strong>Settings › Imber › Tools and skills › More folders of skills</strong>, in the order
+    you added them — a folder that holds skill folders, or one that is a skill itself (it has a <code>SKILL.md</code>);</li>
   <li><code>~/.claude/skills</code>.</li>
 </ul>
 <p>
-  A project skill hides a user skill of the same name, and <code>.bennu</code> wins over <code>.claude</code>.
+  A project skill hides a user skill of the same name, and <code>.bennu</code> wins over <code>.claude</code>. Among your
+  own folders the list above is the order: a skill in a folder you added wins over one of the same name in
+  <code>~/.claude/skills</code>. Skills from an added folder are user skills, labelled with the folder's name.
 </p>
 
 <h2>The skills manager</h2>
@@ -37,6 +41,7 @@ description: How to write a database migration in this project
 <h2>How a skill is used</h2>
 <ul>
   <li>Only a one-line index of the enabled skills (name and description) travels with each request.</li>
+  <li>The folder of an enabled skill is readable by Imber whatever the reach — its <code>SKILL.md</code> and the files it points at (references, examples) — without an access card; writing there follows the ordinary rules.</li>
   <li>Imber loads a skill's text with <code>load_skill</code> when a task matches, or when you start your message with <code>/name</code>. Type <code>/</code> in the composer to pick from the enabled skills.</li>
   <li>Limits: a skill's text is cut at 32 KB, at most 50 skills are read, and a description is cut at 240 characters.</li>
   <li>Nothing in a skill is ever run. Other files in its folder are only named; Imber can read them with its ordinary tools only if the reach allows it.</li>

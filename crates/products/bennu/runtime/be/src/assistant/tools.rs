@@ -35,6 +35,7 @@ use super::view::detail_of;
 mod autonomy;
 mod batch;
 mod brp;
+mod cargo_run;
 mod debug;
 mod debug_bp;
 mod debug_capture;
@@ -45,11 +46,13 @@ mod debug_text;
 mod diagram;
 mod diagram_context;
 mod edit;
+mod external;
 mod families;
 mod gate;
 mod digests;
 mod history;
 mod live;
+mod open_project;
 mod own_specs;
 mod reads;
 pub(super) mod reserve;
@@ -65,7 +68,11 @@ pub(super) fn release_debug_matching(root: Option<&str>, reason: &str) {
 }
 mod profile;
 mod screenshot;
+mod script;
 mod image;
+mod merula;
+mod title;
+pub(super) use title::asks_for_title;
 pub(super) use screenshot::save_picture;
 mod skills;
 mod spawn;
@@ -90,14 +97,19 @@ pub(super) fn all_specs() -> Vec<ToolSpec> {
     let mut specs = ToolHost::own_specs();
     specs.extend(batch::specs());
     specs.extend(brp::specs());
+    specs.extend(cargo_run::specs());
     specs.extend(debug::specs());
     specs.extend(diagram::specs());
+    specs.extend(external::specs());
     specs.extend(history::specs());
     specs.extend(image::specs());
+    specs.extend(merula::specs());
+    specs.extend(title::specs());
     specs.extend(live::specs());
     specs.extend(profile::specs());
     specs.extend(reads::specs());
     specs.extend(screenshot::specs());
+    specs.extend(script::specs());
     specs.extend(skills::specs());
     specs.extend(spawn::specs());
     specs.extend(structural::specs());
@@ -191,21 +203,32 @@ pub(super) struct ToolHost {
     agents: spawn::Agents,
     /// The panel was told the run is waiting to retry, and has not been told it resumed.
     retrying: std::sync::atomic::AtomicBool,
+    /// The model's context window, when known: what each request's `max_tokens` is cut to fit.
+    window: Option<u64>,
 }
 
 impl ToolHost {
     pub(super) fn new(session: Arc<Session>, rt: tokio::runtime::Handle, compaction: Option<Compaction>, guard: Option<Guard>, chat: bool, git: Vec<ToolDescriptor>, plan: bool, off: Off, skills: Vec<Skill>) -> Self {
         let catalog = tools_for("").into_iter().filter(offered).collect();
-        let host = Self { session, catalog, rt, compaction, guard, run_spend: Default::default(), chat, git, plan, off, skills, last_status: Default::default(), diagram_failures: Default::default(), debug: Default::default(), agents: Default::default(), retrying: Default::default() };
+        let host = Self { session, catalog, rt, compaction, guard, run_spend: Default::default(), chat, git, plan, off, skills, last_status: Default::default(), diagram_failures: Default::default(), debug: Default::default(), agents: Default::default(), retrying: Default::default(), window: None };
         // A debug session the conversation left open is this run's again.
         host.debug.adopt(&host.session);
         host
     }
 
+    /// The model's context window, so each request asks for as much output as the window leaves room for.
+    pub(super) fn with_context_window(mut self, window: Option<u64>) -> Self {
+        self.window = window;
+        self
+    }
+
     /// Make the conversation smaller when it has reached the window the user allows.
     fn compact_if_needed(&self, request: &mut Request) {
         let Some(c) = &self.compaction else { return };
-        if compact::estimate_request(request) < c.threshold {
+        // Compaction measures with the raw character estimate; the threshold is put in the same units, so the
+        // conversation is folded when it is really near the window, not when the estimate thinks it is.
+        let threshold = bennu_assistant::prelude::unscaled_limit(c.threshold, super::token_scale::get(&self.session.conversation_id));
+        if compact::estimate_request(request) < threshold {
             return;
         }
         let Ok(transport) = HttpTransport::new() else { return };
@@ -215,7 +238,7 @@ impl ToolHost {
         let overhead = tokens(&request.system) + tokens(&tools_json);
         let size = |m: &[Message]| overhead + tokens(&serde_json::to_string(m).unwrap_or_default()) + bennu_assistant::prelude::image_tokens(m);
 
-        match compact::compact(&request.messages, &transport, &c.key, &c.model, None, false, &size, c.threshold) {
+        match compact::compact(&request.messages, &transport, &c.key, &c.model, None, false, &size, threshold) {
             Ok(done) => {
                 if done.summarized {
                     // Written by the cheaper side model, so priced at its rates (not with the main model's requests).
@@ -259,13 +282,34 @@ impl ToolHost {
     }
 
     /// Stop the run, before the next request, if it has taken the spending to a limit.
+    /// What this run has cost so far, in dollars: the requests finished, the one in progress, and the side jobs
+    /// (compaction). `None` without the model's prices.
+    fn run_usd(&self) -> Option<f64> {
+        let model = self.guard.as_ref()?.model.as_ref()?;
+        let spend = self.run_spend.lock().unwrap_or_else(|p| p.into_inner());
+        let extra = self.session.extra_requests.lock().unwrap_or_else(|p| p.into_inner());
+        Some(model.cost_of_all(&spend.finished) + model.cost(&spend.current) + model.cost_of_all(&extra) + super::side_jobs::cost_of(&self.session.run_id))
+    }
+
+    /// The conversation's cost and context as they stand mid-run, for the meter: the panel would otherwise learn
+    /// them only when the run ends, minutes and many requests later. `request` is the one about to go out, whose
+    /// size is the context; without it only the cost moves. Estimates, like the meter's figures at the end.
+    fn report_live(&self, request: Option<&Request>) {
+        let cost = self.guard.as_ref().zip(self.run_usd()).map(|(g, run)| g.session_base + run);
+        let context = request.map(|r| {
+            let index = super::skills::render_index(&self.skills);
+            let raw = super::token_report::context_of(&r.system, &self.session.root, &index, &r.tools, &r.messages);
+            super::token_report::context_json(&super::token_scale::context(raw, super::token_scale::get(&self.session.conversation_id)))
+        });
+        if cost.is_none() && context.is_none() {
+            return;
+        }
+        self.session.emit("live", json!({ "cost": cost, "context": context }));
+    }
+
     fn enforce_limits(&self) {
-        let Some(Guard { limits, periods, session_base, model: Some(model), run_cap_usd }) = &self.guard else { return };
-        let run_usd = {
-            let spend = self.run_spend.lock().unwrap_or_else(|p| p.into_inner());
-            let extra = self.session.extra_requests.lock().unwrap_or_else(|p| p.into_inner());
-            model.cost_of_all(&spend.finished) + model.cost(&spend.current) + model.cost_of_all(&extra) + super::side_jobs::cost_of(&self.session.run_id)
-        };
+        let Some(Guard { limits, periods, session_base, model: Some(_), run_cap_usd }) = &self.guard else { return };
+        let Some(run_usd) = self.run_usd() else { return };
         // This run's figure goes where the other runs can see it, and theirs come back: two conversations
         // running at once must not together pass a limit that neither passes alone.
         let others = super::ledger::in_flight().report(&self.session.run_id, run_usd);
@@ -315,11 +359,33 @@ impl ToolHost {
     /// Absolute path for `raw`: a project's name (or `name:path` in one) first, then as given when absolute,
     /// otherwise under the project the user is in.
     fn resolve(&self, raw: &str) -> PathBuf {
-        if let Some(real) = projects::expand(&self.session.projects, raw) {
+        if let Some(real) = projects::expand(&self.session.projects(), raw) {
             return PathBuf::from(real);
         }
         let p = Path::new(raw);
         if p.is_absolute() { p.to_path_buf() } else { self.project().join(p) }
+    }
+
+    /// The folder a program is started in (`run_start`, `cargo_run`, `run_tool`): relative to the project, or in
+    /// another project of the conversation by name (`voriz:` or `voriz:crates/app`), or an absolute path inside one
+    /// of them. A conversation over several projects runs things in each without a `cd` in a command line.
+    pub(super) fn run_cwd(&self, input: &Value) -> Result<PathBuf, String> {
+        let raw = input.get("cwd").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).unwrap_or(".");
+        let path = lexical(&self.resolve(raw));
+        let projects = self.session.projects();
+        let inside = projects::owner(&projects, &path).is_some() || projects::same_root(&path.to_string_lossy(), &self.session.root)
+            || path.starts_with(self.project());
+        if !inside {
+            let names: Vec<&str> = projects.iter().map(|p| p.name.as_str()).collect();
+            return Err(format!(
+                "cwd `{raw}` is in no project of this conversation; give a folder of the project, or name one of its projects as `name:` or `name:folder` ({})",
+                names.join(", ")
+            ));
+        }
+        if !path.is_dir() {
+            return Err(format!("cwd `{}` is not a folder", path.display()));
+        }
+        Ok(path)
     }
 
     // ── Running ──────────────────────────────────────────────────────────────────────────────────
@@ -374,24 +440,81 @@ impl ToolHost {
     /// Call a catalogue tool with the project's root filled in and the names of projects turned into paths,
     /// and hand back its raw result. The pieces that want the value (digests, the read memory) start here.
     pub(super) fn catalog_call(&self, d: &ToolDescriptor, input: &Value) -> Result<Value, String> {
-        let mut flat = input.clone();
-        self.expand_names(&mut flat);
-        if let Some(root) = flat.get("root").and_then(Value::as_str) {
-            if root != self.session.root && projects::owner(&self.session.projects, Path::new(root)).is_none() {
-                return Err(format!("`{root}` is not one of the projects in this conversation"));
-            }
+        let mut flat = self.catalog_args(input);
+        // The gate has brought the project in, or said why not (`open_project.rs`); this is the last word.
+        if let Some(root) = self.foreign_root(&flat) {
+            return Err(format!("`{root}` is not one of the projects in this conversation"));
         }
-        // Nearly every tool takes the project root; the model should not have to repeat it.
+        // Nearly every tool takes the project root; the model should not have to repeat it. A check, build or test
+        // run that names a crate the project the user is in does not have runs where that crate is.
         let wants_root = d.input_schema.pointer("/properties/root").is_some();
         if wants_root && flat.get("root").is_none() {
+            let root = self.root_of_crate(&d.name, &flat).unwrap_or_else(|| self.session.root.clone());
             if let Some(obj) = flat.as_object_mut() {
-                obj.insert("root".into(), Value::String(self.session.root.clone()));
+                obj.insert("root".into(), Value::String(root));
             }
         }
         let root = flat.get("root").and_then(Value::as_str).unwrap_or(&self.session.root).to_string();
         let value = self.call_handler(&d.method, d.wrap_arguments(flat))?;
         self.note_diagnostics(&d.name, &root, &value);
         Ok(value)
+    }
+
+    /// Put what the user wrote while the run was working into the next request, as their words: after the tool
+    /// results the request carries (a message may hold both), or as a message of its own. The thread shows each as
+    /// read, where it was read, which is also how the panel learns it no longer waits.
+    fn deliver_notes(&self, request: &mut Request) {
+        let notes = runs::take_notes(&self.session.run_id);
+        if notes.is_empty() {
+            return;
+        }
+        let text = notes.iter().map(|n| n.text.trim()).collect::<Vec<_>>().join("\n\n");
+        let text = format!("[Message from the user, written while you were working — read it before you go on:]\n{text}");
+        match request.messages.last_mut() {
+            Some(last) if last.role == bennu_assistant::prelude::Role::User => last.blocks.push(bennu_assistant::prelude::Block::Text { text }),
+            _ => request.messages.push(bennu_assistant::prelude::Message::user(text)),
+        }
+        for note in &notes {
+            self.session.view().push(json!({ "type": "note", "note": { "id": note.id, "text": note.text } }));
+        }
+        self.session.push_message();
+    }
+
+    /// For `bennu_check`, `bennu_build` and `bennu_test_run` with a `module` and no `root`: the project of the
+    /// conversation whose Cargo workspace has that crate, when the project the user is in does not. `None` keeps
+    /// the default.
+    fn root_of_crate(&self, tool: &str, flat: &Value) -> Option<String> {
+        if !matches!(tool, "bennu_check" | "bennu_build" | "bennu_test_run") {
+            return None;
+        }
+        let module = flat.get("module").and_then(Value::as_str).map(str::trim).filter(|m| !m.is_empty())?;
+        let has = |root: &str| {
+            let want = module.replace('-', "_");
+            bennu_cargo::prelude::read_workspace(Path::new(root)).crates.iter().any(|c| c.name.replace('-', "_") == want)
+        };
+        if has(&self.session.root) {
+            return None;
+        }
+        self.session.projects().into_iter().map(|p| p.root).find(|root| !projects::same_root(root, &self.session.root) && has(root))
+    }
+
+    /// A catalogue call's arguments with the names of projects turned into paths, and a relative root made absolute.
+    /// A relative root (`games/voriz`) is a folder of the project the user is in, as a relative file is: made
+    /// absolute here, the ownership check sees it inside the project instead of refusing it.
+    pub(super) fn catalog_args(&self, input: &Value) -> Value {
+        let mut flat = input.clone();
+        self.expand_names(&mut flat);
+        if let Some(root) = flat.get("root").and_then(Value::as_str).filter(|r| !r.is_empty() && !Path::new(r).is_absolute()) {
+            let absolute = self.resolve(root).to_string_lossy().into_owned();
+            flat["root"] = Value::String(absolute);
+        }
+        flat
+    }
+
+    /// The root a call's (normalized) arguments name, when no project of the conversation holds it.
+    pub(super) fn foreign_root(&self, flat: &Value) -> Option<String> {
+        let root = flat.get("root").and_then(Value::as_str).filter(|r| !r.is_empty())?;
+        (root != self.session.root && projects::owner(&self.session.projects(), Path::new(root)).is_none()).then(|| root.to_string())
     }
 
     /// Call one of Corvus's git tools through the shell. The people in the answer are replaced by ids on the way
@@ -418,14 +541,15 @@ impl ToolHost {
     /// The root of the project that owns `file`: where its encoding, index and history live. The project
     /// the user is in for anything outside the ones in play.
     fn root_of(&self, file: &Path) -> String {
-        projects::owner(&self.session.projects, file).map(|p| p.root.clone()).unwrap_or_else(|| self.session.root.clone())
+        projects::owner(&self.session.projects(), file).map(|p| p.root.clone()).unwrap_or_else(|| self.session.root.clone())
     }
 
     /// Turn a project's name, or `name:path`, in a tool's path arguments into the real path.
     fn expand_names(&self, args: &mut Value) {
         let Some(obj) = args.as_object_mut() else { return };
+        let all = self.session.projects();
         let swap = |v: &mut Value| {
-            if let Some(real) = v.as_str().and_then(|s| projects::expand(&self.session.projects, s)) {
+            if let Some(real) = v.as_str().and_then(|s| projects::expand(&all, s)) {
                 *v = Value::String(real);
             }
         };
@@ -463,12 +587,11 @@ impl ToolHost {
     /// Each comes with the folder to look in.
     fn text_targets(&self, input: &Value, path: Option<&str>) -> Result<Vec<(String, PathBuf, PathBuf)>, String> {
         let which = input.get("project").and_then(Value::as_str).filter(|s| !s.is_empty());
+        let all = self.session.projects();
         let chosen: Vec<&projects::Project> = match which {
             None => Vec::new(),
-            Some(w) if w.eq_ignore_ascii_case("all") => self.session.projects.iter().collect(),
-            Some(name) => vec![self
-                .session
-                .projects
+            Some(w) if w.eq_ignore_ascii_case("all") => all.iter().collect(),
+            Some(name) => vec![all
                 .iter()
                 .find(|p| p.name.eq_ignore_ascii_case(name))
                 .ok_or_else(|| format!("`{name}` is not one of the projects in this conversation"))?],
@@ -519,6 +642,7 @@ impl ToolHost {
         let steps = parse_plan(input)?;
         let (done, total) = (steps.iter().filter(|s| s["status"] == "completed").count(), steps.len());
         crate::assistant::subagents::note_plan_step(&self.session.conversation_id, &steps);
+        crate::assistant::plan_memory::set(&self.session.conversation_id, crate::assistant::plan_memory::steps_of(&Value::Array(steps.clone())));
         let id = format!("plan-{}", self.session.run_id);
         let block = json!({ "type": "plan", "plan": { "id": id, "steps": steps } });
         let mut view = self.session.view();
@@ -624,7 +748,7 @@ fn clip(text: String) -> String {
 /// What a chat may call: it reads and changes nothing in the project, but it can look up how Bennu works and
 /// open a panel or draw a diagram — showing the user a window or a picture touches neither files nor
 /// processes, so it needs no access.
-pub(super) const CHAT_TOOLS: [&str; 4] = ["bennu_help", "open_ui", diagram::NAME, image::NAME];
+pub(super) const CHAT_TOOLS: [&str; 5] = ["bennu_help", "open_ui", diagram::NAME, image::NAME, title::NAME];
 
 pub(super) fn chat_specs() -> Vec<ToolSpec> {
     all_specs().into_iter().filter(|t| CHAT_TOOLS.iter().any(|n| *n == t.name)).collect()
@@ -650,6 +774,8 @@ impl ToolHost {
             "open_ui" => self.run_open_ui(&call.input),
             "show_diagram" => self.run_show_diagram(&call.input),
             "show_image" => self.run_show_image(&call.input),
+            image::VIEW => self.run_view_image(&call.id, &call.input),
+            n if merula::is_merula_tool(n) => self.run_merula(n, &call.input),
             "load_skill" => self.run_load_skill(&call.input),
             n if spawn::is_agent_tool(n) => self.run_agent_tool(n, &call.input),
             n if live::is_live_tool(n) => self.run_live(n, &call.input),
@@ -664,6 +790,10 @@ impl ToolHost {
             "add_parameter" => self.run_add_parameter(&call.input),
             "ask_user" => self.run_ask(&call.input),
             "update_plan" => self.run_plan(&call.input),
+            title::NAME => self.run_set_title(&call.input),
+            external::NAME => self.run_external(&call.input),
+            script::NAME => self.run_script(&call.input),
+            cargo_run::NAME => self.run_cargo_run(&call.input),
             "bennu_help" => {
                 let query = call.input.get("query").and_then(Value::as_str).unwrap_or("");
                 let limit = call.input.get("limit").and_then(Value::as_u64).unwrap_or(4) as usize;
@@ -688,7 +818,28 @@ impl Host for ToolHost {
         offered_specs(self.plan, !self.skills.is_empty(), &self.off, &self.git)
     }
 
+    fn context_window(&self) -> Option<u64> {
+        self.window
+    }
+
+    fn token_scale(&self) -> f64 {
+        super::token_scale::get(&self.session.conversation_id)
+    }
+
+    fn learned_token_scale(&self, scale: f64) {
+        super::token_scale::set(&self.session.conversation_id, scale);
+    }
+
+    fn before_finish(&self) -> Option<String> {
+        if !self.plan || self.chat {
+            return None;
+        }
+        crate::assistant::plan_memory::closing_note(&self.session.conversation_id)
+    }
+
     fn prepare(&self, request: &mut Request) {
+        // What the user wrote while the run worked goes out with this request, behind the results it waited for.
+        self.deliver_notes(request);
         // First, so the size the compaction measures is the size that would be sent.
         request.messages = diagram_context::prune_diagram_attempts(&request.messages);
         // Only the latest screenshots stay as pictures (the rest become a line), each loaded from disk now —
@@ -701,6 +852,7 @@ impl Host for ToolHost {
         // Whatever the read memory called "above" must still be there: compaction and stubbing remove results.
         self.sync_read_memory(&request.messages);
         self.enforce_limits();
+        self.report_live(Some(request));
     }
 
     fn gate(&self, call: &ToolCall) -> Gate {
@@ -708,8 +860,18 @@ impl Host for ToolHost {
     }
 
     fn run(&self, call: &ToolCall) -> Result<String, String> {
-        let result = self.run_tool(call);
-        self.with_notes(result)
+        let result = self.with_notes(self.run_tool(call));
+        // A plan left untouched for a while is recalled after the result, so steps get ticked as they are done.
+        if !self.plan || call.name == "update_plan" {
+            return result;
+        }
+        match crate::assistant::plan_memory::tick(&self.session.conversation_id) {
+            None => result,
+            Some(reminder) => match result {
+                Ok(out) => Ok(format!("{out}\n\n{reminder}")),
+                Err(e) => Err(format!("{e}\n\n{reminder}")),
+            },
+        }
     }
 
     fn summarize(&self, _call: &ToolCall, result: &Result<String, String>) -> String {
@@ -717,7 +879,7 @@ impl Host for ToolHost {
     }
 
     fn take_images(&self, call: &ToolCall) -> Vec<bennu_assistant::prelude::ImageRef> {
-        if screenshot::is_screenshot_tool(&call.name) || brp::is_brp_picture_tool(&call.name) { self.shown_images(&call.id) } else { Vec::new() }
+        if screenshot::is_screenshot_tool(&call.name) || brp::is_brp_picture_tool(&call.name) || call.name == image::VIEW { self.shown_images(&call.id) } else { Vec::new() }
     }
 
     /// The wait before a retry ends early on Stop, and on "Retry now" in the panel.
@@ -747,13 +909,18 @@ impl Host for ToolHost {
                 s.view().text(&t);
                 s.push_message_soon();
             }
-            AgentEvent::ToolDone { id, name, input, summary, ok } => {
+            AgentEvent::ToolDone { id, name, input, summary, ok, timing } => {
                 // The questions, the proposals and the access cards are the record of those calls.
                 // A diagram or a picture that was shown is its own record; one that failed leaves a receipt with the reason.
                 if !(name == "ask_user" || name == "update_plan" || (name == diagram::NAME && ok) || (name == image::NAME && ok)) {
-                    s.view().tool(&id, &name, &input, &summary, ok);
+                    s.view().tool(&id, &name, &input, &summary, ok, timing);
                 }
                 s.push_message();
+            }
+            AgentEvent::Responded { ms, first_ms, output_tokens, .. } => {
+                // Where the run's time goes: the model's part, request by request, beside the tools' own.
+                s.view().step(ms, first_ms, output_tokens);
+                s.push_message_soon();
             }
             AgentEvent::Usage(u) => {
                 {
@@ -765,6 +932,8 @@ impl Host for ToolHost {
                     "input": total.input_tokens, "output": total.output_tokens,
                     "cache_read": total.cache_read_tokens, "cache_write": total.cache_write_tokens,
                 }));
+                // The provider's count arrives as the answer streams: the cost moves with it.
+                self.report_live(None);
             }
             AgentEvent::Request { iteration } => {
                 s.view().begin_attempt();
@@ -777,13 +946,35 @@ impl Host for ToolHost {
                 }
             }
             AgentEvent::Thinking(_) => self.status("thinking", None, self.iteration()),
-            AgentEvent::ToolStart { name, .. } => self.status("tool", Some(&name), self.iteration()),
+            AgentEvent::ToolStart { name, .. } => {
+                self.status("tool", Some(&name), self.iteration());
+                // Streamed text reaches the panel at most every so often; what came after the last push would
+                // otherwise wait for the tool to finish — minutes, for a test run — with the sentence cut.
+                s.push_message();
+            }
         }
     }
 
     fn cancelled(&self) -> bool {
         self.session.cancelled()
     }
+}
+
+/// `path` with `.` and `..` worked out without touching the disk, so `voriz:../fulcrum` is checked for where it
+/// lands, not where it starts.
+fn lexical(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

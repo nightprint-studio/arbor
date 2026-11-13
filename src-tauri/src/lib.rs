@@ -13,6 +13,7 @@
 //! [`run`] just stitches those together.
 
 mod app_ctx;
+mod attention;
 mod app_state;
 mod error;
 mod handlers;
@@ -67,6 +68,8 @@ pub use app_state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before any thread or child exists: every backend, and every process they start, inherits it.
+    arbor_process_ext::prelude::widen_process_path();
     setup::init_tracing();
     setup::build_builder()
         .invoke_handler(crate::invoke_handlers!())

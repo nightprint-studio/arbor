@@ -540,6 +540,8 @@ const assistantFixtures: Record<string, FixtureHandler> = {
     { id: 'c-old', title: 'Migrazione Struts 1 → Spring MVC', updatedAt: NOW_MS - 86400000 * 2, model: 'claude-opus-4-5', cost: 2.88, context: { system: 6200, project: 22000, conversation: 41000 } },
   ],
   'bennu.assistant_load': DEMO_CONVERSATION,
+  // One list per tool sent: the demo tool's program is not on this machine.
+  'bennu.assistant_external_tool_problems': [['The program was not found at this path.']],
   'bennu.assistant_spend': {
     meters: [
       { period: 'session', spentEur: 0.41, limitEur: null, level: 'ok' },

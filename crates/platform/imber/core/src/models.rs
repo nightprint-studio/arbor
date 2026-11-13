@@ -54,6 +54,9 @@ pub struct ModelInfo {
     pub tagline: String,
     /// The largest window the model accepts, in tokens.
     pub context_max: u64,
+    /// The most output tokens one response may have — thinking included. Absent: [`DEFAULT_MAX_OUTPUT`].
+    #[serde(default)]
+    pub max_output: Option<u32>,
     /// The effort levels it accepts; empty when it has none.
     #[serde(default)]
     pub efforts: Vec<Effort>,
@@ -63,7 +66,15 @@ pub struct ModelInfo {
     pub long_prompt: Option<Rates>,
 }
 
+/// The output ceiling of a model whose entry does not say: low enough that every model accepts it.
+pub const DEFAULT_MAX_OUTPUT: u32 = 32_000;
+
 impl ModelInfo {
+    /// The most output one response of this model may have (see [`crate::output::output_budget`]).
+    pub fn output_ceiling(&self) -> u32 {
+        self.max_output.filter(|n| *n > 0).unwrap_or(DEFAULT_MAX_OUTPUT)
+    }
+
     /// The rates a request with `prompt_tokens` of prompt is charged at.
     fn rates_for(&self, prompt_tokens: u64) -> &Rates {
         match &self.long_prompt {
@@ -131,7 +142,7 @@ mod tests {
 
     fn model(id: &str) -> ModelInfo {
         ModelInfo {
-            id: id.into(), name: id.into(), tagline: String::new(), context_max: 200_000, efforts: vec![],
+            id: id.into(), name: id.into(), tagline: String::new(), context_max: 200_000, max_output: None, efforts: vec![],
             price: rates(4.0, 20.0), long_prompt: None,
         }
     }

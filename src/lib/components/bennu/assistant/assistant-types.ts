@@ -5,6 +5,7 @@
  * have to fill, so the screen can be judged now and wired later without being redrawn.
  */
 
+import type { ExternalTool } from '$lib/ipc/bennu/config';
 import type { DiffHunkModel } from '$lib/components/shared/ui/TextDiff.svelte';
 
 /**
@@ -27,9 +28,9 @@ export interface AssistantModel {
   outputPrice: number;
 }
 
-import type { ToolCall, ToolKind } from '$lib/components/shared/internal/imber/imber-types';
+import type { ModelStep, ToolCall, ToolKind, WorkItem } from '$lib/components/shared/internal/imber/imber-types';
 /** A tool call and its icon kind are the shared widgets' own types; `refactor` is one of Bennu's. */
-export type { ToolCall, ToolKind };
+export type { ModelStep, ToolCall, ToolKind, WorkItem };
 
 export interface ProposedFile {
   path: string;
@@ -93,6 +94,9 @@ export interface QuestionSet {
   answers?: Record<string, string[]>;
 }
 
+/** What the call behind an access request wants to do in the folder. */
+export type AccessNeed = 'read' | 'list' | 'write' | 'create' | 'delete';
+
 /** What you decided about a request to go beyond where the assistant may reach. */
 export type AccessAnswer = 'denied' | 'read' | 'write';
 
@@ -109,6 +113,8 @@ export interface AccessRequest {
   reason: string;
   /** Writing in a folder already opened for reading — the card then offers keep-read-only or allow-writing. */
   upgrade?: boolean;
+  /** What the call that asked wants to do there: reading or listing is enough for `read`/`list`, the rest write. */
+  needs?: AccessNeed;
   /** Absent until you answer. */
   answer?: AccessAnswer;
 }
@@ -134,6 +140,31 @@ export interface ConfirmRequest {
   danger: boolean;
   answer?: 'yes' | 'no';
 }
+
+/** A script of the project the assistant wants to run: shown to the user, who declines, runs it once, or runs it
+ *  and adds it to their programs (the `declaration` is what gets saved). */
+export interface ScriptRequest {
+  id: string;
+  /** Absolute path of the script. */
+  path: string;
+  /** How the thread names it (`project:path`). */
+  label: string;
+  /** The command that will run, as text: interpreter, script and arguments. */
+  command: string;
+  cwd: string;
+  /** Why the assistant wants to run it, in its words; may be empty. */
+  why: string;
+  /** The first lines of the script. */
+  preview: string;
+  /** How many lines it has in all. */
+  lines: number;
+  /** It changed since it last ran in this conversation. */
+  changed: boolean;
+  background: boolean;
+  declaration: ExternalTool;
+  answer?: ScriptAnswer;
+}
+export type ScriptAnswer = 'no' | 'once' | 'add';
 
 export type PlanStatus = 'pending' | 'in_progress' | 'completed';
 export interface PlanStep {
@@ -216,10 +247,15 @@ export type MessageBlock =
   | { type: 'access'; request: AccessRequest; promptId?: string }
   | { type: 'grant'; grant: AccessGrant }
   | { type: 'confirm'; confirm: ConfirmRequest; promptId?: string }
+  | { type: 'script'; script: ScriptRequest; promptId?: string }
   | { type: 'notice'; level: 'error' | 'warning' | 'info'; text: string; detail?: string; kind?: string; retryable?: boolean; canRetry?: boolean }
   | { type: 'questions'; set: QuestionSet; promptId?: string }
   | { type: 'code'; language: string; code: string }
   | { type: 'tool'; call: ToolCall }
+  /** One answer of the model: recorded after its text, before the receipts of the calls it asked for. */
+  | { type: 'step'; step: ModelStep }
+  /** A message the user wrote while the run worked, where the run read it. */
+  | { type: 'note'; note: { id: string; text: string } }
   | { type: 'proposal'; proposal: EditProposal }
   | { type: 'live_summary'; summary: LiveSummary }
   | { type: 'screenshot'; shot: ScreenshotShot }
@@ -308,4 +344,6 @@ export interface Conversation {
   autoContinue?: string;
   /** This conversation's own sub-agents switch: `on`, `off`; absent follows the setting. */
   subagents?: string;
+  /** Non-stop: this conversation's runs have no step cap (the spending limits still apply). */
+  nonStop?: boolean;
 }

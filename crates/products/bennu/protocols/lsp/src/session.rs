@@ -204,6 +204,45 @@ impl SessionShared {
     }
 }
 
+/// What a running server can answer, from its handshake (see [`LspSession::server_features`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ServerFeatures {
+    pub completion: bool,
+    pub hover: bool,
+    pub definition: bool,
+    pub references: bool,
+    pub implementations: bool,
+    pub rename: bool,
+    /// A file's declarations (`textDocument/documentSymbol`).
+    pub outline: bool,
+    /// Symbols by name across the workspace.
+    pub workspace_symbols: bool,
+    /// Callers and callees.
+    pub call_hierarchy: bool,
+    pub formatting: bool,
+}
+
+impl ServerFeatures {
+    /// What it answers, in words, in a fixed order — the settings page and the project summary show these.
+    pub fn labels(&self) -> Vec<&'static str> {
+        [
+            (self.hover, "hover"),
+            (self.definition, "go to definition"),
+            (self.references, "references"),
+            (self.implementations, "implementations"),
+            (self.rename, "rename"),
+            (self.outline, "outline"),
+            (self.workspace_symbols, "symbol search"),
+            (self.call_hierarchy, "callers"),
+            (self.completion, "completion"),
+            (self.formatting, "formatting"),
+        ]
+        .into_iter()
+        .filter_map(|(on, label)| on.then_some(label))
+        .collect()
+    }
+}
+
 /// A running, initialized language server.
 pub struct LspSession {
     pub(crate) cfg: SessionConfig,
@@ -526,6 +565,26 @@ impl LspSession {
     /// The server capabilities, for the feature gates in [`crate::ops`].
     pub(crate) fn caps(&self) -> &ServerCapabilities {
         &self.caps
+    }
+
+    /// What this server said it can answer, typed, for the questions Bennu's code tools ask — the same gates
+    /// [`crate::ops`] applies, so a feature set here is one a request will not be refused for. [`Self::features`] is
+    /// the panel's list of names.
+    pub fn server_features(&self) -> ServerFeatures {
+        let c = &self.caps;
+        use crate::types::capability_on;
+        ServerFeatures {
+            completion: c.completion_provider.is_some(),
+            hover: capability_on(&c.hover_provider),
+            definition: capability_on(&c.definition_provider),
+            references: capability_on(&c.references_provider),
+            implementations: capability_on(&c.implementation_provider),
+            rename: capability_on(&c.rename_provider),
+            outline: capability_on(&c.document_symbol_provider),
+            workspace_symbols: capability_on(&c.workspace_symbol_provider),
+            call_hierarchy: capability_on(&c.call_hierarchy_provider),
+            formatting: capability_on(&c.document_formatting_provider),
+        }
     }
 
     /// The characters that should trigger completion automatically, from the handshake.

@@ -13,7 +13,7 @@ Read the pages in this order, or open ALL.md for everything in one file. Each pa
 - [Imber: Permissions and modes](03-permissions.md): Manual, Accept edits and Autonomous modes, the four reaches, and one table of what asks when.
 - [Imber: Reviewing changes](04-reviewing-changes.md): Proposals, outdated proposals, Undo, Local History and the isolated copy with Apply.
 - [Imber: Tools it can use](05-tools.md): Every family of tools with its purpose, how to switch one off, git access and several projects.
-- [Imber: Running and observing](06-running-and-observing.md): Managed processes, recipes, scenarios, requests, log reading, the shared build queue and build-error attribution.
+- [Imber: Running and observing](06-running-and-observing.md): Managed processes, cargo run, the programs you set up, recipes, scenarios, requests, log reading, the shared build queue and build-error attribution.
 - [Imber: Debugging with Imber](07-debugging.md): Breakpoints, launching and attaching, stops and snapshots, and the off-by-default tools that change a running program.
 - [Imber: Bevy games and the profiler](08-bevy-and-profiler.md): Looking into a running Bevy game over BRP, changing it behind a separate switch, and reading a profiler recording.
 - [Imber: Screenshots and diagrams](09-screenshots-and-diagrams.md): Seeing a front end on localhost and drawing Mermaid diagrams in the thread.

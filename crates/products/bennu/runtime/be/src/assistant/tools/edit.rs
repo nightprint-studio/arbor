@@ -76,7 +76,7 @@ impl ToolHost {
         if let Ok(rel) = Path::new(file).strip_prefix(self.project()) {
             return rel.to_string_lossy().replace('\\', "/");
         }
-        projects::labelled(&self.session.projects, Path::new(file)).unwrap_or_else(|| file.to_string())
+        projects::labelled(&self.session.projects(), Path::new(file)).unwrap_or_else(|| file.to_string())
     }
 
     pub(super) fn file_entry(&self, file: &str, old: &str, new: &str) -> Value {
@@ -251,8 +251,21 @@ impl ToolHost {
             outcome.map_err(|e| format!("{p}: {e}"))?;
             results.push(format!("{p} (temp, not in Local History)"));
         }
+        // A path that is not there is said so up front, with where a relative one was looked for: answering
+        // "deleted" with a failure buried in the detail reads as a success.
+        let (paths, missing): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| Path::new(p).exists());
+        let missing_note = (!missing.is_empty()).then(|| {
+            format!(
+                "NOT deleted, not there: {} (a relative path is taken in the project at `{}`; name another project as `name:path`)",
+                missing.join(", "),
+                self.project().display()
+            )
+        });
         if paths.is_empty() {
-            return Ok(format!("deleted: {}", results.join(", ")));
+            return match (results.is_empty(), missing_note) {
+                (true, Some(note)) => Err(note),
+                (_, note) => Ok([Some(format!("deleted: {}", results.join(", "))), note].into_iter().flatten().collect::<Vec<_>>().join("\n")),
+            };
         }
         let held: Vec<&Path> = paths.iter().map(Path::new).collect();
         self.reserve_files(&held)?;
@@ -265,10 +278,28 @@ impl ToolHost {
                 None => by_root.push((root, vec![p])),
             }
         }
+        let mut failed: Vec<String> = Vec::new();
         for (root, list) in by_root {
-            results.push(self.call_handler("bennu_delete_paths", json!({"args": {"root": root, "paths": list}}))?.to_string());
+            let reply = self.call_handler("bennu_delete_paths", json!({"args": {"root": root, "paths": list}}))?;
+            let strings = |key: &str| -> Vec<Value> { reply.get(key).and_then(Value::as_array).cloned().unwrap_or_default() };
+            results.extend(strings("deleted").iter().filter_map(Value::as_str).map(str::to_string));
+            failed.extend(strings("failed").iter().map(|f| {
+                format!("{} ({})", f.get("path").and_then(Value::as_str).unwrap_or("?"), f.get("error").and_then(Value::as_str).unwrap_or("failed"))
+            }));
         }
-        Ok(format!("deleted (kept in Local History, restorable): {}", results.join(", ")))
+        let mut lines = Vec::new();
+        if !results.is_empty() {
+            lines.push(format!("deleted {} (kept in Local History, restorable): {}", results.len(), results.join(", ")));
+        }
+        if !failed.is_empty() {
+            lines.push(format!("NOT deleted: {}", failed.join(", ")));
+        }
+        lines.extend(missing_note);
+        // Nothing went: that is a failure, not a success with a footnote.
+        if results.is_empty() {
+            return Err(lines.join("\n"));
+        }
+        Ok(lines.join("\n"))
     }
 }
 

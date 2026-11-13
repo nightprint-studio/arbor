@@ -66,11 +66,11 @@ pub(super) fn specs() -> Vec<ToolSpec> {
     vec![
         spec(
             "run_start",
-            "Start a long-running process (a server, a watcher) on this machine and return its id at once. The user is asked to approve every start. Output is kept (ring buffer) and read with run_logs; `ready` says when it is up (see wait_ready); run_stop ends it with its whole process tree. The command is a shell line run in `cwd` (inside the project). Everything is stopped when the project closes. For a stack of several services prefer a recipe (list_recipes, run_recipe).",
+            "Start a long-running process (a server, a watcher) on this machine and return its id at once. The user is asked to approve every start. Output is kept (ring buffer) and read with run_logs; `ready` says when it is up (see wait_ready); run_stop ends it with its whole process tree. The command is a shell line run in `cwd` (a folder of a project of the conversation). Everything is stopped when the project closes. For a stack of several services prefer a recipe (list_recipes, run_recipe).",
             json!({"type":"object","properties":{
                 "name":{"type":"string","description":"A short name, unique among running processes: `api`, `web`."},
                 "command":{"type":"string","description":"The shell command line, e.g. `mvn -q spring-boot:run` or `npm run dev`."},
-                "cwd":{"type":"string","description":"Folder relative to the project. Default: the project root."},
+                "cwd":{"type":"string","description":"Folder relative to the project, or in another project of the conversation by name (`voriz:` or `voriz:crates/app`). Default: the project root."},
                 "env":{"type":"object","additionalProperties":{"type":"string"}},
                 "ports":{"type":"array","items":{"type":"integer"},"description":"Ports it will listen on: refused up front if already taken."},
                 "ready":ready.clone(),
@@ -190,7 +190,7 @@ fn clock(ms: u64) -> String {
     format!("{:02}:{:02}:{:02}.{:03}", day / 3_600_000, (day / 60_000) % 60, (day / 1000) % 60, day % 1000)
 }
 
-fn duration_text(ms: u64) -> String {
+pub(super) fn duration_text(ms: u64) -> String {
     match ms {
         0..=999 => format!("{ms} ms"),
         1_000..=59_999 => format!("{:.1} s", ms as f64 / 1000.0),
@@ -238,7 +238,7 @@ fn events_text(events: &[Event]) -> String {
     events.iter().map(event_line).collect::<Vec<_>>().join("\n")
 }
 
-fn readiness_from(v: &Value) -> Result<Readiness, String> {
+pub(super) fn readiness_from(v: &Value) -> Result<Readiness, String> {
     let raw: RawReady = serde_json::from_value(v.clone()).map_err(|e| format!("`ready` is not valid: {e}"))?;
     let mut errors = Vec::new();
     raw.validate("this process", &mut errors);
@@ -252,7 +252,7 @@ fn str_arg<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
 // ── The tools ────────────────────────────────────────────────────────────────────────────────────
 
 impl ToolHost {
-    fn live(&self) -> Arc<Live> {
+    pub(super) fn live(&self) -> Arc<Live> {
         live_for(&self.session.root, &self.session.sink)
     }
 
@@ -391,7 +391,7 @@ impl ToolHost {
     fn live_start(&self, input: &Value) -> Result<String, String> {
         let live = self.live();
         let (name, command) = (str_arg(input, "name")?.to_string(), str_arg(input, "command")?.to_string());
-        let cwd = bennu_live::prelude::resolve_cwd(self.project(), input.get("cwd").and_then(Value::as_str).unwrap_or("."))?;
+        let cwd = self.run_cwd(input)?;
         let env: Vec<(String, String)> = input
             .get("env")
             .and_then(Value::as_object)
@@ -402,18 +402,31 @@ impl ToolHost {
             Some(v) if v.is_object() => readiness_from(v)?,
             _ => Readiness::default(),
         };
-        self.refuse_if_held(&live, &name, &ports)?;
-        let owner = Some(self.me().to_string());
-        let info = live.manager.start(StartSpec { name: name.clone(), command, cwd, env, ports, ready, group: None, lifetime: None, owner })?;
+        let spec = StartSpec { name, command, argv: Vec::new(), cwd, env, ports, ready, group: None, lifetime: None, owner: None };
+        self.start_owned(&live, spec, input.get("wait").and_then(Value::as_bool).unwrap_or(false))
+    }
+
+    /// Start a process owned by this conversation and say so — the one door `run_start`, `cargo_run` and a
+    /// background `run_tool` share, so they all refuse a held name or port and read the same way.
+    pub(super) fn start_owned(&self, live: &Live, spec: StartSpec, wait: bool) -> Result<String, String> {
+        self.start_owned_info(live, spec, wait).map(|(_, out)| out)
+    }
+
+    /// [`Self::start_owned`] that also hands back the process, for a caller that goes on watching it.
+    pub(super) fn start_owned_info(&self, live: &Live, mut spec: StartSpec, wait: bool) -> Result<(ProcInfo, String), String> {
+        self.refuse_if_held(live, &spec.name, &spec.ports)?;
+        spec.owner = Some(self.me().to_string());
+        let name = spec.name.clone();
+        let info = live.manager.start(spec)?;
         self.session.live_log().started(&name);
         let mut out = format!("started {} `{}` (pid {}). Read its output with run_logs, stop it with run_stop.", info.id, info.name, info.pid);
-        if input.get("wait").and_then(Value::as_bool).unwrap_or(false) {
+        if wait {
             match live.manager.wait_ready(&info.id, None, &self.live_cancelled()) {
                 Ok(ms) => out.push_str(&format!("\nready after {}.", duration_text(ms))),
                 Err(e) => out.push_str(&format!("\nNOT ready: {e}\nThe process is still running (if it is): use run_logs, or run_stop.")),
             }
         }
-        Ok(out)
+        Ok((info, out))
     }
 
     fn live_status(&self, input: &Value) -> Result<String, String> {

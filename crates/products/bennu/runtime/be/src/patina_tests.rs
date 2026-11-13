@@ -195,6 +195,9 @@ fn bennu_run_patina_tests(ctx: &BennuState, args: PatinaRunArgs) -> Result<Cargo
         label: if args.only.is_empty() { format!("mod {mod_id}") } else { args.only.join(", ") },
         command,
         widened: None,
+        // Patina's own test binary speaks libtest, which is what the cargo runner reads.
+        runner: bennu_test::prelude::CargoRunner::Cargo,
+        runner_note: None,
     };
     let sink = ctx.event_sink();
     let rid = run_id.clone();

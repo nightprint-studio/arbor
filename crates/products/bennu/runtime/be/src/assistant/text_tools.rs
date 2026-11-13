@@ -186,7 +186,7 @@ pub fn search(root: &Path, base: &Path, args: &SearchArgs) -> Result<String, Str
     }
 
     if matched == 0 {
-        return Ok(format!("No matches in {} files.", files.len()));
+        return Ok(format!("No matches in {} files.{}", files.len(), literal_hint(&args.pattern, args.regex)));
     }
     if args.files_only {
         let list: Vec<String> = counts.iter().take(limit).map(|(f, n)| format!("{f} ({n})")).collect();
@@ -230,7 +230,7 @@ pub fn find(root: &Path, base: &Path, args: &FindArgs) -> Result<String, String>
     Ok(out.join("\n"))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct ReplaceArgs {
     /// The text or regular expression to replace.
     pub pattern: String,
@@ -244,7 +244,8 @@ pub struct ReplaceArgs {
     pub ignore_case: bool,
     #[serde(default)]
     pub extensions: Vec<String>,
-    /// Count only: say which files would change and how many times, and change nothing.
+    /// Change nothing: say which files would change, and show each match with its line and what it would
+    /// become.
     #[serde(default)]
     pub dry_run: bool,
     /// Refuse to touch more files than this (default 100): a pattern that matches half the project is
@@ -301,6 +302,42 @@ pub fn replace_matches(re: &regex::Regex, text: &str, replacement: &str, regex_m
         re.replace_all(text, regex::NoExpand(replacement)).into_owned()
     };
     (out, count)
+}
+
+/// What a replacement would do, match by match, for a dry run: the line, the text matched and what it would
+/// become. A count per file is not enough to catch a pattern that matches more than meant — a `.*` that runs
+/// to the end of the line, a `\s` that crosses one — so the text itself is shown, a match over several lines
+/// says which ones, and long text is cut in the middle. At most `limit` matches; the caller says how many more.
+pub fn preview_matches(re: &regex::Regex, text: &str, replacement: &str, regex_mode: bool, limit: usize) -> Vec<String> {
+    re.captures_iter(text)
+        .take(limit)
+        .filter_map(|caps| {
+            let whole = caps.get(0)?;
+            let first = text[..whole.start()].matches('\n').count() + 1;
+            let last = first + whole.as_str().matches('\n').count();
+            let becomes = if regex_mode {
+                let mut out = String::new();
+                caps.expand(replacement, &mut out);
+                out
+            } else {
+                replacement.to_string()
+            };
+            let lines = if last > first { format!("lines {first}–{last}") } else { format!("line {first}") };
+            Some(format!("  {lines}: «{}» → «{}»", shown(whole.as_str()), shown(&becomes)))
+        })
+        .collect()
+}
+
+/// Text for a one-line preview: newlines and tabs made visible, the middle cut past 120 characters.
+fn shown(text: &str) -> String {
+    let flat = text.replace('\n', "⏎").replace('\t', "⇥");
+    let count = flat.chars().count();
+    if count <= 120 {
+        return flat;
+    }
+    let head: String = flat.chars().take(70).collect();
+    let tail: String = flat.chars().skip(count - 40).collect();
+    format!("{head}…({} more)…{tail}", count - 110)
 }
 
 /// Replace `old` with `new` in `text`. `old` must be there; and, unless `expected` says otherwise,
@@ -387,8 +424,28 @@ pub fn apply_spans(text: &str, spans: &[Span]) -> Result<String, String> {
     Ok(out)
 }
 
+/// A literal search that found nothing while its pattern reads like a regex (`a|b`, `foo.*bar`, `^fn`): the
+/// emptiness may be the spelling, not the code, and saying so saves a wrong conclusion.
+fn literal_hint(pattern: &str, regex: bool) -> &'static str {
+    let looks_regex = ["|", ".*", ".+", "\\s", "\\w", "\\d", "\\b", "(?"].iter().any(|t| pattern.contains(t))
+        || pattern.starts_with('^')
+        || pattern.ends_with('$');
+    if regex || !looks_regex {
+        return "";
+    }
+    " The pattern was searched as literal text (`regex` is off), and it contains regex operators: with `regex: true` it would be read as a regular expression."
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_literal_search_that_reads_like_a_regex_says_so_when_empty() {
+        assert!(literal_hint("HostCall|host_call", false).contains("regex: true"));
+        assert!(literal_hint("^fn main", false).contains("literal"));
+        assert_eq!(literal_hint("HostCall|host_call", true), "");
+        assert_eq!(literal_hint("HostCall", false), "");
+    }
+
     use super::*;
 
     fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
@@ -495,6 +552,17 @@ mod tests {
         assert!(by_part.contains("OrderService.java") && by_part.contains("OrderTest.java") && !by_part.contains("pom"));
         let by_suffix = find(&root, &root, &FindArgs { name: "*.xml".into(), path: None, max_results: None }).unwrap();
         assert_eq!(by_suffix, "pom.xml");
+    }
+
+    #[test]
+    fn a_dry_run_shows_each_match_and_what_it_becomes() {
+        let args = ReplaceArgs { pattern: r"let (\w+) = .*".into(), replacement: "let $1 = 0;".into(), regex: true, ..Default::default() };
+        let re = matcher(&args).unwrap();
+        let text = "fn f() {\n    let a = 1; // keep me\n}\n";
+        let shown = preview_matches(&re, text, &args.replacement, true, 10);
+        assert_eq!(shown, vec!["  line 2: «let a = 1; // keep me» → «let a = 0;»".to_string()], "the comment the pattern swallowed is visible");
+        let across = matcher(&ReplaceArgs { pattern: r"\{\s+let".into(), regex: true, ..Default::default() }).unwrap();
+        assert!(preview_matches(&across, text, "", true, 10)[0].starts_with("  lines 1–2: «{⏎    let»"));
     }
 
     #[test]

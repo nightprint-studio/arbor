@@ -10,9 +10,11 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import './imber-motion.css';
 
-  let { label, meta = '', retry = null, detail = '', onRetryNow, onStop }: {
+  let { label, progress = '', meta = '', retry = null, detail = '', onRetryNow, onStop }: {
     /** The present-tense phrase, without the ellipsis ("Thinking", "Reading"). */
     label: string;
+    /** What the step itself reports while it runs ("Compiling voriz · 1:12 in this step"), beside the phrase. */
+    progress?: string;
     /** Elapsed time, step — whatever is worth knowing while waiting. */
     meta?: string;
     /** The status line while the request is being sent again; replaces `label` and `meta`. */
@@ -32,6 +34,7 @@
     {#if onStop}<Button variant="ghost" size="xs" tooltip="Stop the run" onclick={onStop}>Stop</Button>{/if}
   {:else}
     <span class="asst-shimmer label">{label}…</span>
+    {#if progress}<span class="progress" title={progress}>{progress}</span>{/if}
     {#if meta}<span class="meta">{meta}</span>{/if}
   {/if}
 </div>
@@ -40,5 +43,9 @@
   .activity { display: flex; align-items: center; gap: 10px; padding: 2px 4px 2px 25px; }
   .label { font-size: var(--font-size-sm); font-weight: 500; }
   .retry { color: var(--warning); }
-  .meta { font-size: var(--font-size-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .progress {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--font-size-xs); color: var(--text-secondary); font-variant-numeric: tabular-nums;
+  }
+  .meta { flex-shrink: 0; font-size: var(--font-size-2xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 </style>

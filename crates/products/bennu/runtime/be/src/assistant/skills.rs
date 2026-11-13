@@ -39,7 +39,8 @@ pub(super) struct Skill {
     pub description: String,
     /// `user` or `project`.
     pub scope: &'static str,
-    /// Where it was found, for the badge: `.bennu`, `.claude` (project or user), or `bennu` (user config).
+    /// Where it was found, for the badge: `.bennu`, `.claude` (project or user), `bennu` (user config), or the
+    /// name of a folder picked in Settings.
     pub source: String,
     /// The project it belongs to, when it is a project skill.
     pub project: Option<String>,
@@ -175,32 +176,62 @@ fn clip_body(text: &str, limit: usize) -> (String, bool) {
 pub(super) struct Source {
     pub dir: PathBuf,
     pub scope: &'static str,
-    pub label: &'static str,
+    pub label: String,
     pub project: Option<String>,
 }
 
+/// The user's own skill folders, highest precedence first.
+pub(super) struct UserFolders {
+    /// Bennu's config folder (`skills/`).
+    pub bennu: PathBuf,
+    /// Folders the user picked in Settings, in the order they were added. Each holds skill folders, or is
+    /// itself a skill (has a `SKILL.md`).
+    pub custom: Vec<PathBuf>,
+    /// `~/.claude/skills`.
+    pub claude: Option<PathBuf>,
+}
+
+/// The last component of `dir`, for a badge; the whole path when there is none.
+fn folder_label(dir: &Path) -> String {
+    dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| dir.display().to_string())
+}
+
 /// Where skills are looked for, highest precedence first: each project's `.bennu/skills` then
-/// `.claude/skills` (projects in the order given), then the user's own folders.
-pub(super) fn sources(roots: &[PathBuf], user_bennu: PathBuf, user_claude: Option<PathBuf>) -> Vec<Source> {
+/// `.claude/skills` (projects in the order given), then the user's own folders — Bennu's, the ones picked
+/// by hand, `~/.claude/skills`. A folder picked by hand beats `~/.claude` because choosing it is explicit.
+pub(super) fn sources(roots: &[PathBuf], user: UserFolders) -> Vec<Source> {
     let mut out = Vec::new();
     for root in roots {
-        let project = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| root.display().to_string());
+        let project = folder_label(root);
         for (rel, label) in [(".bennu/skills", ".bennu"), (".claude/skills", ".claude")] {
-            out.push(Source { dir: root.join(rel), scope: "project", label, project: Some(project.clone()) });
+            out.push(Source { dir: root.join(rel), scope: "project", label: label.to_string(), project: Some(project.clone()) });
         }
     }
-    out.push(Source { dir: user_bennu, scope: "user", label: "bennu", project: None });
-    if let Some(dir) = user_claude {
-        out.push(Source { dir, scope: "user", label: ".claude", project: None });
+    out.push(Source { dir: user.bennu, scope: "user", label: "bennu".to_string(), project: None });
+    for dir in user.custom {
+        let label = folder_label(&dir);
+        out.push(Source { dir, scope: "user", label, project: None });
+    }
+    if let Some(dir) = user.claude {
+        out.push(Source { dir, scope: "user", label: ".claude".to_string(), project: None });
     }
     out
 }
 
-/// The user's folders: Bennu's own config folder and `~/.claude/skills`.
-pub(super) fn user_sources() -> (PathBuf, Option<PathBuf>) {
-    let bennu = arbor_core::prelude::bennu_config_path("skills");
-    let claude = arbor_core::prelude::user_home().map(|h| h.join(".claude").join("skills"));
-    (bennu, claude)
+/// The user's folders: Bennu's own config folder, the ones picked in Settings (`custom`; blank and
+/// repeated entries are dropped) and `~/.claude/skills`.
+pub(super) fn user_sources(custom: &[String]) -> UserFolders {
+    let mut picked: Vec<PathBuf> = Vec::new();
+    for dir in custom.iter().map(|d| d.trim()).filter(|d| !d.is_empty()).map(PathBuf::from) {
+        if !picked.contains(&dir) {
+            picked.push(dir);
+        }
+    }
+    UserFolders {
+        bennu: arbor_core::prelude::bennu_config_path("skills"),
+        custom: picked,
+        claude: arbor_core::prelude::user_home().map(|h| h.join(".claude").join("skills")),
+    }
 }
 
 fn read_skill(dir: &Path, source: &Source) -> Result<Skill, String> {
@@ -227,7 +258,7 @@ fn read_skill(dir: &Path, source: &Source) -> Result<Skill, String> {
         name,
         description,
         scope: source.scope,
-        source: source.label.to_string(),
+        source: source.label.clone(),
         project: source.project.clone(),
         dir: dir.to_path_buf(),
         body,
@@ -241,6 +272,14 @@ fn read_skill(dir: &Path, source: &Source) -> Result<Skill, String> {
 pub(super) fn discover(sources: &[Source]) -> Discovery {
     let mut found = Discovery::default();
     for source in sources {
+        // A folder picked by hand may be one skill rather than a folder of them.
+        if source.dir.join("SKILL.md").is_file() {
+            match read_skill(&source.dir, source) {
+                Ok(skill) => found.skills.push(skill),
+                Err(reason) => found.invalid.push(Invalid { path: source.dir.join("SKILL.md"), reason }),
+            }
+            continue;
+        }
         let Ok(entries) = std::fs::read_dir(&source.dir) else { continue };
         let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
         dirs.sort();
@@ -428,6 +467,10 @@ mod tests {
         }
     }
 
+    fn user_at(bennu: PathBuf) -> UserFolders {
+        UserFolders { bennu, custom: Vec::new(), claude: None }
+    }
+
     fn doc(name: &str, description: &str) -> String {
         format!("---\nname: {name}\ndescription: {description}\n---\nDo the thing.\n")
     }
@@ -473,7 +516,7 @@ mod tests {
     fn a_missing_description_makes_the_skill_invalid() {
         let s = Scratch::new();
         s.skill("p/.claude/skills", "nodesc", "---\nname: nodesc\n---\nBody");
-        let d = discover(&sources(&[s.0.join("p")], s.0.join("none"), None));
+        let d = discover(&sources(&[s.0.join("p")], user_at(s.0.join("none"))));
         assert!(d.skills.is_empty());
         assert!(d.invalid[0].reason.contains("description"), "{:?}", d.invalid);
     }
@@ -483,7 +526,7 @@ mod tests {
         let s = Scratch::new();
         s.skill("p/.claude/skills", "from-folder", "---\ndescription: d\n---\nBody");
         s.skill("p/.claude/skills", "bad", "---\nname: ../evil\ndescription: d\n---\nBody");
-        let d = discover(&sources(&[s.0.join("p")], s.0.join("none"), None));
+        let d = discover(&sources(&[s.0.join("p")], user_at(s.0.join("none"))));
         assert_eq!(d.skills.iter().map(|k| k.name.as_str()).collect::<Vec<_>>(), ["from-folder"]);
         assert_eq!(d.invalid.len(), 1);
         assert!(valid_name("a_b-1") && !valid_name("a b") && !valid_name("-a") && !valid_name(""));
@@ -501,7 +544,7 @@ mod tests {
     fn a_long_body_is_cut_at_a_line_and_flagged() {
         let s = Scratch::new();
         s.skill("p/.bennu/skills", "big", &format!("---\nname: big\ndescription: d\n---\n{}", "line\n".repeat(20_000)));
-        let d = discover(&sources(&[s.0.join("p")], s.0.join("none"), None));
+        let d = discover(&sources(&[s.0.join("p")], user_at(s.0.join("none"))));
         assert!(d.skills[0].truncated && d.skills[0].body.len() <= MAX_BODY_BYTES);
         assert!(render_loaded(&d.skills[0]).contains("left out"));
     }
@@ -513,7 +556,7 @@ mod tests {
         s.skill("p/.claude/skills", "same", &doc("same", "from claude"));
         s.skill("user", "same", &doc("same", "from user"));
         s.skill("user", "only-user", &doc("only-user", "u"));
-        let d = discover(&sources(&[s.0.join("p")], s.0.join("user"), None));
+        let d = discover(&sources(&[s.0.join("p")], user_at(s.0.join("user"))));
         let same: Vec<_> = d.skills.iter().filter(|k| k.name == "same").collect();
         assert_eq!(same.len(), 2, "one project skill and one (shadowed) user skill: {:?}", d.skills);
         let project = same.iter().find(|k| k.scope == "project").unwrap();
@@ -531,7 +574,7 @@ mod tests {
         }
         s.skill("user", "mid", &doc("mid", "does mid"));
         s.skill("user", "alpha", &doc("alpha", "user alpha"));
-        let d = discover(&sources(&[s.0.join("p")], s.0.join("user"), None));
+        let d = discover(&sources(&[s.0.join("p")], user_at(s.0.join("user"))));
         let on: Vec<String> = ["user/mid", "project/zeta", "project/alpha", "user/alpha"].iter().map(|x| x.to_string()).collect();
         let list = enabled(&d.skills, &on);
         assert_eq!(list.iter().map(|k| k.id.as_str()).collect::<Vec<_>>(), ["project/alpha", "project/zeta", "user/mid"]);
@@ -547,7 +590,7 @@ mod tests {
             let n = format!("s{i:03}");
             s.skill("p/.claude/skills", &n, &doc(&n, "d"));
         }
-        let d = discover(&sources(&[s.0.join("p")], s.0.join("none"), None));
+        let d = discover(&sources(&[s.0.join("p")], user_at(s.0.join("none"))));
         assert_eq!(d.skills.len(), MAX_SKILLS);
         assert_eq!(d.invalid.iter().filter(|i| i.reason.contains("limit")).count(), 3);
     }
@@ -557,7 +600,7 @@ mod tests {
         let s = Scratch::new();
         s.skill("p/.claude/skills", "review", &doc("review", "d"));
         s.skill("p/.claude/skills", "ship", &doc("ship", "d"));
-        let d = discover(&sources(&[s.0.join("p")], s.0.join("none"), None));
+        let d = discover(&sources(&[s.0.join("p")], user_at(s.0.join("none"))));
         let on = enabled(&d.skills, &["project/review".into(), "project/ship".into()]);
         assert_eq!(attached("/review please", &on), ["review"]);
         assert_eq!(attached("  /review /ship do it", &on), ["review", "ship"]);
@@ -574,9 +617,34 @@ mod tests {
         std::fs::write(dir.join("template.md"), "x").unwrap();
         std::fs::create_dir_all(dir.join("scripts")).unwrap();
         std::fs::write(dir.join("scripts/run.sh"), "x").unwrap();
-        let d = discover(&sources(&[s.0.join("p")], s.0.join("none"), None));
+        let d = discover(&sources(&[s.0.join("p")], user_at(s.0.join("none"))));
         let text = render_loaded(&d.skills[0]);
         assert!(text.contains("template.md") && text.contains("scripts/run.sh") && !text.contains("SKILL.md,"));
         assert!(text.contains("not run"));
+    }
+
+    #[test]
+    fn a_picked_folder_holds_skills_or_is_one_and_ranks_between_bennu_and_claude() {
+        let s = Scratch::new();
+        s.skill("picked", "mine", &doc("mine", "from picked"));
+        s.skill("picked", "both", &doc("both", "from picked"));
+        s.skill("claude", "both", &doc("both", "from claude"));
+        s.skill("single", "one", &doc("one", "a single skill"));
+        let user = UserFolders {
+            bennu: s.0.join("none"),
+            custom: vec![s.0.join("picked"), s.0.join("single/one")],
+            claude: Some(s.0.join("claude")),
+        };
+        let d = discover(&sources(&[], user));
+        let names: Vec<_> = d.skills.iter().map(|k| (k.name.as_str(), k.source.as_str(), k.description.as_str())).collect();
+        assert_eq!(names, [("both", "picked", "from picked"), ("mine", "picked", "from picked"), ("one", "one", "a single skill")]);
+        assert_eq!(d.invalid.len(), 1, "the ~/.claude copy loses: {:?}", d.invalid);
+        assert!(d.skills.iter().all(|k| k.id.starts_with("user/")));
+    }
+
+    #[test]
+    fn picked_folders_are_trimmed_and_deduplicated() {
+        let user = user_sources(&["  /a ".into(), "".into(), "/a".into(), "/b".into()]);
+        assert_eq!(user.custom, [PathBuf::from("/a"), PathBuf::from("/b")]);
     }
 }

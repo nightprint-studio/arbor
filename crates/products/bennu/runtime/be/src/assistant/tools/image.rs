@@ -15,6 +15,8 @@ use super::screenshot::{picture_media_type, save_picture};
 use super::{spec, unique_id, ToolHost};
 
 pub(super) const NAME: &str = "show_image";
+/// The other direction: a picture on disk handed to the model, as a screenshot is.
+pub(super) const VIEW: &str = "view_image";
 
 /// A picture file over this is not shown (the panel decodes it whole); an SVG source over this is not either.
 const MAX_FILE_BYTES: u64 = 5_000_000;
@@ -29,6 +31,13 @@ pub(super) fn specs() -> Vec<ToolSpec> {
             "svg":{"type":"string","description":"The SVG source, starting with `<svg`."},
             "caption":{"type":"string","description":"A short line shown under the preview."}
         }}),
+    ), spec(
+        VIEW,
+        "Look at an image file yourself: a PNG, JPEG, GIF or WebP that a program, a script, a test or a build wrote (a render, a chart, a generated texture, a golden image), or one in the project. You receive the picture, as with a screenshot; the user sees it in the thread too. Pictures are expensive (up to a few thousand tokens each) and only the latest two stay in what you read — the older ones become a line — so look at what you need, once. At most 3.5 MB.",
+        json!({"type":"object","properties":{
+            "path":{"type":"string","description":"The image file, absolute or relative to the project (or `project:path`)."},
+            "caption":{"type":"string","description":"A short line saying what it is, shown under it."}
+        },"required":["path"]}),
     )]
 }
 
@@ -71,6 +80,22 @@ impl ToolHost {
         self.session.view().push(json!({ "type": "image", "image": { "id": id, "path": stored, "media_type": media, "caption": caption } }));
         self.session.push_message();
         Ok("Picture shown to the user. Do not describe it again or repeat its source in text.".into())
+    }
+}
+
+impl ToolHost {
+    /// Hand an image file to the model (see [`VIEW`]).
+    pub(super) fn run_view_image(&self, call_id: &str, input: &Value) -> Result<String, String> {
+        let raw = input.get("path").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).ok_or("`path` is required")?;
+        let path = self.resolve(raw);
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let media = picture_media_type(&name)
+            .filter(|m| *m != "image/svg+xml")
+            .ok_or_else(|| format!("`{name}` is not a picture the model reads (PNG, JPEG, GIF or WebP); an SVG is text: read it as a file"))?;
+        let bytes = std::fs::read(&path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+        let caption = input.get("caption").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).unwrap_or(name);
+        let described = self.attach_picture(call_id, &bytes, media, &caption)?;
+        Ok(format!("{} — {described}. The picture follows.", path.display()))
     }
 }
 

@@ -15,8 +15,8 @@
 //! panic message lives), and a caller that had to branch on the build system before
 //! reading a failure would be a caller that mostly does not.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 
 use bennu_test::prelude::{TestClassResult, TestStatus};
 use serde::Serialize;
@@ -57,6 +57,54 @@ pub struct TestRunReport {
     /// The one thing worth saying about this run that the numbers do not: that it never
     /// compiled, that failures were cut, that it was stopped.
     pub note: Option<String>,
+    /// When no test ran: the runner's own words about why — the compiler's errors, Maven's
+    /// `[ERROR]` lines — so the caller can fix the build without running the command itself
+    /// to see them. Capped; absent when tests ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+}
+
+/// The last lines a runner printed, gathered by its pumps while they forward them to the panel.
+///
+/// The pumps are threads that outlive any borrow, so this is shared rather than the
+/// [`Collector`] itself; the runner hands it over with [`Collector::take_output`] once they
+/// have joined.
+#[derive(Clone, Default)]
+pub struct OutputTail(Arc<Mutex<VecDeque<String>>>);
+
+/// Lines of output kept for a failed build: a compile error with its context fits many times.
+const TAIL_LINES: usize = 400;
+/// Characters of it a report carries.
+const MAX_OUTPUT_CHARS: usize = 12_000;
+
+impl OutputTail {
+    pub fn push(&self, line: &str) {
+        let mut tail = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        if tail.len() == TAIL_LINES {
+            tail.pop_front();
+        }
+        tail.push_back(line.to_string());
+    }
+}
+
+/// What of the runner's last lines explains a build that ran no test: from the first error on
+/// (cargo's `error…`, Maven's `[ERROR]`), or the last lines when nothing says error.
+fn build_excerpt(lines: &[String]) -> Option<String> {
+    let is_error = |l: &str| {
+        let t = l.trim_start();
+        t.starts_with("error") || t.starts_with("[ERROR]")
+    };
+    let start = lines.iter().position(|l| is_error(l)).unwrap_or(lines.len().saturating_sub(40));
+    let text = lines[start..].join("\n");
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let mut out: String = text.chars().take(MAX_OUTPUT_CHARS).collect();
+    if out.len() < text.len() {
+        out.push_str("\n… [cut: the rest is in Bennu's Tests panel]");
+    }
+    Some(out)
 }
 
 /// How a run ended — everything [`TestRunReport`] needs that the [`Collector`] does not have.
@@ -98,6 +146,8 @@ struct State {
     /// libtest reports a case's verdict and its panic output as two separate events, the
     /// message arriving after the row it belongs to. Keyed by case path until it lands.
     pending_messages: HashMap<String, String>,
+    /// The runner's last lines, handed over once its pumps are done.
+    output: Vec<String>,
 }
 
 impl Collector {
@@ -148,6 +198,12 @@ impl Collector {
         }
     }
 
+    /// Take what the pumps gathered: read only if no test ran, to say why.
+    pub fn take_output(&self, tail: &OutputTail) {
+        let lines: Vec<String> = tail.0.lock().unwrap_or_else(|p| p.into_inner()).drain(..).collect();
+        self.inner.lock().unwrap_or_else(|p| p.into_inner()).output = lines;
+    }
+
     /// A libtest failure's output, which arrives after the verdict it belongs to.
     pub fn message(&self, path: &str, output: &str) {
         let mut state = self.inner.lock().unwrap_or_else(|p| p.into_inner());
@@ -183,6 +239,8 @@ impl Collector {
         let total_failures = state.failures.len();
         let mut failures = std::mem::take(&mut state.failures);
         failures.truncate(MAX_FAILURES);
+        // Without it a caller told "the build failed" has to run the command itself to learn why.
+        let output = if !cancelled && passed + failed + skipped == 0 { build_excerpt(&state.output) } else { None };
 
         let note = if cancelled {
             Some("The run was stopped before it finished, so these numbers are partial.".into())
@@ -191,8 +249,8 @@ impl Collector {
             // running a test. Saying so is the difference between a green answer and an honest
             // one.
             Some(format!(
-                "No test ran. The build itself most likely failed{} — the runner's own output \
-                 says why, and Bennu's Tests panel has it.",
+                "No test ran. The build itself most likely failed{} — `output` has the runner's \
+                 own words about why.",
                 match exit_code {
                     Some(code) if code != 0 => format!(" (exit code {code})"),
                     _ => String::new(),
@@ -218,6 +276,7 @@ impl Collector {
             skipped,
             failures,
             note,
+            output,
         }
     }
 }
@@ -267,6 +326,31 @@ mod tests {
             system_out: None,
             system_err: None,
         }
+    }
+
+    #[test]
+    fn a_run_that_never_compiled_brings_the_compiler_errors() {
+        let collector = Collector::default();
+        let tail = OutputTail::default();
+        for line in ["   Compiling nd-core v0.1.0", "error[E0425]: cannot find value `x` in this scope", "  --> src/lib.rs:3:5", "error: could not compile `nd-core`"] {
+            tail.push(line);
+        }
+        collector.take_output(&tail);
+        let report = collector.finish("cargo", "l".into(), "c".into(), Some(101), false, None);
+        let output = report.output.expect("the errors come with the report");
+        assert!(output.starts_with("error[E0425]"), "{output}");
+        assert!(output.contains("src/lib.rs:3:5"));
+        assert!(report.note.unwrap().contains("`output`"));
+    }
+
+    #[test]
+    fn a_run_whose_tests_ran_carries_no_output() {
+        let collector = Collector::default();
+        let tail = OutputTail::default();
+        tail.push("error: this line is from a test, not the build");
+        collector.take_output(&tail);
+        collector.case("m::t::a", TestStatus::Passed);
+        assert!(collector.finish("cargo", "l".into(), "c".into(), Some(0), false, None).output.is_none());
     }
 
     #[test]

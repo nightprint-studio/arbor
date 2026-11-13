@@ -33,6 +33,13 @@
    * a right line, either of which may be absent (a pure insertion has no left), and the pairing
    * walks each hunk taking a run of deletions against the run of additions beside it — index
    * for index, which is what puts a line above its own replacement.
+   *
+   * ## Colour
+   *
+   * `highlight` turns one line into highlighted HTML (Prism's token spans, styled globally); without it the text
+   * is plain. Line by line, so a construct spanning lines (a block comment) is coloured where it can be read on
+   * the line alone — the price of a window that only ever renders the rows on screen. The caller supplies it,
+   * which keeps this widget free of any notion of files or languages.
    */
 
   /** What one line of the diff is. */
@@ -116,6 +123,7 @@
     identicalMessage = 'The two versions are identical.',
     rowHeight = 19,
     ariaLabel = 'Diff',
+    highlight,
   }: {
     hunks: DiffHunkModel[];
     /** The two sides are the same. Said out loud, because an empty panel reads as a
@@ -128,6 +136,8 @@
     /** Row height in px. Must match the CSS — the window arithmetic depends on it. */
     rowHeight?: number;
     ariaLabel?: string;
+    /** One line of text to safe, highlighted HTML (escaped by the highlighter). Plain text when absent. */
+    highlight?: (text: string) => string;
   } = $props();
 
   const rows = $derived.by<Row[]>(() => {
@@ -163,7 +173,7 @@
     {@const line = side === 'left' ? item.left : item.right}
     <div class="td-half {line ? `td-${line.kind}` : 'td-filler'}" style="height: {rowHeight}px">
       <span class="td-no">{(side === 'left' ? line?.old : line?.new) ?? ''}</span>
-      <span class="td-text">{line ? line.text || ' ' : ''}</span>
+      <span class="td-text">{#if line && highlight}{@html highlight(line.text) || ' '}{:else}{line ? line.text || ' ' : ''}{/if}</span>
     </div>
   {/if}
 {/snippet}
@@ -201,7 +211,7 @@
             <span class="td-no">{item.line.old ?? ''}</span>
             <span class="td-no">{item.line.new ?? ''}</span>
             <span class="td-sign" aria-hidden="true">{sign(item.line.kind)}</span>
-            <span class="td-text">{item.line.text || ' '}</span>
+            <span class="td-text">{#if highlight}{@html highlight(item.line.text) || ' '}{:else}{item.line.text || ' '}{/if}</span>
           </div>
         {/if}
       {/snippet}

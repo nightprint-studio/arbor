@@ -11,9 +11,35 @@
 
 use crate::message::{Block, Message, ToolSpec};
 
-/// Four characters to a token, rounded up — close enough to steer by.
+/// Four characters to a token, rounded up — close enough to steer by, once [scaled](scale_of) by what the provider
+/// really counted.
 pub fn estimate(text: &str) -> u64 {
     (text.chars().count() as u64).div_ceil(4)
+}
+
+/// How far [`estimate`] is from the provider's count for this conversation: the tokens the provider said a request
+/// held (`counted`: uncached input, cache reads and cache writes) over what was estimated for the same request.
+///
+/// Four characters a token is the rule for English prose; code, JSON with its escapes and other languages pack
+/// fewer characters into a token, and the gap was measured near **two to one** on a real conversation — 181K
+/// estimated, 350K counted. Left raw, that gap means compacting long after the window is full and asking for room
+/// to answer that is not there. `None` when the request was too small to say anything (an estimate of a few
+/// hundred tokens is mostly noise) or nothing was counted; the ratio is held to a plausible range so one odd
+/// report cannot turn every figure upside down.
+pub fn scale_of(counted: u64, estimated: u64) -> Option<f64> {
+    (estimated >= 2_000 && counted > 0).then(|| (counted as f64 / estimated as f64).clamp(0.5, 4.0))
+}
+
+/// An estimate corrected by a [`scale_of`] ratio.
+pub fn scaled(tokens: u64, scale: f64) -> u64 {
+    (tokens as f64 * scale).round() as u64
+}
+
+/// A limit expressed in raw estimated tokens: what `limit` real tokens look like to [`estimate`]. Comparing a raw
+/// estimate against it is the same as comparing the corrected estimate against `limit` — which lets code that
+/// measures with its own raw estimate (compaction) honour the correction without being rewritten.
+pub fn unscaled_limit(limit: u64, scale: f64) -> u64 {
+    (limit as f64 / scale.max(0.01)).floor() as u64
 }
 
 /// One slice of a request.
@@ -126,6 +152,17 @@ pub fn cache_hit_share(input: u64, cache_read: u64, cache_write: u64) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_estimate_learns_from_what_the_provider_counted() {
+        let scale = scale_of(350_000, 181_000).unwrap();
+        assert!((scale - 1.93).abs() < 0.01);
+        assert_eq!(scaled(181_000, scale), 350_000);
+        assert_eq!(unscaled_limit(900_000, scale), 465_428, "a 900K limit is reached by ~465K of raw estimate");
+        assert!(scale_of(900, 500).is_none(), "too small to say anything");
+        assert!(scale_of(0, 50_000).is_none());
+        assert_eq!(scale_of(1_000_000, 10_000), Some(4.0), "one odd report is held to a plausible range");
+    }
     use serde_json::json;
 
     fn tool(name: &str, description: &str) -> ToolSpec {

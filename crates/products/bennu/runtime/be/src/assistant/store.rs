@@ -49,7 +49,17 @@ pub(super) struct Conversation {
     /// This conversation's own sub-agents switch: `on`, `off`, or empty to follow the setting.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub subagents: String,
+    /// Non-stop: this conversation's runs have no step cap (the spending limits still apply).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub non_stop: bool,
     /// What the panel draws.
+    /// The title was chosen — by the model with `set_title`, or by the user renaming the conversation — and is no
+    /// longer the first words of the first message: the model changes it only when the user asks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub title_locked: bool,
+    /// How far the character estimate is from the provider's count for this conversation (`token_scale`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_scale: Option<f64>,
     #[serde(default)]
     pub messages: Vec<Value>,
     /// What the model is sent. Not part of what the panel needs, so not sent to it.

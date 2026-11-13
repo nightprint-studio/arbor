@@ -17,6 +17,7 @@ mod cache_audit;
 mod compact;
 mod decisions;
 mod digest_store;
+mod external_check;
 mod git;
 mod help;
 mod instructions;
@@ -24,6 +25,9 @@ mod ledger;
 mod live_log;
 mod models;
 mod outline;
+mod credits;
+mod plan_memory;
+mod token_scale;
 mod projects;
 mod project_context;
 mod prompt;
@@ -46,7 +50,7 @@ mod transport;
 mod view;
 mod worktree;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -67,9 +71,8 @@ use self::view::View;
 
 /// The provider this build talks to. The vault keeps one key per provider id.
 const PROVIDER: &str = "anthropic";
-/// Requests one run may make before it is stopped.
-const MAX_STEPS: u32 = 40;
-const DEFAULT_MAX_TOKENS: u32 = 16_000;
+/// What a request starts with before the model is known; the send replaces it with the model's ceiling.
+const DEFAULT_MAX_TOKENS: u32 = bennu_assistant::prelude::DEFAULT_MAX_OUTPUT;
 
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
@@ -217,6 +220,9 @@ pub struct SendArgs {
     /// only way a skill reaches the model.
     #[serde(default)]
     pub skills_on: Vec<String>,
+    /// Folders of skills the user picked in Settings, besides the well-known ones.
+    #[serde(default)]
+    pub skill_folders: Vec<String>,
     /// Where today, this week and this month began, in the user's calendar — for the spending limits.
     #[serde(default)]
     pub periods: ledger::Periods,
@@ -224,23 +230,32 @@ pub struct SendArgs {
     #[serde(default)]
     pub dry_run: bool,
     /// The user's default decision level and notes (settings), and this conversation's own (empty: inherit).
-    /// The conversation's are kept with it; they apply from this message on.
+    /// The conversation's are kept with it; they apply from this message on. The `chat_*` ones are absent when
+    /// the request does not speak for the conversation (a scheduled run): then the saved ones stand.
     #[serde(default)]
     pub decision_level: String,
     #[serde(default)]
     pub decision_notes: String,
     #[serde(default)]
-    pub chat_decision_level: String,
+    pub chat_decision_level: Option<String>,
     #[serde(default)]
-    pub chat_decision_notes: String,
+    pub chat_decision_notes: Option<String>,
     /// Minutes an unused debug session of the assistant lives (0: the default).
     #[serde(default)]
     pub debug_idle_minutes: u32,
-    /// Sub-agents: the user's default (settings), and this conversation's own word (`on`, `off`; empty follows the setting).
+    /// Requests one run may make before it stops (0: the default). See `bennu_assistant::steps`.
+    #[serde(default)]
+    pub max_steps: u32,
+    /// This conversation is non-stop: no step cap. Kept with the conversation; absent (a scheduled run) leaves
+    /// what the conversation says as it is.
+    #[serde(default)]
+    pub chat_non_stop: Option<bool>,
+    /// Sub-agents: the user's default (settings), and this conversation's own word (`on`, `off`; empty follows the
+    /// setting; absent leaves the saved word, as for the decision fields).
     #[serde(default)]
     pub subagents_enabled: bool,
     #[serde(default)]
-    pub chat_subagents: String,
+    pub chat_subagents: Option<String>,
 }
 
 fn yes() -> bool {
@@ -260,13 +275,14 @@ impl SendArgs {
 
     /// The decision level this run follows: the conversation's own when it has one, else the setting.
     fn decision_level_effective(&self) -> bennu_assistant::prelude::DecisionLevel {
-        let word = if self.chat_decision_level.trim().is_empty() { &self.decision_level } else { &self.chat_decision_level };
+        let own = self.chat_decision_level.as_deref().unwrap_or("");
+        let word = if own.trim().is_empty() { self.decision_level.as_str() } else { own };
         bennu_assistant::prelude::DecisionLevel::parse(word)
     }
 
     /// The closing prompt paragraph for the decision level and both notes.
     fn decision_paragraph(&self) -> String {
-        let notes = bennu_assistant::prelude::merge_notes(&self.decision_notes, &self.chat_decision_notes);
+        let notes = bennu_assistant::prelude::merge_notes(&self.decision_notes, self.chat_decision_notes.as_deref().unwrap_or(""));
         bennu_assistant::prelude::decision_paragraph(self.decision_level_effective(), &notes)
     }
 }
@@ -281,15 +297,37 @@ fn api_key(ctx: &BennuState) -> Result<String, String> {
 
 /// The projects this run works across: several only when the reach is the workspace or wider; otherwise the
 /// project the user is in, and nothing is named or reachable beside it.
-fn working_set(args: &SendArgs) -> Vec<projects::Project> {
+/// The projects Imber opened into the conversation in earlier runs come right after it, whatever the reach: the
+/// user said yes to them (or let them open), and the cap counts them.
+fn working_set(args: &SendArgs, opened: &[String]) -> Vec<projects::Project> {
     let wide = matches!(parse_scope(&args.scope), Scope::Workspace | Scope::Disk);
-    let open: &[String] = if wide { &args.workspace_roots } else { &[] };
-    projects::working_set(&args.root, open, if wide { args.max_projects } else { 1 })
+    let mut open: Vec<String> = opened.iter().filter(|r| Path::new(r.as_str()).is_dir()).cloned().collect();
+    if wide {
+        open.extend(args.workspace_roots.iter().cloned());
+    }
+    let cap = if wide { args.max_projects } else { 1 + opened.len() };
+    projects::working_set(&args.root, &open, cap)
 }
 
-fn build_policy(args: &SendArgs, conversation: &str, projects: &[projects::Project]) -> Policy {
+/// The projects open in the window that this conversation does not work in, as `(name, root)`.
+fn other_projects(args: &SendArgs, projects: &[projects::Project]) -> Vec<(String, String)> {
+    args.workspace_roots
+        .iter()
+        .filter(|r| !projects.iter().any(|p| projects::same_root(&p.root, r)))
+        .map(|r| (Path::new(r).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| r.clone()), r.clone()))
+        .collect()
+}
+
+/// Whether the user lets Imber open projects that are not open in Bennu.
+fn may_open_external() -> bool {
+    bennu_assistant::prelude::OpenProjects::parse(&bennu_core::config::load().assistant.open_projects) != bennu_assistant::prelude::OpenProjects::Never
+}
+
+fn build_policy(args: &SendArgs, conversation: &str, projects: &[projects::Project], skills: &[skills::Skill]) -> Policy {
     let path = |s: &String| PathBuf::from(s);
     Policy {
+        // A skill the user enabled is theirs to give: its folder (the SKILL.md and what it points at) reads freely.
+        read_folders: skills.iter().map(|s| s.dir.clone()).collect(),
         scope: parse_scope(&args.scope),
         file: args.file.as_ref().map(path),
         project_root: Some(PathBuf::from(&args.root)),
@@ -311,8 +349,7 @@ fn enabled_skills(args: &SendArgs, projects: &[projects::Project]) -> Vec<skills
         return Vec::new();
     }
     let roots: Vec<PathBuf> = projects.iter().map(|p| PathBuf::from(&p.root)).collect();
-    let (user_bennu, user_claude) = skills::user_sources();
-    let found = skills::discover(&skills::sources(&roots, user_bennu, user_claude));
+    let found = skills::discover(&skills::sources(&roots, skills::user_sources(&args.skill_folders)));
     skills::enabled(&found.skills, &args.skills_on)
 }
 
@@ -337,6 +374,7 @@ fn build_request(args: &SendArgs, transcript: Vec<Message>, git_tools: &[arbor_r
     }), debug_on), bevy_on, bevy_write_on), shots_on), &if args.chat { String::new() } else { args.decision_paragraph() }), args.agents_on());
     let system = prompt::with_general_context(system, &bennu_core::config::load().assistant.general_context);
     let system = prompt::with_project_context(system, &project_context::load(&args.root));
+    let system = if args.chat || args.worktree.is_some() { system } else { prompt::with_other_projects(system, &other_projects(args, projects), may_open_external()) };
     Request {
         model: args.model.clone(),
         system,
@@ -446,12 +484,21 @@ async fn send(ctx: &BennuState, args: SendArgs, scheduled: Option<schedule::Sche
         build_isolation: if args.build_isolation.trim().eq_ignore_ascii_case("separate") { "separate".into() } else { String::new() },
         ..Default::default()
     });
+    token_scale::seed(&conv.id, conv.token_scale);
     // What kind of conversation this is was decided when it began; the request follows it, whatever the
     // panel says now.
     let mut args = args;
-    conv.decision_level = args.chat_decision_level.trim().to_string();
-    conv.decision_notes = args.chat_decision_notes.trim().chars().take(bennu_assistant::prelude::MAX_NOTES_CHARS).collect();
-    conv.subagents = assistant::normalize_agents_flag(&args.chat_subagents).to_string();
+    // The conversation's own choices: what the panel sends replaces them; a request that sends none (a scheduled
+    // run) leaves them as saved, and the run follows them.
+    let level = args.chat_decision_level.get_or_insert_with(|| conv.decision_level.clone());
+    conv.decision_level = level.trim().to_string();
+    let notes = args.chat_decision_notes.get_or_insert_with(|| conv.decision_notes.clone());
+    conv.decision_notes = notes.trim().chars().take(bennu_assistant::prelude::MAX_NOTES_CHARS).collect();
+    let agents = args.chat_subagents.get_or_insert_with(|| conv.subagents.clone());
+    conv.subagents = assistant::normalize_agents_flag(agents.as_str()).to_string();
+    if let Some(non_stop) = args.chat_non_stop {
+        conv.non_stop = non_stop;
+    }
     args.chat = conv.chat;
     args.build_isolation = conv.build_isolation.clone();
 
@@ -503,7 +550,9 @@ async fn send(ctx: &BennuState, args: SendArgs, scheduled: Option<schedule::Sche
     let hide = args.hide_authors && !git_tools.is_empty();
 
     let mut transcript = conv.transcript.clone();
-    let set = working_set(&args);
+    // An isolated copy sees only the copy: nothing opened earlier comes along.
+    let opened = if copy_mode.is_some() { Vec::new() } else { runs::opened_projects(&conversation_id) };
+    let set = working_set(&args, &opened);
     let enabled_skills = enabled_skills(&args, &set);
     // What the user attached: read and kept off the runtime's threads. A dry run and a retry attach nothing new.
     let attached = if args.retry || args.dry_run || args.attachments.is_empty() {
@@ -526,6 +575,20 @@ async fn send(ctx: &BennuState, args: SendArgs, scheduled: Option<schedule::Sche
     let note = skills::attachment_note(&skills::attached(&args.text, &enabled_skills));
     if !note.is_empty() {
         user_text = format!("{note}{user_text}");
+    }
+    // The model names the conversation in its first reply, and afterwards only when the user asks for it. On the
+    // first message it is told so here — in the message, not the system prompt, which stays the same on every
+    // request and keeps its cache.
+    let first_message = !conv.messages.iter().any(|m| m.get("role").and_then(Value::as_str) == Some("user"));
+    let may_title = (first_message && !conv.title_locked) || tools::asks_for_title(&args.text);
+    if first_message && !conv.title_locked && !args.dry_run {
+        user_text = format!("{user_text}\n\n[This is the first message of the conversation: name it with set_title now, in your first response, before or together with your first other tool call.]");
+    }
+    // An open plan is restated before the message, so a "continue" picks it up instead of starting over.
+    if args.plan && !args.chat {
+        if let Some(note) = plan_memory::begin(&conversation_id, &transcript) {
+            user_text = format!("{note}{user_text}");
+        }
     }
     if hide {
         // A name the user types that is already a made-up id's owner goes to the provider as the id.
@@ -570,10 +633,15 @@ async fn send(ctx: &BennuState, args: SendArgs, scheduled: Option<schedule::Sche
             Message { role: Role::User, blocks }
         });
     }
-    let request = build_request(&args, transcript.clone(), &git_tools, &set, &enabled_skills);
+    let mut request = build_request(&args, transcript.clone(), &git_tools, &set, &enabled_skills);
 
     let (table, _) = models::load();
     let model = find_model(&table, &args.model).cloned();
+    // The most one response may have is the model's own ceiling; the loop cuts it to what the window leaves
+    // before every request (see `bennu_assistant::output`). An explicit `max_tokens` from the caller still wins.
+    if args.max_tokens.is_none() {
+        request.max_tokens = model.as_ref().map_or(bennu_assistant::prelude::DEFAULT_MAX_OUTPUT, ModelInfo::output_ceiling);
+    }
 
     if args.dry_run {
         let texts = token_report::standing_texts(args.instructions, &args.root, &enabled_skills);
@@ -627,15 +695,18 @@ async fn send(ctx: &BennuState, args: SendArgs, scheduled: Option<schedule::Sche
         ctx.event_sink(),
         state,
         cancel,
-        build_policy(&args, &conversation_id, &set),
+        build_policy(&args, &conversation_id, &set, &enabled_skills),
         View::new(format!("a{now}"), args.model.clone(), now),
     );
     session.hide_authors = hide;
     session.unattended = scheduled.is_some();
     session.ask_cap = bennu_assistant::prelude::question_cap(args.decision_level_effective());
     session.debug_idle_minutes = args.debug_idle_minutes;
-    session.projects = set;
+    session.set_projects(set);
+    session.window_roots = args.workspace_roots.clone();
+    session.may_open_projects = copy_mode.is_none() && !args.chat;
     session.title = conv.title.clone();
+    session.may_title = may_title;
     session.build_isolation = crate::build_queue::Isolation::parse(&conv.build_isolation);
     // So a refusal in another conversation can say whose process or file it ran into.
     crate::live::note_owner(&conversation_id, &conv.title);
@@ -657,16 +728,21 @@ async fn send(ctx: &BennuState, args: SendArgs, scheduled: Option<schedule::Sche
 
     // A run nobody watches has a cap of its own on top of the limits (and says so when it hits it).
     let run_cap_usd = scheduled.as_ref().and_then(|_| schedule::budget::run_cap_usd(&bennu_core::config::load().assistant.limits));
+    // Non-stop is for a run someone watches: a scheduled one keeps the cap whatever its conversation says.
+    let max_steps = bennu_assistant::prelude::run_steps(args.max_steps, conv.non_stop && scheduled.is_none());
     let on_done = scheduled.map(|s| s.on_done);
+    // The title as it stands now — on a first message, its first words — so the tab is named at once, not when the
+    // run ends; `set_title` replaces it as soon as the model calls it.
+    let title = conv.title.clone();
     std::thread::Builder::new()
         .name(format!("assistant-{run_id}"))
         .spawn(move || {
             let guard = tools::Guard { limits, periods: args.periods, session_base, model: model.clone(), run_cap_usd };
-            execute(session, handle, key, request, conv, RunOptions { model, max_context: args.max_context, periods: args.periods, guard, chat: args.chat, git: git_tools, plan: args.plan, off: tools::families_off(&args.families_off), skills: enabled_skills, agents: agent_setup, on_done });
+            execute(session, handle, key, request, conv, RunOptions { model, max_context: args.max_context, periods: args.periods, guard, chat: args.chat, git: git_tools, plan: args.plan, off: tools::families_off(&args.families_off), skills: enabled_skills, agents: agent_setup, on_done, max_steps });
         })
         .map_err(|e| format!("could not start the run: {e}"))?;
 
-    Ok(json!({ "run_id": run_id, "conversation_id": conversation_id }))
+    Ok(json!({ "run_id": run_id, "conversation_id": conversation_id, "title": title }))
 }
 
 /// What a run needs besides the conversation: the model's prices, the window it may fill, and the limits.
@@ -684,6 +760,8 @@ struct RunOptions {
     agents: Option<tools::AgentSetup>,
     /// Present for a scheduled run: told once, at the very end, how it went.
     on_done: Option<schedule::DoneHook>,
+    /// Requests the run may make before it stops, already clamped.
+    max_steps: u32,
 }
 
 /// Ends a run's bookkeeping when `execute` is left, however it is left.
@@ -711,7 +789,7 @@ fn execute(
     mut conv: Conversation,
     options: RunOptions,
 ) {
-    let RunOptions { model, max_context, periods, guard, chat, git, plan, off, skills, agents, on_done } = options;
+    let RunOptions { model, max_context, periods, guard, chat, git, plan, off, skills, agents, on_done, max_steps } = options;
     let skills_index = skills::render_index(&skills);
     // Whatever way this function is left — a panic included — the run's reservations and cancel flag go.
     let _cleanup = RunCleanup(session.run_id.clone(), session.conversation_id.clone());
@@ -728,7 +806,8 @@ fn execute(
                 Some(setup) => host.with_agents(setup),
                 None => host,
             };
-            assistant::run(&Anthropic, &transport, &host, &key, request.clone(), MAX_STEPS)
+            let host = host.with_context_window(model.as_ref().map(|m| m.context_max));
+            assistant::run(&Anthropic, &transport, &host, &key, request.clone(), max_steps)
         }
         Err(e) => assistant::Outcome::failed_to_start(request.messages.clone(), assistant::ProviderError::local(e)),
     };
@@ -752,7 +831,7 @@ fn execute(
     if let Some(e) = &error {
         session.view().push(error_notice(e));
     } else if ended == "too_many_steps" {
-        session.view().push(json!({ "type": "notice", "level": "warning", "text": format!("Stopped after {MAX_STEPS} steps. Say \"continue\" to go on.") }));
+        session.view().push(json!({ "type": "notice", "level": "warning", "text": bennu_assistant::prelude::too_many_steps_notice(max_steps) }));
     } else if ended == "incomplete" {
         session.view().push(json!({ "type": "notice", "level": "warning", "text": "The answer was cut short — the model reached its length limit or declined." }));
     }
@@ -764,7 +843,9 @@ fn execute(
     let mut compacted = false;
     if error.is_none() && ended == "done" && max_context > 0 {
         let overhead = tokens(&request.system) + tokens(&serde_json::to_string(&request.tools).unwrap_or_default());
-        match side_jobs::compact_at_boundary(&session.run_id, &mut conv.transcript, overhead, max_context, &key, &request.model) {
+        // Its measure is the raw estimate: the limit is put in the same units.
+        let limit = bennu_assistant::prelude::unscaled_limit(u64::from(max_context), token_scale::get(&conv.id)).min(u64::from(u32::MAX)) as u32;
+        match side_jobs::compact_at_boundary(&session.run_id, &mut conv.transcript, overhead, limit, &key, &request.model) {
             Ok(Some(folded)) => {
                 compacted = true;
                 session.view().push(json!({ "type": "notice", "level": "info", "text": folded.report }));
@@ -811,14 +892,23 @@ fn execute(
     }
     let limits = limits_now();
     let spent_now = ledger::spent(&periods, conv.cost);
-    conv.context = token_report::context_of(&request.system, &session.root, &skills_index, &request.tools, &conv.transcript);
+    if let Some(title) = session.new_title.lock().unwrap_or_else(|p| p.into_inner()).take() {
+        conv.title = title;
+        conv.title_locked = true;
+    }
+    let scale = token_scale::get(&conv.id);
+    conv.token_scale = (scale != 1.0).then_some(scale);
+    conv.context = token_scale::context(token_report::context_of(&request.system, &session.root, &skills_index, &request.tools, &conv.transcript), scale);
     conv.updated_at = now_ms();
     let saved = store::save_in(&store::dir(), &conv);
 
     session.push_message();
+    // Messages the user wrote that the run ended before reading: back to the panel, which puts them in the box.
+    let unread: Vec<Value> = runs::close_notes(&session.run_id).into_iter().map(|n| json!({ "id": n.id, "text": n.text })).collect();
     session.emit(
         "done",
         json!({
+            "unread_notes": unread,
             "ended": ended,
             "error": error.as_ref().map(|e| e.friendly()),
             "error_kind": error.as_ref().map(|e| e.kind.code()),
@@ -832,6 +922,11 @@ fn execute(
         }),
     );
     runs::finish(&session.run_id);
+    // For the user who went to do something else while it worked: the shell says it only if Bennu is not in front.
+    if bennu_core::config::load().assistant.notify_done {
+        let what = if error.is_some() { "Imber stopped on an error" } else { "Imber has finished" };
+        arbor_ipc::prelude::EventSink::attention(session.sink.as_ref(), what, &conv.title);
+    }
     if let Some(hook) = on_done {
         let (ok, detail) = schedule::outcome_line(ended, error.as_ref().map(|e| e.friendly()), last_said, session.end_note());
         hook(ok, detail);
@@ -857,6 +952,18 @@ pub(crate) fn conversation_active(conversation: &str) -> bool {
 #[arbor_rpc::handler]
 fn assistant_cancel(_ctx: &BennuState, run_id: String) -> Result<bool, String> {
     Ok(runs::cancel(&run_id))
+}
+
+/// Leave a message for a run that is working: it reads it before its next request, after the tool it is running.
+/// False when the run is not taking messages (it has ended, or is ending) — the panel then sends it as an ordinary
+/// message.
+#[arbor_rpc::handler]
+fn assistant_send_note(_ctx: &BennuState, run_id: String, id: String, text: String) -> Result<bool, String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err("the message is empty".into());
+    }
+    Ok(runs::queue_note(&run_id, runs::UserNote { id, text }))
 }
 
 /// Skip the wait before a failed request is sent again ("Retry now"). False when the run is not going.
@@ -907,7 +1014,8 @@ fn assistant_compact(ctx: &BennuState, args: CompactArgs) -> Result<Value, Strin
     if done.summarized {
         subagents::discard_ended(&conv.id);
     }
-    let rebuilt = estimate_context("", &[], &conv.transcript);
+    token_scale::seed(&conv.id, conv.token_scale);
+    let rebuilt = token_scale::context(estimate_context("", &[], &conv.transcript), token_scale::get(&conv.id));
     // The standing part (instructions and tools) is unchanged by this; only the rest is recounted.
     conv.context = Context { project: rebuilt.project, conversation: rebuilt.conversation, ..conv.context };
     let (table, _) = models::load();
@@ -953,15 +1061,15 @@ fn assistant_instructions(_ctx: &BennuState, root: String) -> Result<Value, Stri
     Ok(json!(list.iter().map(|i| json!({ "name": i.name, "bytes": i.text.len(), "truncated": i.truncated })).collect::<Vec<_>>()))
 }
 
-/// Every skill found under the given project roots and the user's folders, with the ones that could not be
-/// used and why — for the manager. The body is included so the manager can preview it; which are enabled is
-/// the panel's to say (`skills_on`), not decided here.
+/// Every skill found under the given project roots and the user's folders (the well-known ones and
+/// `skill_folders`, picked in Settings), with the ones that could not be used and why — for the manager. The
+/// body is included so the manager can preview it; which are enabled is the panel's to say (`skills_on`), not
+/// decided here.
 #[arbor_rpc::handler]
-async fn assistant_skills_list(_ctx: &BennuState, roots: Vec<String>) -> Result<Value, String> {
+async fn assistant_skills_list(_ctx: &BennuState, roots: Vec<String>, skill_folders: Vec<String>) -> Result<Value, String> {
     let found = tokio::task::spawn_blocking(move || {
         let roots: Vec<PathBuf> = roots.iter().filter(|r| !r.trim().is_empty()).map(PathBuf::from).collect();
-        let (user_bennu, user_claude) = skills::user_sources();
-        skills::discover(&skills::sources(&roots, user_bennu, user_claude))
+        skills::discover(&skills::sources(&roots, skills::user_sources(&skill_folders)))
     })
     .await
     .map_err(|e| format!("could not look for skills: {e}"))?;
@@ -1012,6 +1120,8 @@ fn assistant_delete(ctx: &BennuState, id: String) -> Result<(), String> {
     read_memory::forget(&id);
     digest_store::forget(&id);
     subagents::forget_conversation(&id);
+    plan_memory::forget(&id);
+    token_scale::forget(&id);
     crate::build_queue::journal().forget_conversation(&id);
     crate::build_queue::inbox().forget_conversation(&id);
     store::delete_in(&store::dir(), &id)
@@ -1038,6 +1148,8 @@ fn assistant_rename(_ctx: &BennuState, id: String, title: String) -> Result<(), 
         return Err("the title is empty".into());
     }
     c.title = clean.to_string();
+    // A name the user chose is theirs: the model changes it only when asked.
+    c.title_locked = true;
     store::save_in(&dir, &c)
 }
 

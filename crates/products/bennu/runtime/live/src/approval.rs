@@ -14,6 +14,9 @@ use std::sync::Mutex;
 pub struct Approvals {
     /// `project key` -> hash of the recipe file the user approved.
     recipes: Mutex<HashMap<String, String>>,
+    /// `key` -> the hash of a file as it was the last time it was run, whether or not that asked: what tells a
+    /// changed file from the one already run.
+    seen: Mutex<HashMap<String, String>>,
 }
 
 impl Approvals {
@@ -23,6 +26,15 @@ impl Approvals {
 
     pub fn approve_recipes(&self, project: &str, hash: &str) {
         self.recipes.lock().unwrap_or_else(|p| p.into_inner()).insert(project.to_string(), hash.to_string());
+    }
+
+    /// The hash recorded for `key` the last time, if any.
+    pub fn seen_hash(&self, key: &str) -> Option<String> {
+        self.seen.lock().unwrap_or_else(|p| p.into_inner()).get(key).cloned()
+    }
+
+    pub fn remember_seen(&self, key: &str, hash: &str) {
+        self.seen.lock().unwrap_or_else(|p| p.into_inner()).insert(key.to_string(), hash.to_string());
     }
 
     pub fn revoke(&self, project: &str) {
@@ -44,5 +56,14 @@ mod tests {
         assert!(!a.is_recipe_approved("q", "h1"), "another project is not covered");
         a.revoke("p");
         assert!(!a.is_recipe_approved("p", "h1"));
+    }
+
+    #[test]
+    fn what_was_seen_is_remembered_apart_from_what_was_approved() {
+        let a = Approvals::default();
+        assert_eq!(a.seen_hash("k"), None);
+        a.remember_seen("k", "h1");
+        assert_eq!(a.seen_hash("k").as_deref(), Some("h1"));
+        assert!(!a.is_recipe_approved("k", "h1"));
     }
 }

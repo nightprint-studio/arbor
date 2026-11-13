@@ -1234,6 +1234,15 @@ fn host_dispatch(
     // (`true` → corvus-be applies the runtime mutation; `false` → it short-circuits,
     // mirroring the shell's old early `return Ok(())`). Mirrors
     // `ipc/platform/plugin.rs::set_plugins_enabled`'s persistence block exactly.
+    // A backend's plugin Reload (Bennu's, Corvus's…). The wasm extensions its plugins and engines call run HERE,
+    // compiled once and kept by path, so the backend's own reload cannot reach them: without this, a package
+    // rebuilt in place by its `build.sh` kept answering with its previous build until Arbor restarted, while
+    // the window said "Plugins reloaded". The shell's own Reload does the same (`reload_runtime`).
+    if method == "__forget_extensions" {
+        crate::plugin_wasm::forget_compiled();
+        return Ok(serde_json::json!(true));
+    }
+
     if method == "__set_plugins_enabled" {
         let enabled = params.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
         let st = app.state::<AppState>();
@@ -1380,6 +1389,29 @@ fn host_dispatch(
         }
         let args = params.get("args").cloned().unwrap_or(serde_json::Value::Null);
         return dispatch_rpc(state.inner(), "corvus", &name, serde_json::json!({ "args": args })).map_err(|e| e.to_string());
+    }
+
+    // ── Assistant audio (.merula) ────────────────────────────────────────────────────
+    //
+    // Imber checks a `.merula` file and renders it to audio through Merula, which owns the language, the sound
+    // registry and the renderer. The same allowlist rule as git: these four methods and nothing else of
+    // `merula-be`. Every one of them returns at once — the render runs on merula-be's own thread and is waited
+    // for with `status` — because this arm runs on bennu-be's reader thread, which a long call would freeze.
+    if method == "__assistant_merula" {
+        const ALLOWED: [&str; 4] =
+            ["merula_agent_check", "merula_agent_render_start", "merula_agent_render_status", "merula_agent_render_cancel"];
+        let name = params
+            .get("method")
+            .and_then(|m| m.as_str())
+            .ok_or_else(|| "__assistant_merula: missing method".to_string())?
+            .to_string();
+        if !ALLOWED.contains(&name.as_str()) {
+            return Err(format!("__assistant_merula: `{name}` is not one of the Merula calls the assistant may make"));
+        }
+        ensure_merula_be(app);
+        let state = app.state::<AppState>();
+        let args = params.get("args").cloned().unwrap_or(serde_json::Value::Null);
+        return dispatch_rpc(state.inner(), "merula", &name, serde_json::json!({ "args": args })).map_err(|e| e.to_string());
     }
 
     // ── Assistant isolated copy (git worktree) ─────────────────────────────────────
@@ -2523,6 +2555,11 @@ fn forward_backend_event(app: &AppHandle, program: &'static str, topic: String, 
     if topic == arbor_ipc::prelude::PLUGIN_LOG_TOPIC {
         let field = |k: &str| payload.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
         crate::plugin_logs::record(app, &field("level"), &field("plugin"), field("message"));
+        return;
+    }
+    // Something needs the user while they may be elsewhere: the operating system tells them, not a page.
+    if topic == arbor_ipc::prelude::ATTENTION_TOPIC {
+        crate::attention::notify(app, program, &payload);
         return;
     }
     event_tap::tap().publish(program, &topic, &payload);

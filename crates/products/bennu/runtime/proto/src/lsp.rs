@@ -103,6 +103,13 @@ pub struct LspServerInfo {
     /// i.e. no button — rather than a missing field.
     #[serde(default)]
     pub install: Vec<String>,
+    /// What it answers (`hover`, `references`, `callers`, …): declared by a running session of it, or expected from
+    /// the catalogue before one has run. Empty for a server of the user's own that has not run yet.
+    #[serde(default)]
+    pub answers: Vec<String>,
+    /// `answers` came from a running server rather than from the catalogue.
+    #[serde(default)]
+    pub answers_confirmed: bool,
 }
 
 /// One semantically-highlighted span.

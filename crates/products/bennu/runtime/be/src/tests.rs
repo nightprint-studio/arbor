@@ -401,6 +401,8 @@ impl MavenRun {
         let _guard = self.guard;
         self.sink.progress(&format!("mvn test — {}", self.handle.label), None, None);
         let mut pumps = Vec::new();
+        // Maven's `[ERROR]` lines, kept so a run that never compiled can say why.
+        let tail = crate::test_report::OutputTail::default();
         if let Some(out) = self.stdout.take() {
             pumps.push(spawn_pump(
                 out,
@@ -409,6 +411,7 @@ impl MavenRun {
                 self.sink.clone(),
                 self.totals.clone(),
                 self.classes.clone(),
+                tail.clone(),
             ));
         }
         if let Some(err) = self.stderr.take() {
@@ -419,6 +422,7 @@ impl MavenRun {
                 self.sink.clone(),
                 self.totals.clone(),
                 self.classes.clone(),
+                tail.clone(),
             ));
         }
 
@@ -439,6 +443,9 @@ impl MavenRun {
         // last line of output must still make it into the tree.
         for p in pumps {
             let _ = p.join();
+        }
+        if let Some(c) = collector {
+            c.take_output(&tail);
         }
         sweep_reports(&dirs, &mut self.seen, &self.run_id, &self.sink, collector);
 
@@ -651,11 +658,13 @@ fn spawn_pump<R: std::io::Read + Send + 'static>(
     sink: Arc<dyn EventSink>,
     totals: Arc<Mutex<Option<RunTotals>>>,
     classes: crate::log::ClassMap,
+    tail: crate::test_report::OutputTail,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut log = crate::log::LogAnnotator::new(classes);
         let buf = BufReader::new(reader);
         for line in buf.lines().map_while(Result::ok) {
+            tail.push(&line);
             if let Some(class) = running_class(&line) {
                 sink.progress(&format!("Running {class}"), None, None);
                 sink.emit(EVT_TEST_RUNNING, json!({ "run_id": run_id, "classname": class }));

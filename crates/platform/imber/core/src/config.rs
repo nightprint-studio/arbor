@@ -58,6 +58,9 @@ pub struct AssistantConfig {
     /// Skills the user enabled, as `<scope>/<name>` ids (scope `user` or `project`). An allow-list: a skill
     /// found on disk is not shown to the model until it is ticked in the skills manager.
     pub skills_on: Vec<String>,
+    /// Folders of skills picked by hand, besides the project's `.bennu/skills` / `.claude/skills`, Bennu's own and
+    /// `~/.claude/skills`. Each holds skill folders, or is one. Their skills are `user` skills.
+    pub skill_folders: Vec<String>,
     /// How much it decides alone: `ask_forks` (default), `ask_big` or `decide`.
     pub decision_level: String,
     /// The user's own words about decisions, for every conversation (a conversation can add its own).
@@ -68,6 +71,8 @@ pub struct AssistantConfig {
     pub subagents_enabled: bool,
     /// Minutes a debug session the assistant started may sit unused before it is ended.
     pub debug_idle_minutes: u32,
+    /// Requests one run may make before it stops and asks to be told to continue (see [`crate::steps`]).
+    pub max_steps: u32,
     /// When the debugger stops while the assistant is idle, start a run by itself to tell it. Spends money; off by default.
     pub auto_continue_on_stop: bool,
     /// Keep the instructions and tool definitions in the provider's one-hour cache instead of the five-minute one.
@@ -83,6 +88,18 @@ pub struct AssistantConfig {
     /// should always know — in the manner of a chat assistant's custom instructions. Empty: nothing is added.
     /// Cut at [`MAX_GENERAL_CONTEXT_CHARS`] when it is put in the instructions.
     pub general_context: String,
+    /// Programs on this machine the user lets Imber run (`run_tool`), each with what a call may pass and when it
+    /// asks. Here and not in a project: a program's path belongs to the machine.
+    pub external_tools: Vec<crate::external_tools::ExternalTool>,
+    /// What happens when Imber needs Bennu on a project that is not open in the window and that it may already
+    /// read: `ask`, `autonomous` (opened without asking in Autonomous mode, the default), `allowed` or `never`. A
+    /// project outside the reach always goes through the access card. See [`crate::open_projects`].
+    pub open_projects: String,
+    /// A system notification when Imber stops on a question, an approval or a card while no Bennu window has the
+    /// focus — the answer is otherwise found only by opening the app. On by default.
+    pub notify_questions: bool,
+    /// A system notification when a run ends while no Bennu window has the focus. Off by default.
+    pub notify_done: bool,
 }
 
 /// The most characters of [`AssistantConfig::general_context`] that reach the instructions. The text is sent
@@ -114,13 +131,18 @@ pub struct LimitsConfig {
     pub schedule_run_eur: f64,
     /// How many scheduled runs may start in a day, whatever the schedules say (0: no cap).
     pub schedule_runs_per_day: u32,
+    /// The account's credit balance as the user read it in the Claude Console, in dollars (0: not entered). The API
+    /// does not report it, so what is left is estimated from this minus what was spent since `credit_set_at`.
+    pub credit_usd: f64,
+    /// When `credit_usd` was entered, epoch milliseconds.
+    pub credit_set_at: u64,
 }
 
 impl Default for LimitsConfig {
     // On by default, at amounts that a normal day does not reach: the brakes are for the day something
     // loops, and nobody turns them on after that day.
     fn default() -> Self {
-        Self { session_eur: 5.0, day_eur: 10.0, week_eur: 0.0, month_eur: 50.0, eur_per_usd: 0.92, warn_percent: 80.0, schedule_run_eur: 1.0, schedule_runs_per_day: 24 }
+        Self { session_eur: 5.0, day_eur: 10.0, week_eur: 0.0, month_eur: 50.0, eur_per_usd: 0.92, warn_percent: 80.0, schedule_run_eur: 1.0, schedule_runs_per_day: 24, credit_usd: 0.0, credit_set_at: 0 }
     }
 }
 
@@ -146,16 +168,22 @@ impl Default for AssistantConfig {
             bevy_write_enabled: false,
             debug_mutate_enabled: false,
             skills_on: Vec::new(),
+            skill_folders: Vec::new(),
             decision_level: "ask_forks".to_string(),
             decision_notes: String::new(),
             confirm_cost_changes: true,
             subagents_enabled: false,
             debug_idle_minutes: 30,
+            max_steps: crate::steps::DEFAULT_MAX_STEPS,
             auto_continue_on_stop: false,
             long_cache: true,
             side_model: String::new(),
             wrap_pasted_code: true,
             general_context: String::new(),
+            external_tools: Vec::new(),
+            open_projects: crate::open_projects::OpenProjects::Autonomous.id().to_string(),
+            notify_questions: true,
+            notify_done: false,
         }
     }
 }

@@ -9,6 +9,8 @@ vi.mock('./lsp-lang', () => ({
   keyBackendCompletionSource: () => () => null,
   backendHoverSource: () => () => null,
 }));
+// Comment rendering pulls in the markdown editor (DOM widgets, Tauri, mermaid); the tokenizer needs none of it.
+vi.mock('$lib/utils/comment-markdown', () => ({ commentMarkdown: () => [] }));
 
 import { patinaMode } from './patina-lang';
 import '$lib/utils/prism-languages/patina';

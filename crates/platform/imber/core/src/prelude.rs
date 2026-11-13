@@ -21,6 +21,12 @@ pub use crate::decision::{merge_notes, paragraph as decision_paragraph, question
 // How long what the assistant started may outlive its run.
 pub use crate::lifetime::{clamp_idle_minutes, Lease, DEFAULT_IDLE_MINUTES, MAX_IDLE_MINUTES, MIN_IDLE_MINUTES};
 
+// How much one response may say: the model's ceiling, cut to what the window leaves.
+pub use crate::output::{input_estimate, output_budget, MIN_OUTPUT};
+
+// How many requests one run may make, and how the stop is worded.
+pub use crate::steps::{clamp_max_steps, run_steps, too_many_steps_notice, DEFAULT_MAX_STEPS, MAX_MAX_STEPS, MIN_MAX_STEPS};
+
 // How hard the model thinks.
 pub use crate::effort::Effort;
 
@@ -42,7 +48,7 @@ pub use crate::images::{
 pub use crate::provider::{Decoder, Endpoint, Event, Provider, StopReason, Usage};
 
 // The models on offer, and what a request to each one costs.
-pub use crate::models::{find as find_model, merge as merge_models, ModelFile, ModelInfo, Rates, DEFAULT_TOML as DEFAULT_MODELS_TOML};
+pub use crate::models::{find as find_model, merge as merge_models, ModelFile, ModelInfo, Rates, DEFAULT_MAX_OUTPUT, DEFAULT_TOML as DEFAULT_MODELS_TOML};
 
 // Spending limits, in euros.
 pub use crate::limits::{eur, InFlight, Level, Limits, Meter, Period, Spent};
@@ -51,7 +57,7 @@ pub use crate::limits::{eur, InFlight, Level, Limits, Meter, Period, Spent};
 pub use crate::dryrun::{mask_key, preview, Breakdown, Preview};
 
 // The loop, and what a host plugs into it.
-pub use crate::agent::{run, AgentEvent, Ended, Gate, Host, HttpRequest, Outcome, ToolCall, Transport};
+pub use crate::agent::{run, AgentEvent, CallTiming, Ended, Gate, Host, HttpRequest, Outcome, ToolCall, Transport};
 
 // A failed request, as a kind and a sentence, and when it is sent again.
 pub use crate::error::{ErrorKind, ProviderError};
@@ -100,5 +106,20 @@ pub use crate::summary::{
     compose_note as compose_summary_note, current_plan, dropped_report, due_at_boundary, files_touched, BOUNDARY_SHARE, MIN_TOKENS_TO_COMPACT, SYSTEM as SUMMARY_SYSTEM,
 };
 pub use crate::tokens::{
-    cache_hit_share, estimate as estimate_tokens, history_tokens, parts as token_parts, standing as standing_tokens, tool_weights, tools_tokens, HistoryTokens, Part as TokenPart, Standing,
+    cache_hit_share, estimate as estimate_tokens, history_tokens, parts as token_parts, scale_of as token_scale_of, scaled as scaled_tokens, standing as standing_tokens, tool_weights, tools_tokens, unscaled_limit, HistoryTokens, Part as TokenPart, Standing,
 };
+pub use crate::credits::{
+    anthropic_credit, cost_report_days, cost_report_url, estimate_left, rfc3339_utc, spent_from_day, summarize as summarize_credits, utc_day_start,
+    CreditEstimate, CreditLine, CreditSection, CreditSummary, ManualBalance, OrgSpend, ProviderCredit, SpentSince, WARN_LEFT,
+};
+
+// Programs on this machine the user lets Imber run: the declaration, what a call may pass, when it asks.
+pub use crate::external_tools::{
+    catalogue as external_tools_catalogue, clip_output, display as display_argv, find as find_external_tool, fingerprint as tool_fingerprint,
+    must_ask as tool_must_ask, plan as plan_tool_call, problems as tool_problems, usable as usable_tools,
+    ExternalTool, ToolApproval, ToolInvocation, DEFAULT_TIMEOUT_S as TOOL_DEFAULT_TIMEOUT_S, MAX_OUTPUT_CHARS as TOOL_MAX_OUTPUT_CHARS,
+    MAX_TIMEOUT_S as TOOL_MAX_TIMEOUT_S,
+};
+
+// Bringing another project into a conversation: join, open and index, or ask.
+pub use crate::open_projects::{decide as decide_open_project, OpenProjects, OpenStep};

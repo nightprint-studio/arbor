@@ -39,6 +39,26 @@
     <tr><td><strong>Call and type hierarchy</strong></td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd>, <kbd>Ctrl</kbd> + <kbd>H</kbd> — below.</td></tr>
   </tbody>
 </table>
+<h2>What each server answers</h2>
+<p>
+  Not every server implements every feature: a server says what it supports when it starts, and a feature it lacks is not offered
+  for its files. Settings › Language Servers shows, under each server, what it answers — marked <em>expected</em>, from the server's
+  own documentation, until it has run once in this session, and then what it declared. Imber gets the same list in a project's
+  summary, and a question its server cannot answer is refused with what it can.
+</p>
+<table>
+  <thead><tr><th>Server</th><th>Not expected</th></tr></thead>
+  <tbody>
+    <tr><td>rust-analyzer, gopls, typescript-language-server, clangd</td><td>— (everything)</td></tr>
+    <tr><td>pyright</td><td>implementations, formatting</td></tr>
+    <tr><td>svelte-language-server</td><td>symbol search across the workspace, callers</td></tr>
+    <tr><td>Angular language server</td><td>implementations, structure, symbol search, callers, formatting</td></tr>
+    <tr><td>lua-language-server</td><td>implementations, callers</td></tr>
+    <tr><td>wgsl-analyzer</td><td>references, rename, implementations, symbol search, callers</td></tr>
+  </tbody>
+</table>
+<p>A server of your own (<code>[[lsp.servers]]</code>) says what it answers when it starts.</p>
+
 <Callout variant="tip" title="Many refactorings want a selection">
   Extracting a variable or a function has to be told what, so at a bare caret the server's list is short by design. And "selection crosses a block" on a disabled row tells you what to change —
   an absent row would not.

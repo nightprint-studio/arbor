@@ -57,6 +57,7 @@ mod tests {
             name: id.into(),
             tagline: String::new(),
             context_max: 200_000,
+            max_output: None,
             efforts: Vec::new(),
             price: Rates { input, output, cache_read: None, cache_write_5m: None, cache_write_1h: None, over_tokens: None },
             long_prompt: None,

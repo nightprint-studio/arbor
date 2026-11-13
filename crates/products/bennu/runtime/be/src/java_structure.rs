@@ -9,6 +9,7 @@
 
 use bennu_core::prelude::BennuState;
 use bennu_java::prelude::{extract_symbols, Span, TypeDecl, Visibility};
+use bennu_proto::prelude::LspSymbol;
 use serde::{Deserialize, Serialize};
 
 /// Args for [`bennu_java_structure`].
@@ -50,6 +51,69 @@ fn bennu_java_structure(
 }
 
 fn structure_of(source: &str) -> Vec<StructureEntry> {
+    declarations(source).into_iter().map(|(_, entry)| entry).collect()
+}
+
+/// The declarations of a Java file as an outline tree, in the shape a language server's outline has — what
+/// `bennu_outline` and the editor's router answer for a Java file. Built from the same declarations as the
+/// Structure panel, so the two cannot disagree.
+pub(crate) fn document_symbols(file: &str, source: &str) -> Vec<LspSymbol> {
+    let flat: Vec<(usize, LspSymbol)> = declarations(source)
+        .into_iter()
+        .map(|(span, e)| {
+            let (line, col) = line_col(source, span.start);
+            let symbol = LspSymbol {
+                name: e.name,
+                kind: e.kind,
+                detail: e.detail,
+                start: span.start,
+                end: span.end,
+                name_start: span.start,
+                name_end: if e.is_type { span.start } else { span.end },
+                line,
+                col,
+                file: file.to_string(),
+                deprecated: false,
+                children: Vec::new(),
+            };
+            (e.depth, symbol)
+        })
+        .collect();
+    nest(flat)
+}
+
+/// A flat list in source order, each with its depth, as a tree.
+fn nest(flat: Vec<(usize, LspSymbol)>) -> Vec<LspSymbol> {
+    fn attach(stack: &mut [(usize, LspSymbol)], roots: &mut Vec<LspSymbol>, done: LspSymbol) {
+        match stack.last_mut() {
+            Some((_, parent)) => parent.children.push(done),
+            None => roots.push(done),
+        }
+    }
+    let mut roots = Vec::new();
+    let mut stack: Vec<(usize, LspSymbol)> = Vec::new();
+    for (depth, symbol) in flat {
+        while stack.last().is_some_and(|(d, _)| *d >= depth) {
+            let (_, done) = stack.pop().expect("checked");
+            attach(&mut stack, &mut roots, done);
+        }
+        stack.push((depth, symbol));
+    }
+    while let Some((_, done)) = stack.pop() {
+        attach(&mut stack, &mut roots, done);
+    }
+    roots
+}
+
+/// 1-based line and 1-based UTF-16 column of a byte offset — the coordinates a server's outline carries.
+fn line_col(source: &str, offset: usize) -> (usize, usize) {
+    let before = &source[..offset.min(source.len())];
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    (before.matches('\n').count() + 1, before[line_start..].encode_utf16().count() + 1)
+}
+
+/// Every declaration with its span (the whole body of a type, the name of a member), in source order.
+fn declarations(source: &str) -> Vec<(Span, StructureEntry)> {
     let symbols = extract_symbols(source);
     let lines = LineIndex::new(source);
 
@@ -58,11 +122,11 @@ fn structure_of(source: &str) -> Vec<StructureEntry> {
 
     // (where it starts, what it is) — sorted afterwards, because `types` lists nested types
     // after their owner's members and the panel wants the file's own order.
-    let mut found: Vec<(usize, StructureEntry)> = Vec::new();
+    let mut found: Vec<(Span, StructureEntry)> = Vec::new();
     for t in &types {
         let Some(span) = t.span else { continue };
         found.push((
-            span.start,
+            span,
             StructureEntry {
                 kind: t.kind.slug().to_string(),
                 name: t.name.clone(),
@@ -80,7 +144,7 @@ fn structure_of(source: &str) -> Vec<StructureEntry> {
         for m in t.methods.iter().filter(|m| !m.name.is_empty()) {
             let Some(ms) = m.span else { continue };
             found.push((
-                ms.start,
+                ms,
                 StructureEntry {
                     kind: "method".to_string(),
                     name: m.name.clone(),
@@ -96,7 +160,7 @@ fn structure_of(source: &str) -> Vec<StructureEntry> {
         for f in &t.fields {
             let Some(fs) = f.span else { continue };
             found.push((
-                fs.start,
+                fs,
                 StructureEntry {
                     kind: "field".to_string(),
                     name: f.name.clone(),
@@ -110,8 +174,8 @@ fn structure_of(source: &str) -> Vec<StructureEntry> {
             ));
         }
     }
-    found.sort_by_key(|(start, _)| *start);
-    found.into_iter().map(|(_, e)| e).collect()
+    found.sort_by_key(|(span, _)| span.start);
+    found
 }
 
 /// How many other (named) types' bodies `span` sits inside.
@@ -158,6 +222,18 @@ mod tests {
 
     fn names(entries: &[StructureEntry]) -> Vec<(&str, usize, u32)> {
         entries.iter().map(|e| (e.name.as_str(), e.depth, e.line)).collect()
+    }
+
+    #[test]
+    fn the_outline_nests_members_under_their_types() {
+        let src = "class A {\n  int x;\n  void m() {}\n  static class B {\n    void n() {}\n  }\n}\n";
+        let tree = document_symbols("/p/A.java", src);
+        assert_eq!(tree.len(), 1);
+        let a = &tree[0];
+        assert_eq!((a.name.as_str(), a.line), ("A", 1));
+        let kids: Vec<&str> = a.children.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(kids, ["x", "m", "B"]);
+        assert_eq!(a.children[2].children.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["n"]);
     }
 
     #[test]

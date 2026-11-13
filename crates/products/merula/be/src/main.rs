@@ -49,6 +49,7 @@ mod devices;
 mod jobs;
 mod render;
 mod export_all;
+mod agent;
 mod packs_download;
 mod models_download;
 mod importers;

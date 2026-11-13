@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activityLabel, formatElapsed } from './assistant-activity';
+import { activityLabel, formatElapsed, progressLine } from './assistant-activity';
 
 describe('what the assistant says it is doing', () => {
   it('names the phases', () => {
@@ -35,5 +35,18 @@ describe('formatElapsed', () => {
 
   it('never goes negative', () => {
     expect(formatElapsed(-5)).toBe('0:00');
+  });
+});
+
+describe('the progress beside a step', () => {
+  it('says what the tool reports, with its count, and the step clock once the step is long', () => {
+    expect(progressLine({ message: 'Compiling voriz' }, 3_000)).toBe('Compiling voriz');
+    expect(progressLine({ message: 'demo — 40 tests', done: 3, total: 40 }, 3_000)).toBe('demo — 40 tests 3/40');
+    expect(progressLine({ message: '12 passed, 1 failed' }, 75_000)).toBe('12 passed, 1 failed · 1:15 in this step');
+  });
+
+  it('shows only the clock when the tool says nothing, and nothing for a short silent step', () => {
+    expect(progressLine(null, 75_000)).toBe('1:15 in this step');
+    expect(progressLine(null, 2_000)).toBe('');
   });
 });

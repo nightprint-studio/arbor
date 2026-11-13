@@ -7,7 +7,7 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 
 use arbor_ipc::prelude::EventSink;
@@ -52,11 +52,23 @@ pub(super) struct Session {
     pub authors: Mutex<Authors>,
     pub hide_authors: bool,
     /// The projects this conversation works across, the one the user is in first. One when the reach is narrower.
-    pub projects: Vec<super::projects::Project>,
+    /// It grows when Imber opens another project during the run (see `tools/open_project.rs`), so it is read
+    /// through [`Session::projects`].
+    projects: RwLock<Vec<super::projects::Project>>,
+    /// The projects the user has open in the window, whatever the reach: one of them is already indexed, so
+    /// bringing it into the conversation never asks to index it.
+    pub window_roots: Vec<String>,
+    /// Whether Imber may open another project into this conversation at all: not in an isolated copy, where the
+    /// conversation is meant to see only the copy.
+    pub may_open_projects: bool,
     /// What the run did with live processes and which files it changed, for the closing summary card.
     pub live_log: Mutex<LiveRunLog>,
     /// The conversation's title, so a refusal elsewhere can say whose run holds a file.
     pub title: String,
+    /// The model may name the conversation in this run: it has not yet, or the user asked for a new title.
+    pub may_title: bool,
+    /// The title the model gave in this run, for the conversation when the run ends.
+    pub new_title: Mutex<Option<String>>,
     /// The files that builds and checks of this run reported an error in: the only ones Autonomous may open.
     pub diagnostics: Mutex<Diagnostics>,
     /// The files this run opened for itself, for the cap and for revoking.
@@ -114,9 +126,13 @@ impl Session {
             proposal_id: Mutex::new(None),
             authors: Mutex::new(Authors::load()),
             hide_authors: false,
-            projects: Vec::new(),
+            projects: RwLock::new(Vec::new()),
+            window_roots: Vec::new(),
+            may_open_projects: true,
             live_log: Mutex::new(LiveRunLog::default()),
             title: String::new(),
+            may_title: false,
+            new_title: Mutex::new(None),
             diagnostics: Mutex::new(Diagnostics::default()),
             run_grants: Mutex::new(RunGrants::default()),
             build_isolation: Default::default(),
@@ -201,6 +217,23 @@ impl Session {
         self.own_commands_ok.store(true, Ordering::SeqCst);
     }
 
+    /// The projects this conversation works across, as they stand now.
+    pub(super) fn projects(&self) -> Vec<super::projects::Project> {
+        self.projects.read().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    pub(super) fn set_projects(&mut self, projects: Vec<super::projects::Project>) {
+        *self.projects.get_mut().unwrap_or_else(|p| p.into_inner()) = projects;
+    }
+
+    /// Bring one more project into the conversation, during a run.
+    pub(super) fn add_project(&self, project: super::projects::Project) {
+        let mut all = self.projects.write().unwrap_or_else(|p| p.into_inner());
+        if !all.iter().any(|p| p.root == project.root) {
+            all.push(project);
+        }
+    }
+
     pub(super) fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
@@ -258,6 +291,28 @@ impl Session {
         }
     }
 
+    /// The conversation's title as the user sees it now: the one the model just gave, or the one it had.
+    pub(super) fn current_title(&self) -> String {
+        self.new_title.lock().unwrap_or_else(|p| p.into_inner()).clone().unwrap_or_else(|| self.title.clone())
+    }
+
+    /// Tell the user, through the system, that this conversation stopped on `block` for them — when they asked
+    /// for it. The shell shows it only if no Bennu window has the focus.
+    fn call_for_user(&self, block: &Value) {
+        if !bennu_core::config::load().assistant.notify_questions {
+            return;
+        }
+        let what = match block.get("type").and_then(Value::as_str) {
+            Some("questions") => "Imber has a question for you",
+            Some("access") => "Imber asks to reach a file or folder",
+            Some("confirm") => "Imber asks for your yes",
+            Some("script") => "Imber asks to run a script",
+            Some("proposal") => "Imber proposes a change",
+            _ => "Imber is waiting for your answer",
+        };
+        self.sink.attention(what, &self.current_title());
+    }
+
     /// Put a question to the user and wait for the answer.
     ///
     /// `block` is added to the message with a fresh `promptId`; the panel renders it and replies with
@@ -297,6 +352,10 @@ impl Session {
         }
         let thread: &Session = self.prompt_via.as_ref().map_or(self, |(parent, _)| parent.as_ref());
         let rx = runs::open_prompt(&prompt_id);
+        // A question only the panel's code answers (it has a time limit) is not one for the user.
+        if limit.is_none() {
+            thread.call_for_user(&block);
+        }
         thread.view().push(block);
         thread.push_message();
 

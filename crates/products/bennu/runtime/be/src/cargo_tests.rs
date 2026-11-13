@@ -51,8 +51,9 @@ use arbor_process_ext::prelude::NoWindowExt;
 use bennu_cargo::prelude::{read_workspace, CargoWorkspace};
 use bennu_core::prelude::BennuState;
 use bennu_test::prelude::{
-    cargo_plan, compiling_crate, discover_rust_in_source, place_of, running_target, CargoTestScope,
-    LibtestEvent, LibtestParser, RustTest, TestStatus, TestTarget,
+    binary_target, cargo_plan_with, compiling_crate, discover_rust_in_source, place_of, running_target, CargoRunOptions,
+    CargoRunner, CargoTestScope, LibtestEvent, LibtestParser, LibtestResult, NextestEvent, NextestParser, RustTest,
+    TestStatus, TestTarget,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -213,6 +214,58 @@ pub struct RunArgs {
     /// Also run the `#[ignore]`d ones.
     #[serde(default)]
     pub include_ignored: bool,
+    /// Run only the `#[ignore]`d ones.
+    #[serde(default)]
+    pub ignored_only: bool,
+    /// nextest's filter expression (`-E`); nextest only.
+    #[serde(default)]
+    pub filter_expr: Option<String>,
+    /// Cargo features to enable for the run.
+    #[serde(default)]
+    pub features: Vec<String>,
+    #[serde(default)]
+    pub all_features: bool,
+    #[serde(default)]
+    pub no_default_features: bool,
+    /// `cargo` or `nextest`; absent chooses (see [`choose_runner`]).
+    #[serde(default)]
+    pub runner: Option<CargoRunner>,
+}
+
+/// Where a workspace configures nextest. Its presence is what makes nextest the default runner.
+const NEXTEST_CONFIG: &str = ".config/nextest.toml";
+
+/// Which runner a run uses, and what to say about the choice when it is not what was asked or implied.
+///
+/// Asked for: that one — nextest only if it is installed (otherwise an error, since the caller named it).
+/// Not asked: nextest when the workspace configures it (`.config/nextest.toml`) and it is installed; cargo
+/// otherwise, with a note when the workspace wanted nextest and it is missing. Doc-tests are cargo's in every
+/// case: nextest does not run them.
+pub(crate) fn choose_runner(asked: Option<CargoRunner>, configured: bool, installed: bool, doc_tests: bool) -> Result<(CargoRunner, Option<String>), String> {
+    if doc_tests {
+        let note = (asked == Some(CargoRunner::Nextest)).then(|| "Doc-tests ran with cargo test: nextest does not run them.".to_string());
+        return Ok((CargoRunner::Cargo, note));
+    }
+    match asked {
+        Some(CargoRunner::Nextest) if !installed => {
+            Err("cargo-nextest is not installed. Install it with `cargo install cargo-nextest --locked`, or run with cargo.".to_string())
+        }
+        Some(runner) => Ok((runner, None)),
+        None if configured && installed => Ok((CargoRunner::Nextest, None)),
+        None if configured => Ok((CargoRunner::Cargo, Some(format!(
+            "This workspace configures nextest ({NEXTEST_CONFIG}) but cargo-nextest is not installed, so the tests ran with cargo test."
+        )))),
+        None => Ok((CargoRunner::Cargo, None)),
+    }
+}
+
+/// Whether a scope is (or contains) doc-tests.
+fn is_doc_scope(scope: &CargoTestScope) -> bool {
+    match scope {
+        CargoTestScope::Target { target, .. } | CargoTestScope::Module { target, .. } => *target == TestTarget::Doc,
+        CargoTestScope::Cases { cases } => cases.iter().any(|c| c.target == TestTarget::Doc),
+        CargoTestScope::Workspace | CargoTestScope::Package { .. } => false,
+    }
 }
 
 /// The handle correlating a live run with its event stream.
@@ -227,6 +280,10 @@ pub struct CargoRunHandle {
     /// Set when the selection was too large to spell and the run was widened. The panel must show
     /// it: the user asked for a subset and is getting a superset.
     pub widened: Option<String>,
+    /// Which program runs the tests.
+    pub runner: CargoRunner,
+    /// Said about the runner when it is not the one the workspace implies (nextest configured, not installed).
+    pub runner_note: Option<String>,
 }
 
 /// A launched `cargo test`, before anyone has waited on it.
@@ -260,7 +317,25 @@ pub(crate) fn start_cargo_run(ctx: &BennuState, args: &RunArgs) -> Result<CargoR
 pub(crate) fn start_cargo_run_with(ctx: &BennuState, args: &RunArgs, guard: BuildGuard) -> Result<CargoRun, String> {
 
     let root = PathBuf::from(&args.root);
-    let plan = cargo_plan(&args.scope, args.include_ignored);
+    let (runner, runner_note) = choose_runner(
+        args.runner,
+        root.join(NEXTEST_CONFIG).is_file(),
+        crate::cargo_cmd::nextest_installed(),
+        is_doc_scope(&args.scope),
+    )?;
+    if args.filter_expr.as_deref().is_some_and(|e| !e.trim().is_empty()) && runner != CargoRunner::Nextest {
+        return Err("`filter` is a nextest filter expression, and this run uses cargo test: ask for `runner: nextest` (cargo-nextest must be installed), or select with `tests` / `module`.".into());
+    }
+    let options = CargoRunOptions {
+        include_ignored: args.include_ignored,
+        ignored_only: args.ignored_only,
+        filter_expr: args.filter_expr.clone(),
+        features: args.features.clone(),
+        all_features: args.all_features,
+        no_default_features: args.no_default_features,
+        runner,
+    };
+    let plan = cargo_plan_with(&args.scope, &options);
     // Resolved rather than taken from `PATH`: a windowed app doesn't have `~/.cargo/bin` on it.
     let launcher = crate::cargo_cmd::cargo_launcher();
     let mut cmd = Command::new(&launcher);
@@ -305,6 +380,8 @@ pub(crate) fn start_cargo_run_with(ctx: &BennuState, args: &RunArgs, guard: Buil
             label: plan.label,
             command: format!("cargo {}", plan.args.join(" ")),
             widened: plan.widened,
+            runner,
+            runner_note,
         },
         guard,
         child,
@@ -330,8 +407,24 @@ impl CargoRun {
         // The guard rides the run: the lock is held for as long as cargo runs, not just for
         // as long as the handler that started it.
         let _guard = self.guard;
-        self.sink.progress(&format!("cargo test — {}", self.handle.label), None, None);
+        let head = match self.handle.runner { CargoRunner::Nextest => "cargo nextest", CargoRunner::Cargo => "cargo test" };
+        self.sink.progress(&format!("{head} — {}", self.handle.label), None, None);
         let mut pumps = Vec::new();
+        // cargo's own words — the compiler's errors — are on stderr; kept so a run that never compiled can say why.
+        let tail = crate::test_report::OutputTail::default();
+        if self.handle.runner == CargoRunner::Nextest {
+            // One parser for both pipes: nextest writes its report on stderr, and whatever reaches stdout is read
+            // the same way rather than assumed empty.
+            let state = Arc::new(Mutex::new(NextestState::default()));
+            for (stream, reader) in [
+                ("stderr", self.stderr.take().map(|r| Box::new(r) as Box<dyn std::io::Read + Send>)),
+                ("stdout", self.stdout.take().map(|r| Box::new(r) as Box<dyn std::io::Read + Send>)),
+            ] {
+                if let Some(reader) = reader {
+                    pumps.push(spawn_nextest_pump(reader, stream, self.run_id.clone(), self.sink.clone(), state.clone(), self.totals.clone(), collector.clone(), tail.clone()));
+                }
+            }
+        }
         if let Some(err) = self.stderr.take() {
             pumps.push(spawn_stderr_pump(
                 err,
@@ -339,8 +432,10 @@ impl CargoRun {
                 self.sink.clone(),
                 self.announced.clone(),
                 self.ws.clone(),
+                tail.clone(),
             ));
         }
+        let collector_for_output = collector.clone();
         if let Some(out) = self.stdout.take() {
             pumps.push(spawn_stdout_pump(
                 out,
@@ -356,6 +451,9 @@ impl CargoRun {
             self.child.lock().unwrap_or_else(|p| p.into_inner()).wait().ok().and_then(|s| s.code());
         for p in pumps {
             let _ = p.join();
+        }
+        if let Some(c) = &collector_for_output {
+            c.take_output(&tail);
         }
 
         let cancelled = registry()
@@ -412,6 +510,28 @@ struct Totals {
     passed: u32,
     failed: u32,
     ignored: u32,
+    /// When the counts were last told as progress, in ms since the epoch.
+    told_ms: u64,
+}
+
+/// How often the running counts are told as progress: often enough that a run of minutes visibly moves, rarely
+/// enough that a run of thousands of fast tests does not become thousands of events.
+const PROGRESS_EVERY_MS: u64 = 1_000;
+
+/// Count one case into `totals`, and tell the counts as progress when it has been a moment since the last time.
+fn count_case(totals: &Mutex<Totals>, status: TestStatus, sink: &Arc<dyn EventSink>) {
+    let Ok(mut t) = totals.lock() else { return };
+    match status {
+        TestStatus::Passed => t.passed += 1,
+        TestStatus::Skipped => t.ignored += 1,
+        _ => t.failed += 1,
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    if now.saturating_sub(t.told_ms) >= PROGRESS_EVERY_MS {
+        t.told_ms = now;
+        let skipped = if t.ignored > 0 { format!(", {} skipped", t.ignored) } else { String::new() };
+        sink.progress(&format!("{} passed, {} failed{skipped}", t.passed, t.failed), None, None);
+    }
 }
 
 /// The targets cargo has announced so far, in order, with a condvar so the stdout pump can wait
@@ -434,10 +554,12 @@ fn spawn_stderr_pump<R: std::io::Read + Send + 'static>(
     sink: Arc<dyn EventSink>,
     announced: Announced,
     ws: Arc<CargoWorkspace>,
+    tail: crate::test_report::OutputTail,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let buf = BufReader::new(reader);
         for line in buf.lines().map_while(Result::ok) {
+            tail.push(&line);
             if let Some(t) = running_target(&line) {
                 let resolved = resolve_target(&t, &ws);
                 let (lock, cv) = &*announced;
@@ -561,13 +683,7 @@ fn spawn_stdout_pump<R: std::io::Read + Send + 'static>(
                                 target: None,
                             }),
                         };
-                        if let Ok(mut t) = totals.lock() {
-                            match status {
-                                TestStatus::Passed => t.passed += 1,
-                                TestStatus::Skipped => t.ignored += 1,
-                                _ => t.failed += 1,
-                            }
-                        }
+                        count_case(&totals, status, &sink);
                         if let Some(collector) = &collector {
                             collector.case(&path, status);
                         }
@@ -632,6 +748,133 @@ fn spawn_stdout_pump<R: std::io::Read + Send + 'static>(
     })
 }
 
+/// What the nextest pumps share: one parser, and the groups opened so far by binary id.
+#[derive(Default)]
+struct NextestState {
+    parser: NextestParser,
+    /// Binary id → its group: the index the panel keys it on, where it lives, and its counts so far.
+    groups: Vec<NextestGroup>,
+}
+
+struct NextestGroup {
+    binary: String,
+    package: String,
+    target: TestTarget,
+    counts: LibtestResult,
+}
+
+impl NextestState {
+    /// The group of `binary`, opened (and announced) the first time it is seen.
+    fn group(&mut self, binary: &str, run_id: &str, sink: &Arc<dyn EventSink>) -> usize {
+        if let Some(at) = self.groups.iter().position(|g| g.binary == binary) {
+            return at;
+        }
+        let (package, target) = binary_target(binary);
+        let index = self.groups.len();
+        sink.emit(EVT_CARGO_TARGET, json!({
+            "run_id": run_id,
+            "index": index,
+            // nextest does not say how many tests a binary holds before running them.
+            "count": 0,
+            "package": package,
+            "target": target,
+            "desc": format!("{package} {}", target.label()),
+        }));
+        let counts = LibtestResult { ok: true, ..LibtestResult::default() };
+        self.groups.push(NextestGroup { binary: binary.to_string(), package, target, counts });
+        index
+    }
+}
+
+/// Read one of nextest's pipes into the same events the cargo runner emits: a group per binary, a row per test,
+/// the output of each failure, and each group's counts when the run ends.
+#[allow(clippy::too_many_arguments)]
+fn spawn_nextest_pump(
+    reader: Box<dyn std::io::Read + Send>,
+    stream: &'static str,
+    run_id: String,
+    sink: Arc<dyn EventSink>,
+    state: Arc<Mutex<NextestState>>,
+    totals: Arc<Mutex<Totals>>,
+    collector: Option<Arc<crate::test_report::Collector>>,
+    tail: crate::test_report::OutputTail,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let buf = BufReader::new(reader);
+        for line in buf.lines().map_while(Result::ok) {
+            tail.push(&line);
+            if let Some(crate_name) = compiling_crate(&line) {
+                sink.progress(&format!("Compiling {crate_name}"), None, None);
+                sink.emit(EVT_CARGO_COMPILING, json!({ "run_id": run_id, "crate": crate_name }));
+            }
+            let events = state.lock().unwrap_or_else(|p| p.into_inner()).parser.line(&line);
+            for ev in events {
+                nextest_event(ev, &run_id, &sink, &state, &totals, collector.as_deref());
+            }
+            sink.emit(EVT_TEST_OUTPUT, json!({ "run_id": run_id, "stream": stream, "text": line }));
+        }
+        // The first pipe to end leaves the rest to the other; the last settles what is still pending.
+        let pending = state.lock().unwrap_or_else(|p| p.into_inner()).parser.finish();
+        for ev in pending {
+            nextest_event(ev, &run_id, &sink, &state, &totals, collector.as_deref());
+        }
+    })
+}
+
+fn nextest_event(
+    ev: NextestEvent,
+    run_id: &str,
+    sink: &Arc<dyn EventSink>,
+    state: &Arc<Mutex<NextestState>>,
+    totals: &Arc<Mutex<Totals>>,
+    collector: Option<&crate::test_report::Collector>,
+) {
+    let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
+    match ev {
+        NextestEvent::Case { binary, path, status } => {
+            let index = st.group(&binary, run_id, sink);
+            let group = &mut st.groups[index];
+            match status {
+                TestStatus::Passed => group.counts.passed += 1,
+                TestStatus::Skipped => group.counts.ignored += 1,
+                _ => {
+                    group.counts.failed += 1;
+                    group.counts.ok = false;
+                }
+            }
+            count_case(totals, status, sink);
+            if let Some(collector) = collector {
+                collector.case(&path, status);
+            }
+            let (module, name) = split_path(&path);
+            sink.emit(EVT_CARGO_CASE, json!({
+                "run_id": run_id,
+                "index": index,
+                "package": group.package,
+                "target": group.target,
+                "module": module,
+                "name": name,
+                "path": path,
+                "status": status,
+                "note": null,
+            }));
+        }
+        NextestEvent::Failure { binary, path, output } => {
+            let index = st.group(&binary, run_id, sink);
+            if let Some(collector) = collector {
+                collector.message(&path, &output);
+            }
+            sink.emit(EVT_CARGO_CASE, json!({ "run_id": run_id, "index": index, "path": path, "message": output }));
+        }
+        NextestEvent::Summary { passed, failed, .. } => {
+            sink.progress(&format!("{passed} passed, {failed} failed"), None, None);
+            for (index, group) in st.groups.iter().enumerate() {
+                sink.emit(EVT_CARGO_TARGET_DONE, json!({ "run_id": run_id, "index": index, "result": group.counts }));
+            }
+        }
+    }
+}
+
 /// Wait for cargo to have announced target `index`, up to [`TARGET_WAIT`].
 ///
 /// The bound is what keeps a `Running` line we failed to recognise from stopping the pump: the
@@ -673,6 +916,28 @@ fn split_path(path: &str) -> (String, String) {
 mod tests {
     use super::*;
     use bennu_test::prelude::RunningTarget;
+
+    #[test]
+    fn nextest_is_the_default_where_the_workspace_configures_it_and_it_is_installed() {
+        assert_eq!(choose_runner(None, true, true, false).unwrap(), (CargoRunner::Nextest, None));
+        assert_eq!(choose_runner(None, false, true, false).unwrap(), (CargoRunner::Cargo, None));
+        let (runner, note) = choose_runner(None, true, false, false).unwrap();
+        assert_eq!(runner, CargoRunner::Cargo);
+        assert!(note.unwrap().contains("not installed"), "configured but missing is said, not silent");
+    }
+
+    #[test]
+    fn an_explicit_runner_wins_and_a_missing_nextest_is_an_error() {
+        assert_eq!(choose_runner(Some(CargoRunner::Cargo), true, true, false).unwrap(), (CargoRunner::Cargo, None));
+        assert_eq!(choose_runner(Some(CargoRunner::Nextest), false, true, false).unwrap(), (CargoRunner::Nextest, None));
+        assert!(choose_runner(Some(CargoRunner::Nextest), true, false, false).unwrap_err().contains("cargo install cargo-nextest"));
+    }
+
+    #[test]
+    fn doc_tests_always_run_with_cargo() {
+        assert_eq!(choose_runner(None, true, true, true).unwrap().0, CargoRunner::Cargo);
+        assert!(choose_runner(Some(CargoRunner::Nextest), true, true, true).unwrap().1.is_some());
+    }
 
     fn workspace(crates: &[(&str, &str, bool)]) -> CargoWorkspace {
         let mut ws = read_workspace(Path::new("/definitely/not/a/workspace"));

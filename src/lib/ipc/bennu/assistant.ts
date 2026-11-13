@@ -10,6 +10,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { bennu } from '../rpc';
+import type { ExternalTool } from './config';
 import type { AccessScope, AssistantAgent, AssistantEffort, AssistantMode, AssistantModel, Conversation, MessageBlock, ProposedFile } from '$lib/components/bennu/assistant/assistant-types';
 
 /** The only provider so far; the vault keeps one key per provider id. */
@@ -83,6 +84,8 @@ export interface SendParams {
   debug_mutate?: boolean;
   /** Skills the user enabled (`<scope>/<name>`). */
   skills_on: string[];
+  /** Folders of skills picked by hand in Settings. */
+  skill_folders?: string[];
   /** The default decision level and notes, and the conversation's own (empty: inherit). */
   decision_level?: string;
   decision_notes?: string;
@@ -91,8 +94,12 @@ export interface SendParams {
   /** Offer sub-agents: the default from the settings, and this conversation's own (`on`, `off`; empty follows the setting). */
   subagents_enabled?: boolean;
   chat_subagents?: string;
+  /** This conversation is non-stop: no step cap. */
+  chat_non_stop?: boolean;
   /** Minutes an unused debug session of the assistant lives. */
   debug_idle_minutes?: number;
+  /** Requests the run may make before it stops (0: the default). */
+  max_steps?: number;
   dry_run: boolean;
 }
 
@@ -116,7 +123,7 @@ export interface RequestPreview {
   estimate: { first: number; next: number; uncached?: number } | null;
 }
 
-export type SendResult = { run_id: string; conversation_id: string } | { preview: RequestPreview };
+export type SendResult = { run_id: string; conversation_id: string; title?: string } | { preview: RequestPreview };
 
 export interface ConversationSummary {
   id: string;
@@ -190,8 +197,12 @@ export interface SkillListing {
   max: number;
 }
 
-/** The skills under these project roots and the user's folders. */
-export const listSkills = (roots: string[]) => bennu<SkillListing>('assistant_skills_list', { roots });
+/** The skills under these project roots and the user's folders — the well-known ones and `skillFolders`. */
+export const listSkills = (roots: string[], skillFolders: string[]) =>
+  bennu<SkillListing>('assistant_skills_list', { roots, skill_folders: skillFolders });
+
+/** One list of problems per external tool, in order — the rules a run uses to decide whether it is offered. */
+export const externalToolProblems = (tools: ExternalTool[]) => bennu<string[][]>('assistant_external_tool_problems', { tools });
 
 export const getSpend = (periods: { day: number; week: number; month: number }, conversationId: string | null) =>
   bennu<SpendStatus>('assistant_spend', { periods, conversation_id: conversationId });
@@ -200,6 +211,8 @@ export const sendAssistantMessage = (p: SendParams) => bennu<SendResult>('assist
 export const cancelAssistantRun = (runId: string) => bennu<boolean>('assistant_cancel', { run_id: runId });
 /** Skip the wait before a failed request is sent again. False when the run is not going. */
 export const retryAssistantRunNow = (runId: string) => bennu<boolean>('assistant_retry_now', { run_id: runId });
+/** Leave a message for a working run: read before its next request. False when the run no longer takes them. */
+export const sendAssistantNote = (runId: string, id: string, text: string) => bennu<boolean>('assistant_send_note', { run_id: runId, id, text });
 /** Take back a file the agent opened for itself (Autonomous). False when the run is over. */
 export const revokeAssistantGrant = (runId: string, grantId: string) =>
   bennu<boolean>('assistant_revoke_grant', { run_id: runId, grant_id: grantId });
@@ -246,6 +259,10 @@ export type AssistantEvent =
   | { kind: 'usage'; run_id: string; conversation_id: string; input: number; output: number; cache_read: number; cache_write: number }
   /** A request failed for a reason that can pass; it is sent again at `until` (ms since the epoch). */
   | { kind: 'retry'; run_id: string; conversation_id: string; attempt: number; max: number; wait_s: number; until: number; error_kind: string; message: string; detail: string }
+  /** The conversation's cost and context as they stand mid-run (estimates); `null` when not known yet. */
+  | { kind: 'live'; run_id: string; conversation_id: string; cost: number | null; context: Conversation['context'] | null }
+  /** The model named the conversation (`set_title`): the tab and the list follow at once. */
+  | { kind: 'title'; run_id: string; conversation_id: string; title: string }
   /** Data came in again after a wait: the status line goes. */
   | { kind: 'retry_end'; run_id: string; conversation_id: string }
   /** A sub-agent started, spent or ended: the list entry as it stands. */
@@ -258,6 +275,8 @@ export type AssistantEvent =
       /** What the provider billed for the run's last request. */
       request?: LastRequest | null;
       spend: SpendStatus;
+      /** Messages the user wrote while it worked that it ended before reading. */
+      unread_notes?: { id: string; text: string }[];
     };
 
 export interface AssistantWireMessage {

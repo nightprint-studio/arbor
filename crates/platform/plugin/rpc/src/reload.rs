@@ -1,7 +1,8 @@
 //! Whole-runtime mutations — reload + the master kill-switch. Generic port of
 //! `corvus-be`'s former `plugin_reload.rs`.
 //!
-//! * `reload_plugins` — full `host.reload()` + restart schedulers, then re-fire
+//! * `reload_plugins` — asks the shell to drop its compiled wasm extensions (`__forget_extensions`: they run
+//!   there, so a backend's reload cannot reach them otherwise), then a full `host.reload()` + restart schedulers, then re-fire
 //!   `on_repo_open` for every open tab and broadcast `arbor://plugins-reloaded`.
 //! * `set_plugins_enabled` — master toggle. Persists the choice over the reverse
 //!   channel (`__set_plugins_enabled`, idempotent compare-and-save) **before**
@@ -21,6 +22,12 @@ use crate::context::{with_host_mut, PluginRpcContext};
 /// Rebuild the plugin runtime from disk and re-announce it — shared by
 /// `reload_plugins` and the "enable" branch of `set_plugins_enabled`.
 pub fn reload_runtime<C: PluginRpcContext>(ctx: &C) -> Result<(), String> {
+    // The wasm extensions run in the shell, compiled once and kept by path: a reload here must ask the shell to
+    // drop them, or a package rebuilt in place keeps answering with its previous build. Best effort — a reload of
+    // the Lua side is still worth doing when the shell cannot be reached.
+    if let Err(e) = ctx.host_call("__forget_extensions", Value::Null) {
+        eprintln!("plugin-rpc: could not ask the shell to drop the compiled extensions: {e}");
+    }
     // Rebuild + restart schedulers under the lock, then drop the guard before
     // firing any hooks (the broker re-enters the host).
     with_host_mut(ctx, |host| {

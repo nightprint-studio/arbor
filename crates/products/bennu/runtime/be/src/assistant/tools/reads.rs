@@ -100,6 +100,9 @@ fn memory_key(path: &Path) -> String {
     if cfg!(windows) { s.to_lowercase() } else { s }
 }
 
+/// How full the context window must be before old results are dropped at all.
+const STALE_FILL_SHARE: f64 = 0.5;
+
 impl ToolHost {
     fn file_tool(&self) -> Result<&ToolDescriptor, String> {
         self.descriptor("bennu_read_file").ok_or_else(|| "bennu_read_file is not available".to_string())
@@ -216,6 +219,15 @@ impl ToolHost {
     pub(super) fn stub_stale_results(&self, request: &mut Request) {
         if self.chat {
             return;
+        }
+        // Only when the room is really running out. Dropping a read the model still works from costs a new read
+        // or a guess from memory — the dearest thing in a long task — so it is done to make room, not because
+        // there is something to drop: below this share of the window, every result stays whole.
+        if let Some(window) = self.window.filter(|w| *w > 0) {
+            let used = crate::assistant::compact::estimate_request(request);
+            if (used as f64) < STALE_FILL_SHARE * window as f64 {
+                return;
+            }
         }
         let policy = bennu_assistant::prelude::StalePolicy::default();
         if let Some((messages, report)) = bennu_assistant::prelude::maybe_stub_stale(&request.messages, &policy) {

@@ -80,6 +80,11 @@
   </tbody>
 </table>
 
+<h2>nextest</h2>
+<p>
+  A Cargo workspace with a <code>.config/nextest.toml</code> runs its tests with <code>cargo nextest run</code> instead of <code>cargo test</code>, when cargo-nextest is installed: one process per test, in parallel, with the workspace's own nextest settings. The tree, the counts and the failure output are the same. Without the config file the runner is <code>cargo test</code>; with the file and no cargo-nextest, the run uses <code>cargo test</code> and the console says why. Doc tests always run with <code>cargo test</code>, which is the only one that runs them. Install it with <code>cargo install cargo-nextest --locked</code>.
+</p>
+
 <h2>Debugging a test</h2>
 <p>
   Every ▷ in the Tests panel has a <strong>bug icon</strong> beside it running the same thing under the debugger. Nothing to attach, no port: the forked test JVM dials back to Bennu and suspends

@@ -11,11 +11,38 @@
 
 <h2>Managed processes</h2>
 <ul>
-  <li><code>run_start</code> starts a named process with a command, a working folder, optional ports and a readiness check (a port, a log line or a health URL). It asks every time, showing the command.</li>
+  <li><code>run_start</code> starts a named process with a command, a working folder, optional ports and a readiness check (a port, a log line or a health URL). It asks every time, showing the command. The line runs in <code>bash</code> where the machine has it (<code>sh</code> otherwise), and its <code>cwd</code> may be any project of the conversation, by name (<code>voriz:</code>, <code>voriz:crates/app</code>) — the same for <code>cargo_run</code>, whose <code>cwd</code> also decides which Cargo workspace it runs in, and for <code>run_tool</code>. Tools such as <code>cargo</code> and <code>mvn</code> are found even when Arbor was started from the Finder: at start it adds the usual tool folders (<code>~/.cargo/bin</code>, Homebrew, SDKMAN) to the <code>PATH</code> every process inherits. Imber is told to prefer Bennu's own tools for a check, a build, the tests or <code>cargo run</code> (<code>bennu_check</code>, <code>bennu_build</code>, <code>bennu_test_run</code>, <code>cargo_run</code>), which need no card and answer with the parsed result; a command stays available when one of them cannot do the job.</li>
+  <li><code>cargo_run</code> runs a binary or an example of a Rust project — package, <code>bin</code> or <code>example</code>, features, <code>release</code> or a profile, the program's own arguments and environment variables — as a managed process like any other. Imber gives fields, never a command line, and the command is the one a run configuration with the same fields would run, without a shell. The first run of a target (package and binary) in a conversation asks; the yes covers that target again with any features, arguments or environment, and another target asks again. A compile error shows in its logs. A server returns at once (its output is read with <code>run_logs</code>, also after it ends); a program that does its work and ends is run with <code>until_exit</code>, which waits for it (5 minutes by default, at most 30) and answers with its exit code and the last lines it printed, stderr marked — build errors included.</li>
   <li><code>run_status</code>, <code>run_logs</code>, <code>wait_ready</code> and <code>run_stop</code> inspect, wait for and stop what the conversation started. Reading never asks; stopping what the run started does not ask.</li>
   <li>The processes are the same ones the Live panel lists. Every process records its owner; a conversation stops only its own processes. A name or port that another conversation holds is refused instead of duplicated or killed, and a stack another conversation already runs is attached read-only.</li>
   <li>A yes given to a recipes file in one conversation does not carry to another.</li>
 </ul>
+
+<h2>Programs you set up</h2>
+<p>
+  <code>run_tool</code> runs one of the programs listed in Settings › Imber › Tools and skills › <em>Programs it may run</em>, by name. Each declaration sets the program (an absolute path), the arguments always passed, whether Imber may add its own, the variables always set and the ones Imber may set, a time limit, whether it changes things, and when a call asks: every call, once per conversation, or never. A tool that changes things asks at every call in Manual mode, whatever it says.
+</p>
+<ul>
+  <li>The program runs directly, without a shell: each argument reaches it as written, so <code>;</code>, <code>|</code>, <code>$(…)</code> and wildcards are plain characters. An argument or a variable the declaration does not allow is refused before anything starts.</li>
+  <li>It runs in a folder of the project (its root unless Imber names one) and Imber gets back the exit code with standard output and standard error; a long output keeps its beginning and its end. Imber can also send text to its standard input.</li>
+  <li>A call that reaches its time limit, or a run you cancel, ends the program with its whole process tree.</li>
+  <li>With <code>background</code> the program starts as a managed process instead — for a watcher or a server — and is read and stopped like any other (<code>run_logs</code>, <code>run_stop</code>).</li>
+  <li>A yes given once per conversation lasts until you edit the tool. A scheduled run never uses these programs.</li>
+  <li>The settings page marks a tool that would not be offered (no program at that path, a name that is not allowed, no description) and says why.</li>
+</ul>
+
+<h2>Scripts of the project</h2>
+<p>
+  <code>run_script</code> runs a script of the project that is not one of your programs — <code>.sh</code>, <code>.bash</code>, <code>.py</code>, <code>.js</code>, <code>.ps1</code>, <code>.bat</code>/<code>.cmd</code> on Windows, or an executable file. It always asks first, with a card that shows the script's path, the command, why Imber wants to run it and its first lines. Three answers:
+</p>
+<ul>
+  <li><strong>Decline</strong> — nothing runs, and Imber is told.</li>
+  <li><strong>Run once</strong> — this call only.</li>
+  <li><strong>Run and add to my programs</strong> — it runs, and a declaration is added to Settings › Imber › Tools and skills › <em>Programs it may run</em> (interpreter, script, "changes things", asked once per conversation), for you to give a description and refine. From then on Imber calls it with <code>run_tool</code>.</li>
+</ul>
+<p>
+  The script runs through its interpreter, chosen by its extension, or directly when it is executable; arguments are passed one by one, with no shell. It runs like a program you set up: the exit code and the output come back, it is stopped after ten minutes, and <code>background</code> makes it a managed process. Imber can edit the project's files, so a yes is for the script <em>as it is</em>: a script that changed asks again, and the card says it changed. The same holds for a program you set up whose file is inside the project — or a script you handed to an interpreter in its fixed arguments: its approval covers that content, and even one set to <em>Never</em> asks again when the file has changed since it last ran in the conversation.
+</p>
 
 <h2>Recipes and scenarios</h2>
 <p>

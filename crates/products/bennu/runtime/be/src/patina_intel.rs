@@ -502,6 +502,170 @@ fn symbols_of(
     out
 }
 
+/// One declaration of a file, from the package's `symbols`: a flattened tree, the parent by index.
+#[derive(Deserialize)]
+struct WireSymbol {
+    name: String,
+    kind: String,
+    span: Span,
+    #[serde(default)]
+    parent: Option<u32>,
+}
+
+/// The file's declarations as an outline tree (functions, structs, traits, their methods). `None` for a file that is
+/// not Patina. The package gives each symbol the span of its **name** only, so a node's range is its name.
+pub(crate) fn document_symbols(ctx: &BennuState, file: &str, source: &str) -> Option<Vec<LspSymbol>> {
+    if !is_patina(file) {
+        return None;
+    }
+    if is_library_view(file) {
+        return Some(Vec::new());
+    }
+    let wire = call(ctx, "symbols", vec![request(file, source)])
+        .ok()
+        .and_then(|v| decode::<Vec<WireSymbol>>("symbols", v))
+        .unwrap_or_default();
+    Some(outline_tree(file, source, wire))
+}
+
+/// The flattened wire list (parent by index) as nested symbols, in the package's order.
+fn outline_tree(file: &str, source: &str, wire: Vec<WireSymbol>) -> Vec<LspSymbol> {
+    let parents: Vec<Option<usize>> = wire.iter().map(|w| w.parent.map(|p| p as usize)).collect();
+    let mut nodes: Vec<Option<LspSymbol>> = wire
+        .into_iter()
+        .map(|w| {
+            let (line, _) = line_col(source, w.span.start);
+            let col = source[line_start(source, w.span.start)..w.span.start.min(source.len())].encode_utf16().count() + 1;
+            Some(LspSymbol {
+                name: w.name,
+                kind: w.kind,
+                detail: None,
+                start: w.span.start,
+                end: w.span.end,
+                name_start: w.span.start,
+                name_end: w.span.end,
+                line,
+                col,
+                file: file.to_string(),
+                deprecated: false,
+                children: Vec::new(),
+            })
+        })
+        .collect();
+    // Children before their parents are taken, from the last: a parent's index is always lower than its children's.
+    for i in (0..nodes.len()).rev() {
+        if let Some(p) = parents[i].filter(|p| *p < i) {
+            if let Some(child) = nodes[i].take() {
+                if let Some(parent) = nodes[p].as_mut() {
+                    parent.children.insert(0, child);
+                }
+            }
+        }
+    }
+    nodes.into_iter().flatten().collect()
+}
+
+// ── who calls a function: the incoming call hierarchy ─────────────────────────────
+
+/// A function or method that calls the name asked about, from the package's optional `incoming-calls`.
+#[derive(Deserialize)]
+struct WireIncomingCall {
+    name: String,
+    kind: String,
+    location: WireLocation,
+    #[serde(default)]
+    calls: Vec<WireLocation>,
+}
+
+/// The handle of a Patina hierarchy node: where its name is. It says it is Patina's, so a step is routed by the handle
+/// itself rather than by a guess from the file.
+fn patina_handle(file: &str, offset: usize) -> Json {
+    json!({ "patina": { "file": file, "offset": offset } })
+}
+
+/// The function or method at `offset`, as the root of a call hierarchy. `None` for a file that is not Patina; empty
+/// when the name there is not callable.
+pub(crate) fn prepare_calls(ctx: &BennuState, file: &str, source: &str, offset: usize) -> Option<Vec<bennu_proto::prelude::HierarchyNode>> {
+    if !is_patina(file) {
+        return None;
+    }
+    let callable = hover(ctx, file, source, offset).flatten().is_some_and(|h| matches!(h.kind.as_str(), "function" | "method"));
+    if !callable || is_library_view(file) {
+        return Some(Vec::new());
+    }
+    let (start, end) = name_bounds(source, offset);
+    let (line, col) = line_col(source, start);
+    let preview = source[line_start(source, start)..].lines().next().unwrap_or("").trim().to_string();
+    Some(vec![bennu_proto::prelude::HierarchyNode {
+        name: source[start..end].to_string(),
+        kind: "function".into(),
+        detail: None,
+        file: file.to_string(),
+        start,
+        end,
+        line,
+        col,
+        preview,
+        call_sites: Vec::new(),
+        handle: patina_handle(file, start),
+    }])
+}
+
+/// One level of callers of the node `handle` names, when the handle is Patina's (`None` otherwise). Empty when the
+/// installed package predates `incoming-calls`.
+pub(crate) fn incoming_step(ctx: &BennuState, handle: &Json) -> Option<Vec<bennu_proto::prelude::HierarchyNode>> {
+    let at = handle.get("patina")?;
+    let (Some(file), Some(offset)) = (at.get("file").and_then(Json::as_str), at.get("offset").and_then(Json::as_u64)) else {
+        return Some(Vec::new());
+    };
+    let Ok(source) = std::fs::read_to_string(file) else { return Some(Vec::new()) };
+    let wire = call(ctx, "incoming-calls", vec![request(file, &source), json!(offset)])
+        .ok()
+        .and_then(|v| decode::<Vec<WireIncomingCall>>("incoming-calls", v))
+        .unwrap_or_default();
+    let mut texts: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut text_of = |f: &str| texts.entry(f.to_string()).or_insert_with(|| std::fs::read_to_string(f).unwrap_or_default()).clone();
+    Some(
+        wire.into_iter()
+            .filter(|c| !c.location.file.starts_with(LIBRARY_SCHEME))
+            .map(|c| {
+                let text = text_of(&c.location.file);
+                let (line, col) = line_col(&text, c.location.span.start);
+                let preview = text[line_start(&text, c.location.span.start)..].lines().next().unwrap_or("").trim().to_string();
+                let call_sites = c
+                    .calls
+                    .iter()
+                    .map(|s| {
+                        let t = text_of(&s.file);
+                        bennu_proto::prelude::HierarchyCallSite {
+                            file: s.file.clone(),
+                            start: s.span.start,
+                            end: s.span.end,
+                            line: line_col(&t, s.span.start).0,
+                            preview: t[line_start(&t, s.span.start)..].lines().next().unwrap_or("").trim().to_string(),
+                        }
+                    })
+                    .collect();
+                // A call outside every function has no caller to climb from.
+                let handle = if c.name.is_empty() { Json::Null } else { patina_handle(&c.location.file, c.location.span.start) };
+                bennu_proto::prelude::HierarchyNode {
+                    name: if c.name.is_empty() { "(top level)".into() } else { c.name },
+                    kind: if c.kind.is_empty() { "module".into() } else { c.kind },
+                    detail: None,
+                    file: c.location.file,
+                    start: c.location.span.start,
+                    end: c.location.span.end,
+                    line,
+                    col,
+                    preview,
+                    call_sites,
+                    handle,
+                }
+            })
+            .collect(),
+    )
+}
+
 /// The uses of the name at `offset`, across the mod. `None` for a file that is not Patina.
 pub(crate) fn references(ctx: &BennuState, file: &str, source: &str, offset: usize) -> Option<Option<UsagesResult>> {
     if !is_patina(file) {
@@ -1006,11 +1170,17 @@ fn line_col(text: &str, at: usize) -> (usize, usize) {
 
 /// The identifier around `offset`, for a results label.
 fn name_at(text: &str, offset: usize) -> String {
+    let (start, end) = name_bounds(text, offset);
+    text[start..end].to_string()
+}
+
+/// The byte range of the identifier around `offset`.
+fn name_bounds(text: &str, offset: usize) -> (usize, usize) {
     let offset = offset.min(text.len());
     let is_ident = |c: char| c.is_alphanumeric() || c == '_';
     let start = text[..offset].char_indices().rev().take_while(|&(_, c)| is_ident(c)).last().map(|(i, _)| i).unwrap_or(offset);
     let end = text[offset..].char_indices().find(|&(_, c)| !is_ident(c)).map(|(i, _)| offset + i).unwrap_or(text.len());
-    text[start..end].to_string()
+    (start, end)
 }
 
 #[cfg(test)]
@@ -1199,6 +1369,17 @@ mod tests {
     fn a_path_outside_any_mod_is_refused_with_a_sentence_and_nothing_is_called() {
         let d = scratch("nomod");
         assert_eq!(mod_root_of(&d.join("a.ptn")), None);
+    }
+
+    #[test]
+    fn the_outline_is_the_flattened_list_nested_by_parent() {
+        let src = "trait Shape {\n    fn area(self) -> f32\n}\nfn main() {}\n";
+        let at = |n: &str| src.find(n).unwrap();
+        let sym = |name: &str, kind: &str, parent: Option<u32>| WireSymbol { name: name.into(), kind: kind.into(), span: Span { start: at(name), end: at(name) + name.len() }, parent };
+        let tree = outline_tree("/m/script/a.ptn", src, vec![sym("Shape", "trait", None), sym("area", "method", Some(0)), sym("main", "function", None)]);
+        assert_eq!(tree.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Shape", "main"]);
+        assert_eq!(tree[0].children[0].name, "area");
+        assert_eq!((tree[0].children[0].line, tree[0].children[0].col), (2, 8));
     }
 
     #[test]

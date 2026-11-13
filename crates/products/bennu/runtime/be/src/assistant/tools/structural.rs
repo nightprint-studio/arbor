@@ -47,7 +47,7 @@ impl ToolHost {
     /// `structural_search`: run the query to the end and say what it found. Reads, never writes.
     pub(super) fn run_structural_search(&self, input: &Value) -> Result<String, String> {
         let query = input.get("query").and_then(Value::as_str).ok_or("`query` is required")?;
-        if self.session.projects.first().is_some_and(|p| !p.modules.is_empty() && !p.has("Maven") && !p.has("Gradle")) {
+        if self.session.projects().first().is_some_and(|p| !p.modules.is_empty() && !p.has("Maven") && !p.has("Gradle")) {
             return Err("structural_search matches Java and JSP code, and this project has none. Use search_text here.".into());
         }
         let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(20).clamp(1, 100);
@@ -115,7 +115,7 @@ impl ToolHost {
         let text = |k: &str| input.get(k).and_then(Value::as_str).ok_or_else(|| format!("`{k}` is required"));
         let (query, replacement) = (text("query")?, text("replacement")?);
         let dry_run = input.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
-        if self.session.projects.first().is_some_and(|p| !p.modules.is_empty() && !p.has("Maven") && !p.has("Gradle")) {
+        if self.session.projects().first().is_some_and(|p| !p.modules.is_empty() && !p.has("Maven") && !p.has("Gradle")) {
             return Err("structural_replace matches Java and JSP code, and this project has none. Use replace_in_files or edit_files here.".into());
         }
         // A rewrite reaches only what could also be changed: read-only folders, secrets and `.git` are out,

@@ -24,6 +24,12 @@
     Brackets are coloured by depth and blocks fold by their braces. It never claims to know which names exist, so it cannot go out of
     date — telling a parameter from a local, or a <code>mut</code> binding, would need the backend. In Markdown, a fenced block tagged
     <code>ptn</code> or <code>patina</code> (any case, extra words after the tag allowed) is coloured the same way, in both the rendered and the source view.</dd>
+  <dt>Comments as Markdown</dt>
+  <dd>A run of whole-line <code>//</code>, <code>///</code> or <code>//!</code> comments with the same indentation reads as one Markdown document, drawn live as in the
+    Markdown editor: headings, <strong>bold</strong> and <em>italic</em>, <code>inline code</code>, links, lists and task lists, quotes and
+    callouts (<code>&gt; [!WARNING]</code>), fenced code blocks, Mermaid diagrams and tables. A paragraph can span several comment lines. The
+    <code>//</code> shows only on the line the caret is on, and inline markers show while the caret is inside them. A table is edited cell by
+    cell, as in the Markdown editor, and keeps its <code>//</code> when written back. A comment after code on the same line stays plain.</dd>
   <dt>Completion and hover</dt>
   <dd>After a dot, the fields and methods of the receiver's type, with its generics filled in; after <code>::</code>, variants and associated items;
     inside a call, the parameters by name. A name the file does not import yet is offered with the <code>use</code> line it needs. Hover shows the
@@ -31,6 +37,13 @@
     inferred type of a local.</dd>
   <dt>Go-to, find usages, rename</dt>
   <dd>Across the whole mod. A rename lists every edit with the text it expects to find, and refuses names from a library.</dd>
+  <dt>Implementations, callers, structure</dt>
+  <dd>Go to implementation from a trait (the types that implement it), a trait method (the methods of its <code>impl</code>s) or an
+    <code>impl</code> method (the other <code>impl</code>s). <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> on a function or method opens who calls
+    it, grouped by the calling function with each call site, one level at a time (there is no type hierarchy). The Structure panel and the
+    <kbd>Ctrl</kbd> + <kbd>F12</kbd> popup list the file's functions, structs, enums, traits and the methods of their <code>impl</code>s. Imber asks
+    the same things (<code>bennu_implementors</code>, <code>bennu_callers</code>, <code>bennu_outline</code>). Who calls needs a version of the extension
+    that has it; an older one answers with no callers.</dd>
   <dt>Diagnostics</dt>
   <dd>Syntax, names, types, contexts (<code>#[server]</code>, <code>#[client]</code>, <code>#[worldgen]</code>), the capabilities the mod's
     <code>manifest.ron</code> declares, exhaustive <code>match</code>, writes to what is not <code>mut</code>.</dd>

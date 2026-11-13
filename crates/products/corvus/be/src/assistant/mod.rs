@@ -41,9 +41,6 @@ use self::permission::Mode;
 use crate::ephemeral::tab_for;
 use crate::repo::{open, repo_path};
 
-/// Requests one run may make before it is stopped.
-const MAX_STEPS: u32 = 40;
-const MAX_TOKENS: u32 = 16_000;
 /// A commit message is a few lines.
 const COMMIT_MESSAGE_TOKENS: u32 = 1_000;
 /// Characters of the staged diff that reach the model when writing a commit message.
@@ -138,6 +135,7 @@ pub(crate) fn begin_run(state: &CorvusState, shared: Arc<CorvusState>, handle: t
 
     let cfg = settings::assistant();
     let model = settings::model_info(&cfg.model);
+    let max_steps = imber_core::prelude::clamp_max_steps(cfg.max_steps);
     let conversation_id = args.conversation_id.clone().filter(|c| !c.is_empty()).unwrap_or_else(|| format!("c-{:x}", now_ms()));
 
     // The brake, before anything is spent: a conversation already at its limit does not go on.
@@ -171,7 +169,8 @@ pub(crate) fn begin_run(state: &CorvusState, shared: Arc<CorvusState>, handle: t
         system,
         messages: transcript,
         tools: Vec::<ToolSpec>::new(), // the loop asks the host for them before every request
-        max_tokens: MAX_TOKENS,
+        // The model's own ceiling; the loop cuts it to what the window leaves before each request.
+        max_tokens: model.as_ref().map_or(imber_core::prelude::DEFAULT_MAX_OUTPUT, imber_core::prelude::ModelInfo::output_ceiling),
         effort: Effort::parse(&cfg.effort),
         long_cache: cfg.long_cache,
     };
@@ -182,13 +181,14 @@ pub(crate) fn begin_run(state: &CorvusState, shared: Arc<CorvusState>, handle: t
     if let Some(note) = &args.announce {
         session.emit("scheduled", json!({ "note": note, "text": args.text }));
     }
-    let host = ImberHost::new(Arc::clone(&session), shared, handle, root.clone(), conversation_id.clone(), mode, args.chat, args.unattended);
+    let mut host = ImberHost::new(Arc::clone(&session), shared, handle, root.clone(), conversation_id.clone(), mode, args.chat, args.unattended);
+    host.window = model.as_ref().map(|m| m.context_max);
 
     let claimed = conversation_id.clone();
     std::thread::Builder::new()
         .name(format!("imber-{run_id}"))
         .spawn(move || {
-            execute(Arc::clone(&session), host, key, request, model, on_done);
+            execute(Arc::clone(&session), host, key, request, model, max_steps, on_done);
             runs::release_conversation(&claimed);
         })
         .map_err(|e| {
@@ -200,9 +200,9 @@ pub(crate) fn begin_run(state: &CorvusState, shared: Arc<CorvusState>, handle: t
 }
 
 /// The run itself: the loop, then saving what it produced.
-fn execute(session: Arc<Session>, host: ImberHost, key: String, request: Request, model: Option<ModelInfo>, on_done: Option<DoneHook>) {
+fn execute(session: Arc<Session>, host: ImberHost, key: String, request: Request, model: Option<ModelInfo>, max_steps: u32, on_done: Option<DoneHook>) {
     let outcome = match HttpTransport::new() {
-        Ok(transport) => run_agent(&Anthropic, &transport, &host, &key, request.clone(), MAX_STEPS),
+        Ok(transport) => run_agent(&Anthropic, &transport, &host, &key, request.clone(), max_steps),
         Err(e) => imber_core::prelude::Outcome::failed_to_start(request.messages.clone(), ProviderError::local(e)),
     };
 
@@ -212,7 +212,7 @@ fn execute(session: Arc<Session>, host: ImberHost, key: String, request: Request
     if let Some(e) = &outcome.error {
         session.view().push(error_notice(e));
     } else if outcome.ended == Ended::TooManySteps {
-        session.view().push(json!({ "type": "notice", "level": "warning", "text": format!("Stopped after {MAX_STEPS} steps. Say \"continue\" to go on.") }));
+        session.view().push(json!({ "type": "notice", "level": "warning", "text": imber_core::prelude::too_many_steps_notice(max_steps) }));
     } else if matches!(outcome.ended, Ended::Incomplete(_)) {
         session.view().push(json!({ "type": "notice", "level": "warning", "text": "The answer was cut short — the model reached its length limit or declined." }));
     }

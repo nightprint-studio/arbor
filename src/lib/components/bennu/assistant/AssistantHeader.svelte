@@ -23,7 +23,8 @@
       id: c.id,
       title: c.title,
       updatedAt: c.updatedAt,
-      subtitle: `${store.models.find((m) => m.id === c.model)?.name ?? c.model} · ${relativeTime(c.updatedAt, now)}`,
+      // Several conversations work at once: the list says which ones are going.
+      subtitle: `${store.isRunning(c.id) ? 'Working · ' : ''}${store.models.find((m) => m.id === c.model)?.name ?? c.model} · ${relativeTime(c.updatedAt, now)}`,
       meta: formatEur(store.eur(c.cost)),
     })),
   );

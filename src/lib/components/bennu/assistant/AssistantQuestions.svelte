@@ -14,6 +14,7 @@
    */
   import { MessageCircleQuestion, Check, ChevronLeft, ChevronRight } from 'lucide-svelte';
   import ChoiceList from '$lib/components/shared/ui/ChoiceList.svelte';
+  import MarkdownView from '$lib/components/shared/ui/MarkdownView.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
   import AssistantStalePrompt from './AssistantStalePrompt.svelte';
@@ -24,7 +25,10 @@
 
   const OTHER = '__other__';
 
-  // What has been picked so far, per question — kept while you move between them.
+  // What has been picked so far, per question — kept while you move between them. A question not yet
+  // touched has no entry, so ChoiceList is bound through getter/setter pairs that read it as empty:
+  // `bind:value={picked[id]}` hands it `undefined`, and Svelte throws (`props_invalid_value`) on a bind of
+  // undefined to a prop with a fallback — the card dies mid-render and the message stops updating.
   let step = $state(0);
   let picked = $state<Record<string, string[]>>({});
   let typed = $state<Record<string, string>>({});
@@ -68,16 +72,39 @@
   </div>
 
   {#if answered}
-    <dl class="summary">
-      {#each questions as q (q.id)}
-        <div class="line">
-          <dt>{q.header}</dt>
-          <dd>{(set.answers?.[q.id] ?? []).join(' · ') || '—'}</dd>
-        </div>
+    <!-- What was decided, and on what: each question as it was asked, the answer under it. -->
+    <ol class="summary">
+      {#each questions as q, i (q.id)}
+        {@const answer = set.answers?.[q.id] ?? []}
+        <li>
+          <div class="qhead">{#if questions.length > 1}<span class="idx">{i + 1}</span>{/if}<span class="qname">{q.header}</span></div>
+          <div class="asked"><MarkdownView text={q.text} size="xs" /></div>
+          <div class="answer">
+            {#if answer.length}<MarkdownView text={answer.join('\n\n')} size="sm" />{:else}<span class="none">No answer</span>{/if}
+          </div>
+        </li>
       {/each}
-    </dl>
+    </ol>
   {:else if !waiting}
-    <p class="text">{questions.map((q) => q.text).join(' · ')}</p>
+    <!-- Nobody can answer any more, but what was asked stays readable: each question, numbered, with its options. -->
+    <ol class="stale">
+      {#each questions as q, i (q.id)}
+        <li>
+          <div class="qhead">{#if questions.length > 1}<span class="idx">{i + 1}</span>{/if}<span class="qname">{q.header}</span></div>
+          <div class="text"><MarkdownView text={q.text} size="sm" /></div>
+          {#if q.options.length}
+            <ul class="opts">
+              {#each q.options as o (o.label)}
+                <li>
+                  <span class="opt">{o.label}</span>
+                  {#if o.description}<div class="why"><MarkdownView text={o.description} size="xs" /></div>{/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </li>
+      {/each}
+    </ol>
     <AssistantStalePrompt />
   {:else}
     {#if questions.length > 1}
@@ -100,19 +127,27 @@
 
     {#key current.id}
       <div class="body">
-        <p class="text">{current.text}</p>
+        <div class="qhead">
+          {#if questions.length > 1}<span class="idx">{step + 1}</span>{/if}
+          <span class="qname">{current.header}</span>
+          {#if questions.length > 1}<span class="of">{step + 1} of {questions.length}</span>{/if}
+        </div>
+        <div class="text"><MarkdownView text={current.text} size="sm" /></div>
         <ChoiceList
           name={`${set.id}-${current.id}`}
           options={current.options.map((o) => ({ value: o.label, label: o.label, description: o.description }))}
           multi={current.multi}
-          bind:value={picked[current.id]}
-          bind:other={typed[current.id]}
-        />
+          bind:value={() => picked[current.id] ?? [], (v) => (picked[current.id] = v)}
+          bind:other={() => typed[current.id] ?? '', (v) => (typed[current.id] = v)}
+          onsubmit={() => { if (last ? allDone : isDone(current.id)) next(); }}
+        >
+          {#snippet description(o)}<MarkdownView text={o.description ?? ''} size="xs" />{/snippet}
+        </ChoiceList>
       </div>
     {/key}
 
     <div class="foot">
-      <span class="hint">{current.multi ? 'Pick any that apply.' : 'Pick one.'}</span>
+      <span class="hint">{current.multi ? 'Pick any that apply.' : 'Pick one.'} Ctrl/⌘+Enter in your own answer goes on.</span>
       <span class="grow"></span>
       {#if step > 0}
         <Button variant="ghost" size="sm" onclick={() => (step -= 1)}><ChevronLeft size={12} /> Back</Button>
@@ -161,14 +196,43 @@
   .tab.ok .n { background: var(--success); color: var(--text-on-accent); }
 
   .body { display: flex; flex-direction: column; gap: 9px; }
-  .text { margin: 0; font-size: var(--font-size-sm); line-height: 1.55; color: var(--text-primary); }
+  .text { color: var(--text-primary); }
+
+  /* The number and name of a question: the same badge as the tabs, so "2" reads the same everywhere. */
+  .qhead { display: flex; align-items: center; gap: 7px; }
+  .idx {
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+    width: 18px; height: 18px; border-radius: 50%;
+    font-size: var(--font-size-2xs); font-weight: 700;
+    background: var(--accent); color: var(--text-on-accent);
+  }
+  .qname { font-size: var(--font-size-xs); font-weight: 600; color: var(--text-primary); }
+  .of { margin-left: auto; font-size: var(--font-size-2xs); color: var(--text-muted); }
+
+  .stale { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; }
+  .stale > li { display: flex; flex-direction: column; gap: 6px; }
+  .stale > li + li { padding-top: 10px; border-top: 1px solid var(--border-subtle); }
+  .stale .idx { background: var(--bg-overlay); color: var(--text-muted); }
+  .opts { margin: 0; padding: 0 0 0 25px; display: flex; flex-direction: column; gap: 4px; }
+  .opts li { font-size: var(--font-size-xs); }
+  .opt { color: var(--text-secondary); font-weight: 600; }
+  .why { color: var(--text-muted); }
 
   .foot { display: flex; align-items: center; gap: 6px; }
   .grow { flex: 1; }
   .hint { font-size: var(--font-size-2xs); color: var(--text-muted); }
 
-  .summary { margin: 0; display: flex; flex-direction: column; gap: 6px; }
-  .line { display: flex; gap: 10px; font-size: var(--font-size-xs); }
-  dt { flex-shrink: 0; width: 64px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-size: var(--font-size-2xs); padding-top: 1px; }
-  dd { margin: 0; color: var(--text-primary); line-height: 1.45; }
+  .summary { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .summary > li { display: flex; flex-direction: column; gap: 5px; }
+  .summary > li + li { padding-top: 10px; border-top: 1px solid var(--border-subtle); }
+  .summary .idx { background: var(--bg-overlay); color: var(--text-muted); }
+  .asked { color: var(--text-muted); padding-left: 25px; }
+  .answer {
+    margin-left: 25px; padding: 6px 10px;
+    border-left: 2px solid var(--success);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: color-mix(in srgb, var(--success) 6%, var(--bg-base));
+    color: var(--text-primary);
+  }
+  .none { font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic; }
 </style>

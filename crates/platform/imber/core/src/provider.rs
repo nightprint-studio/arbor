@@ -42,6 +42,11 @@ pub struct Usage {
 }
 
 impl Usage {
+    /// Every token of the request's input as the provider counted it: uncached, read from the cache, written to it.
+    pub fn prompt_tokens(&self) -> u64 {
+        self.input_tokens + self.cache_read_tokens + self.cache_write_tokens
+    }
+
     /// Combines two reports of one request. A streamed response gives its numbers in parts and each is
     /// a running total, so the larger of the two is the later one — the input count comes with the first
     /// report and the output count grows with the answer.
@@ -65,10 +70,10 @@ pub enum Event {
     Thinking(String),
     /// The model began a tool call. Arguments are still arriving.
     ToolStart { id: String, name: String },
-    /// A tool call is complete. `input` is parsed; `valid` is false when the arguments did not parse as
-    /// JSON (a truncated stream, a model slip) — the host answers that call with an error result rather
-    /// than running a tool on guessed arguments.
-    ToolDone { id: String, name: String, input: Value, valid: bool },
+    /// A tool call is complete. `input` is parsed; `problem` says why the arguments could not be used when
+    /// they did not parse as a JSON object (a truncated stream, a model slip) — the host answers that call
+    /// with an error result carrying it rather than running a tool on guessed arguments.
+    ToolDone { id: String, name: String, input: Value, problem: Option<String> },
     /// The provider's running count of what the request used.
     Usage(Usage),
     /// The response is over.

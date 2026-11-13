@@ -29,7 +29,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::cargo_discover::TestTarget;
+use crate::cargo_discover::{RustTest, RustTestKind, TestTarget};
 
 /// One test case to run: where it lives, and how its name must be matched.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,20 +83,97 @@ pub struct CargoPlan {
 /// point is to stay away from the edge, not to find it.
 const MAX_FILTER_CHARS: usize = 6000;
 
+/// Which program runs the tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CargoRunner {
+    /// `cargo test`: every binary in turn, libtest inside each.
+    #[default]
+    Cargo,
+    /// `cargo nextest run`: one process per test, in parallel across binaries. It takes the same
+    /// target flags and the same name filters after `--`; it does not run doc-tests.
+    Nextest,
+}
+
+/// How a run is made, besides what it selects.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CargoRunOptions {
+    /// Also run the `#[ignore]`d tests — the only way to run one without editing the source.
+    pub include_ignored: bool,
+    /// Run **only** the `#[ignore]`d tests (libtest's `--ignored`): the slow or windowed ones kept out of the
+    /// ordinary run. Wins over `include_ignored`.
+    pub ignored_only: bool,
+    /// nextest's filter expression (`-E`), e.g. `test(/^play::/) & package(vz-regression)`. nextest only.
+    pub filter_expr: Option<String>,
+    /// Cargo features to enable (`--features a,b`).
+    pub features: Vec<String>,
+    /// `--all-features`.
+    pub all_features: bool,
+    /// `--no-default-features`.
+    pub no_default_features: bool,
+    pub runner: CargoRunner,
+}
+
+impl CargoRunOptions {
+    /// The feature flags, in cargo's spelling — the same for `test` and `nextest run`.
+    fn feature_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        let features: Vec<&str> = self.features.iter().map(|f| f.trim()).filter(|f| !f.is_empty()).collect();
+        if !features.is_empty() {
+            args.push("--features".to_string());
+            args.push(features.join(","));
+        }
+        if self.all_features {
+            args.push("--all-features".to_string());
+        }
+        if self.no_default_features {
+            args.push("--no-default-features".to_string());
+        }
+        args
+    }
+}
+
 /// Build the `cargo test` invocation for `scope`.
 ///
 /// `include_ignored` adds libtest's `--include-ignored`, which is the only way to run a
 /// `#[ignore]`d test without editing the source.
 pub fn cargo_plan(scope: &CargoTestScope, include_ignored: bool) -> CargoPlan {
+    cargo_plan_with(scope, &CargoRunOptions { include_ignored, ..CargoRunOptions::default() })
+}
+
+/// Build the invocation for `scope` with `options`: `cargo test`, or `cargo nextest run`.
+///
+/// The two take the same selection — `-p`, the target flags, the features, and libtest-style name filters (with
+/// `--exact` and `--include-ignored`) after the `--` — so one plan serves both; only the head of the line and the
+/// output flags differ. nextest is told to print each test's verdict (skips included), the output of a failure
+/// at once, nothing for a pass, and no final recap: the recap repeats every failure, which a reader of the stream
+/// Past this many crates a run of several is spelled `--workspace` rather than one `-p` each.
+const MAX_NAMED_PACKAGES: usize = 12;
+
+/// would count twice.
+pub fn cargo_plan_with(scope: &CargoTestScope, options: &CargoRunOptions) -> CargoPlan {
+    let include_ignored = options.include_ignored;
     // `--color never` because the output is parsed: libtest already drops colour when its stdout
     // is a pipe, but cargo's own status lines are the ones that carry the target names, and a
     // stray escape sequence in one of those is a target the panel cannot name.
-    let mut args = vec![
-        "test".to_string(),
-        "--no-fail-fast".to_string(),
-        "--color".to_string(),
-        "never".to_string(),
-    ];
+    let mut args = match options.runner {
+        CargoRunner::Cargo => vec!["test".to_string()],
+        CargoRunner::Nextest => vec!["nextest".to_string(), "run".to_string()],
+    };
+    args.extend(["--no-fail-fast", "--color", "never"].map(String::from));
+    if options.runner == CargoRunner::Nextest {
+        args.extend(
+            ["--status-level", "skip", "--final-status-level", "none", "--failure-output", "immediate", "--success-output", "never"]
+                .map(String::from),
+        );
+    }
+    args.extend(options.feature_args());
+    if options.runner == CargoRunner::Nextest {
+        if let Some(expr) = options.filter_expr.as_deref().map(str::trim).filter(|e| !e.is_empty()) {
+            args.push("-E".to_string());
+            args.push(expr.to_string());
+        }
+    }
     // Everything libtest gets, collected separately and appended after the `--`.
     let mut filters: Vec<String> = Vec::new();
     let mut widened = None;
@@ -135,11 +212,20 @@ pub fn cargo_plan(scope: &CargoTestScope, include_ignored: bool) -> CargoPlan {
                 args.push(package);
                 args.extend(target.selector_args());
             } else {
-                // Cases from several crates or several targets cannot be narrowed on cargo's
-                // side: one invocation is one target set. The whole workspace is built and every
-                // binary is handed the filters — each reports only what it matches, so the result
-                // is right, it just costs more to get.
-                args.push("--workspace".to_string());
+                // Cases from several targets cannot be narrowed to one target: one invocation is one target
+                // set. They are narrowed to their crates instead (`-p` for each), every binary of those is handed
+                // the filters and reports only what it matches. Only across very many crates is it the workspace.
+                let mut packages: Vec<&str> = cases.iter().map(|c| c.package.as_str()).collect();
+                packages.sort_unstable();
+                packages.dedup();
+                if packages.len() <= MAX_NAMED_PACKAGES {
+                    for p in packages {
+                        args.push("-p".to_string());
+                        args.push(p.to_string());
+                    }
+                } else {
+                    args.push("--workspace".to_string());
+                }
             }
             // `--exact` is a property of the whole run, not of one filter, so it is only safe when
             // every case wants it. With a parameterized case in the set the filters stay
@@ -153,9 +239,13 @@ pub fn cargo_plan(scope: &CargoTestScope, include_ignored: bool) -> CargoPlan {
                     true => c.path.clone(),
                     // A parameterized function's cases are `path::case_1`; the prefix is what
                     // reaches all of them.
-                    false => format!("{}::", c.path),
+                    // A module prefix arrives already spelled `cli::`: one `::`, not two (`cli::::` matches nothing).
+                    false => format!("{}::", c.path.trim_end_matches("::")),
                 });
             }
+            // One module prefix found in several binaries is still one filter.
+            let mut seen = std::collections::HashSet::new();
+            filters.retain(|f| seen.insert(f.clone()));
             let spelled: usize = filters.iter().map(|f| f.len() + 1).sum();
             if spelled > MAX_FILTER_CHARS {
                 widened = Some(format!(
@@ -167,7 +257,10 @@ pub fn cargo_plan(scope: &CargoTestScope, include_ignored: bool) -> CargoPlan {
         }
     }
 
-    if include_ignored {
+    // nextest takes both spellings after the `--` too, for compatibility with cargo test.
+    if options.ignored_only {
+        filters.push("--ignored".to_string());
+    } else if include_ignored {
         filters.push("--include-ignored".to_string());
     }
     if !filters.is_empty() {
@@ -205,9 +298,150 @@ fn case_label(cases: &[RustCaseRef]) -> String {
     }
 }
 
+/// The cases a list of names asks for, against the tests that exist.
+///
+/// A name is either a test (`cli::tests::parses`) or a **module prefix** (`cli`, `cli::`, `cli::tests`): the
+/// second runs every test under that module. A prefix becomes one libtest filter per binary that holds such
+/// tests — `cli::`, not exact — so the command line stays one filter long however many tests are under it.
+/// libtest matches a filter as a substring, so `cli::` also catches an `other::cli::x` in the same binary;
+/// the report lists what ran, which is where an over-match shows. `Err` lists the names that are neither.
+pub fn select_cases(found: &[RustTest], wanted: &[String]) -> Result<Vec<RustCaseRef>, Vec<String>> {
+    let mut cases: Vec<RustCaseRef> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+    for raw in wanted {
+        let name = raw.trim();
+        if let Some(test) = found.iter().find(|t| t.path == name) {
+            push_once(&mut cases, RustCaseRef {
+                package: test.package.clone(),
+                target: test.target.clone(),
+                path: test.path.clone(),
+                // A parameterised function's real cases are `path::case_1`, `case_2`, … — asking libtest for
+                // `path` exactly would run none of them.
+                exact: !matches!(test.kind, RustTestKind::Parameterized),
+            });
+            continue;
+        }
+        let module = name.trim_end_matches("::");
+        let filter = format!("{module}::");
+        let under: Vec<&RustTest> = if module.is_empty() { Vec::new() } else { found.iter().filter(|t| t.path.starts_with(&filter)).collect() };
+        if under.is_empty() {
+            missing.push(name.to_string());
+            continue;
+        }
+        for test in under {
+            push_once(&mut cases, RustCaseRef { package: test.package.clone(), target: test.target.clone(), path: filter.clone(), exact: false });
+        }
+    }
+    if missing.is_empty() { Ok(cases) } else { Err(missing) }
+}
+
+fn push_once(cases: &mut Vec<RustCaseRef>, case: RustCaseRef) {
+    if !cases.contains(&case) {
+        cases.push(case);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn found(package: &str, target: TestTarget, path: &str) -> RustTest {
+        RustTest {
+            package: package.into(),
+            target,
+            module: path.rsplit_once("::").map(|(m, _)| m.to_string()).unwrap_or_default(),
+            name: path.rsplit("::").next().unwrap_or(path).into(),
+            path: path.into(),
+            file: String::new(),
+            line: 1,
+            offset: 0,
+            kind: RustTestKind::Test,
+            ignored: false,
+            should_panic: false,
+        }
+    }
+
+    #[test]
+    fn features_go_before_the_filters_for_either_runner() {
+        let options = CargoRunOptions { features: vec!["serde".into(), " dev ".into(), "".into()], no_default_features: true, ..CargoRunOptions::default() };
+        let p = cargo_plan_with(&CargoTestScope::Package { package: "a".into() }, &options);
+        let at = p.args.iter().position(|a| a == "--features").unwrap();
+        assert_eq!(p.args[at + 1], "serde,dev");
+        assert!(p.args.contains(&"--no-default-features".to_string()) && !p.args.contains(&"--all-features".to_string()));
+        assert!(p.args.iter().position(|a| a == "--").map_or(true, |dash| dash > at));
+    }
+
+    #[test]
+    fn only_the_ignored_and_a_nextest_filter_reach_the_command_line() {
+        let options = CargoRunOptions {
+            runner: CargoRunner::Nextest,
+            ignored_only: true,
+            include_ignored: true,
+            filter_expr: Some("test(/^play::/)".into()),
+            ..CargoRunOptions::default()
+        };
+        let plan = cargo_plan_with(&CargoTestScope::Package { package: "vz-regression".into() }, &options);
+        let line = plan.args.join(" ");
+        assert!(line.contains("-E test(/^play::/)"), "{line}");
+        assert!(line.ends_with("-- --ignored"), "{line}");
+        // cargo test has no filter expression: it is left out rather than passed to a runner that refuses it.
+        let cargo = cargo_plan_with(&CargoTestScope::Workspace, &CargoRunOptions { filter_expr: Some("x".into()), ..CargoRunOptions::default() });
+        assert!(!cargo.args.iter().any(|a| a == "-E"));
+    }
+
+    #[test]
+    fn nextest_takes_the_same_selection_with_its_own_head_and_output_flags() {
+        let options = CargoRunOptions { runner: CargoRunner::Nextest, include_ignored: true, ..CargoRunOptions::default() };
+        let scope = CargoTestScope::Cases { cases: vec![case("a", TestTarget::Lib, "cli::tests::x")] };
+        let p = cargo_plan_with(&scope, &options);
+        assert_eq!(&p.args[..2], ["nextest", "run"]);
+        assert!(p.args.windows(2).any(|w| w == ["--final-status-level", "none"]));
+        assert!(p.args.windows(2).any(|w| w == ["-p", "a"]) && p.args.contains(&"--lib".to_string()));
+        assert_eq!(filters_of(&p), ["--exact", "cli::tests::x", "--include-ignored"]);
+        assert_eq!(cargo_plan(&scope, true).args[0], "test", "the plain plan is still cargo test");
+    }
+
+    #[test]
+    fn an_exact_name_is_one_exact_case() {
+        let all = [found("a", TestTarget::Lib, "cli::tests::parses"), found("a", TestTarget::Lib, "cli::tests::fails")];
+        let cases = select_cases(&all, &["cli::tests::parses".into()]).unwrap();
+        assert_eq!(cases, [RustCaseRef { package: "a".into(), target: TestTarget::Lib, path: "cli::tests::parses".into(), exact: true }]);
+    }
+
+    #[test]
+    fn a_module_prefix_runs_once_filtered_in_the_crates_that_have_it() {
+        let all = [
+            found("a", TestTarget::Lib, "cli::tests::parses"),
+            found("b", TestTarget::Bin { name: "suite".into() }, "cli::main_works"),
+            found("c", TestTarget::Lib, "other::tests::x"),
+        ];
+        let cases = select_cases(&all, &["cli::".into()]).unwrap();
+        let p = cargo_plan_with(&CargoTestScope::Cases { cases }, &CargoRunOptions::default());
+        let line = p.args.join(" ");
+        assert!(line.contains("-p a -p b") && !line.contains("--workspace") && !line.contains("-p c"), "{line}");
+        assert_eq!(filters_of(&p), ["cli::"]);
+    }
+
+    #[test]
+    fn a_module_prefix_is_one_filter_per_binary_that_holds_its_tests() {
+        let all = [
+            found("a", TestTarget::Lib, "cli::tests::parses"),
+            found("a", TestTarget::Lib, "cli::ptn::tests::runs"),
+            found("a", TestTarget::Bin { name: "a".into() }, "cli::main_works"),
+            found("a", TestTarget::Lib, "other::tests::x"),
+        ];
+        for spelled in ["cli", "cli::", " cli:: "] {
+            let cases = select_cases(&all, &[spelled.into()]).unwrap();
+            assert_eq!(cases.len(), 2, "{spelled}: {cases:?}");
+            assert!(cases.iter().all(|c| c.path == "cli::" && !c.exact));
+        }
+    }
+
+    #[test]
+    fn a_name_that_is_neither_is_reported() {
+        let all = [found("a", TestTarget::Lib, "cli::tests::parses")];
+        assert_eq!(select_cases(&all, &["cl".into(), "nothing::".into(), "".into()]).unwrap_err(), ["cl", "nothing::", ""]);
+    }
 
     fn case(package: &str, target: TestTarget, path: &str) -> RustCaseRef {
         RustCaseRef { package: package.to_string(), target, path: path.to_string(), exact: true }

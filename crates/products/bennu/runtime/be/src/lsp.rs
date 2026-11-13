@@ -71,7 +71,13 @@ fn bennu_lsp_servers(_ctx: &BennuState) -> Result<Vec<LspServerInfo>, String> {
     Ok(LspRegistry::global()
         .availability()
         .into_iter()
-        .map(|a| LspServerInfo {
+        .map(|a| {
+            let known = LspRegistry::global().known_features(&a.id, &a.language);
+            (a, known)
+        })
+        .map(|(a, known)| LspServerInfo {
+            answers: known.map(|(f, _)| f.labels().into_iter().map(str::to_string).collect()).unwrap_or_default(),
+            answers_confirmed: known.is_some_and(|(_, confirmed)| confirmed),
             id: a.id,
             name: a.name,
             language: a.language,
@@ -131,13 +137,14 @@ fn bennu_lsp_semantic_tokens(_ctx: &BennuState, args: LspFileArgs) -> Result<Vec
 // Structure
 // ---------------------------------------------------------------------------
 
-/// The document outline, for the Structure panel.
+/// The document outline, for the Structure panel and the File Structure popup — from the engine that serves the
+/// file (see `engine`): a language server, or the Patina package for a `.ptn`. Named for the servers it began with.
 #[arbor_rpc::handler]
 fn bennu_lsp_document_symbols(
-    _ctx: &BennuState,
+    ctx: &BennuState,
     args: LspFileArgs,
 ) -> Result<Vec<LspSymbol>, String> {
-    Ok(lsp_route::document_symbols(&args.file, &args.source))
+    Ok(crate::engine::document_symbols(ctx, &args.file, &args.source))
 }
 
 /// Every occurrence of the symbol at the caret, in the open buffer.

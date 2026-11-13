@@ -69,6 +69,27 @@ impl HttpTransport {
     }
 }
 
+impl HttpTransport {
+    /// A plain GET whose whole body is read and returned — for the small reports beside the conversation (the
+    /// organization's cost), never for an answer. Bounded as a whole: thirty seconds, then it is a timeout.
+    pub fn get_text(&self, url: &str, headers: &[(String, String)]) -> Result<String, ProviderError> {
+        self.rt.block_on(async {
+            let mut call = self.client.get(url).timeout(Duration::from_secs(30));
+            for (name, value) in headers {
+                call = call.header(name.as_str(), value.as_str());
+            }
+            let response = call.send().await.map_err(|e| send_error(url, &e))?;
+            let status = response.status();
+            let body = response.text().await.map_err(|e| read_error(&e))?;
+            if status.is_success() {
+                Ok(body)
+            } else {
+                Err(ProviderError::from_response(status.as_u16(), None, &body))
+            }
+        })
+    }
+}
+
 /// What a failure to send (connecting, or waiting for the first byte) was: the class of network error decides
 /// whether it is worth another try, the error's own text is kept for the user.
 fn send_error(url: &str, e: &reqwest::Error) -> ProviderError {

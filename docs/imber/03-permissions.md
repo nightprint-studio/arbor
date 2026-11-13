@@ -47,10 +47,13 @@ Always allowed on top of the reach: the **extra folders** you added in Settings 
 | **Delete (inside the reach)** | Asks | Free, but a call removing more than 50 files asks | Same as Accept edits |
 | **Delete in the Temp area** | Free | Free | Free |
 | **Delete outside the reach, or a whole project or allowed folder** | Asks | Asks | Asks |
-| **Build or run the tests of the project (`bennu_build`, `bennu_test_run`)** | Asks on every call | Asks once per run | Free |
+| **Check, build or run the tests of the project (`bennu_check`, `bennu_build`, `bennu_test_run`)** | Asks on every call | Asks once per run | Free |
 | **Other things that execute code (cargo run, npm scripts, run configurations, launching a program)** | Asks | Asks | Asks |
 | **Other Bennu tools that change something** | Asks | Free | Free |
 | **Start a process (`run_start`)** | Asks every time | Asks every time | Asks every time |
+| **Run a Rust binary or example (`cargo_run`)** | Asks the first time for each target in a conversation; then free with any features, arguments or environment | Same | Same |
+| **Run a program you set up (`run_tool`)** | As the tool says (every call, once per conversation, never); every call when the tool changes things | As the tool says | As the tool says |
+| **Run a script of the project that is not one of your programs (`run_script`)** | Asks every time, showing the script: decline, run once, or run and add it to your programs (then it is asked about once per conversation). A script added this way asks again when its content changes | Same | Same |
 | **Run a recipe or a scenario** | Asks once per content of the recipes file or scenario | Same | Same |
 | **HTTP request to localhost** | GET, HEAD, OPTIONS free; any other method asks unless the port belongs to a process it started | Same | Same |
 | **Debugger: set breakpoints, read the stack and values, step** | Free | Free | Free |
@@ -62,7 +65,8 @@ Always allowed on top of the reach: the **extra folders** you added in Settings 
 | **Git: read (status, diff, log, blame)** | Free once git is switched on | Free | Free |
 | **Git: stage, unstage** | Asks | Free | Free |
 | **Git: commit** | Asks | Asks | Asks. Push does not exist |
-| **A path outside the reach** | One prompt: Deny, Allow reading, Allow reading and writing, for that folder, for the session | Same | Same, except the build-error case below. "Anywhere on disk" never asks |
+| **Bring in another project for Bennu's tools** | Open in Bennu: free inside the reach, the access card outside it. Not open: the access card outside the reach (a yes also indexes it); inside it, as *Opening other projects* says (asks by default) | Same | Same, except that by default a project not open in Bennu but inside the reach opens without asking |
+| **A path outside the reach** | One prompt: Deny, Allow reading, Allow reading and writing, for that folder, for the session. It says what the call wants there (read, search, change, create, delete), and the grant that lets it go on is the highlighted button | Same | Same, except the build-error case below. "Anywhere on disk" never asks |
 | **A file named by an error of Imber's own build or check (inside the project)** | The prompt says the build reported an error there | Same | Opened for reading and writing without a prompt, for that run, shown with a Revoke button |
 | **Read a secret file (`.env`, keys)** | Asks every time | Asks every time | Asks every time |
 | **Write a secret file, or anything under `.git`** | Refused | Refused | Refused |
@@ -72,7 +76,7 @@ A grant you give (reading, or reading and writing) lasts for the session and app
 
 ## Autonomous and the build-error files
 
-Under Autonomous, a file named by an *error* of a build or check Imber ran itself (`bennu_build`, `bennu_check_file`, `bennu_problems`) and located inside the project you are in is opened for reading and writing, for that run only, without a prompt. Limits: at most 25 files a run; never anything under build output or fetched code (`target`, `build`, `out`, `dist`, `node_modules`, generated folders); never a dependency manifest or lockfile (`pom.xml`, `Cargo.toml`, `package.json`); never a secret. The thread shows each one ("Access granted to … because the build reports an error there") with a *Revoke* button, and the access ends with the run. Files of another project open this way only when the reach is *all open projects*; otherwise it asks. In Manual and Accept edits the prompt for such a file says why it is being asked.
+Under Autonomous, a file named by an *error* of a build or check Imber ran itself (`bennu_check`, `bennu_build`, `bennu_check_file`, `bennu_problems`) and located inside the project you are in is opened for reading and writing, for that run only, without a prompt. Limits: at most 25 files a run; never anything under build output or fetched code (`target`, `build`, `out`, `dist`, `node_modules`, generated folders); never a dependency manifest or lockfile (`pom.xml`, `Cargo.toml`, `package.json`); never a secret. The thread shows each one ("Access granted to … because the build reports an error there") with a *Revoke* button, and the access ends with the run. Files of another project open this way only when the reach is *all open projects*; otherwise it asks. In Manual and Accept edits the prompt for such a file says why it is being asked.
 
 ## Revoking access
 
@@ -80,7 +84,7 @@ Press *Revoke* on an access card to take back a folder before the session ends. 
 
 ## Hard limits no mode changes
 
-- No shell. Imber cannot run an arbitrary command; processes start only through `run_start` (asks), recipes and scenarios (ask), or the project's own build and test commands.
+- No shell. Imber cannot run an arbitrary command; processes start only through `run_start` (asks), `cargo_run` (asks once per target), recipes and scenarios (ask), the programs you set up in Settings (each with the arguments and variables you allowed), or the project's own build and test commands. Neither `cargo_run` nor `run_tool` goes through a shell.
 - Secret files (`.env`, keys) are never written; reading one asks every time.
 - `.git` is never changed by file tools.
 - Deleting the project folder itself, an allowed folder, or anything outside the reach always asks.

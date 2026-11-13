@@ -78,7 +78,7 @@ pub struct ExportAllOpts {
 }
 
 /// Read `meta { cycles = "N" }` from a parsed program, if it declares one.
-fn meta_cycles(program: &Program) -> Option<u32> {
+pub(crate) fn meta_cycles(program: &Program) -> Option<u32> {
     program.items.iter().find_map(|item| {
         let Item::Meta(block) = item else { return None };
         block.fields.iter().find_map(|f| {
@@ -95,7 +95,7 @@ fn meta_cycles(program: &Program) -> Option<u32> {
 
 /// The longest arrangement period across a file's tracks (`0` when no track is an
 /// `arrange(...)`), which is that file's natural loop length.
-fn arrangement_cycles(tracks: &Tracks<ControlMap>) -> u32 {
+pub(crate) fn arrangement_cycles(tracks: &Tracks<ControlMap>) -> u32 {
     tracks.tracks.iter().map(|t| t.period).max().unwrap_or(0)
 }
 

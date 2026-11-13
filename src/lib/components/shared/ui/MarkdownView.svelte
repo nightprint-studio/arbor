@@ -17,7 +17,13 @@
   import { renderMarkdown } from '$lib/utils/markdown';
   import { copyToClipboard } from '$lib/utils/clipboard';
 
-  let { text, streaming = false }: { text: string; streaming?: boolean } = $props();
+  let { text, streaming = false, size = 'md' }: {
+    text: string;
+    streaming?: boolean;
+    /** `sm` / `xs` for Markdown set inside a smaller surface — a question, an option's description. The
+     *  smaller sizes take the colour of the surface they sit in. */
+    size?: 'md' | 'sm' | 'xs';
+  } = $props();
 
   /** Close a fence the text has opened and not finished. */
   function closeOpenFence(md: string): string {
@@ -67,10 +73,12 @@
   });
 </script>
 
-<div class="md-view" bind:this={host}>{@html html}</div>
+<div class="md-view" class:sm={size === 'sm'} class:xs={size === 'xs'} bind:this={host}>{@html html}</div>
 
 <style>
   .md-view { font-size: var(--font-size-md); line-height: 1.6; color: var(--text-primary); overflow-wrap: anywhere; user-select: text; }
+  .md-view.sm { font-size: var(--font-size-sm); line-height: 1.55; color: inherit; }
+  .md-view.xs { font-size: var(--font-size-xs); line-height: 1.45; color: inherit; }
   .md-view :global(*) { user-select: text; }
 
   .md-view :global(.md-p) { margin: 0 0 8px; }
