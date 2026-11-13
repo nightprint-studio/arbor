@@ -297,7 +297,9 @@ impl FrameworkExtension for FulcrumI18nExtension {
             // one.
             if let Some(default) = cat.default_language() {
                 let label = format!("{}:{}", bundle.category, value.key);
-                if bundle.lang != default && cat.declaration_in(&label, default).is_none() {
+                // A list is one label however many elements it has: said once, on its first element.
+                let first = value.element.is_none_or(|n| n == 0);
+                if first && bundle.lang != default && cat.declaration_in(&label, default).is_none() {
                     out.push(Diagnostic {
                         message: format!(
                             "`{label}` is not declared in `{default}`, the fallback language"

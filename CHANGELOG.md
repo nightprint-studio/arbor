@@ -82,6 +82,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu: find and go-to-line overlays slide in** — a short slide/fade from the top when opened; go-to-line also slides out (respects reduced-motion).
 
 ### Fixed
+- **Fulcrum i18n: list translations are labels** — a key holding a list of strings (picked one at a time by the game) is known, hovered and completed like any other, and each element's markup is coloured and checked where it is written.
 - **Image zoom enlarges the picture** — zooming in the large image view used to move the picture to the top-left corner without enlarging it; it now zooms at the pointer (click, +/−, Ctrl/⌘ + wheel or pinch, up to 8×) and a zoomed picture pans by dragging.
 - **Imber: several conversations can work at once** — while one conversation works, another can be started and sent to; each keeps its own status, Stop and waiting messages, and the list marks the ones working.
 - **Imber reads the skills you enabled without asking** — the folder of an enabled skill (its `SKILL.md` and the files it points at) is readable in any reach; writing there still asks.

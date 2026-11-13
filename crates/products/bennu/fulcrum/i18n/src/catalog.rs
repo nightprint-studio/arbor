@@ -75,6 +75,32 @@ pub struct Declaration {
     /// A whole `.md` file, taken **literally** — the engine does not run it through the markup
     /// parser, so neither may anything here: a `{` in a wiki page is a brace, not a placeholder.
     pub document: bool,
+    /// A list of strings (`woman = ["Ada", "Carla"]`), which the engine reads with `t!(…, pick:)`.
+    /// `value` is then the elements joined by [`LIST_JOIN`], and `content_start` is `None`.
+    pub list: bool,
+}
+
+/// What a list's elements are joined with in [`Declaration::value`]: the same separator as the
+/// Patina index, so a hover reads the same in both.
+pub const LIST_JOIN: &str = " · ";
+
+/// Whether `entry` is an array of strings — a list label — rather than one string.
+pub(crate) fn is_list(entry: &Entry) -> bool {
+    entry.value.trim_start().starts_with('[') && !entry.items.is_empty()
+}
+
+/// The elements of a list label, each unquoted with its TOML escapes resolved, and the byte offset
+/// of its content in the file when it lines up (see [`unquote`]).
+pub(crate) fn list_elements(entry: &Entry) -> Vec<(String, Option<usize>, &bennu_toml::prelude::Item)> {
+    entry
+        .items
+        .iter()
+        .map(|item| {
+            let source = &entry.value[item.start - entry.value_start..item.end - entry.value_start];
+            let (text, content) = unquote(source);
+            (text, content.map(|off| item.start + off), item)
+        })
+        .collect()
 }
 
 impl Declaration {
@@ -467,6 +493,27 @@ impl LabelCatalog {
     fn read_category(&mut self, path: &str, text: &str, lang: &str, category: &str) {
         let m = Manifest::parse(text);
         for e in &m.entries {
+            let label = format!("{category}:{}", entry_key(e));
+            // A **list** (`woman = ["Ada", "Carla"]`) is one label: the engine picks one element with
+            // `t!(…, pick: roll)`. The value reads as the elements joined, the same `" · "` the Patina
+            // index uses, and it has no single content offset: the toolbar writes into one element at a
+            // time, through the studio's live values.
+            if is_list(e) {
+                let items: Vec<String> = list_elements(e).into_iter().map(|(text, _, _)| text).collect();
+                let decl = Declaration {
+                    lang: lang.to_string(),
+                    file: path.to_string(),
+                    value: items.join(LIST_JOIN),
+                    start: e.value_start,
+                    end: e.value_end,
+                    content_start: None,
+                    line: e.line,
+                    document: false,
+                    list: true,
+                };
+                self.declare(label, decl);
+                continue;
+            }
             // Only strings are translations. A number or a bool is legal in the engine (it
             // stringifies them) but it is not markup, and treating one as a label would put a
             // row in the catalogue nothing can be said about.
@@ -474,7 +521,6 @@ impl LabelCatalog {
             if content_start.is_none() && !is_quoted(&e.value) {
                 continue;
             }
-            let label = format!("{category}:{}", entry_key(e));
             let decl = Declaration {
                 lang: lang.to_string(),
                 file: path.to_string(),
@@ -484,6 +530,7 @@ impl LabelCatalog {
                 content_start: content_start.map(|off| e.value_start + off),
                 line: e.line,
                 document: false,
+                list: false,
             };
             self.declare(label, decl);
         }
@@ -501,6 +548,7 @@ impl LabelCatalog {
             content_start: Some(0),
             line: 1,
             document: true,
+            list: false,
         };
         self.declare(format!("{category}:{key}"), decl);
     }
@@ -742,6 +790,20 @@ enabled = false
             f("/p/content/core/i18n/en/menu.toml", "[items]\nnew_game = \"New game\"\n"),
             f("/p/content/core/i18n/it/tree.toml", "[nodes.drill]\nname = 'Trapano $bold{+}'\n"),
         ])
+    }
+
+    #[test]
+    fn a_list_is_one_label_with_its_elements_joined() {
+        let c = LabelCatalog::build(&[
+            f("/p/i18n/languages.toml", LANGUAGES),
+            f("/p/i18n/it/names.toml", "woman = [\"Ada\", 'Carla', \"Irma \\\"la\\\"\"]\nflag = true\n"),
+        ]);
+        assert!(c.knows("names:woman"), "a list is a label like a string");
+        assert!(!c.knows("names:flag"), "a bool is still not one");
+        let d = c.declaration_in("names:woman", "it").expect("declared in it");
+        assert!(d.list);
+        assert_eq!(d.value, "Ada · Carla · Irma \"la\"", "the elements, unescaped, joined as Patina joins them");
+        assert_eq!(d.content_start, None, "no single content to write into");
     }
 
     #[test]

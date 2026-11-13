@@ -26,7 +26,7 @@ use serde::Serialize;
 use bennu_toml::prelude::{Entry, Manifest};
 
 use crate::catalog::{
-    entry_key, is_quoted, place_of, unquote, FileKind, GlossaryDecl, LabelCatalog, StyleDecl,
+    entry_key, is_list, is_quoted, list_elements, place_of, unquote, FileKind, GlossaryDecl, LabelCatalog, StyleDecl,
 };
 use crate::markup::{self, MarkupProblem, Name, Segment, SegmentKind};
 
@@ -100,6 +100,7 @@ fn document_value(key: String, text: &str) -> LiveValue {
         value_start: 0,
         value_end: text.len(),
         line: 1,
+        element: None,
     }
 }
 
@@ -124,12 +125,16 @@ pub struct LiveValue {
     pub value_start: usize,
     pub value_end: usize,
     pub line: u32,
+    /// Which element of a **list** label this is (`woman = ["Ada", "Carla"]`), from 0; `None` for a
+    /// plain string. Each element is a value of its own, with its own span, so the markup of one is
+    /// coloured, checked and edited where it is written.
+    pub element: Option<usize>,
 }
 
 /// Every translation the buffer declares, in source order.
 pub fn live_values(text: &str) -> Vec<LiveValue> {
     let m = Manifest::parse(text);
-    m.entries.iter().filter_map(live_of).collect()
+    m.entries.iter().flat_map(live_of).collect()
 }
 
 /// The translation whose key or value contains `at`, when there is one.
@@ -138,25 +143,44 @@ pub fn live_values(text: &str) -> Vec<LiveValue> {
 /// which is where it is after typing one.
 pub fn live_value_at(text: &str, at: usize) -> Option<LiveValue> {
     let m = Manifest::parse(text);
-    live_of(m.entry_at(at)?)
+    let values = live_of(m.entry_at(at)?);
+    // In a list, the element under the caret; on the key or between two elements, the first.
+    let under = values.iter().position(|v| v.value_start <= at && at <= v.value_end);
+    values.into_iter().nth(under.unwrap_or(0))
 }
 
-fn live_of(entry: &Entry) -> Option<LiveValue> {
+fn live_of(entry: &Entry) -> Vec<LiveValue> {
+    if is_list(entry) {
+        return list_elements(entry)
+            .into_iter()
+            .enumerate()
+            .map(|(n, (raw, content_start, item))| LiveValue {
+                key: entry_key(entry),
+                raw,
+                content_start,
+                value_start: item.start,
+                value_end: item.end,
+                line: entry.line,
+                element: Some(n),
+            })
+            .collect();
+    }
     let (raw, content_off) = unquote(&entry.value);
     // Only a string is a translation. A number or a bool is legal in a bundle — the engine
     // stringifies it — but it is not markup, and previewing one would put a panel around a value
     // there is nothing to say about.
     if content_off.is_none() && !is_quoted(&entry.value) {
-        return None;
+        return Vec::new();
     }
-    Some(LiveValue {
+    vec![LiveValue {
         key: entry_key(entry),
         raw,
         content_start: content_off.map(|off| entry.value_start + off),
         value_start: entry.value_start,
         value_end: entry.value_end,
         line: entry.line,
-    })
+        element: None,
+    }]
 }
 
 // ── colouring ─────────────────────────────────────────────────────────────────
@@ -614,4 +638,19 @@ enabled = true
         assert!(!view.problems.is_empty(), "an unclosed brace is a problem, not a refusal");
         assert!(!view.segments.is_empty(), "and what did parse is still there");
     }
+
+    #[test]
+    fn every_element_of_a_list_is_a_live_value_with_its_own_span() {
+        let text = "woman = [\"Ada\", '$red{Carla}']\n";
+        let values = live_values(text);
+        assert_eq!(values.iter().map(|v| (v.raw.as_str(), v.element)).collect::<Vec<_>>(), [("Ada", Some(0)), ("$red{Carla}", Some(1))]);
+        assert_eq!(values.iter().map(|v| v.key.as_str()).collect::<Vec<_>>(), ["woman", "woman"]);
+        let carla = &values[1];
+        assert_eq!(&text[carla.content_start.expect("a literal string lines up")..][..11], "$red{Carla}");
+        assert_eq!(&text[carla.value_start..carla.value_end], "'$red{Carla}'");
+        // The caret picks the element it is on; on the key, the first.
+        assert_eq!(live_value_at(text, text.find("Carla").unwrap()).map(|v| v.element), Some(Some(1)));
+        assert_eq!(live_value_at(text, 1).map(|v| v.element), Some(Some(0)));
+    }
+
 }

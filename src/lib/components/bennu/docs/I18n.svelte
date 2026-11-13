@@ -30,6 +30,10 @@
   <code>it/</code> and in <code>en/</code> is <strong>one label with two declarations</strong>.
 </p>
 <p>
+  A label can also be a <strong>list</strong> of strings — <code>woman = ["Ada", "Carla"]</code> — from which the game picks one element. It is one label: a hover and the
+  Labels panel show its elements joined by <code>·</code>, and each element is coloured, checked and edited in the i18n panel on its own, with the caret on it.
+</p>
+<p>
   More than one tree is normal — the base project's and each mod's. They merge, later trees winning, exactly as the engine merges them, and a language declared in one tree can be
   translated in another.
 </p>
